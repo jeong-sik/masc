@@ -15,9 +15,7 @@
 // own Korean label, with no lossy fold — a keeper blocked on
 // `runtime_attempts_exhausted` and one blocked on `fiber_unresolved` get
 // different operator copy, because the backend already paid to distinguish
-// them. keeper-attention-labels.drift.test.ts reads those backend OCaml emit
-// sites and fails the build if any produced token has no label here, so this
-// list cannot silently drift behind the backend the way it did before.
+// them.
 //
 // One-time warn per (kind, token) so dev consoles surface backend tokens that
 // have no Korean label, without spamming on every render.
@@ -31,7 +29,7 @@ function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action
   }
 }
 
-// Backend emit sites for `attention_reason` (the drift guard reads these):
+// Backend emit sites for `attention_reason`:
 //   - lib/keeper/keeper_status_bridge.ml needs_attention block
 //     (approval_pending, paused,
 //      runtime_attempts_exhausted, provider_runtime_error,

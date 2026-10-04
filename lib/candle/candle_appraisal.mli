@@ -7,7 +7,7 @@ type relation = Related | Unrelated
 type trace = { run_id : string; slot_id : string }
 type task_relation = { task_id : string; relation : relation; trace : trace }
 type request =
-  | Grade of goal
+  | Grade of { goal : goal; grades : (Candle_grade.t * string) list }
   | Relation of { goal : goal; task_title : string }
   | Weights of { goal : goal; tasks : task list; keepers : string list; weight_max : int }
 type decision = Grade_decided of Candle_grade.t | Relation_decided of relation
@@ -18,8 +18,12 @@ type error =
   | Invalid_response of string
   | Execution_rejected of string
       (** A typed request, authentication or configuration refusal prevents
-          the declared executions from serving this request. Keep the obligation pending and await a
-          change event instead of replaying the same appraisal on a pulse. *)
+          the declared executions from serving this request -- whether the
+          refusal came from the declared execution itself (an HTTP refusal
+          of the request) or from local admission. Keep the obligation
+          pending and await a change event instead of replaying the same
+          appraisal on a pulse. An unusable model *output* is
+          [Invalid_response], not this variant. *)
 type runner = identity:identity -> request -> (answer, error) result
 val stage : request -> string
 val input : request -> Yojson.Safe.t

@@ -1,5 +1,8 @@
 """Keyboard PTY Dashboard scenarios in the Dune parallel batch."""
 
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_approvals as _keyboard_approvals
+
 import base64
 import json
 import os
@@ -7,90 +10,77 @@ import sys
 from pathlib import Path
 import threading
 import time
+import tui_keyboard_dashboard as _keyboard_dashboard
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_walk as _keyboard_walk
 
-import test_tui_keyboard_input as keyboard
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml",
-    "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_config.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_overview_tasks.ml",
-    "bin/masc_tui_overview_goals.ml",
-    "bin/masc_tui_overview_providers.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_render_schedule.ml",
-    "lib/tui_decode_usage.ml",
-    "lib/tui_decode_usage.mli",
-)
+
 
 
 def operator_menu_from_dashboard(executable: str) -> None:
     # The link survives the short Dashboard's body cut, including an empty
     # queue. Its key and its drawn click target reach the same surface.
     for pending in (False, True):
-        fixtures = keyboard.overview_event_http_fixtures()
-        fixtures[keyboard.KEEPER_ASKS_PATH] = (
-            keyboard.keeper_asks_response() if pending
+        fixtures = _keyboard_harness.overview_event_http_fixtures()
+        fixtures[_keyboard_harness.KEEPER_ASKS_PATH] = (
+            _keyboard_approvals.keeper_asks_response() if pending
             else (200, {"keeper": None, "open_count": 0, "asks": []})
         )
 
         def interact(process, fd, _slave, output, _base):
             menu = b"p:Approvals / Questions"
             for columns in (40, 80, 140):
-                frame = keyboard.resize_and_wait(
+                frame = _keyboard_harness.resize_and_wait(
                     process, fd, output, rows=16, columns=columns,
-                    needle=menu, controls=(keyboard.FULL_REDRAW,),
+                    needle=menu, controls=(_keyboard_harness.FULL_REDRAW,),
                     final_cursor=b"\x1b[?25l",
                 )
-                rows = keyboard.screen_rows(frame)
+                rows = _keyboard_harness.screen_rows(frame)
                 # The first body row follows the title and its divider.
                 # Check that row, including its border and optional sidebar,
                 # so the footer's repeated label cannot satisfy this.
-                menu_row = keyboard.screen_row_of(rows, b"MASC Dashboard") + 2
+                menu_row = _keyboard_harness.screen_row_of(rows, b"MASC Dashboard") + 2
                 if menu not in rows.get(menu_row, b""):
                     raise AssertionError(
                         f"{columns}x16 hid the operator menu body row: {rows!r}"
                     )
                 print(f"OPERATOR_MENU_{int(pending)}_{columns}X16_B64="
                       f"{base64.b64encode(frame).decode()}")
-                keyboard.press_label_on_screen(
+                _keyboard_keepers.press_label_on_screen(
                     process, fd, output, menu,
                     row=menu_row, needle=b"MASC Approvals",
                 )
                 # Approvals belongs to Work; the current navigation has no
                 # global 1 jump. Verify each rendered return, rather than
                 # waiting for a Dashboard title after an ignored key.
-                keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
-                keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-            keyboard.resize_and_wait(
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            _keyboard_harness.resize_and_wait(
                 process, fd, output, rows=40, columns=80, needle=menu,
-                controls=(keyboard.FULL_REDRAW,), final_cursor=b"\x1b[?25l",
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l",
             )
-            keyboard.send_and_wait(process, fd, output, b"P", b"MASC Approvals")
-            keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
-            keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-            keyboard.send_and_wait(process, fd, output, b"p", b"MASC Approvals")
+            _keyboard_harness.send_and_wait(process, fd, output, b"P", b"MASC Approvals")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            _keyboard_harness.send_and_wait(process, fd, output, b"p", b"MASC Approvals")
             if pending:
-                keyboard.wait_for_output(
+                _keyboard_harness.wait_for_output(
                     process, fd, output, b"Questions waiting on you", start=0, timeout=10
                 )
-                keyboard.send_and_wait(process, fd, output, b"a", b"ship the cold-start")
-                keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Approvals")
+                _keyboard_harness.send_and_wait(process, fd, output, b"a", b"ship the cold-start")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Approvals")
             os.write(fd, b"q")
 
-        keyboard.run_terminal_scenario(
+        _keyboard_harness.run_terminal_scenario(
             executable, description=f"Dashboard operator menu pending={pending}",
             interact=interact, http_fixtures=fixtures,
         )
 
 
 def first_use_frames(executable: str) -> None:
-    fixtures = keyboard.overview_event_http_fixtures()
-    status, empty = keyboard.empty_runtime_resolved_fixture()
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    status, empty = _keyboard_harness.empty_runtime_resolved_fixture()
     payload = dict(empty)
     names = (
         "antigravity_subscription",
@@ -125,7 +115,7 @@ def first_use_frames(executable: str) -> None:
         }
         for name in names
     ]
-    fixtures[keyboard.RUNTIME_RESOLVED_PATH] = (status, payload)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = (status, payload)
 
     requested = threading.Event()
     release = threading.Event()
@@ -134,18 +124,18 @@ def first_use_frames(executable: str) -> None:
         requested.set()
         if not release.wait(30):
             raise AssertionError("the unread briefing fixture was never released")
-        return 200, keyboard.overview_event_briefing()
+        return 200, _keyboard_harness.overview_event_briefing()
 
     fixtures["/api/v1/dashboard/briefing"] = briefing
 
     def interact(process, fd, _slave, output, _base):
         def capture(state: str, columns: int, needle: bytes) -> bytes:
-            frame = keyboard.resize_and_wait(
+            frame = _keyboard_harness.resize_and_wait(
                 process, fd, output, rows=32, columns=columns,
-                needle=needle, controls=(keyboard.FULL_REDRAW,),
+                needle=needle, controls=(_keyboard_harness.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
-            visible = keyboard.screen_text(frame)
+            visible = _keyboard_harness.screen_text(frame)
             print(
                 f"DASHBOARD_FRAME_{state}_{columns}X32_B64="
                 f"{base64.b64encode(frame).decode()}"
@@ -160,7 +150,7 @@ def first_use_frames(executable: str) -> None:
         try:
             # Keep reading frames while the briefing is held so the terminal
             # buffer cannot stop the TUI before its request is observed.
-            if not keyboard.wait_for_fixture_event(
+            if not _keyboard_harness.wait_for_fixture_event(
                 process, fd, output, requested, timeout=10
             ):
                 if process.poll() is not None:
@@ -180,7 +170,7 @@ def first_use_frames(executable: str) -> None:
         finally:
             release.set()
 
-        keyboard.wait_for_output(
+        _keyboard_harness.wait_for_output(
             process, fd, output, b"Create a Keeper", start=0, timeout=10
         )
         for columns in (80, 140):
@@ -193,7 +183,7 @@ def first_use_frames(executable: str) -> None:
                     raise AssertionError(f"Home repeated a detail panel: {visible!r}")
         os.write(fd, b"q")
 
-    keyboard.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable, description="first-use Dashboard at 80 and 140 columns",
         interact=interact, http_fixtures=fixtures, workspace="overview-demo",
         prepare_workspace=lambda base: [p.unlink() for p in (Path(base) / ".masc" / "keepers").glob("*.json")],
@@ -201,22 +191,22 @@ def first_use_frames(executable: str) -> None:
 
 
 def unreadable_keeper_listing_has_no_first_use_guide(executable: str) -> None:
-    fixtures = keyboard.overview_event_http_fixtures()
-    fixtures["/api/v1/dashboard/briefing"] = keyboard.unlisted_keepers_briefing()
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/briefing"] = _keyboard_dashboard.unlisted_keepers_briefing()
 
     def interact(process, fd, _slave, output, _base):
-        keyboard.wait_for_output(process, fd, output, b"Keepers unlisted: EACCES", start=0, timeout=10)
-        frame = keyboard.resize_and_wait(
+        _keyboard_harness.wait_for_output(process, fd, output, b"Keepers unlisted: EACCES", start=0, timeout=10)
+        frame = _keyboard_harness.resize_and_wait(
             process, fd, output, rows=32, columns=140,
-            needle=b"Keepers unlisted: EACCES", controls=(keyboard.FULL_REDRAW,),
+            needle=b"Keepers unlisted: EACCES", controls=(_keyboard_harness.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
-        visible = keyboard.screen_text(frame)
+        visible = _keyboard_harness.screen_text(frame)
         if b"Create a Keeper" in visible or b"masc keeper-create --edit" in visible:
             raise AssertionError(f"an unreadable listing claimed an empty fleet: {visible!r}")
         os.write(fd, b"q")
 
-    keyboard.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable, description="unreadable Keeper listing has no first-use guide",
         interact=interact, http_fixtures=fixtures,
     )
@@ -259,7 +249,7 @@ def opening_boot_frames(executable: str) -> None:
                     (Path(base_path) / ".masc" / "keepers" / f"{name}.json").unlink()
             if target == "last":
                 (Path(base_path) / ".masc" / "keepers" / "last.json").write_text(
-                    json.dumps(keyboard.keeper_metadata("last")), encoding="utf-8"
+                    json.dumps(_keyboard_harness.keeper_metadata("last")), encoding="utf-8"
                 )
 
         def interact(process, fd, _slave, output, base_path):
@@ -269,20 +259,20 @@ def opening_boot_frames(executable: str) -> None:
             # not the earlier loading frame that already says Continue.
             needles = (expected,) if chat or mode in ("last", "keeper") else (b"Continue",)
             for needle in needles:
-                keyboard.wait_for_output(
+                _keyboard_harness.wait_for_output(
                     process, fd, output, needle, start=0, timeout=10
                 )
             # The needle can arrive before the rest of its frame, and that
             # frame rewrites only the rows that changed: the title can sit in
             # an earlier one. So wait for the frame's end and replay every row
             # painted up to it (screen_text starts at the last full redraw).
-            needle_end = max(keyboard.end_of_needle(output, needle, 0) for needle in needles)
-            keyboard.wait_for_output(
-                process, fd, output, keyboard.FRAME_END, start=needle_end, timeout=3.0
+            needle_end = max(_keyboard_harness.end_of_needle(output, needle, 0) for needle in needles)
+            _keyboard_harness.wait_for_output(
+                process, fd, output, _keyboard_harness.FRAME_END, start=needle_end, timeout=3.0
             )
             drawn = bytes(output)
-            frame_end = drawn.find(keyboard.FRAME_END, needle_end) + len(keyboard.FRAME_END)
-            visible = keyboard.screen_text(drawn[:frame_end])
+            frame_end = drawn.find(_keyboard_harness.FRAME_END, needle_end) + len(_keyboard_harness.FRAME_END)
+            visible = _keyboard_harness.screen_text(drawn[:frame_end])
             if expected not in visible:
                 raise AssertionError(
                     f"opening={mode!r}, target={target!r} omitted {expected!r}: {visible!r}"
@@ -294,31 +284,31 @@ def opening_boot_frames(executable: str) -> None:
                 if mode in ("last", "keeper") and (reason is None or continuation is None or reason >= continuation):
                     raise AssertionError(f"fallback reason was not before the Home actions: {visible!r}")
             if mode == "last" and target is None:
-                narrow = keyboard.resize_and_wait(
+                narrow = _keyboard_harness.resize_and_wait(
                     process, fd, output, rows=20, columns=80,
-                    needle=expected, controls=(keyboard.FULL_REDRAW,),
+                    needle=expected, controls=(_keyboard_harness.FULL_REDRAW,),
                     final_cursor=b"\x1b[?25l",
                 )
-                if expected not in keyboard.screen_text(narrow):
+                if expected not in _keyboard_harness.screen_text(narrow):
                     raise AssertionError("the last-chat fallback reason disappeared at 80x20")
             if chat:
                 start = len(output)
                 os.write(fd, b"\x1b")
-                keyboard.wait_for_output(
+                _keyboard_harness.wait_for_output(
                     process, fd, output, b":settings", start=start, timeout=3
                 )
             if mode == "keeper" and target == "alpha":
-                home = keyboard.palette_go(
+                home = _keyboard_harness.palette_go(
                     process, fd, output, b"go dashboard", b"Choose a Keeper"
                 )
-                visible_home = keyboard.screen_text(home)
+                visible_home = _keyboard_harness.screen_text(home)
                 if b"Continue with alpha" in visible_home:
                     raise AssertionError(
                         f"fixed startup Keeper was remembered as a chat: {visible_home!r}"
                     )
             if mode == "last" and target == "alpha":
-                keyboard.select_keeper_row(process, fd, output, b"beta")
-                keyboard.send_and_wait(
+                _keyboard_harness.select_keeper_row(process, fd, output, b"beta")
+                _keyboard_harness.send_and_wait(
                     process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode()
                 )
                 stored = (Path(base_path) / ".masc" / "config" / "runtime.toml").read_text(
@@ -326,19 +316,19 @@ def opening_boot_frames(executable: str) -> None:
                 )
                 if 'opening_keeper = "beta"' not in stored.splitlines():
                     raise AssertionError(f"last chat target was not stored: {stored!r}")
-                keyboard.send_and_wait(process, fd, output, b"\x1b", b":settings")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b":settings")
             os.write(fd, b"q")
 
         fixtures = (
-            keyboard.overview_event_http_fixtures()
-            if target is None else keyboard.keeper_runtime_http_fixtures()
+            _keyboard_harness.overview_event_http_fixtures()
+            if target is None else _keyboard_harness.keeper_runtime_http_fixtures()
         )
         if target == "last":
             status, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
             assert status == 200
             roster["keepers"][0]["name"] = "last"
-            roster["keepers"][0]["meta"] = keyboard.keeper_roster_meta("last")
-        keyboard.run_terminal_scenario(
+            roster["keepers"][0]["meta"] = _keyboard_harness.keeper_roster_meta("last")
+        _keyboard_harness.run_terminal_scenario(
             executable,
             description=f"opening {mode or 'absent'} {target or 'unset'}",
             interact=interact,
@@ -353,7 +343,7 @@ def opening_boot_frames(executable: str) -> None:
 if __name__ == "__main__":
     started = time.monotonic()
     executable = os.path.abspath(sys.argv[1])
-    keyboard.run_keyboard_regression(executable, group=2)
+    _keyboard_walk.run_keyboard_regression(executable, group=2)
     operator_menu_from_dashboard(executable)
     first_use_frames(executable)
     unreadable_keeper_listing_has_no_first_use_guide(executable)

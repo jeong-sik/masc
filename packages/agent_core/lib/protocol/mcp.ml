@@ -7,10 +7,13 @@
 open Types
 include Mcp_schema
 module Stdio_transport = struct
-  include Mcp_protocol_eio.Stdio_transport
-
+  module Transport = Mcp_protocol_eio.Stdio_transport
+  type t = { transport : Transport.t; max_size : int option }
+  let create ~stdin ~stdout ?max_size () =
+    {transport = Transport.create ~stdin ~stdout ?max_size (); max_size}
+  let close t = Transport.close t.transport
   let read t =
-    try Mcp_protocol_eio.Stdio_transport.read t with
+    try Transport.read t.transport with
     | Eio.Buf_read.Buffer_limit_exceeded ->
       close t;
       Some (Error "MCP response exceeds the connection's byte limit")
@@ -18,6 +21,22 @@ module Stdio_transport = struct
       close t;
       Some (Error "MCP response nesting exceeds the parser's capacity")
   ;;
+  let write t msg =
+    let module J = Mcp_protocol.Jsonrpc in
+    let fits msg = Option.fold ~none:true ~some:(fun max_size ->
+      String.length (Yojson.Safe.to_string (J.message_to_yojson msg)) <= max_size) t.max_size in
+    let refuse () = close t; Error "MCP outgoing message exceeds the connection's byte limit" in
+    let fallback id =
+      let reply = J.make_error ~id ~code:(-32603)
+        ~message:"response exceeds byte limit" () in
+      if fits reply then Transport.write t.transport reply else refuse () in
+    try
+      match msg with
+      | J.Request _ | J.Notification _ -> Transport.write t.transport msg
+      | J.Response _ | J.Error _ when fits msg -> Transport.write t.transport msg
+      | J.Response response -> fallback response.id
+      | J.Error response -> fallback response.id
+    with Stack_overflow | Yojson.Json_error _ | Invalid_argument _ -> refuse ()
 end
 
 module Sdk_client = Mcp_protocol_eio.Generic_client.Make (Stdio_transport)

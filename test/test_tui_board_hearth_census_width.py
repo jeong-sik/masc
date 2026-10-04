@@ -1,19 +1,10 @@
 """The Board's hearth census row budgets what it draws."""
 import os
 import sys
-import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names. The frame and the
-# acting pane draw nothing the scenario waits for; the boundary widths below
-# are built from the frame's margin and the pane's narrow width.
-SOURCE_MODULES = (
-    "bin/masc_tui_render_board.ml",
-    "bin/masc_tui_render_board.mli",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_frame.ml",
-    "bin/masc_tui_acting_pane.ml",
-)
+import tui_keyboard_harness as h
+
+
 
 # No trailing space: the row draws the word dimmed, so a reset sits between
 # "hearths" and the space after it and a needle carrying that space matches

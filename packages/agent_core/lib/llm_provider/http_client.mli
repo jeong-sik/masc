@@ -878,10 +878,13 @@ val inject_stream_options_include_usage : string -> string
 val inject_stream_and_options : string -> string
 
 (** [safe_cohttp_response_flow source] wraps a [cohttp-eio] response body flow
-    to ensure that reads from the underlying flow are always performed with
-    buffers of at least 64KB. This guarantees that [cohttp-eio]'s internal
-    [Reader_flow] never takes its buggy partial-read branch (which slices from
-    offset 0 of the chunk buffer instead of the current position, corrupting
-    chunked or streaming HTTP payloads). *)
+    so underlying reads use buffers of at least 64KB, buffering any remainder
+    for smaller caller reads.
+
+    [scripts/opam-pin-external-deps.sh] pins a corrected [cohttp-eio] fork:
+    [Reader_flow] continues partial deliveries from the current position
+    rather than offset 0. With that pin applied, this wrapper is defensive
+    redundancy, not a fix for an active partial-read bug. It still allocates
+    a reusable 64KB buffer per wrapped flow and copies smaller reads. *)
 val safe_cohttp_response_flow :
   [> Eio.Flow.source_ty ] Eio.Resource.t -> [> Eio.Flow.source_ty ] Eio.Resource.t

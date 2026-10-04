@@ -219,14 +219,7 @@ let dedupe values =
   |> List.sort (fun a b ->
        compare (String.length b, b) (String.length a, a))
 
-let build ~redact_identity_scalars sources =
-  let values =
-    List.fold_left
-      (fun acc source -> values_of_source ~redact_identity_scalars source acc)
-      []
-      sources
-    |> dedupe
-  in
+let compile_exact_values values =
   let patterns = List.map (fun value -> Re.compile (Re.str value)) values in
   let any_exact_value =
     match values with
@@ -237,6 +230,19 @@ let build ~redact_identity_scalars sources =
     List.fold_left (fun longest value -> max longest (String.length value)) 0 values
   in
   { patterns; any_exact_value; exact_values = values; max_exact_value_len }
+
+let build ~redact_identity_scalars sources =
+  let values =
+    List.fold_left
+      (fun acc source -> values_of_source ~redact_identity_scalars source acc)
+      []
+      sources
+    |> dedupe
+  in
+  compile_exact_values values
+
+let copy_for_current_domain snapshot =
+  compile_exact_values snapshot.exact_values
 
 (* The memo is per domain: a compiled [Re.re] fills its DFA tables lazily
    while matching, so one must not be shared between domains. Fibers of one

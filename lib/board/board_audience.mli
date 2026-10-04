@@ -35,3 +35,7 @@ val audience_for_vote : audience
     voted-on author from the signal payload. *)
 
 val audience_label : audience -> string
+
+val to_yojson : audience -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> audience option
+(** Exact persisted audience shape; invalid or empty targets are rejected. *)

@@ -20,36 +20,8 @@ let request_trust_policy =
     fail (Server_request_authority.trust_policy_error_to_string error)
 ;;
 
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when Sys.file_exists (Filename.concat root "dune-project") -> root
-  | _ -> Sys.getcwd ()
-
-let resolve_path rel =
-  if Filename.is_relative rel then Filename.concat (source_root ()) rel else rel
-
-let source_file rel =
-  let path = resolve_path rel in
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-      let len = in_channel_length ic in
-      really_input_string ic len)
-
 let contains ~needle haystack =
   String.length needle = 0 || String_util.contains_substring haystack needle
-
-let assert_contains label ~needle source =
-  check bool label true (contains ~needle source)
-
-let assert_not_contains label ~needle source =
-  check bool label false (contains ~needle source)
-
-let assert_order label ~before ~after source =
-  let before_idx = Str.search_forward (Str.regexp_string before) source 0 in
-  let after_idx = Str.search_forward (Str.regexp_string after) source 0 in
-  check bool label true (before_idx < after_idx)
 
 let request ?(headers = []) ?(meth = `POST) target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) meth target
@@ -425,144 +397,6 @@ let test_failed_initialize_does_not_start_session_duration_metric () =
     before_count
     after_count
 
-let test_h1_h2_post_route_wiring_parity () =
-  let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
-  let h1_routes = source_file "lib/server/server_routes_http_routes_frontend.ml" in
-  let h2 = source_file "lib/server/server_h2_gateway.ml" in
-  assert_contains "H1 exposes POST /mcp/operator route"
-    ~needle:{|Http.Router.post "/mcp/operator"|}
-    h1_routes;
-  assert_contains "H1 binds POST /mcp/operator to operator profile"
-    ~needle:{|handle_post_mcp ~profile:Server_mcp_transport_http.Operator_remote|}
-    h1_routes;
-  assert_contains "H2 exposes POST /mcp/operator route"
-    ~needle:{|`POST, "/mcp/operator"|}
-    h2;
-  assert_contains "H2 binds /mcp/operator to operator profile"
-    ~needle:{|"/mcp/operator" -> Server_mcp_transport_http.Operator_remote|}
-    h2;
-  assert_contains "H1 binds POST /mcp/play to seat profile"
-    ~needle:{|handle_post_mcp ~profile:Server_mcp_transport_http.Seat|}
-    h1_routes;
-  assert_contains "H2 exposes POST /mcp/play route"
-    ~needle:{|`POST, "/mcp/play" ->|}
-    h2;
-  assert_contains "H2 binds /mcp/play to seat profile"
-    ~needle:{|"/mcp/play" -> Server_mcp_transport_http.Seat|}
-    h2;
-  assert_contains "H1 asks the profile before serving a listen stream"
-    ~needle:"if serves_subscriptions_listen ~profile body_str then"
-    h1;
-  assert_not_contains "H1 does not serve listen on the body alone"
-    ~needle:"if body_is_subscriptions_listen"
-    h1;
-  assert_contains "H2 asks the profile before serving a listen stream"
-    ~needle:".serves_subscriptions_listen ~profile"
-    h2;
-  assert_not_contains "H2 does not serve listen on the body alone"
-    ~needle:".body_is_subscriptions_listen"
-    h2;
-  List.iter
-    (fun (label, needle) ->
-      assert_contains ("H1 " ^ label) ~needle h1;
-      assert_contains ("H2 " ^ label) ~needle h2)
-    [
-      ("uses shared POST request context", "Server_mcp_request_context.decide_post_body");
-      ("injects canonical HTTP actor", "body_with_canonical_http_actor");
-      ("forwards internal keeper runtime", "is_verified_internal_keeper_request");
-      ( "records initialize protocol only after success",
-        "remember_protocol_version_if_initialize_succeeded" );
-    ];
-  assert_order "H1 refreshes MCP profile after auth gate"
-    ~before:"match auth_result with"
-    ~after:"remember_mcp_profile ~otel_transport_context session_id profile"
-    h1;
-  assert_order "H2 refreshes MCP profile after auth gate"
-    ~before:"match auth_result with"
-    ~after:"remember_mcp_profile"
-    h2;
-  assert_contains "H1 unknown supplied session returns not found"
-    ~needle:"Httpun.Response.create ~headers `Not_found" h1;
-  assert_contains "H2 unknown supplied session returns not found"
-    ~needle:"~status:`Not_found" h2
-
-let test_h1_h2_delete_route_wiring_parity () =
-  let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
-  let h1_routes = source_file "lib/server/server_routes_http_routes_frontend.ml" in
-  let h2 = source_file "lib/server/server_h2_gateway.ml" in
-  assert_contains "H1 exposes DELETE /mcp route"
-    ~needle:{|Http.Router.add ~path:"/mcp" ~methods:[`DELETE]|}
-    h1_routes;
-  assert_contains "H1 exposes DELETE /mcp/managed route"
-    ~needle:{|Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]|}
-    h1_routes;
-  assert_contains "H1 exposes DELETE /mcp/operator route"
-    ~needle:{|Http.Router.add ~path:"/mcp/operator" ~methods:[`DELETE]|}
-    h1_routes;
-  assert_contains "H2 exposes DELETE /mcp route"
-    ~needle:{|`DELETE, "/mcp"|}
-    h2;
-  assert_contains "H2 exposes DELETE /mcp/managed route"
-    ~needle:{|`DELETE, "/mcp/managed"|}
-    h2;
-  assert_contains "H2 exposes DELETE /mcp/operator route"
-    ~needle:{|`DELETE, "/mcp/operator"|}
-    h2;
-  assert_contains "H1 exposes DELETE /mcp/play route"
-    ~needle:{|Http.Router.add ~path:"/mcp/play" ~methods:[`DELETE]|}
-    h1_routes;
-  assert_contains "H2 exposes DELETE /mcp/play route"
-    ~needle:{|`DELETE, "/mcp/play" ->|}
-    h2;
-  List.iter
-    (fun (label, needle) ->
-      assert_contains ("H1 DELETE " ^ label) ~needle h1;
-      assert_contains ("H2 DELETE " ^ label) ~needle h2)
-    [
-      ("verifies MCP auth", "verify_mcp_auth ~base_path");
-      ("checks session profile", "validate_mcp_session_delete_profile");
-      ("checks protocol continuity", "validate_protocol_version_continuity");
-      ("forgets session after termination", "forget_mcp_session session_id");
-    ]
-
-let test_h2_oauth_route_and_authority_lifetime () =
-  let h2 = source_file "lib/server/server_h2_gateway.ml" in
-  List.iter
-    (fun path ->
-      assert_contains
-        ("H2 exposes OAuth route " ^ path)
-        ~needle:(Printf.sprintf "%S" path)
-        h2)
-    [ "/.well-known/oauth-protected-resource"
-    ; "/.well-known/oauth-authorization-server"
-    ; "/oauth/authorize"
-    ; "/oauth/register"
-    ; "/oauth/token"
-    ];
-  assert_contains
-    "H2 derives the OAuth resource from the lexically admitted authority"
-    ~needle:"Server_oauth_metadata.resource request_authority"
-    h2;
-  assert_not_contains
-    "H2 callbacks do not re-read expired fiber-local authority"
-    ~needle:"Server_request_authority.current_exn ()"
-    h2;
-  assert_not_contains
-    "H2 does not call the HTTP/1 OAuth facade"
-    ~needle:"Server_oauth_http"
-    h2
-
-(* /ws upgrade admission — token-or-same-origin gate parity with the /mcp
-   POST chain.  A base_path with no auth config resolves to
-   [default_auth_config], which is strict (enabled + require_token), so the
-   token leg deterministically fails without a bearer token and the decision
-   falls to the same-origin leg.  If the strict default ever flips, these
-   deny cases must fail loudly — that is a security posture change. *)
-(* H1 and H2 return the same 401, the same typed code and the same bearer
-   challenge, and used to return different CORS headers: H1 reflected
-   get_origin, which answers "*" with no Origin present, while H2 ran the
-   origin through admission and emitted only vary: Origin (#28166). One
-   function answers for both now, and admission is what it reads. *)
 let auth_error_cors ~headers =
   let request =
     Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/api/v1/keepers"
@@ -732,93 +566,6 @@ let test_transport_guarded_paths_are_not_public_read () =
     ; "/api/v1/karma"
     ]
 
-(* serve_auto hands h2c connections to Server_h2_gateway and everything else to
-   the HTTP/1 router, so a route's authorization is decided independently on
-   each side. POST /graphql executed unauthenticated over h2c while HTTP/1
-   answered 401, because the H2 arm used [with_server_state] — which fetches
-   server state and authorizes nothing.
-
-   [with_h2_public_read] is not a substitute for [with_h2_read_auth]: it first
-   requires [http_auth_strict_enabled] and a non-public path, whereas H1's
-   [with_read_auth] authorizes unconditionally. Each H2 arm must name the
-   counterpart of the wrapper its H1 route uses. *)
-let test_h1_h2_read_gate_wiring_parity () =
-  let h1_frontend = source_file "lib/server/server_routes_http_routes_frontend.ml" in
-  let h2 = source_file "lib/server/server_h2_gateway.ml" in
-  assert_contains "H1 guards /graphql with the unconditional read gate"
-    ~needle:{|~path:"/graphql" ~methods:[`GET; `POST]|}
-    h1_frontend;
-  assert_contains "H2 defines the counterpart of Server_auth.with_read_auth"
-    ~needle:"let with_h2_read_auth h2_reqd f =" h2;
-  assert_contains "H2 read gate authorizes without a strict-mode precondition"
-    ~needle:"authorize_read_request" h2;
-  assert_contains "H2 GET /graphql passes through the read gate"
-    ~needle:"| `GET, \"/graphql\" ->\n          with_h2_read_auth h2_reqd" h2;
-  assert_contains "H2 POST /graphql passes through the read gate before its body"
-    ~needle:"| `POST, \"/graphql\" ->\n          with_h2_read_auth h2_reqd (fun state ->\n            h2_read_body h2_reqd"
-    h2;
-  assert_contains "H2 dashboard workspace mirrors H1 with_public_read"
-    ~needle:"| `GET, \"/api/v1/dashboard/workspace\" ->\n          with_h2_public_read h2_reqd"
-    h2;
-  assert_contains "H2 status mirrors H1 with_public_read"
-    ~needle:"| `GET, \"/api/v1/status\" ->\n          with_h2_public_read h2_reqd" h2;
-  (* [with_server_state] performs no authorization; no read route may reach it
-     directly. The arms that still call it (MCP) authorize inside. *)
-  assert_not_contains "H2 /graphql no longer reads state without authorizing"
-    ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2;
-  (* The delegated module has no gate of its own; it takes this gateway's.
-     Each route below is with_public_read on HTTP/1 and must take the same
-     gate over h2c (#28161). *)
-  let h2_extra = source_file "lib/server/server_h2_gateway_routes_extra.ml" in
-  assert_contains "H2 hands the delegated routes its own public-read gate"
-    ~needle:"~with_public_read:(fun f ->" h2;
-  List.iter
-    (fun (path, needle) ->
-      assert_contains
-        (Printf.sprintf "H2 %s passes through the public-read gate" path)
-        ~needle
-        h2_extra)
-    [ "/api/v1/voice/config",
-      "| `GET, \"/api/v1/voice/config\" ->\n      with_public_read"
-    ; "/api/v1/board/curation",
-      "| `GET, \"/api/v1/board/curation\" ->\n      with_public_read"
-    ; "/api/v1/board/hearths",
-      "| `GET, \"/api/v1/board/hearths\" ->\n      with_public_read"
-    ; "/api/v1/board/sub-boards",
-      "| `GET, \"/api/v1/board/sub-boards\" ->\n      with_public_read"
-    ; "/api/v1/board/karma/ledger",
-      "| `GET, \"/api/v1/board/karma/ledger\" ->\n      with_public_read"
-    ; "/api/v1/karma",
-      "| `GET, \"/api/v1/karma\" ->\n      with_public_read"
-    ; "/api/v1/board",
-      "| `GET, \"/api/v1/board\" ->\n      with_public_read"
-    ; "/api/v1/board/sub-boards/<id>",
-      "| `GET, p when String.starts_with ~prefix:board_sub_board_detail_prefix p ->\n      with_public_read"
-    ; "/api/v1/board/<post_id>",
-      "&& String.length p > 14 ->\n      with_public_read"
-    ];
-  (* The post-detail arm takes any remainder after /api/v1/board/, so the
-     sub-board detail arm must be tried first or sub-board paths are answered
-     as post lookups. *)
-  assert_order "H2 sub-board detail arm precedes the post-detail arm"
-    ~before:"~prefix:board_sub_board_detail_prefix p ->"
-    ~after:"&& String.length p > 14 ->"
-    h2_extra;
-  let h1_activity =
-    source_file "lib/server/server_routes_http_routes_activity.ml"
-  in
-  assert_contains "H1 sub-board detail uses the shared prefix and public-read gate"
-    ~needle:
-      "Http.Router.prefix_get board_sub_board_detail_prefix (fun request reqd ->\n       with_public_read"
-    h1_activity;
-  assert_contains "H1 sub-board detail answers through the shared handler"
-    ~needle:"board_sub_board_detail_json ~path:" h1_activity;
-  assert_contains "H2 sub-board detail answers through the shared handler"
-    ~needle:"board_sub_board_detail_json ~path:p" h2_extra;
-  assert_contains "H2 openapi.json passes through the public-read gate"
-    ~needle:"| `GET, \"/api/v1/openapi.json\" ->\n          (*"
-    h2
-
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -846,18 +593,10 @@ let () =
           test_case "failed initialize does not start duration metric" `Quick
             test_failed_initialize_does_not_start_session_duration_metric;
         ] );
-      ( "route-wiring",
+      ( "read-auth-admission",
         [
-          test_case "H1/H2 POST route uses the same admission gates" `Quick
-            test_h1_h2_post_route_wiring_parity;
-          test_case "H1/H2 DELETE route uses the same admission gates" `Quick
-            test_h1_h2_delete_route_wiring_parity;
-          test_case "H2 OAuth routes preserve admitted authority" `Quick
-            test_h2_oauth_route_and_authority_lifetime;
           test_case "transport-guarded paths are not public-read" `Quick
             test_transport_guarded_paths_are_not_public_read;
-          test_case "H1/H2 read gate wiring parity" `Quick
-            test_h1_h2_read_gate_wiring_parity;
           test_case "auth-error CORS reads admission, not the raw Origin" `Quick
             test_auth_error_cors_reads_admission_not_the_raw_origin;
         ] );

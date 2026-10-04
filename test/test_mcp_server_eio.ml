@@ -2378,6 +2378,34 @@ let tool_names_from_list_response response =
       | _ -> Alcotest.fail "result not an object")
   | _ -> Alcotest.fail "response not an object"
 
+let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear (); cleanup_dir base_path)
+    (fun () ->
+      Keeper_registry.For_testing.clear ();
+      let config = Masc.Workspace.default_config base_path in
+      let meta_path = Masc.Keeper_types_profile.keeper_meta_path config "alpha" in
+      Fs_compat.mkdir_p (Filename.dirname meta_path);
+      Yojson.Safe.to_file meta_path (Masc.Keeper_meta_json.meta_to_json (make_keeper_meta "alpha"));
+      let token = Auth.ensure_internal_keeper_token base_path in
+      let access ~internal_keeper_runtime ~token ~name =
+        let caller = Masc.Mcp_server_eio_caller_identity.resolve ~config
+          ~tool_name:"masc_lane_inspect" ~arguments:(`Assoc ["_agent_name", `String name])
+          ~identity:(test_agent_identity ~uuid:"lane-runtime" ~session_key:"lane-runtime")
+          ~cached_resolved_agent:None ~auth_token:(Some token) ~internal_keeper_runtime
+          ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
+          ~workspace_initialized:(fun () -> false) ~log_mcp_exn:(fun ~label:_ _ -> ()) in
+        Masc.Mcp_server_eio_execute.lane_access_for_caller ~config caller in
+      Alcotest.(check bool) "verified runtime resolves existing Keeper" true
+        (access ~internal_keeper_runtime:true ~token ~name:"alpha" = Masc.Lane_addon_sources.Keeper "alpha");
+      List.iter (fun (internal_keeper_runtime, token, name) ->
+        Alcotest.(check bool) "unverified or missing Keeper stays unauthenticated" true
+          (access ~internal_keeper_runtime ~token ~name = Masc.Lane_addon_sources.Unauthenticated))
+        [false, token, "alpha"; true, "invalid-token", "alpha"; true, token, "missing"])
+
 let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools
     () =
   Eio_main.run @@ fun env ->
@@ -3259,6 +3287,8 @@ let eio_tests = [
     test_handle_request_tools_call_records_keeper_usage_for_public_mcp;
   "handle tools/call blocks keeper internal tool", `Quick,
     test_handle_request_tools_call_blocks_keeper_internal_tool;
+  "verified internal Keeper Lane access", `Quick,
+    test_internal_keeper_lane_access_requires_verified_runtime_and_keeper;
   "handle tools/list internal keeper runtime hides keeper internal tools", `Quick,
     test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools;
   "handle tools/call internal keeper runtime rejects unknown execute", `Quick,

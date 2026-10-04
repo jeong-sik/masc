@@ -625,6 +625,24 @@ lanes, all runtimes, and then this surface. From the lane overview, `p` or
 `Esc` returns to Runtime; inside the run list and run detail, `Esc` first
 backs out one drill-down level as before. The palette keeps `go Lanes`.
 
+On Lanes, select a lane and press `s` to edit its model order. Arrow keys or
+`j/k` select a candidate. Press `r` to replace it at the same position;
+type a configured model and reasoning effort such as `luna medium`, select
+with arrows and press Enter. The choices show the declared reasoning effort,
+account provider ID and context. Unset reasoning is shown as `default`.
+The picker uses the terminal height and gives each model two lines: model
+and reasoning first, account and context below. The selected runtime ID is
+shown separately rather than crowding the model name.
+Replacing a candidate selects another configured runtime; it does not change
+the shared model's settings in other lanes.
+
+`a` adds a fallback. `1` moves the selected candidate to the first position
+within its HTTP or CLI group, preserving the other candidates' relative order.
+HTTP candidates always run before CLI candidates. `J/K` move within a group,
+`x` removes, and Esc returns. These changes save immediately. The success
+message appears after the saved order is read back; a failed read is shown as
+unverified rather than successful.
+
 ### Clients
 
 Everyone attached to this workspace in one reading: directory agents,

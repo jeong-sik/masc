@@ -69,6 +69,11 @@ let dashboard_fixture_name ?fixture () =
         if trimmed <> "" then Some trimmed else Env_config.Dashboard_config.fixture_opt ()
     | None -> Env_config.Dashboard_config.fixture_opt ()
 
+let execution_fixture_name ?fixture () =
+  match dashboard_fixture_name ?fixture () with
+  | Some "execution_smoke" as selected -> selected
+  | Some _ | None -> None
+
 (** Agent profile representation for dashboard views. *)
 type agent_profile = {
   emoji : string;

@@ -387,10 +387,12 @@ let output_line_json line =
     [ "seq", `Int line.seq
     ; "ts_ms", `Int line.ts_ms
     ; "stream", `String line.stream
-    ; "text", `String line.text
+    ; "text", `String (String_util.sanitize_utf8 line.text)
     ; "ansi", `Bool line.ansi
     ]
 
+(* Commands produce bytes. JSON/SSE carries Unicode text, so repair only
+   this display projection; raw captures and byte accounting stay intact. *)
 let snapshot_json (s : snapshot) =
   `Assoc
     [ "type", `String "snapshot"
@@ -403,8 +405,8 @@ let snapshot_json (s : snapshot) =
     ; "last_seq", `Int s.last_seq
     ; "since_stdout", `Int s.since_stdout
     ; "since_stderr", `Int s.since_stderr
-    ; "stdout_since", `String s.stdout_since
-    ; "stderr_since", `String s.stderr_since
+    ; "stdout_since", `String (String_util.sanitize_utf8 s.stdout_since)
+    ; "stderr_since", `String (String_util.sanitize_utf8 s.stderr_since)
     ; "closed", `Bool s.closed
     ; "status", option_json (fun value -> value) s.status
     ; "bytes_dropped_stdout", `Int s.bytes_dropped_stdout

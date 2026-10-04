@@ -2,8 +2,8 @@
  (alias runtest-test_tui_tasks_title_fits_the_frame)
  (deps
   test_tui_tasks_title_fits_the_frame.py
-  test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run
    python3

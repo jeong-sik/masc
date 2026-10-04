@@ -39,6 +39,16 @@ val contains_contiguous_token_sequence
     appears as a contiguous token sequence inside [haystack]. Empty [needle]
     returns [false]. *)
 
+val contains_query_term_ci : string -> string -> bool
+(** Free-text search matching. ASCII alphanumeric terms shorter than the
+    trigram tokenizer's three-character minimum require ASCII word
+    boundaries, preserving adjacent Korean suffixes. Phrase endpoints obey
+    that rule; other terms retain substring matching. *)
+
+val contains_all_query_terms_ci : string -> string -> bool
+(** Like [contains_all_tokens_ci], using [contains_query_term_ci] for each
+    whitespace-separated term. *)
+
 val contains_all_tokens_ci : string -> string -> bool
 (** [contains_all_tokens_ci haystack query] — token-AND containment:
     every token of [query_tokens query] appears in [haystack] as a

@@ -825,6 +825,11 @@ val rename_noreplace : string -> string -> unit
     rather than substring matching on the libc message. *)
 val rename_if_exists : src:string -> dst:string -> bool
 
+val unlink_if_exists : string -> bool
+(** Remove a single file or symlink without following it. Returns [false]
+    only for a missing path, [true] after removal. Directories are refused;
+    other I/O failures propagate as [Sys_error]. *)
+
 (** Remove a file, symlink, or directory tree without invoking a shell.
     Missing paths are ignored.  Symlinks are unlinked, not followed. *)
 val remove_tree : string -> unit

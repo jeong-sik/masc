@@ -1,0 +1,47 @@
+[
+  {
+    "source": "lib/keeper/keeper_composite_observer.mli",
+    "exit_code": 0,
+    "sha256": "742537e15570cb7e63a0ab7a878aa42943369d519903770612a1d5d7c2b40ce6"
+  },
+  {
+    "source": "lib/keeper/keeper_composite_observer.ml",
+    "exit_code": 0,
+    "sha256": "aa4eba01ecaafaed7ec8fd7ddabbd4035b029a2e9cf0dc5a232c6bfaa5540e3b"
+  },
+  {
+    "source": "lib/server_keeper_waiting_inventory.mli",
+    "exit_code": 0,
+    "sha256": "853ef6485c1f7f547f76c7c030b58ed8517fae35d06af8ddeb8416365b685780"
+  },
+  {
+    "source": "lib/server_keeper_waiting_inventory.ml",
+    "exit_code": 0,
+    "sha256": "c79a6be7c00613df77b2d0d5daa868ac5c79e19f218c5430bda0511ad3654f64"
+  },
+  {
+    "source": "lib/server/server_dashboard_http_keeper_api.mli",
+    "exit_code": 0,
+    "sha256": "4b4ec631d512d19a4c360fe60f10127427fb5685228f82d14149d286372fb9e5"
+  },
+  {
+    "source": "lib/server/server_dashboard_http_keeper_api.ml",
+    "exit_code": 0,
+    "sha256": "5b95ada394eed56b3ff4533b3d1b6bcad47765d57cafc264a2551bc51b6aca8c"
+  },
+  {
+    "source": "test/deps/masc_test_deps.ml",
+    "exit_code": 0,
+    "sha256": "34cad13baba8bc352cacb11e24576ae7e458c68a3a22c7cc3b1fb6e90c876999"
+  },
+  {
+    "source": "test/test_keeper_composite_live_turn_surface.ml",
+    "exit_code": 0,
+    "sha256": "ef5de07d4aa2b36494f58259832b2edc72ec993a7d446c98078e6df01cd3ef96"
+  },
+  {
+    "source": "test/test_keeper_waiting_inventory.ml",
+    "exit_code": 0,
+    "sha256": "d71e0bf905b34be6dadfc1416ca6dd36a46090cd876c7d70d170027fd70cd65a"
+  }
+]

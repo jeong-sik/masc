@@ -261,10 +261,10 @@ let get_default_runtime_id_fn
    frozen declaration order. The unconnected default is an explicit [Error] so
    an unwired process leaves the review visibly deferred instead of silently
    picking a runtime. *)
-let get_verifier_exact_lane_slot_ids_fn
-  : (unit -> (string list, string) result) Atomic.t
+let get_verifier_exact_lane_slots_fn
+  : (unit -> ((string * Types_core.verifier_slot_kind) list, string) result) Atomic.t
   = Atomic.make (fun () ->
-      Error "Workspace_hooks: get_verifier_exact_lane_slot_ids_fn not connected")
+      Error "Workspace_hooks: get_verifier_exact_lane_slots_fn not connected")
 
 let record_task_metric_fn
   : (Workspace_utils_backend_setup.config ->

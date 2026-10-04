@@ -1,0 +1,18 @@
+operator reading.000.output
+ASSERT reported zero cache is measured
+ASSERT missing cache stays unknown
+ASSERT missing billed cost is not zero dollars
+ASSERT original catalog is not a copied override
+ASSERT declarations remain separately visible
+ASSERT binding override remains visible
+ASSERT stale reading is explicit
+ASSERT cost store failure is visible
+ASSERT global unknown attribution remains visible
+ASSERT no unrelated account samples
+
+operator reading.001.output
+ASSERT failed cold read does not masquerade as loading
+
+operator reading.002.output
+ASSERT cache cannot exceed inclusive input
+ASSERT duplicate runtime identity is refused

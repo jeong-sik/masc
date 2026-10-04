@@ -8,7 +8,8 @@
     missing forecast is named, not hidden. *)
 
 val lines
-  :  prose:(string -> string list)
+  :  ?runtime_details:(string -> string list)
+  -> prose:(string -> string list)
   -> fact:(string -> string list)
   -> safe:(string -> string)
   -> scale:Masc_tui_token_scale.t

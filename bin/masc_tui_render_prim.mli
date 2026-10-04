@@ -590,6 +590,7 @@ val context_split_width : int -> int
     estimated token figure; the serialized request led by the provider's
     token count; history reach; recent turns. *)
 val context_composition_lines :
+  ?runtime_details:(string -> string list) ->
   cols:int ->
   turn_back:int ->
   forecast:(Masc_tui_context_inspector.forecast, string) result ->

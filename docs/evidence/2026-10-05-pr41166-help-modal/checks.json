@@ -1,0 +1,20 @@
+{
+  "head": "e87e8dd3bd051d3d2f2df0129d9fb28ce8dd5e4b",
+  "parent": "758d8d672e90056c61ad07db996c2cf70b692797",
+  "native_tests": 10,
+  "pty_red_exit": 1,
+  "pty_green_exit": 0,
+  "before_binary_sha256": "8170ccaaf5df81a40053664d25964f5696f05a79e934d47a1c1b35979cf539e1",
+  "after_binary_sha256": "589318418945899cb9307d31c1de7d907a22b7ff6b66fae20c1521b56e5e22a0",
+  "files": {
+    "red.log": "90384ea34e28da6d7a9ec31d4f35ec412a78944b68ebbdc0d619569553283973",
+    "green.log": "5b969c0487f393a77eac987de6f3056d5389ad08993339931a34f2aec417db81",
+    "pyright.json": "542e448c3ee269c52fdf705312d5b8bb65167c53402d04f8e8729bdc5b4c34fb",
+    "green-build.log": "2df841e03ed75d07a9acabfe7c85e90cfe92ca977b771f2393f3af3ebba6c4fe",
+    "README.md": "4505832963381f36f378d64e4f42ab6866de129f296d84699b4210e892a7b422",
+    "native.log": "183b8fdf53e30a7ad5a0bc6cf30ad82e3c395bf8e3016680d32206a1b3394b6b",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "red-build.log": "e52f531ce61eba2ca2c569e6f0c1790809bd2d35200cea67441051b2bdffd9b7",
+    "pyright-baseline.json": "6c24468dd5d2757477eb57cbc4c978a4852a5592f2763c2d376f5ec0a4e71a9d"
+  }
+}

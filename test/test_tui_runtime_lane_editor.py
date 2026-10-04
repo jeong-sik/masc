@@ -615,7 +615,9 @@ def run_exact(executable: str) -> None:
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-a"},
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-b"},
         ]
-        if without_checked_revision([p for p in posted if isinstance(p, dict)]) != expected:
+        typed_posts = [post for post in posted if isinstance(post, dict)]
+        assert len(typed_posts) == len(posted), f"non-object routing post: {posted!r}"
+        if without_checked_revision(typed_posts) != expected:
             raise AssertionError(f"exact posts: {posted!r}, expected {expected!r}")
         declared = store.exact_declared[EXACT_LANE]
         if declared != [DROPPED_SLOT, "glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]:
@@ -1226,7 +1228,9 @@ def run_filter(executable: str) -> None:
             if len(posted) >= len(expected) or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        if without_checked_revision([p for p in posted if isinstance(p, dict)]) != expected:
+        typed_posts = [post for post in posted if isinstance(post, dict)]
+        assert len(typed_posts) == len(posted), f"non-object routing post: {posted!r}"
+        if without_checked_revision(typed_posts) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         # [e] opens the picker for the lane under the list's cursor: still
         # primary, so no wheel notch moved it while the picker was open.

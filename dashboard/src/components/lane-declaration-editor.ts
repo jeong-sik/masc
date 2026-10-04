@@ -51,7 +51,7 @@ export function LaneDeclarationEditor({ session, authority, onSaved }: {
         onInput=${(event: Event) => update(key, value => ({ ...value, text: (event.target as HTMLTextAreaElement).value }))} />
     </label>
     <div class="flex flex-wrap gap-2">
-      <${ActionButton} variant="primary" disabled=${busy || !loaded || !modified || draft.needsRead || draft.fileName === ''} ariaBusy=${draft.phase === 'saving'} onClick=${save}>
+      <${ActionButton} variant="primary" disabled=${busy || !loaded || !modified || draft.needsRead || draft.current !== null || draft.fileName === ''} ariaBusy=${draft.phase === 'saving'} onClick=${save}>
         ${draft.phase === 'saving' ? 'Saving TOML…' : 'Save TOML'}
       </${ActionButton}>
       ${readPath !== null && html`<${ActionButton} disabled=${busy} onClick=${() => session.read(key, readPath, authority, !loaded)}>

@@ -1,6 +1,8 @@
 from pathlib import Path
 import subprocess,json,tempfile,hashlib,sys
-wd=Path(sys.argv[1]).resolve(); root=Path(sys.argv[2]).resolve(); out=Path(tempfile.mkdtemp(prefix='masc-sampling-review-')); Path('/tmp/masc-improvement-pr-20261004/sampling-native-dir').write_text(str(out))
+wd=Path(sys.argv[1]).resolve(); root=Path(sys.argv[2]).resolve()
+out=Path(tempfile.mkdtemp(prefix='masc-sampling-review-'))
+print(f'Evidence directory: {out}', flush=True)
 source_ref=sys.argv[3] if len(sys.argv)>3 else None
 def source(path):
  return subprocess.check_output(['git','-C',str(wd),'show',source_ref+':'+path],text=True) if source_ref else (wd/path).read_text()
@@ -45,3 +47,5 @@ for ext in ['mli','ml']:
  (out/('masc__Lane_addon_sampling.'+ext)).write_text(source('lib/lane_addon/lane_addon_sampling.'+ext))
  run(cmd+['-open','Masc','-c','masc__Lane_addon_sampling.'+ext])
 (out/'full-consumer-typecheck.txt').write_text('Complete current Lane_addon_sampling.mli/ml typecheck passed against candidate Store and cached interfaces. Not a full product build.\n')
+
+sys.exit(execution.returncode)

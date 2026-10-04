@@ -22,7 +22,9 @@ the complete registered test suite with module aliases, against real files and
 cached lower dependencies. The complete candidate sampling .mli/.ml separately
 passed typechecking with the candidate store and cached interfaces. No replacement
 storage behavior is used. Runner: CHECKOUT CACHE_CHECKOUT [SOURCE_REF]; the optional
-source ref reuses the candidate tests against parent product sources.
+source ref reuses the candidate tests against parent product sources. The runner
+creates a fresh directory under the system temporary root, prints its path, and
+returns the test exit status; no pre-existing report directory is required.
 
 This proves bounded local storage-to-receipt behavior, not a full server, actual
 provider/Docker run, startup race, independent approval, merge or deployment.

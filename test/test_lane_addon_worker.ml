@@ -511,7 +511,10 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       text=(if !oversized then String.make 4096 'x' else "host answer")};
       model=(if !blank_model then "" else "host-fixture");stop_reason=Some "endTurn";
       _meta=Some (`Assoc ["masc.lane_sampling",`String "forged-first";
-        "provider_note",`String "fixture";"masc.lane_sampling",`String "forged-last"])} in
+        "provider_note",`String "fixture";
+        "masc.lane_provider",`String "private-provider";
+        "masc.lane_host",`String "private-host";
+        "masc.lane_sampling",`String "forged-last"])} in
   let sampling_handler = match Masc.Lane_addon_sampling.create ~store
       ~package:{(package dir "sampling") with model_access=Types.Host_sampling}
       ~instance_id:"sampling-worker" ~route:"fixture-route" ~invoke () with
@@ -558,6 +561,12 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check int "worker reply exposes exactly one host-owned sampling reference" 1
     (List.length (List.filter (fun (key, _) -> key="masc.lane_sampling") fields));
   let references = Yojson.Safe.Util.member "masc.lane_sampling" metadata in
+  let retained_metadata = references |> Yojson.Safe.Util.member "outcome" |> read_reference
+    |> Yojson.Safe.Util.member "response" |> Yojson.Safe.Util.member "_meta" in
+  check string "host identity remains in private retained evidence" "private-host"
+    Yojson.Safe.Util.(retained_metadata |> member "masc.lane_host" |> to_string);
+  check string "provider identity remains in private retained evidence" "private-provider"
+    Yojson.Safe.Util.(retained_metadata |> member "masc.lane_provider" |> to_string);
   let selected evidence : Types.output = {rows=[{
     id="sample";lane_id="fusion/computation";kind=Types.Value;title="sample";
     observed_at=1.;subject_id="sample";clock=None;actor=None;fields=[];
@@ -707,6 +716,18 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     |> Yojson.Safe.from_string in
   check string "oversized response is rejected before transmission" "invalid_response"
     (uncertain |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  let oversized_record = uncertain |> Yojson.Safe.Util.member "evidence"
+    |> Yojson.Safe.Util.member "outcome" |> read_reference in
+  check string "bounded terminal preserves callback failure status" "invalid_response"
+    Yojson.Safe.Util.(oversized_record |> member "status" |> to_string);
+  check string "bounded terminal preserves installation identity" "sampling-worker"
+    Yojson.Safe.Util.(oversized_record |> member "instance_id" |> to_string);
+  let oversized_request = match Types.evidence_of_json
+      Yojson.Safe.Util.(uncertain |> member "evidence" |> member "request") with
+    | Ok reference -> reference | Error detail -> fail detail in
+  let oversized_receipt = project "sampling-worker" (selected [oversized_request]) |> List.hd in
+  check string "oversized failure projects a usable host receipt" "invalid_response"
+    Yojson.Safe.Util.(oversized_receipt |> member "terminal" |> member "status" |> to_string);
   let terminal_after_failure = match sampling_requests recovered ~instance_id:"sampling-worker" with
     | Ok rows -> rows | Error detail -> fail detail in
   check bool "retention failure still has terminal recovery evidence" true
@@ -729,10 +750,19 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let retained_answer = match Mcp_protocol.Sampling.create_message_result_of_yojson
       (Yojson.Safe.Util.member "response" invalid_record) with
     | Ok answer -> answer | Error detail -> fail detail in
-  check bool "invalid-response error carries the package-safe retained response" true
-    (Yojson.Safe.Util.member "response" invalid =
+  check (list string) "inline failure carries only status and evidence"
+    ["evidence"; "status"]
+    (Yojson.Safe.Util.to_assoc invalid |> List.map fst |> List.sort String.compare);
+  let invalid_request = match Types.evidence_of_json
+      Yojson.Safe.Util.(invalid |> member "evidence" |> member "request") with
+    | Ok reference -> reference | Error detail -> fail detail in
+  let invalid_receipt = project "sampling-worker" (selected [invalid_request]) |> List.hd in
+  check bool "invalid-response receipt carries the package-safe retained response" true
+    (Yojson.Safe.Util.(invalid_receipt |> member "terminal" |> member "response") =
       Mcp_protocol.Sampling.create_message_result_to_yojson
         (Masc.Lane_addon_sampling.package_response retained_answer));
+  check string "retained invalid response preserves the missing model identity" ""
+    retained_answer.model;
   check bool "invalid-response raw host evidence keeps callback metadata" true
     (Yojson.Safe.Util.member "_meta" (Yojson.Safe.Util.member "response" invalid_record) <> `Null);
   check string "malformed actual answer remains in retained evidence" "host answer"
@@ -911,8 +941,23 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   let result = run bounded in
   check bool "host reply including receipt metadata obeys package envelope" true (Result.is_error result);
   (match result with
-   | Error detail -> check bool "overflow refusal also fits without echoing receipt metadata" true
-       (String.length (Yojson.Safe.to_string (`String detail)) <= bounded.resources.max_reply_bytes)
+   | Error detail ->
+       check bool "overflow refusal also fits without echoing receipt metadata" true
+         (String.length (Yojson.Safe.to_string (`String detail)) <= bounded.resources.max_reply_bytes);
+       let terminal = Yojson.Safe.from_string detail in
+       check string "metadata overflow returns an indexed invalid response" "invalid_response"
+         Yojson.Safe.Util.(terminal |> member "status" |> to_string);
+       let reference = match Types.evidence_of_json
+           Yojson.Safe.Util.(terminal |> member "evidence" |> member "outcome") with
+         | Ok value -> value | Error message -> fail message in
+       let bytes = match Store.read_blob_bounded
+           ~budget:(Store.read_budget ~max_bytes:bounded.resources.max_reply_bytes) store reference with
+         | Ok bytes -> bytes | Error _ -> fail "metadata overflow outcome unavailable" in
+       check string "metadata overflow callback matches retained status" "invalid_response"
+         Yojson.Safe.Util.(Yojson.Safe.from_string bytes |> member "status" |> to_string);
+       check bool "metadata overflow preserves the original answer when it fits" true
+         (Yojson.Safe.Util.member "response" (Yojson.Safe.from_string bytes) =
+          S.create_message_result_to_yojson answer)
    | Ok _ -> fail "oversized answer accepted");
   let indexes = match sampling_requests store ~instance_id:"w" with Ok xs -> xs | Error detail -> fail detail in
   check int "both actual outcomes remain durably indexed" 2 (List.length indexes);

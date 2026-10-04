@@ -1,0 +1,9 @@
+{
+  "admission_delay_s": 3.0066751250997186,
+  "disconnect_after_dispatch_s": 10.021761500043795,
+  "dispatch_deadline_s": 8.0,
+  "old_admission_deadline_would_accept": true,
+  "status": "PASS_EXPECTED_REJECTION",
+  "script_sha256": "82dca83b09b46ffec692f528dd62352533d72cacd503bce7776ecd2e59218b74",
+  "binary_sha256": "64ea20854e47c3a5883c717303de468cbc7ed7b811b8fcea815f263ee8bc41d6"
+}

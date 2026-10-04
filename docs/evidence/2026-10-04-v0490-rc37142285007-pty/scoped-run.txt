@@ -1,0 +1,10 @@
+START item-boundary
+RESULT item-boundary PASS
+START item-authority
+Item workspace authority: PASS (withdrawal, late response, failure, Off, recovery)
+RESULT item-authority PASS
+START resource
+RESULT resource PASS
+START remote-portrait
+RESULT remote-portrait PASS
+COMPLETE 0

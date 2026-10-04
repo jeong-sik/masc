@@ -363,6 +363,63 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).not.toBeNull())
   })
 
+  it('automatically rereads a clean load superseded by an external write', async () => {
+    let finish!: (value: typeof baseConfig) => void
+    apiMocks.fetchRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    const latest = { ...baseConfig, source_text: baseConfig.source_text + '# latest writer\n', source_revision: 'f'.repeat(64) }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(latest)
+    await act(() => announceRuntimeTomlWritten())
+    await act(async () => { finish(baseConfig); await Promise.resolve() })
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(latest.source_text))
+    expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(2)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('rejects a comparison response superseded by another writer', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = baseConfig.source_text + '# retained\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    let finish!: (value: typeof baseConfig) => void
+    apiMocks.fetchRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-read-current"]')!)
+    await waitFor(() => expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(2))
+    await act(() => announceRuntimeTomlWritten())
+    await act(async () => { finish(baseConfig); await Promise.resolve() })
+    expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).toBeNull()
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    const current = { ...baseConfig, source_revision: 'd'.repeat(64) }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(current)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-read-current"]')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')!)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, current.source_revision, expect.any(Object)))
+  })
+
+  it('blocks a lost typed-patch receipt across remount until comparison adoption', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    apiMocks.patchRuntimeRouting.mockRejectedValueOnce(new Error('receipt lost'))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(richConfig.source_text))
+    fireEvent.change(container.querySelector('[aria-label="default runtime"]')!, { target: { value: 'openai.gpt' } })
+    await waitFor(() => expect(container.textContent).toContain('파일 변경 여부를 확인하지 못했습니다'))
+    render(null, container)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    fireEvent.change(container.querySelector('[aria-label="default runtime"]')!, { target: { value: 'openai.gpt' } })
+    expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledTimes(1)
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, source_revision: 'e'.repeat(64) })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-read-current"]')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')!)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-routing"]')!)
+    fireEvent.change(container.querySelector('[aria-label="default runtime"]')!, { target: { value: 'openai.gpt' } })
+    await waitFor(() => expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledTimes(2))
+  })
+
   it('retains a hidden dirty draft when an external write is announced', async () => {
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
@@ -1204,8 +1261,22 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('textarea')!, { target: { value: `${baseConfig.source_text}# draft\n` } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-replace-draft"]')).not.toBeNull())
+    const initialLaneReads = apiMocks.fetchStandaloneLanes.mock.calls.length
+    let finishLaneRead!: (value: ReturnType<typeof laneSnapshot>) => void
+    const heldLaneRead = new Promise<ReturnType<typeof laneSnapshot>>(resolve => { finishLaneRead = resolve })
+    apiMocks.fetchStandaloneLanes.mockReturnValueOnce(heldLaneRead)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-replace-draft"]')!)
     await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(current.source_text))
+    await waitFor(() => expect(apiMocks.fetchStandaloneLanes).toHaveBeenCalledTimes(initialLaneReads + 1))
+    // The session adopts immediately; its new config identity withdraws the old
+    // projection while the replacement reading is still pending.
+    expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).toBeNull()
+    expect(container.querySelector('[data-testid="runtime-exact-lane-editor"]')).toBeNull()
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    finishLaneRead(laneSnapshot(['openai.gpt'], []))
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-exact-lane-editor"]')).not.toBeNull())
+    expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')?.textContent).toContain('1. openai.gpt')
+    expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')?.textContent).not.toContain('1. runpod_mtp.qwen')
     expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
     expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     const amended = `${current.source_text}# after explicit replace\n`
@@ -1239,7 +1310,8 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => expect(container.textContent).toContain('파일 변경 여부를 확인하지 못했습니다'))
     expect(container.querySelector('textarea')?.value).toBe(draft)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenNthCalledWith(2, draft, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('keeps the dirty draft when save validation fails', async () => {
@@ -1259,7 +1331,7 @@ describe('RuntimeTomlEditor', () => {
       expect(container.textContent).toContain('runtime config parse failed')
     })
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('[runtime]\ndefault = "missing.runtime"\n')
-    expect(saveButton.disabled).toBe(false)
+    expect(saveButton.disabled).toBe(true)
   })
 
   it('adds a new provider through the form and saves it through the existing validated path', async () => {

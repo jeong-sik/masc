@@ -94,6 +94,10 @@ let scope_to_string = function
   | Credential_file path -> "file:" ^ path
   | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
 
+(* Preserve the IDs already persisted by provider Usage history. These name
+   credential locations, not the provider accounts whose secrets occupy them. *)
+let scope_id scope = Digest.to_hex (Digest.string (scope_to_string scope))
+
 let scope_equal left right =
   match left, right with
   | Provider_row a, Provider_row b

@@ -83,21 +83,15 @@ type stall_disposition =
   | Retry_scheduled of { delay : retry_delay }
   | No_retry_armed
 
-(** Which review stopped. A Task review is keyed by its verification id and
-    carries what its scheduling owner did about a retry; a Goal review is
-    keyed by the durable request it answers and carries no disposition,
-    because the Goal verifier arms no retry — its post always reads as
-    [No_retry_armed]. Both stops are the same event — a verifier ended a
-    review without a verdict — so both go through
-    {!notify_stalled_verification} and share its channel, metadata and
-    repeat rule. *)
+(** Each review carries its durable identity and the scheduling owner's actual
+    retry disposition. Goal and Task notices never schedule work themselves. *)
 type stalled_subject =
   | Task_review of
       { task_id : string
       ; verification_id : string
       ; disposition : stall_disposition
       }
-  | Goal_review of { goal_id : string; request_id : string }
+  | Goal_review of { goal_id : string; request_id : string; disposition : stall_disposition }
 
 val notify_stalled_verification_with_runtime :
   authority:Masc_domain.completion_authority ->
@@ -125,8 +119,7 @@ val notify_stalled_verification :
     [submit_for_verification] (a legal transition from
     [AwaitingVerification] that supersedes this verification), or an
     operator HITL verdict — and the sweep that reviews it again without
-    either; a Goal post names a Keeper calling [request_complete] on the
-    Goal. A Task caller passes, inside [Task_review], the disposition the
+    either; a Goal post reports its retry or names [request_complete] when none is armed. A Task caller passes, inside [Task_review], the disposition the
     scheduling owner reported after it acted, so the post follows the
     timer, never the other way round.
 

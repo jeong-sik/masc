@@ -36,7 +36,7 @@ def run(executable):
             screen = unwrapped(h.screen_text(frame))
             for evidence in (b"Tokens 9876 \xc2\xb7 9 reported, 3 missing",
                              b"Cost $0.1234 \xc2\xb7 8 reported, 4 missing",
-                             b"7 malformed rows", b"5 unread turn rows", b"totals are lower bounds"):
+                             b"7 malformed rows", b"5 unread turn rows", b"reported totals are lower bounds"):
                 if evidence not in screen:
                     raise AssertionError(f"Usage evidence lost at {width} columns: {evidence!r}, {screen!r}")
         # Make the wrapped content exceed the body, then reach its final row.

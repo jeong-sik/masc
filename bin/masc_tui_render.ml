@@ -10975,7 +10975,7 @@ let usage_lines ~cols (state : state) =
                   match row.kur_coverage with
                   | Keeper_usage_complete -> "read"
                   | Keeper_usage_partial { malformed_rows; unread_turn_rows } ->
-                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows) · totals are lower bounds"
+                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows) · reported totals are lower bounds"
                         malformed_rows unread_turn_rows
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason

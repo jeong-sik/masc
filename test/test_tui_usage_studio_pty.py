@@ -208,7 +208,7 @@ def keeper_comparison(executable, no_color=False, unreported_cost=False):
         for text in ("Scale: tokens 1000", "cost unreported" if unreported_cost else "cost $1.0000", "As of 2026-10-03 00:00 UTC",
                      "120s old", "refresh failed: fixture refresh failure",
                      "partial (2 malformed rows, 3 unread turn rows)",
-                     "partial (0 malformed rows, 4 unread turn rows)", "totals are lower bounds", "7 reported, 3 missing",
+                     "partial (0 malformed rows, 4 unread turn rows)", "reported totals are lower bounds", "7 reported, 3 missing",
                      "unreported", "fixture read failure", "bars are not quota",
                      "[unavailable", "[" + "░" * 32 + "] 0"):
             assert text.encode() in wide, f"Keeper comparison evidence missing: {text}"

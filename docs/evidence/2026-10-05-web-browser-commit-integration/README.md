@@ -34,3 +34,5 @@ remain original-author evidence and do not attest this integrated source tree.
 
 The separately advanced #41194 Settings implementation is not part of this
 response. Its parent integration must preserve this shared commit notification.
+
+Historical identity: this manifest records the earlier source and parent candidate, not the subsequently reviewed 310140 head or current descendants. Its original source hashes and raw logs remain unchanged. New combined proof is recorded separately in 2026-10-05-write-boundary-chain-leaf (325/7) and 2026-10-05-committed-followup-chain (379/7).

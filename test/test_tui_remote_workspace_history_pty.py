@@ -47,6 +47,16 @@ def screen(output: bytearray) -> bytes:
     return _keyboard_harness.screen_text(bytes(output[: end + len(_keyboard_harness.FRAME_END)])) if end >= 0 else b""
 
 
+def leave_chat_for_roster(process, fd, output) -> None:
+    # These chats were opened with m from the roster. Ctrl-Q leaves without
+    # interrupting a still-running fixture turn; Esc may interrupt instead.
+    os.write(fd, b"\x11")
+    assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+        lambda: b"MASC Keepers" in screen(output)
+            and "▸ chat".encode() not in screen(output),
+        timeout=WAIT_SECONDS), "quiet chat leave did not restore the Keeper roster"
+
+
 def history_row(marker: bytes, stamp: float) -> _keyboard_harness.HttpResponse:
     return 200, [{"id": marker.decode(), "role": "assistant",
                   "content": marker.decode(), "ts": stamp}]
@@ -441,8 +451,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert admission.phases == ["a", "a-returned"], admission.phases
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
-            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            leave_chat_for_roster(process, fd, output)
             os.write(fd, b"q")
         finally:
             admission.release_admission.set()
@@ -513,8 +522,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert beta_submitted[0].get("attachments", []) == [], beta_submitted
             assert not [block for block in beta_submitted[0].get("user_blocks", [])
                         if block.get("type") == "image"], beta_submitted
-            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"beta")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            leave_chat_for_roster(process, fd, output)
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: staged_text in text, "alpha draft was not restored")
@@ -528,8 +536,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             images = [block for block in actual["user_blocks"] if block.get("type") == "image"]
             assert images == [{"type": "image", "attachment_id": attached["id"]},
                               {"type": "image", "url": reference}], actual
-            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            leave_chat_for_roster(process, fd, output)
             os.write(fd, b"q")
         finally:
             admission.release.set()
@@ -1422,8 +1429,7 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
                 "title": "workspace-a-fresh-task",
             })], created
             assert json.loads(chat)["message"] == "[task-9] workspace-a-fresh-task"
-            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            leave_chat_for_roster(process, fd, output)
             os.write(fd, b"q")
         finally:
             release_initialize.set()

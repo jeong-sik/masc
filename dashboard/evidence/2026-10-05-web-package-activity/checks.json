@@ -19,7 +19,7 @@
     "exit_code": 0,
     "log": "tests.txt",
     "raw_log": "tests.txt.gz",
-    "raw_sha256": "cc9410117f90584a5d2494c42cad529c39a1ebc3a37b5581aaf328fea8c595db",
+    "raw_sha256": "96678f15173e6409cfd68a7e5530597a5cd3f5fd75518b76543845c28f7d1c14",
     "normalization": "Trailing EOF whitespace only; raw output preserved as gzip."
   },
   {
@@ -63,7 +63,7 @@
     "exit_code": 0,
     "log": "browser.txt",
     "raw_log": "browser.txt.gz",
-    "raw_sha256": "4e95a38aed6a93193bef5fefc6a8236ea5d17f9762b55a2dad838ca3b3f19975",
+    "raw_sha256": "8f1b8099f1b130c08767d769bd67124c5b06fda988b54b8b5d02ed2b923171cf",
     "normalization": "Trailing EOF whitespace only; raw output preserved as gzip."
   }
 ]

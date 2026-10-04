@@ -46,6 +46,21 @@ async function save(screen: Screen) {
   fireEvent.click(panel(screen).getByRole('button', { name: 'Save activity' }))
 }
 describe('Web package on/off without deleting configuration', () => {
+  it('refreshes a remounted inventory when its retained pending save completes', async () => {
+    let finish!: (value: ReturnType<typeof receipt>) => void
+    files.saveLaneDeclaration.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    let screen = render(html`<${LaneAddonsPanel} />`); await open(screen); fireEvent.click(toggle(screen)); await save(screen)
+    await panel(screen).findByRole('button', { name: 'Saving activity…' })
+    screen.unmount(); screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByRole('region', { name: 'Package activity pkg' })
+    expect(panel(screen).getByText('Observed configuration: On · not yet applied')).toBeTruthy()
+    lane.fetchLaneAddons.mockResolvedValue({ ...snapshot, configuration: { ...snapshot.configuration!, declarations: [
+      { ...snapshot.configuration!.declarations[0], enabled: false, instance_id: 'still-observed' },
+    ] } })
+    await act(() => finish(receipt(`enabled = false\n${original}`)))
+    await panel(screen).findByText('Observed configuration: Off requested · worker cleanup not yet confirmed')
+    expect(files.saveLaneDeclaration).toHaveBeenCalledTimes(1)
+  })
   it('changes only activity with explicit CAS save and leaves the raw draft independent', async () => {
     const screen = render(html`<${LaneAddonsPanel} />`)
     fireEvent.click(await screen.findByRole('button', { name: `Edit TOML ${path}` }))

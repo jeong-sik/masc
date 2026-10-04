@@ -1135,15 +1135,19 @@ def run_replace_and_promote(executable: str) -> None:
             h.send_and_wait(process, fd, output, b"s", b"Model order")
             h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
             h.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
-            # Filtering can leave the selected row unchanged, so only the
-            # filter redraw is new output. Verify the retained selection on
-            # the current screen before confirming the replacement.
-            h.send_and_wait(process, fd, output, b"luna medium",
-                            b"filter: luna medium" + FILTER_CURSOR + b" 1 of 1")
-            screen = h.screen_text(bytes(output))
-            if (b"> [CLI replacement] gpt-6-luna medium" not in screen
-                    or b"Selected: account.luna-medium" not in screen):
-                raise AssertionError(f"filtered replacement is not selected: {screen!r}")
+            # The matching label can already be visible before typing; a delta
+            # frame then rewrites only the query. Check the completed selection.
+            h.write_all(fd, output, b"luna medium")
+            def replacement_filtered():
+                end = output.rfind(h.FRAME_END)
+                if end < 0:
+                    return False
+                screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                return (b"filter: luna medium" in screen
+                        and b"> [CLI replacement] gpt-6-luna medium" in screen
+                        and b"Selected: account.luna-medium" in screen)
+            if not h.wait_for_fixture_state(process, fd, output, replacement_filtered, timeout=3.0):
+                raise AssertionError("model/effort query did not select the replacement")
             h.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
         finally:
             release.set()

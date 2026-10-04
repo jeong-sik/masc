@@ -1,0 +1,22 @@
+{
+  "binary_sha256": "64ea20854e47c3a5883c717303de468cbc7ed7b811b8fcea815f263ee8bc41d6",
+  "binary_commit": "e4afdce8f0c4ba4cf02e4326ba423c4fe2207339",
+  "files": {
+    "test_tui_keeper_portrait_pty.py": "4473ae29ab7e74cee00d96bed4c92c3289681ea42ed37d69666db2901e15b62c",
+    "test_tui_item_workspace_authority_pty.py": "a642ede56b1562c885f095646ce49f9bbf7daf0097f5443e532e4be003c2e5a9",
+    "test_tui_remote_workspace_history_pty.py": "3e83dc79ed02a719842a2404681cebbc78dab124c3581545bbf768779812bba5",
+    "test_tui_remote_equipped_portrait.py": "0118173a188d6f6b652cb226f255ab792771105975645b858f16ac91adf6e982"
+  },
+  "harness_sha256": "87137805aa5adbd987fbf6bd5740c3157d8f33d98a3e24be0149228565d43ae5",
+  "started_at": 1791054516.855062,
+  "pid": 91525,
+  "scope": "existing exact e4 macOS native binary with changed fixtures; remote portrait replays real e4 Linux native fixture receipts; no new build or full RC",
+  "finished_at": 1791054541.105552,
+  "exit_code": 0,
+  "files_after": {
+    "test_tui_keeper_portrait_pty.py": "4473ae29ab7e74cee00d96bed4c92c3289681ea42ed37d69666db2901e15b62c",
+    "test_tui_item_workspace_authority_pty.py": "a642ede56b1562c885f095646ce49f9bbf7daf0097f5443e532e4be003c2e5a9",
+    "test_tui_remote_workspace_history_pty.py": "3e83dc79ed02a719842a2404681cebbc78dab124c3581545bbf768779812bba5",
+    "test_tui_remote_equipped_portrait.py": "0118173a188d6f6b652cb226f255ab792771105975645b858f16ac91adf6e982"
+  }
+}

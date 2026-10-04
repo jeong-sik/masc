@@ -225,6 +225,11 @@ let () =
               check_case "drop"
                 {|{"lane":"exact/board_attention_exact","action":"drop","runtime_id":"runpod_mtp.qwen"}|}
                 "exact/board_attention_exact" "drop" [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "replace carries the old and new exact-lane slot" `Quick
+            (fun () ->
+              check_case "replace"
+                {|{"lane":"exact/board_attention_exact","action":"replace","runtime_id":"runpod_mtp.qwen","replacement_runtime_id":"openai.gpt"}|}
+                "exact/board_attention_exact" "replace" [ "runpod_mtp.qwen"; "openai.gpt" ])
         ; Alcotest.test_case "move carries the slot and a direction" `Quick
             (fun () ->
               check_case "move-up"
@@ -232,7 +237,10 @@ let () =
                 "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "up" ];
               check_case "move-down"
                 {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"down"}|}
-                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "down" ])
+                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "down" ];
+              check_case "move-first"
+                {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"first"}|}
+                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "first" ])
         ; Alcotest.test_case "move refuses a direction it cannot read" `Quick
             (fun () ->
               expect_error "move-sideways"

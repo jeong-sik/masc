@@ -23,7 +23,9 @@ from test_tui_emblem_screen_pty import rgba_png
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 KITTY_CHUNK = re.compile(rb"\x1b_G([^;]*);([^\x1b]*)\x1b\\")
 PORTRAIT_ID = b"42"
-KITTY_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
+# Info uses a four-row icon. A 40px cell height makes its 160px drawing
+# comparable to the real router fixture's exported 160px icon, pixel for pixel.
+KITTY_REPLIES = b"\x1b[6;40;20t" + h.GRAPHICS_SUPPORTED_REPLY
 INFO_TAB = "▸Info".encode()
 WAIT_SECONDS = 10.0  # Test failure deadline, not a product refresh interval.
 REFRESH_APPLIED = b"fresh-roster-applied"

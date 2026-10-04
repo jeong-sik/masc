@@ -1,0 +1,14 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+                                                                                                                                                                                                                                                    │[Recent] Changes · feed opening
+   MASC Keepers (2)                                                                                                                                                                                04:27:58  HTTP [connected] [workspace mismatch]  │alpha · no events on this feed yet
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Health  1 healthy · 1 idle
+    fleet ok   running 0/0   turn capacity 0/0
+     HEALTH     KEEPER                           Mode S   TURN LIFECYCLE / RUNTIME              TASK
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     ●          alpha                            A D      — b.current                        not observed
+     ○ idle     beta                             D D      — paused anthropic.claude-sonnet-4 not observed
+    OPERATIONS loading…
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  MISMATCH local /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-ulhqhf5_ (r:retry)  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  l:logs  t:calls  g:yolo  u:runtime  c:chat  q:quit  …?
+ › alpha — chat needs the server workspace for attachments and pasted files

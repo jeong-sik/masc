@@ -1,0 +1,26 @@
+[
+  {
+    "case": "item-boundary",
+    "status": "PASS",
+    "started_at": 1791054516.855318,
+    "elapsed_s": 1.6228489875793457
+  },
+  {
+    "case": "item-authority",
+    "status": "PASS",
+    "started_at": 1791054518.478676,
+    "elapsed_s": 11.047660827636719
+  },
+  {
+    "case": "resource",
+    "status": "PASS",
+    "started_at": 1791054529.5269198,
+    "elapsed_s": 6.754982233047485
+  },
+  {
+    "case": "remote-portrait",
+    "status": "PASS",
+    "started_at": 1791054536.282228,
+    "elapsed_s": 4.823072910308838
+  }
+]

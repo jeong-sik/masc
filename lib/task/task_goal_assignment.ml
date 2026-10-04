@@ -8,10 +8,8 @@
    [Workspace_goal_index] (the link write). The task domain already integrates
    with goals (e.g. [handle_add_task] validates a goal_id), so a task->goal
    reference here is the established, allowed direction. Putting it in [lib/goal]
-   instead would teach the goal *leaf* domain about the task domain — a
-   goal->task coupling the domain-boundary ratchet
-   (scripts/lint/masc-domain-boundary-ratchet.sh) rejects. Both the MCP tool
-   handler and the dashboard HTTP route call this one function, so the
+   instead would teach the goal *leaf* domain about the task domain. Both the
+   MCP tool handler and the dashboard HTTP route call this one function, so the
    precondition checks live in a single place. *)
 
 type set_task_goal_error =

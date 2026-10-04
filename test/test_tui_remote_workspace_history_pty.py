@@ -320,7 +320,7 @@ def run(binary: str, captures: Path | None) -> None:
         http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
-def scoped_roster_authority(binary: str) -> None:
+def scoped_roster_authority(binary: str, *, matching_c: bool = False) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     template = fixtures[ROSTER_PATH][1]
     class ScopedWire(WorkspaceWire):
@@ -330,9 +330,20 @@ def scoped_roster_authority(binary: str) -> None:
             self.hold_roster = False
             self.roster_started = threading.Event()
             self.roster_release = threading.Event()
+        def prepare(self, base: str) -> None:
+            super().prepare(base)
+            if not matching_c:
+                return
+            keeper_path = Path(base, ".masc", "keepers", "alpha.json")
+            metadata = json.loads(keeper_path.read_text())
+            metadata["name"] = "c-only"
+            Path(base, ".masc", "keepers", "c-only.json").write_text(json.dumps(metadata))
+            keeper_path.unlink()
         def health(self):
             with self.lock:
-                base = "/fixture-workspace-b" if self.phase == "b" else "/fixture-workspace-c"
+                base = ("/fixture-workspace-b" if self.phase == "b" else
+                        self.local_base if matching_c else "/fixture-workspace-c")
+            assert base is not None, "scoped authority fixture was not prepared"
             _, payload = _keyboard_harness.fleet_safety_fixture()
             payload["paths"] = {"effective_base_path": base,
                                 "effective_masc_root": str(Path(base, ".masc"))}
@@ -359,34 +370,38 @@ def scoped_roster_authority(binary: str) -> None:
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health,
                      "/api/v1/board?sort_by=hot": wire.board})
+    detour = b"Activity" if matching_c else b"Board"
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            # At 80 columns the Activity pane is not drawn. Board does not
+            # At 80 columns the Activity pane is not drawn. The detour does not
             # need the roster, so entering Keepers dispatches a scoped GET.
             _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=32, columns=80, needle=b"MASC Dashboard",
                 controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
-            await_screen(lambda text: b"workspace identity is unverified" in text
-                         and b"[workspace mismatch]" in text,
-                         "B authority did not refuse the unverified Board read")
+            _keyboard_harness.palette_go(process, fd, output, b"go " + detour, b"MASC " + detour)
+            if not matching_c:
+                await_screen(lambda text: b"workspace identity is unverified" in text
+                             and b"[workspace mismatch]" in text,
+                             "B authority did not refuse the unverified Board read")
             with wire.lock:
                 wire.hold_roster = True
             _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.roster_started,
                 timeout=WAIT_SECONDS), "the scoped B roster was not held"
-            _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
+            _keyboard_harness.palette_go(process, fd, output, b"go " + detour, b"MASC " + detour)
             wire.publish("b-after-late")
             _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=500,
-                             needle=b"MASC Board", controls=(_keyboard_harness.FULL_REDRAW,))
+                             needle=b"MASC " + detour, controls=(_keyboard_harness.FULL_REDRAW,))
             os.write(fd, b"r")
             # While a scoped read is held the full revalidation still owns
             # /health. Its exact Base footer is the applied identity barrier;
             # the wider frame keeps both workspace paths visible.
-            await_screen(lambda text: b"Base: /fixture-workspace-c" in text,
+            expected_base = _base.encode() if matching_c else b"/fixture-workspace-c"
+            await_screen(lambda text: b"Base: " + expected_base in text
+                         and (not matching_c or b"[workspace mismatch]" not in text),
                          "full C identity reading did not become current")
             c_boundary = len(output)
             _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
@@ -401,7 +416,8 @@ def scoped_roster_authority(binary: str) -> None:
         finally:
             wire.roster_release.set()
     _keyboard_harness.run_terminal_scenario(binary,
-        description="superseded scoped roster cannot replace a newer full workspace reading",
+        description="superseded scoped roster cannot replace a newer "
+            + ("matching" if matching_c else "foreign") + " full workspace reading",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=30.0, terminal_cols=80)
 
@@ -1822,6 +1838,7 @@ if __name__ == "__main__":
     queued_workspace_inputs(binary)
     queued_workspace_inputs(binary, root_only=True)
     scoped_roster_authority(binary)
+    scoped_roster_authority(binary, matching_c=True)
     staged_payload_workspace_inputs(binary)
     staged_payload_workspace_inputs(binary, root_only=True)
     armed_schedule_and_runtime_workspace(binary)

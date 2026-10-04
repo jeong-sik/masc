@@ -993,6 +993,9 @@ class ReportCliTest(unittest.TestCase):
                 run = pair["preflight"]["run"]
                 if mode == "different_actor":
                     run["actor"] = "other-keeper"
+                    run["input"]["payload"]["actual_input"]["rendered_prompt_variables"][
+                        "keeper_id"
+                    ] = "other-keeper"
                 elif mode in ("disabled_candidate", "keep_current_fallback", "successful_not_entered"):
                     run["output"].update(generation_path="full_lane", full_llm_skipped=False)
                     if mode == "keep_current_fallback":
@@ -1027,7 +1030,9 @@ class ReportCliTest(unittest.TestCase):
                 result = self.execute(manifest)
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout, "")
-                if mode == "keep_current_fallback":
+                if mode == "different_actor":
+                    self.assertIn("paired runs must use the same Keeper actor", result.stderr)
+                elif mode == "keep_current_fallback":
                     self.assertIn("keep-current fallback domain rejection", result.stderr)
                 elif mode == "disabled_candidate":
                     self.assertIn("preflight arm must enter preflight evaluation", result.stderr)

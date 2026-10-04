@@ -1,0 +1,48 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41130-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts src/api/lane-declarations.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41130-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-declaration-editor.test.ts (33 tests | 1 failed) 722ms
+   ❯ Lane declaration editing through the status surface (33)
+     × offers issue editing only for exact declaration files in the configured directory 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > offers issue editing only for exact declaration files in the configured directory
+AssertionError: expected <button type="button" …(2)></button> to be null
+
+- Expected:
+null
+
++ Received:
+<button
+  aria-label="Edit TOML /workspace/.masc/config/lane-addons/.toml"
+  class="border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"
+  type="button"
+>
+  Edit TOML
+</button>
+
+ ❯ src/components/lane-declaration-editor.test.ts:548:94
+    546|     await screen.findByText('Configuration read: incomplete')
+    547|     for (const sourcePath of paths.slice(0, -1)) {
+    548|       expect(screen.queryByRole('button', { name: `Edit TOML ${sourceP…
+       |                                                                                              ^
+    549|     }
+    550|     fireEvent.click(screen.getByRole('button', { name: `Edit TOML ${pa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 77 passed (78)
+   Start at  02:51:36
+   Duration  4.29s (tests 37%, import 28%, transform 15%, environment 11%, setup 8%)
+
+    Isolate  3 workers spawned · ~247ms startup each (spawn + environment, per file)
+             at least ~495ms faster with isolate: false — reuses workers across files instead of one per file
+
+ ELIFECYCLE  Test failed. See above for more details.

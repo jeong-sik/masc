@@ -1587,6 +1587,8 @@ export function SettingsSurface() {
     }
   }
 
+  const runtimeAuthority = executionWorkspaceAuthority.value
+
   // runtime defaults / model routing — resolved from runtime.toml (SSOT)
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
   // single resolved-runtime document (bugs #14/#15/#36) — effective
@@ -1612,54 +1614,63 @@ export function SettingsSurface() {
 
   useEffect(() => {
     let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+    setRuntimeDefaults(null)
+    if (!runtimeAuthority) return () => { active = false }
     void (async () => {
       try {
         const resp = await fetchRuntimeDefaults()
-        if (!active) return
+        if (!current()) return
         setRuntimeDefaults(resp)
       } catch {
-        if (!active) return
+        if (!current()) return
         setRuntimeDefaults(null)
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [runtimeAuthority])
 
   useEffect(() => {
     let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+    setRuntimeResolved(null)
     setRuntimeResolvedStatus('loading')
+    if (!runtimeAuthority) return () => { active = false }
     void (async () => {
       try {
         const resp = await fetchRuntimeResolved()
-        if (!active) return
+        if (!current()) return
         setRuntimeResolved(resp)
         setRuntimeResolvedStatus('ready')
       } catch {
-        if (!active) return
+        if (!current()) return
         setRuntimeResolved(null)
         setRuntimeResolvedStatus('error')
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [runtimeAuthority])
 
   useEffect(() => {
     let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+    setRuntimeProviders(null)
     setRuntimeCatalogStatus('loading')
+    if (!runtimeAuthority) return () => { active = false }
     void (async () => {
       try {
         const resp = await fetchRuntimeProviders()
-        if (!active) return
+        if (!current()) return
         setRuntimeProviders(resp)
         setRuntimeCatalogStatus('ready')
       } catch {
-        if (!active) return
+        if (!current()) return
         setRuntimeProviders(null)
         setRuntimeCatalogStatus('error')
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [runtimeAuthority])
 
   async function reloadRuntimeTomlSourceSnapshot(current: () => boolean = () => true): Promise<{ sourceText: string; sourceRevision: string } | null> {
     try {
@@ -1675,9 +1686,13 @@ export function SettingsSurface() {
   }
 
   useEffect(() => {
-    if (sec !== 'routing') return
-    void reloadRuntimeTomlSourceSnapshot()
-  }, [sec])
+    let active = true
+    setRuntimeTomlSource({ status: 'loading' })
+    if (sec === 'routing' && runtimeAuthority) {
+      void reloadRuntimeTomlSourceSnapshot(() => active && executionWorkspaceAuthority.peek() === runtimeAuthority)
+    }
+    return () => { active = false }
+  }, [sec, runtimeAuthority])
 
   async function reloadRuntimeDefaultsSnapshot(current: () => boolean = () => true): Promise<void> {
     try {
@@ -1741,7 +1756,6 @@ export function SettingsSurface() {
   }
 
   // The mounted parent owns refreshes even when navigation unmounts the editor.
-  const runtimeAuthority = executionWorkspaceAuthority.value
   const runtimeCommit = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).committed.value : null
   useEffect(() => {
     if (!runtimeCommit || runtimeCommit.authority !== runtimeAuthority) return

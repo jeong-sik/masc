@@ -1,0 +1,89 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-runtime-raw-save.test.ts src/components/runtime-toml-editor.test.ts -t 'definite precommit|actual raw-save validation'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+
+ ❯ src/components/runtime-toml-editor.test.ts (84 tests | 1 failed | 83 skipped) 34ms
+   ❯ RuntimeTomlEditor (84)
+     × allows correcting and retrying an actual raw-save validation refusal without adopting a file 33ms
+ ❯ src/api/dashboard-runtime-raw-save.test.ts (22 tests | 2 failed | 20 skipped) 7ms
+   ❯ raw runtime.toml revision-checked write (22)
+     × classifies the raw route structured 400 as a definite precommit refusal 6ms
+     × classifies the raw route structured 400 as a definite precommit refusal 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/dashboard-runtime-raw-save.test.ts > raw runtime.toml revision-checked write > classifies the raw route structured 400 as a definite precommit refusal
+AssertionError: expected ApiRequestError: POST /api/v1/runtime/con… { …(13) } to match object { name: 'RuntimeTomlSaveRejected' }
+(14 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "name": "RuntimeTomlSaveRejected",
++ ApiRequestError {
++   "name": "ApiRequestError",
+  }
+
+ ❯ src/api/dashboard-runtime-raw-save.test.ts:81:60
+     79|   ])('classifies the raw route structured 400 as a definite precommit …
+     80|     const fetchMock = reply(body, 400)
+     81|     await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.t…
+       |                                                            ^
+     82|     expect(fetchMock).toHaveBeenCalledTimes(1)
+     83|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/api/dashboard-runtime-raw-save.test.ts > raw runtime.toml revision-checked write > classifies the raw route structured 400 as a definite precommit refusal
+AssertionError: expected ApiRequestError: POST /api/v1/runtime/con… { …(13) } to match object { name: 'RuntimeTomlSaveRejected' }
+(16 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "name": "RuntimeTomlSaveRejected",
++ ApiRequestError {
++   "name": "ApiRequestError",
+  }
+
+ ❯ src/api/dashboard-runtime-raw-save.test.ts:81:60
+     79|   ])('classifies the raw route structured 400 as a definite precommit …
+     80|     const fetchMock = reply(body, 400)
+     81|     await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.t…
+       |                                                            ^
+     82|     expect(fetchMock).toHaveBeenCalledTimes(1)
+     83|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/components/runtime-toml-editor.test.ts > RuntimeTomlEditor > allows correcting and retrying an actual raw-save validation refusal without adopting a file
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/runtime-toml-editor.test.ts:1358:29
+    1356|       await waitFor(() => expect(container.textContent).toContain('inv…
+    1357|       expect(textarea.value).toBe(draft)
+    1358|       expect(save.disabled).toBe(false)
+       |                             ^
+    1359|       expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    1360|       expect(coreApi.postControlPlane).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 103 skipped (106)
+   Start at  02:54:08
+   Duration  1.60s (transform 32%, import 26%, environment 21%, setup 18%, tests 3%)
+
+ ELIFECYCLE  Test failed. See above for more details.

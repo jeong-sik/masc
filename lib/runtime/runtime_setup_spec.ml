@@ -254,8 +254,18 @@ let connection_matches spec (provider : Runtime_schema.provider) =
           | Error _ -> false)
     | Client _, Runtime_schema.Http _ | Http _, Runtime_schema.Cli _ -> false in
   provider.protocol=protocol spec.choice && connection_matches
+type reuse_eligibility = Eligible | Disabled | Interactive_cli
+let reuse_eligibility (provider : Runtime_schema.provider) =
+  if not provider.enabled then Disabled else
+  match provider.transport with
+  | Runtime_schema.Cli _ when not provider.is_non_interactive -> Interactive_cli
+  | Runtime_schema.Cli _ | Runtime_schema.Http _ -> Eligible
+let reuse_refusal = function
+  | Eligible -> "provider connection changed"
+  | Disabled -> "provider is disabled"
+  | Interactive_cli -> "CLI provider must declare is-non-interactive = true"
 let for_provider spec (provider : Runtime_schema.provider) =
-  if provider.enabled && connection_matches spec provider
+  if reuse_eligibility provider = Eligible && connection_matches spec provider
   then Some {spec with declared_provider_id=Some provider.id} else None
 let resolve_provider spec providers =
   let selected = match spec.declared_provider_id with
@@ -264,17 +274,17 @@ let resolve_provider spec providers =
   | Some id ->
     (match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) providers with
      | Some provider -> (match for_provider spec provider with
-         | Some bound -> Ok bound | None -> invalid "selected provider is disabled or changed")
+         | Some bound -> Ok bound | None -> invalid (reuse_refusal (reuse_eligibility provider)))
      | None -> invalid "selected provider is absent")
   | None ->
     let matches = List.filter (connection_matches spec) providers in
-    let enabled = List.filter (fun (p:Runtime_schema.provider) -> p.enabled) matches in
+    let enabled = List.filter (fun provider -> reuse_eligibility provider = Eligible) matches in
     let generated = provider_id spec in
     let enabled = match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=generated) enabled with
       | Some provider -> [provider] | None -> enabled in
     (match enabled, matches with
      | [provider], _ -> Ok {spec with declared_provider_id=Some provider.id}
-     | [], _ :: _ -> invalid "matching provider is disabled"
+     | [], provider :: _ -> invalid (reuse_refusal (reuse_eligibility provider))
      | _ :: _ :: _, _ -> invalid "matching providers are ambiguous"
      | [], [] ->
        if List.exists (fun (p:Runtime_schema.provider) -> p.id=generated) providers

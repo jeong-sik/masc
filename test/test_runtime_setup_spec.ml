@@ -341,7 +341,39 @@ max-context = 500000
   Alcotest.check Alcotest.bool "public account identities expose no account home" false
     (String_util.contains_substring (Yojson.Safe.to_string (`List groups)) "/fixture/")
 
+let test_cli_reuse_requires_non_interactive () =
+  List.iter (fun (choice, fields) ->
+    let json = `Assoc (["choice", `String choice; "model", `String "fixture-model";
+      "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true] @ fields) in
+    let spec = Runtime_setup_spec.of_json json |> Result.get_ok in
+    let rendered = Runtime_setup_spec.render spec in
+    let config = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
+    let provider = List.hd config.Runtime_schema.providers in
+    let binding = List.hd config.bindings in
+    Alcotest.(check bool) (choice ^ " generated provider is executable") true
+      (Result.is_ok (Runtime_adapter.binding_to_execution config binding));
+    let interactive = {provider with is_non_interactive=false} in
+    let interactive_config = {config with providers=[interactive]} in
+    Alcotest.(check bool) (choice ^ " actual adapter refuses interactive declaration") true
+      (Result.is_error (Runtime_adapter.binding_to_execution interactive_config binding));
+    Alcotest.(check bool) (choice ^ " direct reuse refuses interactive declaration") true
+      (Option.is_none (Runtime_setup_spec.for_provider spec interactive));
+    Alcotest.(check bool) (choice ^ " implicit account resolution refuses before stage") true
+      (Result.is_error (Runtime_setup_spec.resolve_provider spec [interactive]));
+    let bound = Runtime_setup_spec.for_provider spec provider |> Option.get in
+    Alcotest.(check bool) (choice ^ " selected identity is rechecked") true
+      (Result.is_error (Runtime_setup_spec.resolve_provider bound [interactive]));
+    let sibling = {provider with id="admissible_account"} in
+    let selected = Runtime_setup_spec.resolve_provider spec [interactive;sibling] |> Result.get_ok in
+    Alcotest.(check string) (choice ^ " alias chooses the admissible existing connection")
+      sibling.id (Runtime_setup_spec.provider_id selected))
+    ["codex", ["account_home", `String "/fixture/codex"];
+     "claude_code", ["account_home", `String "/fixture/claude"];
+     "antigravity", ["credential_file", `String "/fixture/oauth.json"; "timeout_s", `Int 60];
+     "muse", ["account_home", `String "/fixture/muse"]]
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
+  Alcotest.test_case "CLI reuse follows actual execution eligibility" `Quick test_cli_reuse_requires_non_interactive;
   Alcotest.test_case "HTTP request surface survives setup" `Quick test_http_request_surface;
   Alcotest.test_case "existing and disabled account identity" `Quick test_configured_account_resolution;
   Alcotest.test_case "inventory groups existing account providers without renaming" `Quick test_inventory_groups_existing_account_providers;

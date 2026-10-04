@@ -46,6 +46,16 @@
       "verdict": "PASS",
       "reviewer": "parent",
       "scope_note": "Complete production, protocol, docs and regression diff read; generation gates all source successes/failures before state changes, captured exact target and navigation/workspace cancellation checked. Syntax-only execution evidence; new PTY authored."
+    },
+    {
+      "scope": "final editor and account-group source integration",
+      "heads": [
+        "9b02d31459f914bbe8426f30cdf29ad47ea588e3",
+        "a7377975fa7b83fcf00d5bc32e3a777aac938646"
+      ],
+      "verdict": "PASS",
+      "reviewer": "review_usage",
+      "scope_note": "Independent source-only review of generation/captured identity, group membership/deletion and account versus connection display. No independent approval of reviewer-authored Usage/status."
     }
   ]
 }

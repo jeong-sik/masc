@@ -1,36 +1,36 @@
 [
   {
-    "file": "model-table.log",
+    "file": "model-table.txt",
     "sha256": "1e34a8ea93feac184dab2a5b6afa3e8cbee6cc60218dc63de794378fa57fd273",
     "cases": 17
   },
   {
-    "file": "model-form.log",
+    "file": "model-form.txt",
     "sha256": "433bc1fcfb276ab58af6f7a06a0f41d0b30ac98e854dbdf4d2c783a9d5557eeb",
     "cases": 4
   },
   {
-    "file": "usage-snapshots.log",
+    "file": "usage-snapshots.txt",
     "sha256": "bbda9513c8fcf910824a4995c54f3477a3ac361efcd4effd4fb986973cf137cd",
     "cases": 3
   },
   {
-    "file": "metrics-producer.log",
+    "file": "metrics-producer.txt",
     "sha256": "86eb35bb48b9c973bcb2a7c8e212baf11bd53d657a97819f052dbb4ab4c2cb23",
     "cases": 46
   },
   {
-    "file": "metrics-view.log",
+    "file": "metrics-view.txt",
     "sha256": "d12c68b668fff935f6d1a55bb601a11e2fff65d5261e1338d326898653135c5e",
     "cases": 3
   },
   {
-    "file": "setup-spec.log",
+    "file": "setup-spec.txt",
     "sha256": "e8e9fbc1918bb9a1a75d9654a0ac205de247cf74cfa51361bd2d04918b6d4af5",
     "cases": 11
   },
   {
-    "file": "account-login.log",
+    "file": "account-login.txt",
     "sha256": "e29a9911ffb7ed991731c53d1744e4adf4f56b24b41380fd61e117753aa9f821",
     "cases": 33
   }

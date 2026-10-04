@@ -48,8 +48,9 @@ uncropped live captures remain private and are not included here.
 - `installed-tui.json`: identity of the installed TUI used for live captures.
 - `live-runtime-catalog.txt`, `live-usage.txt`: text replay of the old installed
   binary's real PTY, cropped to the main pane. These are not images of the new UI.
-- `log-manifest.json` and `.log` files: bounded existing native test transcripts.
-- `stack.json`: final published branch/PR identities captured at submission.
+- `log-manifest.json` and the named `.txt` files: bounded existing native test transcripts.
+- `stack.json`: published branch/PR snapshot before the final evidence-only commit.
+  The PR pages carry current head identities.
 
 Focused native tests compiled only changed modules against existing cached
 OCaml 5.5.1 dependencies. No Dune/full local build, CI watch, full CI or deployment

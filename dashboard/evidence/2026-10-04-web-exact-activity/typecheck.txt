@@ -1,4 +1,3 @@
 
 > masc-dashboard@1.0.0 typecheck /Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard
 > tsc --noEmit
-

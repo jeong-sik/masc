@@ -1,0 +1,8 @@
+{
+  "tested_member": "f3ed4cb82979454b23bb5d9712dd949417a85cf5",
+  "test": "test/test_tui_usage_rows_pty.py",
+  "handle": 90655,
+  "exit": 0,
+  "binary_sha256": "0a941cd4719fbd0df9b8df128f3ed4b4356b8ec02a37a49a9de656c42834e433",
+  "log_sha256": "baf353922ae3002b2a553ef3756cb65576c9908382ef6a15421dc8aae05def9d"
+}

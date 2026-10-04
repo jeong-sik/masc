@@ -338,3 +338,25 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
     ; "generated_at", `Float (Time_compat.now ())
     ]
 ;;
+
+let compute_runtime_metrics_json ~base_path ~window_minutes =
+  let observed_at = Time_compat.now () in
+  let since_unix = observed_at -. (Float.of_int window_minutes *. 60.0) in
+  let entries, cost_read = read_all_entries ~base_path ~since_unix in
+  let attributed = List.filter_map (fun (entry : raw_entry) ->
+    match entry.executed_runtime_id with
+    | Some runtime_id -> Some { entry with model = runtime_id }
+    | None -> None) entries in
+  let runtimes = aggregate_by_model attributed |> List.map (fun stats ->
+    match model_stats_to_json ~model_label:stats.model_id stats with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "model_id", value -> "runtime_id", value
+        | field -> field) fields)
+    | json -> json) in
+  `Assoc [ "state", `String "ready";
+    "observed_at", `Float observed_at;
+    "window_minutes", `Int window_minutes;
+    "attributed_entries", `Int (List.length attributed);
+    "unattributed_entries", `Int (List.length entries - List.length attributed);
+    "cost_read", cost_read_to_json cost_read;
+    "runtimes", `List runtimes ]

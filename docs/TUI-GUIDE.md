@@ -144,7 +144,7 @@ decides whether launching one is worth it.
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
 | Keeper Automation | unavailable | `GET /api/v1/dashboard/scheduled-automation`, filtered to the selected Keeper |
 | Keeper Runs | unavailable | `GET /api/v1/dashboard/fusion-runs`, filtered to the selected Keeper |
-| Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` |
+| Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` + authenticated `GET /api/v1/runtime/metrics` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
 
@@ -1881,6 +1881,23 @@ the one the lane walks: `head`, `fallback #n`, or `single candidate`.
 `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
 metadata-endpoint reachability reading. It does not send a completion, execute a CLI
 runtime, or report runtime candidate order history.
+
+Runtime detail also reads the authenticated `GET /api/v1/runtime/metrics`.
+It shows the last and recent recorded successes within a 24-hour window,
+successful/error sample counts, reported usage and telemetry coverage, and
+cache reads as a share of inclusive input tokens from the same valid pairs.
+Zero cache reads and missing reports remain distinct. Only the decision's
+observed executed runtime ID attributes a sample; API model names, the selected
+lane, and unpaired cost rows do not identify an account. Records without an
+answerer and unavailable cost-store reads are shown separately. These are
+recorded samples, not a claim that every call was logged. Snapshot age and
+staleness accompany the history; a cold cache shows loading until refreshed.
+
+The same detail lists current catalog context/output limits separately from
+model, provider and binding context declarations. Official-client catalog
+limits that the runtime does not expose remain unreported. These current
+specifications do not describe earlier calls. Bound Keeper totals are labelled
+as lifetime activity across all runtimes, separate from this runtime's history.
 
 `CLI not probed` is neutral, and a candidate absent from a stale probe is
 `unobserved`, not unhealthy. Green is limited to the `reachable` token; model,

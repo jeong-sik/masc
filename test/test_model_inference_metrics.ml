@@ -1663,6 +1663,7 @@ let test_prompt_feedback_is_cost_independent () =
 let test_usage_signal_uses_tokens_not_cost () =
   let entry : Model_inference_metrics_entry.raw_entry =
     { model = "runtime"
+    ; executed_runtime_id = None
     ; inference_key = None
     ; ts_unix = 0.0
     ; outcome = "success"
@@ -1703,6 +1704,40 @@ let test_usage_signal_uses_tokens_not_cost () =
     (Model_inference_metrics_reader.usage_signal_present cache_creation_only)
 
 (* ── Runner ──────────────────────────────────────── *)
+
+let test_runtime_history_keeps_account_attribution () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "runtime-history" in
+    let now = now_unix () in
+    let observed runtime json = match json with
+      | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+          "runtime_id", `String "shared-lane";
+          "executed_runtime_id", `String runtime]) :: fields)
+      | _ -> fail "fixture is not an object" in
+    write_decisions path [
+      observed "account-one.model" (success_entry ~model:"same-api-model" ~ts:(now -. 10.)
+        ~identity_seed:"first-account" ~input_tokens:100 ~cache_read_tokens:25 ());
+      observed "account-two.model" (success_entry ~model:"same-api-model" ~ts:(now -. 5.)
+        ~identity_seed:"second-account" ~input_tokens:200 ~cache_read_tokens:100 ());
+      success_entry ~model:"same-api-model" ~ts:(now -. 2.) ~input_tokens:9000 ();
+      observed "account-one.model" (success_entry ~model:"same-api-model" ~ts:(now -. 90000.) ())
+    ];
+    write_costs base [cost_entry ~model:"cost-model-name" ~ts:(now -. 10.)
+      ~identity_seed:"first-account" ~input_tokens:999 ()];
+    let open Yojson.Safe.Util in
+    let json = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    let runtimes = json |> member "runtimes" |> to_list in
+    check int "two account rows, no API-name join" 2 (List.length runtimes);
+    check int "unattributed decision remains explicit" 1 (json |> member "unattributed_entries" |> to_int);
+    let row id = List.find (fun json -> json |> member "runtime_id" = `String id) runtimes in
+    let one = row "account-one.model" and two = row "account-two.model" in
+    check int "exact cost merge preserves executed identity and one sample" 1 (one |> member "entry_count" |> to_int);
+    check int "paired usage uses normalized decision" 100 (one |> member "cached_input" |> member "input_tokens" |> to_int);
+    check int "account one cache only" 25 (one |> member "cached_input" |> member "cache_read_tokens" |> to_int);
+    check int "account two cache only" 100 (two |> member "cached_input" |> member "cache_read_tokens" |> to_int);
+    check (float 0.001) "recent success belongs to selected account"
+      (floor (now -. 10.)) (one |> member "recent_entries" |> to_list |> List.hd |> member "ts_unix" |> to_float))
 
 let () =
   run "Model_inference_metrics" [
@@ -1760,6 +1795,7 @@ let () =
         test_public_runtime_lane_label_is_stable_across_windows;
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;
+      test_case "runtime history keeps account attribution" `Quick test_runtime_history_keeps_account_attribution;
     ];
     "thinking_fraction", [
       test_case "mixed reported yields fraction" `Quick test_thinking_fraction_mixed;

@@ -216,3 +216,9 @@ val compute_cost_latency_json :
     lane labels rather than concrete provider/model axes.
 
     @since 2.300.0 *)
+
+(** Operator-only runtime history. Groups by the exact executed runtime from
+    decision records; unpaired cost observations and records without an answerer
+    remain unattributed. The window and store diagnostics accompany the samples.
+    Call this from an asynchronous cached producer, never on a request's I/O path. *)
+val compute_runtime_metrics_json : base_path:string -> window_minutes:int -> Yojson.Safe.t

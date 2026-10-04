@@ -9452,6 +9452,7 @@ let runtime_detail_lines state target ~width =
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
+        @ runtime_detail_field ~width ~style:Ansi.reset "Account / provider ID" runtime.ro_provider_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
         @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"
             (Printf.sprintf "%d tokens" runtime.ro_effective_max_context)
@@ -9576,7 +9577,7 @@ let runtime_detail_lines state target ~width =
                   (format_context_tokens tokens) cost
             in
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
-            @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
+            @ runtime_detail_field ~width ~style:Ansi.reset "Keeper lifetime" (activity_str ^ " · across all runtimes")
       in
       let usage_lines =
         match state.runtime_surface with
@@ -9600,7 +9601,14 @@ let runtime_detail_lines state target ~width =
                 runtime_detail_field ~width ~style:(Theme.warn ()) "Spent limit"
                   (limit ^ " (observed " ^ observed ^ ")")) windows
       in
-      fields @ candidate @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
+      let evidence_lines = match state.runtime_evidence with
+        | None -> runtime_detail_field ~width ~style:Ansi.dim "Runtime history" "not read"
+        | Some (Error detail) -> runtime_detail_field ~width ~style:Ansi.dim "Runtime history" detail
+        | Some (Ok evidence) ->
+          Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
+          |> List.concat_map (fun (label, value) ->
+            runtime_detail_field ~width ~style:Ansi.reset label value) in
+      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in

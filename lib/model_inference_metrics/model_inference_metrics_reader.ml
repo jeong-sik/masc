@@ -135,6 +135,7 @@ let value_or ~preferred ~fallback =
 
 let merge_exact_inference decision cost =
   { model = cost.model
+  ; executed_runtime_id = decision.executed_runtime_id
   ; inference_key = cost.inference_key
   ; ts_unix = cost.ts_unix
   ; outcome = decision.outcome

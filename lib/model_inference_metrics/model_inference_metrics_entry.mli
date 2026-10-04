@@ -130,6 +130,8 @@ type aggregate =
 
 type raw_entry =
   { model : string
+  ; executed_runtime_id : string option
+    (** Exact observed answerer from the decision, never inferred from an API model name. *)
   ; inference_key : Cost_ledger.inference_key option
   ; ts_unix : float
   ; outcome : string

@@ -128,6 +128,13 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            | Some provider_context -> [ provider_context ]
            | None -> []
          in
+         let* executed_runtime_id = match provider_context_fields with
+           | [] -> Ok None
+           | fields :: _ ->
+             Result.map (function
+               | Some (Runtime_answerer.Executed id) -> Some id
+               | Some Runtime_answerer.Not_observed | None -> None)
+               (runtime_answerer_of_provider_context fields) in
          let model_attribution_field_sets = tfields :: provider_context_fields in
          let runtime_model_attribution =
            runtime_model_attribution provider_context_fields
@@ -168,6 +175,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            in
            Ok
              { model
+             ; executed_runtime_id
              ; inference_key = None
              ; ts_unix = ts
              ; outcome = "error"
@@ -300,6 +308,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
 	             Result.map
 	               (fun inference_key ->
 	                  { model
+	             ; executed_runtime_id
 	             ; inference_key
 	             ; ts_unix = ts
 	             ; outcome
@@ -401,6 +410,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
     in
     Ok
       { model = row.model
+      ; executed_runtime_id = None
       ; inference_key = Cost_ledger.inference_key row
       ; ts_unix = row.ts_unix
       ; outcome = "success"

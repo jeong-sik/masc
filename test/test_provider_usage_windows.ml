@@ -863,6 +863,30 @@ let antigravity_exec : Runtime_execution.antigravity_cli =
 
 let no_antigravity ~scope:_ _ = fail "an Antigravity read was asked for"
 
+let test_http_empty_report_replaces_old_limit () =
+  let account =
+    { Read.scope = Runtime_quota_window.scope_of_credential
+        ~provider_id:"usage_http_empty_report" None
+    ; how = Read.Http
+        { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string "fixture-key"
+        ; usage_read = { shape = Runtime_schema.Openrouter_key;
+            url = "https://usage.invalid/key"; refresh_s = None }
+        }
+    } in
+  let read body =
+    Read.read_scopes ~codex:(fun ~scope:_ _ -> fail "unexpected Codex read")
+      ~antigravity:no_antigravity ~fetch:(fun ~api_key:_ _ -> Ok body) [account] in
+  read {|{"data":{"limit":20,"limit_remaining":0}}|};
+  (match Usage.state ~scope:account.scope with
+   | Usage.Reported ({ window = { utilization = Usd { used; limit = Some limit }; _ }; _ }, []) ->
+       check (float 0.) "initial HTTP report has a spent credit cap" limit used
+   | _ -> fail "initial HTTP credit report was not recorded");
+  read {|{"data":{"limit":null}}|};
+  match Usage.state ~scope:account.scope with
+  | Usage.Reported_no_windows { source = Openrouter_key_read; _ } -> ()
+  | _ -> fail "successful empty HTTP report left its old credit cap behind"
+;;
+
 let test_failed_background_schedule_releases_scope () =
   Eio_main.run (fun _env ->
     let scope =
@@ -1192,7 +1216,9 @@ let () =
         ; test_case "version" `Quick test_antigravity_version
         ] )
     ; ( "reading scopes"
-      , [ test_case "a raising scope does not stop the rest" `Quick
+      , [ test_case "empty HTTP report removes old credit limits" `Quick
+            test_http_empty_report_replaces_old_limit
+        ; test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
         ; test_case "failed background schedule releases the account" `Quick
             test_failed_background_schedule_releases_scope

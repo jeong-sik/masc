@@ -124,8 +124,8 @@ let read_antigravity ~scope (antigravity : Runtime_execution.antigravity_cli) =
        Log.Runtime_agent.info
          "provider usage read for %s (antigravity /usage) stated no windows"
          (Runtime_quota_window.scope_to_string scope)
-     | _ :: _ ->
-       Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report);
+     | _ :: _ -> ());
+    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
     Ok ()
   | Error error -> Error (Runtime_antigravity_usage.error_to_string error)
 ;;
@@ -233,8 +233,8 @@ let read_http ~fetch ~scope http =
        "provider usage read for %s (shape %s) stated no windows"
        (Runtime_quota_window.scope_to_string scope)
        (shape_label http)
-   | _ :: _ ->
-     Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report);
+   | _ :: _ -> ());
+  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
   Ok ()
 ;;
 

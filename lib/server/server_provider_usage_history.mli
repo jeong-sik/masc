@@ -22,6 +22,8 @@ val days_of_window : window -> int
 val read :
   Workspace.config -> now:float -> window:window -> (Yojson.Safe.t, string) result
 (** Return the latest report on each UTC day, per scope and reported window.
+    Complete reports remove omitted windows from that day's sample; sparse
+    updates retain unstated windows. Earlier days retain their own readings.
     Missing days have no point. A stored line that cannot be read is logged,
     skipped, and counted in [unreadable_reports]; the rest are still read. A
     store that cannot be read at all, or a report that failed to persist in

@@ -1165,9 +1165,22 @@ let empty_loaded_state =
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
+let catalogue_revision_ref = Atomic.make 0
+let catalogue_changed = Eio.Condition.create ()
+let catalogue_revision () = Atomic.get catalogue_revision_ref
+
+let publish_loaded_state state =
+  Atomic.set loaded_state_ref state;
+  ignore (Atomic.fetch_and_add catalogue_revision_ref 1);
+  Eio.Condition.broadcast catalogue_changed
+
+let await_catalogue_change ~after =
+  Eio.Condition.loop_no_mutex catalogue_changed (fun () ->
+    let current = catalogue_revision () in
+    if current > after then Some current else None)
 
 let enter_setup_required ~reason () =
-  Atomic.set loaded_state_ref empty_loaded_state;
+  publish_loaded_state empty_loaded_state;
   Runtime_startup_state.set (Setup_required reason)
 ;;
 
@@ -1212,7 +1225,7 @@ let set_loaded
     | Some declared -> declared
     | None -> media_failover
   in
-  Atomic.set loaded_state_ref
+  publish_loaded_state
     { default_runtime = Some rt
     ; default_route = Some default_route
     ; runtimes
@@ -3090,12 +3103,13 @@ module For_testing = struct
   (* TEL-OK: this module only exposes pure state and validation test helpers. *)
 
   let snapshot () = runtime_state ()
-  let restore snapshot = Atomic.set loaded_state_ref snapshot
+  let restore snapshot = publish_loaded_state snapshot
   let with_config_lock_observed_with_release_failure ~release_failure ~runtime_config_path action =
     with_runtime_config_write_lock_using
       (File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure ~release_failure)
       runtime_config_path action
   ;;
+
   let with_config_lock_with_journal_sync_parent ~sync_parent ~runtime_config_path action =
     with_runtime_config_write_lock_using
       ~require_resolved:(Keeper_config_journal.For_testing.require_resolved_with_sync_parent ~sync_parent)

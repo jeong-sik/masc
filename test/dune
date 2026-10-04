@@ -2775,6 +2775,9 @@
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)
 
+(include stanzas/test_provider_usage_history_snapshots.inc)
+(include stanzas/test_provider_usage_snapshots.inc)
+
 (include stanzas/test_runtime_resolved_fleet.inc)
 
 (include stanzas/test_tui_overview_providers.inc)
@@ -7020,7 +7023,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries masc_tui_surface_search alcotest masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)

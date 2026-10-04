@@ -125,20 +125,19 @@ let test_section_draws_three_line_shapes () =
   check string "plain usage title" " Plan usage" (plain section.title);
   let text = String.concat "\n" lines in
   List.iter (fun fact -> check bool ("retains " ^ fact) true (contains ~affix:fact text))
-    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Reported 67%"; "Reported 44%"; "Reported 100%"
+    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Used  67%"; "Used  44%"; "Used 100%"
     ; "Model call limit"; " in 4h12m"; "reported 3m00s ago"; "reset time passed"
     ; "no newer report"; "Last report"; "exhausted (observed)"; "catalogue reopens"; " in 2h00m" ];
   check bool "exhausted account is first" true
     (match lines with first :: _ -> contains ~affix:"Kimi Coding" first | [] -> false);
-  check bool "unreported, unblocked accounts draw no invented meters" false
+  check bool "unreported accounts remain visible" true
     (contains ~affix:"Codex Pro" text || contains ~affix:"Ollama Cloud" text);
   let five_hour = List.find (fun line -> contains ~affix:"67%" line) lines in
   let meter, cells = meter_of five_hour in
   check string "the window still draws the reported share" meter (Providers.meter ~cells 0.67);
   check bool "cards have visible boundaries" true (contains ~affix:"┌" text)
 
-(* The one silent account kept: its quota is observed exhausted, and that tag
-   is the reason a Keeper on it is stuck. It draws no meter. *)
+(* A silent account keeps its identity and, when observed, its exhaustion. *)
 let test_silent_account_draws_only_its_exhaustion () =
   let windows =
     match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
@@ -156,9 +155,9 @@ let test_silent_account_draws_only_its_exhaustion () =
       let lines = List.map plain section.lines in
       let text = String.concat "\n" lines in
       List.iter (fun fact -> check bool ("silent account retains " ^ fact) true
-        (contains ~affix:fact text)) [ "Codex Pro"; "no usage data"; "exhausted (observed)" ];
-      check bool "the silent account that is not exhausted draws nothing" true
-        (not (List.exists (contains ~affix:"Ollama Cloud") lines))
+        (contains ~affix:fact text)) [ "Codex Pro"; "No usage report since server start"; "exhausted (observed)" ];
+      check bool "the unblocked silent account is visible too" true
+        (List.exists (contains ~affix:"Ollama Cloud") lines)
 
 let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
     ?(kimi_resets_at = 1790179580.0) ~width () =
@@ -283,8 +282,8 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   let text = String.concat "\n" (List.map plain section.lines) in
   List.iter (fun fact -> check bool ("window role retains " ^ fact) true
     (contains ~affix:fact text))
-    [ "Reported 100%"; "Model call limit"; "Other use · does not block model calls"
-    ; "Unclassified limit"; "Reported 80%" ];
+    [ "Used 100%"; "Model call limit"; "Other use · does not block model calls"
+    ; "Unclassified limit"; "Used  80%" ];
   check bool "the source label is retained" true
     (List.exists (fun line -> contains ~affix:"1 x unit 5" (plain line)) section.lines);
   check bool "missing reset stays distinct from zero" true
@@ -368,8 +367,7 @@ let test_empty_read_names_missing_usage_data () =
         (List.map plain section.lines)
   | None -> fail "an empty account list disappeared"
 
-(* Account email metadata never changes meter geometry. Unreported accounts
-   without an observed block remain absent. *)
+(* Account identity remains visible before the first usage report. *)
 let test_account_emails_name_their_accounts () =
   let windows =
     match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
@@ -392,7 +390,7 @@ let test_account_emails_name_their_accounts () =
   let text = String.concat "\n" (List.map plain fitting.lines) in
   List.iter (fun fact -> check bool ("email identity retains " ^ fact) true
     (contains ~affix:fact text)) [ "Claude Max"; "id-claud"; "c@x.io"; "kimi@example.com" ];
-  check bool "an account with no drawn report has no email row" false
+  check bool "an account with no usage report keeps its email" true
     (contains ~affix:"codex@example.com" text);
   let wide = read [ ("claude_code", "claude.with.long.address@example.com") ] in
   let meters (section : Providers.section) = List.filter (contains ~affix:meter_open) (List.map plain section.lines) in
@@ -426,7 +424,8 @@ let test_history_preserves_reported_days_and_units () =
            (match point.puhp_unit with
             | Masc.Tui_decode_usage.Utilization_fraction value ->
                 check (float 0.0001) "reported fraction" 0.4 value
-            | Masc.Tui_decode_usage.Utilization_percent _ -> fail "unit changed")
+            | Masc.Tui_decode_usage.Utilization_percent _
+            | Masc.Tui_decode_usage.Utilization_usd _ -> fail "unit changed")
        | _ -> fail "expected one reported point")
 
 (* The trend is built once from the answer. A day without a report is the
@@ -474,6 +473,34 @@ let test_scope_id_is_the_servers () =
         [ "id-codex"; "id-kimi"; "id-claude_code"; "id-ollama_cloud" ]
         (List.map Providers.scope_id windows.puws_accounts)
 
+let test_usd_cards_do_not_invent_a_percentage () =
+  let json = Yojson.Safe.from_string
+    {|{"provider_usage_windows_since":1,"provider_usage_windows":[
+      {"scope":"usd","scope_id":"usd","providers":[{"id":"openrouter","display_name":"OpenRouter"}],
+       "state":"reported","windows":[
+        {"limit_id":null,"window":{"kind":"provider_label","label":"credit limit"},"role":"gates_model_calls",
+         "utilization":{"unit":"usd","value":5.125,"limit":20},"resets_at":null,"observed_at":2},
+        {"limit_id":null,"window":{"kind":"provider_label","label":"credit usage (all time)"},"role":"counts_other_use",
+         "utilization":{"unit":"usd","value":12.3456,"limit":null},"resets_at":null,"observed_at":2}]}]}|}
+  in
+  let reading = match Masc.Tui_decode_usage.decode_provider_usage_windows json with
+    | Ok reading -> reading | Error detail -> fail detail in
+  List.iter (fun width ->
+    let section = match Providers.section ~providers:(Types.Providers_read reading)
+        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width with
+      | Some section -> section | None -> fail "USD accounts disappeared" in
+    let lines = List.map plain section.lines in
+    let text = String.concat " " lines in
+    List.iter (fun value -> check bool ("retains " ^ value) true (contains ~affix:value text))
+      [ "Used  25%"; "$5.1250"; "$20.0000"; "$14.8750"; "$12.3456"; "no key limit" ];
+    check int "only the capped amount has a meter" 1
+      (List.length (List.filter (contains ~affix:meter_open) lines));
+    List.iter (fun line -> check bool "USD rows fit the terminal" true
+      (Masc_tui_message_layout.display_width line <= width)) lines)
+    [44; 80; 132];
+  check (option (float 0.0001)) "an uncapped amount has no fabricated percentage" None
+    (Providers.share_of_full (Masc.Tui_decode_usage.Utilization_usd { used = 12.3456; limit = None }))
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -489,6 +516,7 @@ let () =
         ; test_case "trend is built from the answer" `Quick
             test_trend_is_built_from_the_answer
         ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
+        ; test_case "USD cards preserve amounts without a fabricated meter" `Quick test_usd_cards_do_not_invent_a_percentage
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
         ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded

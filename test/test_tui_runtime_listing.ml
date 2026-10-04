@@ -1383,9 +1383,54 @@ let test_account_usage_stays_spent_until_new_report () =
     (Result.is_error (runtime_spent_usage
        {snapshot.rss_resolved with rrs_usage = Error "bad report"} rt))
 
+let test_credit_cap_removal_clears_spent_warning () =
+  let module Usage = Runtime_provider_usage_window in
+  let open Masc.Tui_decode_usage in
+  let scope = Runtime_quota_window.scope_of_credential
+      ~provider_id:"usage_cap_removal_runtime_fixture" None in
+  let snapshot = match (lane_state ()).runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let record at body =
+    match Usage.decode_openrouter_key (Yojson.Safe.from_string body) with
+    | Error detail -> Alcotest.fail (Usage.decode_error_to_string detail)
+    | Ok report -> Usage.record ~scope ~observed_at:at report in
+  let reading () =
+    let json = Server_dashboard_runtime_resolved_json.build
+        ~generated_at_iso:"2026-10-04T00:00:00Z"
+        ~config:(Masc.Workspace.default_config (Filename.get_temp_dir_name ())) in
+    let usage = match decode_provider_usage_windows json with
+      | Ok usage -> usage | Error detail -> Alcotest.fail detail in
+    let account = List.find (fun account -> account.pua_scope_id =
+      Server_provider_usage_history.scope_id scope) usage.puws_accounts in
+    let rt = { (runtime "credit") with ro_quota_scope = Some account.pua_scope } in
+    let windows = match runtime_spent_usage
+        { snapshot.rss_resolved with rrs_usage = Ok usage } rt with
+      | Ok windows -> windows | Error detail -> Alcotest.fail detail in
+    account, List.length windows in
+  record 100. {|{"data":{"limit":20,"limit_remaining":0}}|};
+  expect "spent credit cap warns" 1 (snd (reading ()));
+  record 101. {|{"data":{"limit":null,"usage":21.5}}|};
+  let account, warnings = reading () in
+  expect "removing the cap removes the old spent warning" 0 warnings;
+  (match account.pua_state with
+   | Account_reported ({ puw_utilization = Utilization_usd { used; limit = None }; _ }, []) ->
+       Alcotest.(check (float 0.0001)) "only current uncapped USD remains" 21.5 used
+   | _ -> Alcotest.fail "stale credit-cap window survived the complete report");
+  record 102. {|{"data":{"limit":null}}|};
+  let account, warnings = reading () in
+  expect "empty complete report has no spent warning" 0 warnings;
+  (match account.pua_state with
+   | Account_reported_no_windows { observed_at; _ } ->
+       Alcotest.(check (float 0.0)) "empty report keeps its observation time" 102. observed_at
+   | _ -> Alcotest.fail "empty report became a missing report");
+  record 100.5 {|{"data":{"limit":20,"limit_remaining":0}}|};
+  expect "late older snapshot cannot resurrect the removed cap" 0 (snd (reading ()))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [ Alcotest.test_case "account usage survives reset until new report" `Quick
         test_account_usage_stays_spent_until_new_report;
+        Alcotest.test_case "credit cap removal reaches runtime warning" `Quick
+          test_credit_cap_removal_clears_spent_warning;
         Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
         Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
         Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;

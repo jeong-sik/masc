@@ -93,63 +93,66 @@ let get_inspect request reqd =
       dispatch ?caller ~access state Runtime.Inspect args in
     respond request reqd result) request reqd
 
+let package_catalog_payload state fields =
+  let* directory = match fields with
+    | [] -> Ok None
+    | ["directory",path] when String.trim path <> "" -> Ok (Some path)
+    | _ -> Error "package catalog accepts one nonblank directory or no parameters" in
+  let config = Mcp_server.workspace_config state in
+  Eio_unix.run_in_systhread (fun () ->
+    Lane_addon_catalog.discover ~base_path:config.Workspace.workspace_path ~directory
+      ~load_package:(fun ~path ->
+        Lane_addon_manifest.load ~path
+        |> Result.map_error Lane_addon_manifest.error_to_string
+        |> Result.map (fun (package : Lane_addon_types.package) -> Lane_addon_catalog.{title=package.title;
+          revision=package.revision; description=package.presentation.description})))
+  |> Result.map Lane_addon_catalog.to_json
+
+let package_preview_payload state fields =
+  let* path = match fields with
+    | ["manifest_path",path] when String.trim path<>"" -> Ok path
+    | _ -> Error "package preview requires one manifest_path" in
+  let config = Mcp_server.workspace_config state in
+  (* The only filesystem path this API takes from a request. Relative
+     names are read against the workspace, and the result has to stay
+     there: without this an absolute name was opened as given, and a
+     relative one kept its [..], so a read token reached any manifest on
+     the host and the parse error told the caller what sat at a path it
+     could not otherwise see. Symlinks resolve first, so a link inside
+     the workspace cannot point out of it either.
+
+     The refusal names no path and does not say whether one exists,
+     which is why a missing file outside the workspace and a real one
+     read alike. *)
+  let base = Exec_policy_paths.resolve_path config.Workspace.workspace_path in
+  let resolved =
+    Exec_policy_paths.resolve_path ~base_dir:config.Workspace.workspace_path path
+  in
+  let* path =
+    if Exec_policy_paths.is_within_dir ~dir:base resolved then Ok resolved
+    else Error "manifest_path must name a file inside the workspace" in
+  let* package = Eio_unix.run_in_systhread (fun () -> Lane_addon_manifest.load ~path)
+      |> Result.map_error Lane_addon_manifest.error_to_string in
+  let inspection = match state.Mcp_server.proc_mgr, Eio_context.get_clock () with
+    | None, _ -> Error "Server process manager unavailable; image inspection was not performed"
+    | Some _, Error message -> Error message
+    | Some mgr, Ok clock -> Lane_addon_worker.inspect_image
+        ~clock ~control_timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
+        ~mgr ~package () |> Result.map_error Lane_addon_worker.error_to_string in
+  let image = match inspection with
+    | Ok digest -> `Assoc ["state",`String "available";"digest",`String digest]
+    | Error detail -> `Assoc ["state",`String "unverified";"detail",`String detail] in
+  Ok (`Assoc ["manifest_path",`String path;"package",Lane_addon_types.package_to_json package;
+              "image",image])
+
+
 let get_package_catalog request reqd =
   with_read_auth (fun state _request reqd ->
-    let result =
-      let* directory = match query_fields request with
-        | [] -> Ok None
-        | ["directory",path] when String.trim path <> "" -> Ok (Some path)
-        | _ -> Error "package catalog accepts one nonblank directory or no parameters" in
-      let config = Mcp_server.workspace_config state in
-      Eio_unix.run_in_systhread (fun () ->
-        Lane_addon_catalog.discover ~base_path:config.Workspace.base_path ~directory
-          ~load_package:(fun ~path ->
-            Lane_addon_manifest.load ~path
-            |> Result.map_error Lane_addon_manifest.error_to_string
-            |> Result.map (fun (package : Lane_addon_types.package) -> Lane_addon_catalog.{title=package.title;
-              revision=package.revision; description=package.presentation.description})))
-      |> Result.map Lane_addon_catalog.to_json in
-    respond request reqd result) request reqd
+    respond request reqd (package_catalog_payload state (query_fields request))) request reqd
 
 let get_package_preview request reqd =
   with_read_auth (fun state _request reqd ->
-    let result =
-      let* path = match query_fields request with
-        | ["manifest_path",path] when String.trim path<>"" -> Ok path
-        | _ -> Error "package preview requires one manifest_path" in
-      let config = Mcp_server.workspace_config state in
-      (* The only filesystem path this API takes from a request. Relative
-         names are read against the workspace, and the result has to stay
-         there: without this an absolute name was opened as given, and a
-         relative one kept its [..], so a read token reached any manifest on
-         the host and the parse error told the caller what sat at a path it
-         could not otherwise see. Symlinks resolve first, so a link inside
-         the workspace cannot point out of it either.
-
-         The refusal names no path and does not say whether one exists,
-         which is why a missing file outside the workspace and a real one
-         read alike. *)
-      let base = Exec_policy_paths.resolve_path config.Workspace.base_path in
-      let resolved =
-        Exec_policy_paths.resolve_path ~base_dir:config.Workspace.base_path path
-      in
-      let* path =
-        if Exec_policy_paths.is_within_dir ~dir:base resolved then Ok resolved
-        else Error "manifest_path must name a file inside the workspace" in
-      let* package = Eio_unix.run_in_systhread (fun () -> Lane_addon_manifest.load ~path)
-          |> Result.map_error Lane_addon_manifest.error_to_string in
-      let inspection = match state.Mcp_server.proc_mgr, Eio_context.get_clock () with
-        | None, _ -> Error "Server process manager unavailable; image inspection was not performed"
-        | Some _, Error message -> Error message
-        | Some mgr, Ok clock -> Lane_addon_worker.inspect_image
-            ~clock ~control_timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
-            ~mgr ~package () |> Result.map_error Lane_addon_worker.error_to_string in
-      let image = match inspection with
-        | Ok digest -> `Assoc ["state",`String "available";"digest",`String digest]
-        | Error detail -> `Assoc ["state",`String "unverified";"detail",`String detail] in
-      Ok (`Assoc ["manifest_path",`String path;"package",Lane_addon_types.package_to_json package;
-                  "image",image]) in
-    respond request reqd result) request reqd
+    respond request reqd (package_preview_payload state (query_fields request))) request reqd
 
 let get_slice request reqd =
   with_read_auth (fun state _request reqd ->

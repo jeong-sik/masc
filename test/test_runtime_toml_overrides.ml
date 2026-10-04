@@ -1053,14 +1053,14 @@ let test_supervisor_and_rotation_bounds_reach_boot () =
     | Ok _ -> fail "out-of-range setting was accepted at boot")
     ["[supervisor]\nsweep_sec = 0.0\n";
      "[supervisor]\nsweep_sec = 121.0\n";
-     "[metrics]\nmax_rotated = 0\n"];
+     "[metrics]\nmax_rotated = -1\n"];
   List.iter (fun (raw, expected) ->
     with_env "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" (Some raw) @@ fun () ->
     check (float 0.) "process default respects scheduler bounds" expected
       (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec))
     ["0", 10.; "121", 120.; "nan", 30.; "infinity", 30.];
   with_env "MASC_KEEPER_METRICS_MAX_ROTATED" (Some "0") @@ fun () ->
-  check int "effective rotation count matches retained backup floor" 1
+  check int "environment zero requests no backups" 0
     (Env_config_keeper.KeeperMetrics.max_rotated_files ())
 ;;
 
@@ -1144,10 +1144,36 @@ let test_boot_settings_reach_consumers_and_projection () =
   check bool "process environment still overrides TOML for actual rotation" true (Sys.file_exists path)
 ;;
 
+let test_zero_retention_toml_reaches_metrics_writer () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_BYTES" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let toml = "[metrics]\nmax_bytes = 17\nmax_rotated = 0\n" in
+  write_toml base_path toml;
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "both metrics overrides applied" 2 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let open Yojson.Safe.Util in
+  let row = Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail toml)
+    |> to_list |> List.find (fun row -> row |> member "env" |> to_string = "MASC_KEEPER_METRICS_MAX_ROTATED") in
+  check string "zero is applied" "applied" (row |> member "application_status" |> to_string);
+  check string "zero is the effective retention" "0" (row |> member "effective_value" |> to_string);
+  let path = Filename.concat base_path "metrics.jsonl" in
+  Fs_compat.save_file path (String.make 17 'x');
+  Fs_compat.save_file (path ^ ".1") "previous";
+  Keeper_types_support.append_jsonl_line path (`Null);
+  check bool "no backup survives the zero retention rotation" false (Sys.file_exists (path ^ ".1"));
+  check string "new metric survives" "null\n" (Fs_compat.load_file path)
+;;
+
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
-      , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
+      , [ test_case "zero-retention TOML reaches the metrics writer" `Quick
+            test_zero_retention_toml_reaches_metrics_writer
+        ; test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies the whole wire_capture table" `Quick

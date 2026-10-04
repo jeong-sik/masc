@@ -3,7 +3,7 @@
   "source_sha256": {
     "lib/fusion_core/fusion_judge_parse.ml": "074a60118fdb03f331f7981d6f15b9fc0926692918ea0816c00b1d55bb2476c5",
     "lib/fusion_core/fusion_judge_parse.mli": "a2089aec1547586c50c827a1a79c38ab376b3c849dd1d049e52bfaaa0044fa9e",
-    "lib/keeper/keeper_structured_output_schema.ml": "910676f217602ad5f6e74021a8073bcfeb03a758730723440bed54753ff4bf04",
-    "test/test_keeper_structured_output_schema.ml": "0f1a13a7be1065717fd74fe361e8d7c1507f1c2e2c081c8724c07ef776c85ade"
+    "lib/keeper/keeper_structured_output_schema.ml": "d0ec1acc88780b8ee2d42dd28cc0ede2fde35252786ea8d53ae7914993a883cb",
+    "test/test_keeper_structured_output_schema.ml": "7e60cef278b6382b983e83a6a5894352c26999c2becf91cd9016c3a774110423"
   }
 }

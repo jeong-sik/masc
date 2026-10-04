@@ -24,3 +24,9 @@ JSON Schema's authoritative contract specifies that additional properties are
 allowed when the keyword is absent, and string patterns constrain strings:
 https://json-schema.org/understanding-json-schema/reference/object#additionalproperties
 https://json-schema.org/understanding-json-schema/reference/string#regexp
+
+The child was restacked onto the parent after its native-stack rebase to
+`fe6964a5f55bd65db3bc2cdd96463fa2ee0e4f12`. That parent also changes unrelated
+Librarian category fields. The focused native consumer run was repeated after
+restacking; manifest.json records the final source files, and the same three
+outcomes passed. The full-file cached-interface limitation remains unqualified.

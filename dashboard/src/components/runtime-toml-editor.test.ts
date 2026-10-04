@@ -1002,8 +1002,17 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('textarea')!, { target: { value: `${baseConfig.source_text}# draft\n` } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-replace-draft"]')).not.toBeNull())
+    const initialLaneReads = apiMocks.fetchStandaloneLanes.mock.calls.length
+    let finishLaneRead!: (value: ReturnType<typeof laneSnapshot>) => void
+    const heldLaneRead = new Promise<ReturnType<typeof laneSnapshot>>(resolve => { finishLaneRead = resolve })
+    apiMocks.fetchStandaloneLanes.mockReturnValueOnce(heldLaneRead)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-replace-draft"]')!)
     await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(current.source_text))
+    await waitFor(() => expect(apiMocks.fetchStandaloneLanes).toHaveBeenCalledTimes(initialLaneReads + 1))
+    expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).not.toBeNull()
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    finishLaneRead(laneSnapshot(['openai.gpt'], []))
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).toBeNull())
     expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
     expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     const amended = `${current.source_text}# after explicit replace\n`

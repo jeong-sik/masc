@@ -568,6 +568,7 @@ type stop_cause =
       { gate : string
       ; detail : string
       ; evaluator_runtime : string
+      ; retryable_runtimes : string list
       ; retry : retry_request
       }
   | Raised of { detail : string }
@@ -904,6 +905,7 @@ let process_task_once
              { gate
              ; detail
              ; evaluator_runtime
+             ; retryable_runtimes = result.retryable_runtimes
              ; retry = retry_request_of_evaluator_retryable result.evaluator_error_retryable
              }
          in
@@ -1036,27 +1038,12 @@ let schedule_retry_scope (runtime : runtime) ~delay_sec scope =
     scope
 ;;
 
-(* How long a retry of one stalled review waits: the maintenance pulse, or
-   longer while the slot that last refused it is resting after a provider
-   rate limit or an exhausted quota (RFC-provider-path-rest §3.3) -- the
-   provider's Retry-After, the configured floor without one, never past the
-   configured cap. A retry that fired inside that rest would send the whole
-   review prompt to a slot that has just said it will refuse it. The pulse
-   stays the shortest wait and there is still no attempt cap; only the rest a
-   provider imposed is waited out. *)
-let retry_delay_of_path_rest ~retry_interval_sec ~now = function
-  | Keeper_turn_driver.Path_serving -> retry_interval_sec
-  | Keeper_turn_driver.Path_resting { release_at; walk_promotes_at_release = _ } ->
-    Float.max retry_interval_sec (release_at -. now)
-;;
-
+(* Retry when any candidate that actually reported a transient failure can
+   serve again. The last diagnostic may name a different, long-resting slot. *)
 let retry_delay_sec (runtime : runtime) = function
-  | Not_reviewed { evaluator_runtime; _ } ->
+  | Not_reviewed { retryable_runtimes; _ } ->
     let now = Eio.Time.now runtime.clock in
-    retry_delay_of_path_rest
-      ~retry_interval_sec:runtime.retry_interval_sec
-      ~now
-      (Keeper_turn_driver.path_rest ~now evaluator_runtime)
+    Verification_retry.delay ~retry_interval_sec:runtime.retry_interval_sec ~now retryable_runtimes
   | Infrastructure_unavailable _ | Commit_failed _ | Raised _ ->
     runtime.retry_interval_sec
 ;;
@@ -1311,7 +1298,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 
 module For_testing = struct
   let authority_actor = authority_actor
-  let retry_delay_of_path_rest = retry_delay_of_path_rest
+  let retry_delay_of_paths = Verification_retry.delay_of_paths
   let evidence_refs_of_output = evidence_refs_of_output
   let verdict_question_of_request = verdict_question_of_request
   let completion_verdict_of_review = completion_verdict_of_review
@@ -1347,6 +1334,7 @@ module For_testing = struct
         { gate : string
         ; detail : string
         ; evaluator_runtime : string
+        ; retryable_runtimes : string list
         ; retry : retry_request
         }
     | Raised of { detail : string }

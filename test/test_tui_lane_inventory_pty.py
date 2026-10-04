@@ -14,7 +14,7 @@ import shlex
 import tempfile
 import threading
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import tui_keyboard_harness as terminal
 import tui_keyboard_keepers as lanes
@@ -123,7 +123,19 @@ def select(process, fd, output, identity, visible_label):
 
 def run_inventory(executable, columns):
     fixtures = terminal.keeper_runtime_http_fixtures()
-    fixtures[lanes.LANE_INVENTORY_PATH] = inventory_response()
+    inventory_reads = []
+    addon_reads = []
+
+    def read_inventory(path, *, owner_present=True):
+        inventory_reads.append(path)
+        return inventory_response(owner_present=owner_present)
+
+    def read_addons(path):
+        addon_reads.append(path)
+        return 200, addon_snapshot()
+
+    fixtures[lanes.LANE_INVENTORY_PATH] = terminal.PathHttpResponse(read_inventory)
+    fixtures["/api/v1/lane-addons"] = terminal.PathHttpResponse(read_addons)
     requests = []
 
     def interact(process, fd, _slave, output, _base):
@@ -173,14 +185,15 @@ def run_inventory(executable, columns):
             if needle not in prose(screen):
                 raise AssertionError(f"full inventory diagnosis lost {needle!r}: {screen!r}")
         terminal.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
-        fixtures[lanes.LANE_INVENTORY_PATH] = inventory_response(owner_present=False)
+        fixtures[lanes.LANE_INVENTORY_PATH] = terminal.PathHttpResponse(
+            lambda path: read_inventory(path, owner_present=False))
         terminal.send_and_wait(process, fd, output, b"r", b"owner has not been observed")
         terminal.send_and_wait(process, fd, output, b"i", b"Inventory diagnostics")
         if b"owner has not been observed" not in prose(settled_screen(process, fd, output)):
             raise AssertionError("owner absence was hidden or reported as disabled")
-        if any(path.split("?", 1)[0] == "/api/v1/lane-addons" for path, _ in requests):
+        if addon_reads:
             raise AssertionError("package discovery depended on opening Add-ons")
-        if not any(path == lanes.LANE_INVENTORY_PATH for path, _ in requests):
+        if not inventory_reads:
             raise AssertionError("common inventory endpoint was never read")
         print(f"LANE_INVENTORY_PTY width={columns}: End/search/ID press/d/i (synthetic HTTP)")
         terminal.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
@@ -188,20 +201,35 @@ def run_inventory(executable, columns):
 
     terminal.run_terminal_scenario(executable, description=f"common inventory at {columns} columns",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        terminal_cols=columns, terminal_rows=24)
+        terminal_cols=columns, terminal_rows=24, workspace="inventory")
 
 
 def run_destinations(executable):
     fixtures = terminal.overview_event_http_fixtures()
     fixtures[lanes.LANE_INVENTORY_PATH] = inventory_response()
-    fixtures[lanes.lane_runs_path("verifier_exact")] = lanes.verifier_lane_runs_response()
     fixtures["/api/v1/lane-addons"] = (200, addon_snapshot())
-    fixtures["/api/v1/lane-addons/declaration"] = (200, declaration_document())
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {
         "clients": [{"clientId": "fixture-client", "browser": "firefox"}],
     }})
     browser_reads = []
     slice_reads = []
+    exact_reads = []
+    machine_reads = []
+    declaration_reads = []
+
+    def exact_read(path):
+        exact_reads.append(path)
+        return lanes.verifier_lane_runs_response()
+
+    def declaration_read(path):
+        query = parse_qs(urlsplit(path).query)
+        if query != {"source_path": [BROKEN_PATH]}:
+            raise AssertionError(f"declaration read changed the source: {query!r}")
+        declaration_reads.append(path)
+        return 200, declaration_document()
+
+    fixtures[lanes.lane_runs_path("verifier_exact")] = terminal.PathHttpResponse(exact_read)
+    fixtures["/api/v1/lane-addons/declaration"] = terminal.PathHttpResponse(declaration_read)
 
     def retained_slice(path):
         query = parse_qs(urlsplit(path).query)
@@ -232,6 +260,7 @@ def run_destinations(executable):
         }}
 
     def machine_read(path):
+        machine_reads.append(path)
         kind = parse_qs(urlsplit(path).query)["source_kind"][0]
         return 200, {"source_kind": kind, "state": "no_machine",
                      **({"activity": []} if kind == "dos_capture" else {})}
@@ -249,13 +278,19 @@ def run_destinations(executable):
 
         def interact(process, fd, _slave, output, _base):
             def open_inventory():
-                terminal.palette_go(process, fd, output, b"go lanes", b"All lanes")
-                terminal.wait_for_output(process, fd, output, b"1 inventory issues", start=0, timeout=5)
+                terminal.palette_go(process, fd, output, b"go lanes", b"Lanes (31 lanes)")
+                screen = settled_screen(process, fd, output)
+                if b"All lanes" not in screen or b"1 inventory issues" not in screen:
+                    raise AssertionError(f"inventory navigation lost its body: {screen!r}")
 
             open_inventory()
             select(process, fd, output, "exact/verifier_exact", b"Verifier")
             terminal.send_and_wait(process, fd, output, b"\r", b"task task-9")
-            terminal.wait_for_http_request(process, fd, output, requests, path=lanes.lane_runs_path("verifier_exact"))
+            if not terminal.wait_for_fixture_state(process, fd, output,
+                    lambda: lanes.lane_runs_path("verifier_exact") in exact_reads, timeout=5):
+                raise AssertionError("the selected exact Lane was never read")
+            # Go Lanes retains its sub-reading; use the run list's own back key.
+            terminal.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
             for lane, label in (("automation", b"Browser automation"), ("stagehand", b"Browser Stagehand"), ("live", b"Live browser")):
                 open_inventory()
                 select(process, fd, output, "browser/" + lane, label)
@@ -267,15 +302,22 @@ def run_destinations(executable):
             for machine in ("msx", "dos"):
                 open_inventory()
                 select(process, fd, output, "machine/" + machine, machine.upper().encode())
-                terminal.send_and_wait(process, fd, output, b"\r", b"no machine loaded")
-                terminal.wait_for_http_request(process, fd, output, requests,
-                    path=LIVE_PATH + "?source_kind=" + machine + "_capture")
+                terminal.read_available(fd, output)
+                mark = len(output)
+                os.write(fd, b"\r")
+                terminal.wait_for_output(process, fd, output, b"no machine loaded", start=mark, timeout=5)
+                if not terminal.wait_for_fixture_state(process, fd, output,
+                        lambda: LIVE_PATH + "?source_kind=" + machine + "_capture" in machine_reads, timeout=5):
+                    raise AssertionError(f"the selected {machine} live screen was never read")
                 terminal.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
             open_inventory()
             select(process, fd, output, "broken.toml", b"broken.toml")
             terminal.send_and_wait(process, fd, output, b"\r", b"TOML draft broken.toml")
-            terminal.wait_for_http_request(process, fd, output, requests,
-                path="/api/v1/lane-addons/declaration?source_path=" + quote(BROKEN_PATH, safe=""))
+            if not terminal.wait_for_fixture_state(process, fd, output,
+                    lambda: any(urlsplit(path).path == "/api/v1/lane-addons/declaration"
+                                and parse_qs(urlsplit(path).query) == {"source_path": [BROKEN_PATH]}
+                                for path in declaration_reads), timeout=5):
+                raise AssertionError("the selected declaration was never read")
             if marker.exists():
                 raise AssertionError("Enter spawned the external editor instead of inspecting TOML")
             # Esc closes the document but leaves the Technical installation
@@ -285,8 +327,9 @@ def run_destinations(executable):
             terminal.send_and_wait(process, fd, output, b"q", b"All lanes")
             select(process, fd, output, "instance/" + MANUAL_ID, b"Manual observer")
             terminal.send_and_wait(process, fd, output, b"\r", b"Manual observer")
-            terminal.wait_for_http_request(process, fd, output, requests,
-                path="/api/v1/lane-addons/slice?run_id=fixture-world")
+            if not terminal.wait_for_fixture_state(process, fd, output,
+                    lambda: "/api/v1/lane-addons/slice?run_id=fixture-world" in slice_reads, timeout=5):
+                raise AssertionError("the selected retained worker history was never read")
             terminal.send_and_wait(process, fd, output, b"4", b"Retained selection proof")
             terminal.send_and_wait(process, fd, output, b"D", MANUAL_INCARNATION.encode())
             screen = settled_screen(process, fd, output)
@@ -333,7 +376,11 @@ def run_msx_live_recovery(executable):
     def interact(process, fd, _slave, output, _base):
         terminal.palette_go(process, fd, output, b"go lanes", b"All lanes")
         select(process, fd, output, "machine/msx", b"MSX")
-        terminal.send_and_wait(process, fd, output, b"\r", b"fixture live read unavailable")
+        terminal.read_available(fd, output)
+        start = len(output)
+        os.write(fd, b"\r")
+        # The spectator uses its own terminal renderer, not FRAME_END.
+        terminal.wait_for_output(process, fd, output, b"fixture live read unavailable", start=start, timeout=5)
         terminal.read_available(fd, output)
         start = len(output)
         recovered.set()
@@ -344,6 +391,7 @@ def run_msx_live_recovery(executable):
         mutations = [(path, body) for path, body in requests if path.startswith("/api/v1/msx/")]
         if mutations:
             raise AssertionError(f"live-read recovery mutated the machine: {mutations!r}")
+        terminal.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
         os.write(fd, b"q")
 
     terminal.run_terminal_scenario(executable,

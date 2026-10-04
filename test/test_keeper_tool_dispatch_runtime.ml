@@ -7426,6 +7426,7 @@ value = {surface="dashboard", content="must not run"}
       if break_evidence then (
         let path = Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1" in
         Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_goto _ ->
           incr navigations;
@@ -7443,6 +7444,7 @@ value = {surface="dashboard", content="must not run"}
       let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
         ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
+        Browser_lane.install_activity_observer None;
         Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
@@ -7548,6 +7550,7 @@ id = "second"
       let navigations = ref 0 and seconds = ref 0 in
       Masc.Keeper_tool_call_log.reset_for_testing ();
       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_goto _ ->
           incr navigations;
@@ -7561,6 +7564,7 @@ id = "second"
       let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
         ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
+        Browser_lane.install_activity_observer None;
         Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
@@ -8929,9 +8933,11 @@ let test_composable_outputs_satisfy_declared_schema () =
            check=(fun () -> Ok ()); close=(fun () -> ())}
        in
        let driver = Driver.create ~start_downloads ~request () in
+       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
        Browser_lane.install_automation_executor (Some (Driver.execute driver));
        Fun.protect ~finally:(fun () ->
          Msx_lane.install_activity_observer None;
+         Browser_lane.install_activity_observer None;
          Browser_lane.install_automation_executor None;
          ignore (Driver.close driver);
          ignore (Msx_lane.eject ()))

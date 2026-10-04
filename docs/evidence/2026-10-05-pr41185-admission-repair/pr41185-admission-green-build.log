@@ -1,0 +1,10 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-1071463474.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-admission-20261005/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-admission-20261005 bin/main_stdio_eio.exe test/test_browser_surface.exe test/test_browser_observation_composition.exe test/test_keeper_vision_tool.exe test/test_keeper_tool_dispatch_runtime.exe test/test_mcp_server_eio_call_tool.exe
+File "test/stanzas/test_browser_activity.inc", lines 15-17, characters 0-75:
+15 | (rule
+16 |  (alias runtest)
+17 |  (deps (alias runtest-test_stdio_browser_activity)))
+Error: Field "action" is missing
+Hint: You can use the (alias) stanza to add dependencies to an alias.

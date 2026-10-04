@@ -95,8 +95,21 @@ def run(binary):
         h.drain_until_quiet(process, fd, output)
         assert b'Server activity: Off' in h.screen_text(bytes(output))
         h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
-        h.send_and_wait(process, fd, output, b'?', b'reapply activity')
+        h.send_and_wait(process, fd, output, b'?', b'MASC Cheat Sheet')
         h.send_and_wait(process, fd, output, b'\x1b', b'MASC Machine activity')
+        for dismiss in (b'?', b'\x1b'):
+            print(f'Compact Machine help hidden key: {dismiss!r}', flush=True)
+            h.send_and_wait(process, fd, output, b'?', b'MASC Cheat Sheet')
+            h.resize_and_wait(process, fd, output, rows=12, columns=120,
+                              needle=b'terminal too small')
+            os.write(fd, dismiss)
+            h.drain_until_quiet(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=40, columns=120,
+                              needle=b'MASC Cheat Sheet')
+            h.send_and_wait(process, fd, output, b'\x1b', b'Current file: On')
+            assert b'Activity draft: Off' in h.screen_text(bytes(output)), 'help dismissal closed the Machine activity draft'
+            with server.lock:
+                assert server.previews == 0 and not server.saves, 'compact help dispatched a write'
         h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
         h.send_and_wait(process, fd, output, b' ', b'Current file: On')
         h.drain_until_quiet(process, fd, output)
@@ -139,7 +152,40 @@ def run(binary):
                             interact=interact, http_fixtures=fixtures,
                             terminal_cols=120, terminal_rows=40)
 
+def run_compact_quit(binary):
+    server = Server()
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[RAW] = h.RequestHttpResponse(server.raw)
+    fixtures[RAW + '/preview'] = h.RequestHttpResponse(server.preview)
+    fixtures[lanes.LANE_INVENTORY_PATH] = h.RequestHttpResponse(server.inventory)
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b'go keepers', b'MASC Keepers')
+        h.select_keeper_row(process, fd, output, b'alpha')
+        h.palette_go(process, fd, output, b'go lanes', b'All lanes')
+        select(process, fd, output, 'msx')
+        h.send_and_wait(process, fd, output, b' ', b'Current file: On')
+        h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
+        h.resize_and_wait(process, fd, output, rows=12, columns=120,
+                          needle=b'terminal too small')
+        os.write(fd, b'q')
+        h.drain_until_quiet(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=32, columns=120,
+                          needle=b'MASC Machine activity')
+        assert b'Activity draft: Off' in h.screen_text(bytes(output)), 'compact quit closed the hidden Machine draft'
+        assert server.previews == 0 and not server.saves, 'compact quit dispatched a write'
+        h.resize_and_wait(process, fd, output, rows=12, columns=120,
+                          needle=b'terminal too small')
+        exit_start = len(output)
+        os.write(fd, b'q')
+        h.wait_for_output(process, fd, output, b'Goodbye!', start=exit_start, timeout=3.0)
+
+    h.run_terminal_scenario(binary, description='Compact overlay owns Machine quit',
+        interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=32)
+    print('Machine compact quit PTY: PASS (synthetic HTTP)')
+
 
 if __name__ == '__main__':
     run(os.path.abspath(sys.argv[1]))
+    run_compact_quit(os.path.abspath(sys.argv[1]))
     print('tui machine activity: PASS')

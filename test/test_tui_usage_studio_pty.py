@@ -60,7 +60,7 @@ def fixtures():
     for days in (1, 7, 14):
         result[f"/api/v1/dashboard/provider-usage-history?days={days}"] = (200, {
             "days": days, "generated_at": now,
-            "sampling": "latest_provider_report_per_utc_day", "unreadable_reports": 0,
+            "sampling": "latest_provider_report_per_utc_day", "unreadable_reports": 0, "reported_no_windows": [],
             "points": [{"scope_id": scope["scope_id"], "kind": "five_hour",
                         "limit_id": None, "unit": "fraction", "value": 0.4,
                         "observed_at": now, "source": "fixture", "resets_at": None}
@@ -92,7 +92,7 @@ def journey(executable, no_color=False):
         _keyboard_harness.wait_for_output(process, fd, output, b"catalogue reopens", start=0, timeout=10)
         wide = capture(process, fd, output, "plan-wide-no-color" if no_color else "plan-wide",
                        48, 220, b"claude@example.com")
-        for value in (b"Plan usage", b"Reported 0%", b"Reported 25%", b"Reported 33%", b"Reset",
+        for value in (b"Plan usage", b"Used   0%", b"Used  25%", b"Used  33%", b"Reset",
                       b"Last report", b"Model call limit", b"Other use", b"does not block model calls",
                       b"Unclassified limit", b"Catalogue", b"reported", b"claude@example.com"):
             if value not in wide:

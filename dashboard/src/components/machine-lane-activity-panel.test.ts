@@ -6,11 +6,11 @@ import { parseLaneInventory } from '../api/lane-inventory'
 import inventory from '../api/fixtures/lane-inventory.json'
 import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
-import { RuntimeTomlRevisionConflict, type RuntimeTomlConfig } from '../api/dashboard-runtime'
+import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
 import { readMachineActivity, writeMachineActivity } from '../lib/machine-lane-activity'
 import { machineLaneActivitySessionFor, resetMachineLaneActivitySessionsForTesting } from '../lib/machine-lane-activity-session'
 import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
-import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
+import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { LaneInventoryPanel } from './lane-inventory-panel'
 
@@ -165,6 +165,28 @@ describe('Machine activity operator flow', () => {
     expect(await session.save(authority)).toBe(false); expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(session.state.value.uncertain).toBe(false); expect(session.state.value.draft?.enabled).toBe(false)
     expect(await session.save(authority)).toBe(true)
+  })
+  it('retains a known no-write raw refusal and allows an explicit corrected retry', async () => {
+    const { session, authority } = await draft()
+    const before = session.state.peek(), generation = runtimeTomlSourceGeneration.peek()
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    const observations = inventoryApi.fetchLaneInventory.mock.calls.length
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlSaveRejected('write refused before replacement'))
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.draft).toEqual(before.draft)
+    expect(session.state.value.current).toEqual(before.current)
+    expect(session.state.value.observed).toEqual(before.observed)
+    expect(session.state.value.error).toContain('write refused before replacement')
+    expect(runtimeTomlSourceGeneration.peek()).toBe(generation)
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(inventoryApi.fetchLaneInventory).toHaveBeenCalledTimes(observations)
+    expect(followup.refreshRuntimeConfigConsumers).not.toHaveBeenCalled()
+    expect(session.ready(authority)).toBe(true)
+    expect(await session.save(authority)).toBe(true)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(2)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(off, revision(source), expect.any(Object))
+    expect(stored).toBe(off)
   })
   it('does not let a late A read overwrite a fresh A read after A-B-A', async () => {
     const first = deferred<RuntimeTomlConfig>(), authority = executionWorkspaceAuthority.peek()!

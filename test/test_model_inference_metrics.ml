@@ -4,6 +4,15 @@ module M = Model_inference_metrics
 
 open Alcotest
 
+let read_ok = function
+  | Ok value -> value
+  | Error error -> fail (M.read_error_to_string error)
+let compute ~base_path ~window_minutes = M.compute ~base_path ~window_minutes |> read_ok
+let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes =
+  M.compute_with_buckets ~base_path ~window_minutes ~bucket_minutes |> read_ok
+let compute_cost_latency_json ~base_path ~window_minutes =
+  M.compute_cost_latency_json ~base_path ~window_minutes |> read_ok
+
 (* ── Helpers ─────────────────────────────────────── *)
 
 let test_dir () =
@@ -395,7 +404,7 @@ let test_cost_parser_requires_usage_missing () =
 let test_empty_dir () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 0 agg.total_entries;
     check int "total_error_entries" 0 agg.total_error_entries;
     check int "models count" 0 (List.length agg.models))
@@ -414,7 +423,7 @@ let test_single_model_success () =
         ~input_tokens:150 ~output_tokens:80 ~latency_ms:800
         ~cost_usd:0.003 ~tools_used:["shell"] ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
     check int "total_error_entries" 0 agg.total_error_entries;
     check int "models" 1 (List.length agg.models);
@@ -446,7 +455,7 @@ let test_provider_kind_is_not_reconstructed () =
       success_entry ~model:"kimi-k2.6" ~ts:(ts -. 5.0)
         ~provider_kind ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 1 agg.total_entries;
     let s = List.hd agg.models in
     check string "model stays bare" "kimi-k2.6" s.model_id;
@@ -469,7 +478,7 @@ let test_usage_labels_never_suppress_raw_aggregates () =
       success_entry ~model:"llama:qwen3.5-27b" ~ts:(ts -. 1.0)
         ~input_tokens:(-7) ~output_tokens:5 ~latency_ms:1000 ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "total entries retained for diagnosis" 4 agg.total_entries;
     check int "models" 1 (List.length agg.models);
     let s = List.hd agg.models in
@@ -515,7 +524,7 @@ let test_error_turns_counted () =
       error_entry ~runtime_id:"local_only" ~answerer:(`Answered "local_only")
         ~ts:(ts -. 10.0) ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
     check int "total_error_entries" 1 agg.total_error_entries;
     (* Error attributed to the runtime that answered *)
@@ -542,7 +551,7 @@ let test_multi_model () =
       success_entry ~model:"claude-sonnet" ~ts:(ts -. 10.0)
         ~tools_used:["read"] ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 3 agg.total_entries;
     check int "models" 2 (List.length agg.models);
     (* claude-sonnet has 2 entries, should be first (sorted by entry_count desc) *)
@@ -561,7 +570,7 @@ let test_top_tools_per_model () =
       success_entry ~model:"m1" ~ts:(ts -. 20.0)
         ~tools_used:["shell"; "write"] ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check bool "has top_tools" true (List.length s.top_tools > 0);
     (* shell should be #1 with count 3 *)
@@ -582,7 +591,7 @@ let test_recent_entries () =
           ~cache_creation_tokens:(if i = 0 then 8 else 0)
           ~latency_ms:500 ~cost_usd:0.01 ())
     );
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check int "recent_entries capped at 5" 5 (List.length s.recent_entries);
     (* First recent entry should be the most recent (highest ts_unix) *)
@@ -602,7 +611,7 @@ let test_window_filter () =
       success_entry ~model:"m1" ~ts:(ts -. 30.0) ();       (* within 1 min *)
       success_entry ~model:"m1" ~ts:(ts -. 120.0) ();      (* outside 1 min *)
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:1 in
+    let agg = compute ~base_path:base ~window_minutes:1 in
     check int "only recent entry" 1 agg.total_entries)
 
 let test_json_roundtrip () =
@@ -616,7 +625,7 @@ let test_json_roundtrip () =
         ~cache_creation_tokens:7
         ~tools_used:["t1"] ~cost_usd:0.05 ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let json = M.to_json agg in
     let open Yojson.Safe.Util in
     let models = json |> member "models" |> to_list in
@@ -652,7 +661,7 @@ let test_prompt_tps_and_peak_memory_aggregates () =
       success_entry ~model:"mlx-vlm" ~ts:(ts -. 5.0)
         ~prompt_per_second:1500.0 ~peak_memory_gb:20.25 ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check bool "prompt avg present" true (Option.is_some s.prompt_avg_tok_per_sec);
     check (float 0.001) "prompt avg" 1350.0
@@ -689,7 +698,7 @@ let test_missing_usage_serializes_unknowns () =
     write_decisions path [
       success_entry_without_usage ~model:"kimi-for-coding" ~ts:(ts -. 5.0) ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check int "success_count" 1 s.success_count;
     check int "usage samples" 0 s.usage_sample_count;
@@ -733,7 +742,7 @@ let test_coverage_diagnostics_survive_aggregation () =
         ~stop_reason:"completed"
         ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check string "coverage status" "none" s.coverage_status;
     check int "usage missing count" 1 s.usage_missing_count;
@@ -799,7 +808,7 @@ let test_success_without_model_names_the_answering_runtime () =
         ~answerer:(`Answered "runtime.glm-coding-with-spark")
         ~ts:(ts -. 5.0) ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "null-model row retained" 1 agg.total_entries;
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
@@ -825,7 +834,7 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
         ~runtime_id:"runtime.coding_plan" ~answerer:(`Answered "runtime.coding_plan")
         ~ts:(ts -. 10.0) ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "sparse rows retained" 2 agg.total_entries;
     check int "error row counted" 1 agg.total_error_entries;
     check int "one attributed bucket" 1 (List.length agg.models);
@@ -855,7 +864,7 @@ let test_error_attribution_names_the_candidate_not_the_lane () =
         ~answerer:(`Answered "deepseek.deepseek-v4-flash")
         ~ts:(ts -. 10.0) ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "both rows retained" 2 agg.total_entries;
     let named =
       List.sort compare (List.map (fun (s : M.model_stats) -> s.model_id) agg.models)
@@ -881,7 +890,7 @@ let test_unobserved_answerer_is_not_the_lane () =
       success_entry_without_model ~runtime_id:"glm-coding.glm-5.3"
         ~answerer:`Not_observed ~ts:(ts -. 10.0) ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "both rows retained" 2 agg.total_entries;
     check (list string) "one bucket, shared with the latency label"
       [ Runtime_answerer.to_label Runtime_answerer.Not_observed ^ " (runtime)" ]
@@ -920,7 +929,7 @@ let test_cost_ledger_backfills_wall_tok_per_sec () =
       cost_entry ~model:"qwen3.6:27b-coding-nvfp4" ~ts
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:250 ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check string "cost model" "qwen3.6:27b-coding-nvfp4" s.model_id;
     check int "one cost entry" 1 s.entry_count;
@@ -939,7 +948,7 @@ let test_cost_model_field_is_not_rewritten_from_provider () =
       cost_entry ~model:"shared-model" ~provider_kind:"anthropic" ~ts:(ts -. 1.0)
         ~input_tokens:20 ~output_tokens:10 ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "one model bucket" 1 (List.length agg.models);
     let stats = List.hd agg.models in
     check string "model field remains authoritative" "shared-model" stats.model_id;
@@ -955,7 +964,7 @@ let test_cost_ledger_zero_latency_is_missing () =
       cost_entry ~model:"qwen3.6:27b-coding-nvfp4" ~ts
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:0 ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check int "one cost entry" 1 s.entry_count;
     check (option (float 0.001)) "zero latency not averaged"
@@ -989,7 +998,7 @@ let test_exact_identity_merges_decision_and_cost () =
       cost_entry ~model:"ollama:qwen3.6:27b-coding-nvfp4" ~ts
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:250 ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check int "exactly matching rows merged" 1 s.entry_count;
     check (option (float 0.001)) "cost observation supplies wall tok/sec"
@@ -1018,7 +1027,7 @@ let test_nearby_equal_usage_without_identity_match_stays_distinct () =
           ~input_tokens:100
           ~output_tokens:50
           () ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let stats = List.hd agg.models in
     check int "both exact identities remain" 2 stats.entry_count)
 ;;
@@ -1048,7 +1057,7 @@ let test_duplicate_exact_identity_is_excluded_and_diagnosed () =
           ~identity_seed:"duplicate-identity"
           ()
       ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "conflicting identity is excluded" 0 agg.total_entries;
     check int "conflicting identity creates no aggregate" 0
       (List.length agg.models);
@@ -1085,7 +1094,7 @@ let test_an_attempt_reading_beside_the_turn_is_not_a_conflict () =
     write_costs
       base
       [ cost_entry ~model:"same-model" ~ts ~identity_seed:"attempt-turn" (); attempt_row ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     check int "the paired turn and the attempt reading" 2 agg.total_entries;
     match agg.cost_read with
     | Error error ->
@@ -1103,7 +1112,7 @@ let test_cost_read_diagnostics_reach_api () =
       ; `String "schema-invalid"
       ];
     append_raw_line (cost_day_file base) "{";
-    let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
+    let json = compute ~base_path:base ~window_minutes:60 |> M.to_json in
     let diagnostics = Yojson.Safe.Util.member "cost_ledger_read" json in
     check string "cost read state" "available"
       Yojson.Safe.Util.(diagnostics |> member "state" |> to_string);
@@ -1131,7 +1140,7 @@ let test_cost_read_failure_is_not_empty_success () =
     Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc "{}");
-    let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
+    let json = compute ~base_path:base ~window_minutes:60 |> M.to_json in
     check int "decision metrics remain available" 1
       Yojson.Safe.Util.(json |> member "total_entries" |> to_int);
     let diagnostics = Yojson.Safe.Util.member "cost_ledger_read" json in
@@ -1161,7 +1170,7 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
         ~input_tokens:20 ~output_tokens:10 ~latency_ms:1000
         ~cost_usd:0.01 ();
     ];
-    let json = M.compute_cost_latency_json ~base_path:base ~window_minutes:60 in
+    let json = compute_cost_latency_json ~base_path:base ~window_minutes:60 in
     let open Yojson.Safe.Util in
     let per_agent = json |> member "perAgent" |> to_list in
     check int "perAgent row count" 2 (List.length per_agent);
@@ -1230,11 +1239,11 @@ let test_public_runtime_lane_label_is_stable_across_windows () =
           None)
     in
     let full =
-      M.compute ~base_path:base ~window_minutes:60 |> M.to_json
+      compute ~base_path:base ~window_minutes:60 |> M.to_json
       |> label_with_input 300
     in
     let short =
-      M.compute ~base_path:base ~window_minutes:1 |> M.to_json
+      compute ~base_path:base ~window_minutes:1 |> M.to_json
       |> label_with_input 300
     in
     let expected = Some (runtime_lane_label_for_test "stable-model") in
@@ -1270,7 +1279,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
         ]);
       ];
     ];
-    let json = M.compute_cost_latency_json ~base_path:base ~window_minutes:60 in
+    let json = compute_cost_latency_json ~base_path:base ~window_minutes:60 in
     let open Yojson.Safe.Util in
     let per_agent = json |> member "perAgent" |> to_list in
     check int "perAgent row count" 1 (List.length per_agent);
@@ -1339,7 +1348,7 @@ let test_thinking_fraction_mixed () =
           ~thinking_enabled:None ())
     in
     write_decisions path entries;
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check int "entry_count" 10 s.entry_count;
     check bool "thinking_fraction present" true
@@ -1358,7 +1367,7 @@ let test_thinking_fraction_all_missing () =
       success_entry_with_thinking ~model:"m1" ~ts:(ts -. 10.0)
         ~thinking_enabled:None ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check bool "thinking_fraction None" true
       (Option.is_none s.thinking_fraction))
@@ -1374,7 +1383,7 @@ let test_thinking_fraction_json_serialization () =
       success_entry_with_thinking ~model:"m1" ~ts:(ts -. 10.0)
         ~thinking_enabled:(Some false) ();
     ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let agg = compute ~base_path:base ~window_minutes:60 in
     let json = M.to_json agg in
     let open Yojson.Safe.Util in
     let models = json |> member "models" |> to_list in
@@ -1414,7 +1423,7 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
 let bucket_models = function
   | Ok (models, _diagnostics) -> models
   | Error error ->
-    failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
+    failf "metrics read failed: %s" (M.read_error_to_string error)
 
 let test_buckets_empty_dir () =
   let dir = test_dir () in
@@ -1497,7 +1506,7 @@ let test_paired_cache_aggregate_excludes_missing_reports () =
       success_entry ~model:"paired" ~ts:(now -. 2.) ~cache_read_tokens:50 ()
         |> without_field "input_tokens";
     ];
-    let aggregate = M.compute_with_buckets ~base_path:dir ~window_minutes:60 ~bucket_minutes:60 in
+    let aggregate = compute_with_buckets ~base_path:dir ~window_minutes:60 ~bucket_minutes:60 in
     let stats = List.hd aggregate.models in
     check (option int) "standalone input total" (Some 2000) stats.total_input_tokens;
     check (option int) "standalone cache total" (Some 950) stats.total_cache_read_tokens;
@@ -1521,7 +1530,7 @@ let test_buckets_with_compute () =
     success_entry ~model:"model-x" ~ts:now ();
   ];
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
-    let agg = M.compute_with_buckets ~base_path:dir ~window_minutes:60 ~bucket_minutes:5 in
+    let agg = compute_with_buckets ~base_path:dir ~window_minutes:60 ~bucket_minutes:5 in
     check int "bucket_minutes populated" 5 agg.bucket_minutes;
     let m = List.hd agg.models in
     check bool "model_stats.buckets non-empty" true (List.length m.buckets > 0);
@@ -1663,6 +1672,7 @@ let test_prompt_feedback_is_cost_independent () =
 let test_usage_signal_uses_tokens_not_cost () =
   let entry : Model_inference_metrics_entry.raw_entry =
     { model = "runtime"
+    ; executed_runtime_id = None
     ; inference_key = None
     ; ts_unix = 0.0
     ; outcome = "success"
@@ -1704,9 +1714,295 @@ let test_usage_signal_uses_tokens_not_cost () =
 
 (* ── Runner ──────────────────────────────────────── *)
 
+let test_runtime_history_keeps_account_attribution () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "runtime-history" in
+    let now = now_unix () in
+    let observed runtime json = match json with
+      | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+          "runtime_id", `String "shared-lane";
+          "executed_runtime_id", `String runtime]) :: fields)
+      | _ -> fail "fixture is not an object" in
+    write_decisions path [
+      observed "account-one.model" (success_entry ~model:"same-api-model" ~ts:(now -. 10.)
+        ~identity_seed:"first-account" ~input_tokens:100 ~cache_read_tokens:25 ());
+      observed "account-two.model" (success_entry ~model:"same-api-model" ~ts:(now -. 5.)
+        ~identity_seed:"second-account" ~input_tokens:200 ~cache_read_tokens:100 ());
+      success_entry ~model:"same-api-model" ~ts:(now -. 2.) ~input_tokens:9000 ();
+      observed "account-one.model" (success_entry ~model:"same-api-model" ~ts:(now -. 90000.) ())
+    ];
+    write_costs base [cost_entry ~model:"cost-model-name" ~ts:(now -. 10.)
+      ~identity_seed:"first-account" ~input_tokens:999 ()];
+    let open Yojson.Safe.Util in
+    let json = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    let runtimes = json |> member "runtimes" |> to_list in
+    check int "two account rows, no API-name join" 2 (List.length runtimes);
+    check int "unattributed decision remains explicit" 1 (json |> member "unattributed_entries" |> to_int);
+    let row id = List.find (fun json -> json |> member "runtime_id" = `String id) runtimes in
+    let one = row "account-one.model" and two = row "account-two.model" in
+    check int "exact cost merge preserves executed identity and one sample" 1 (one |> member "entry_count" |> to_int);
+    check int "paired usage uses normalized decision" 100 (one |> member "cached_input" |> member "input_tokens" |> to_int);
+    check int "account one cache only" 25 (one |> member "cached_input" |> member "cache_read_tokens" |> to_int);
+    check int "account two cache only" 100 (two |> member "cached_input" |> member "cache_read_tokens" |> to_int);
+    check (float 0.001) "recent success belongs to selected account"
+      (floor (now -. 10.)) (one |> member "recent_entries" |> to_list |> List.hd |> member "ts_unix" |> to_float))
+
+let test_runtime_history_unreadable_decision_file () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let good = make_keeper_dir base "readable-history" in
+    let broken = make_keeper_dir base "unreadable-history" in
+    let row = success_entry ~model:"model" ~ts:(now_unix ()) () in
+    let row = match row with
+      | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+          "executed_runtime_id", `String "account.model"]) :: fields)
+      | _ -> fail "fixture is not an object" in
+    write_decisions good [row];
+    (* A directory where a JSONL file was expected reliably fails the read,
+       including under root; chmod-based fixtures can silently remain readable. *)
+    Unix.mkdir broken 0o700;
+    let open Yojson.Safe.Util in
+    let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "one unreadable file prevents a complete history" "unavailable"
+      (failed |> member "state" |> to_string);
+    check string "file failure has a typed cause" "files_unreadable"
+      (failed |> member "decision_read" |> member "cause" |> to_string);
+    check int "unreadable file counted" 1
+      (failed |> member "decision_read" |> member "unreadable_files" |> to_int);
+    check bool "partial samples never look like complete runtime totals" true
+      (failed |> member "runtimes" = `Null);
+    Unix.rmdir broken;
+    let recovered = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "a subsequent successful read recovers" "ready"
+      (recovered |> member "state" |> to_string);
+    check int "readable account is counted after recovery" 1
+      (recovered |> member "runtimes" |> to_list |> List.hd |> member "success_count" |> to_int))
+
+let test_runtime_history_dangling_decision_file () =
+  let base = test_dir () in
+  let broken = make_keeper_dir base "dangling-history" in
+  Fun.protect ~finally:(fun () ->
+    (try Unix.unlink broken with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+    cleanup_dir base) (fun () ->
+    Unix.symlink (Filename.concat base "missing-target") broken;
+    let open Yojson.Safe.Util in
+    let check_failed () =
+      let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+      check string "enumerated broken link is not an empty readable file" "unavailable"
+        (failed |> member "state" |> to_string);
+      check string "broken link reports file failure" "files_unreadable"
+        (failed |> member "decision_read" |> member "cause" |> to_string);
+      check int "broken link is counted" 1
+        (failed |> member "decision_read" |> member "unreadable_files" |> to_int) in
+    check_failed ();
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:Fs_compat.clear_fs check_failed);
+    Unix.unlink broken;
+    let recovered = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "removed broken entry leaves a genuinely empty store" "ready"
+      (recovered |> member "state" |> to_string))
+
+let test_runtime_history_invalid_decision_rows () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "invalid-history" in
+    let now = now_unix () in
+    let valid = success_entry ~model:"model" ~ts:now () in
+    let schema_invalid = `Assoc ["ts_unix", `Float now; "telemetry", `Assoc []] in
+    let ignored = [`Assoc ["ts_unix", `Float (now -. 172800.); "telemetry", `Assoc []];
+      `Assoc ["ts_unix", `Float now; "event", `String "keeper_started"]] in
+    let open Yojson.Safe.Util in
+    let read () = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    write_decisions path (valid :: ignored);
+    check string "outside-window and valid non-inference rows do not degrade history"
+      "ready" (read () |> member "state" |> to_string);
+    let malformed = "{broken json\n" in
+    List.iter (fun (rows, raw, malformed_count, invalid_count) ->
+      write_decisions path rows;
+      Out_channel.with_open_gen [Open_append; Open_binary] 0o600 path (fun channel ->
+        output_string channel raw);
+      let history = read () in
+      check string "dropped decision evidence cannot confirm complete history"
+        "unavailable" (history |> member "state" |> to_string);
+      let diagnostics = history |> member "decision_read" in
+      check string "dropped rows have a typed cause" "rows_invalid"
+        (diagnostics |> member "cause" |> to_string);
+      check int "malformed rows counted" malformed_count
+        (diagnostics |> member "malformed_rows" |> to_int);
+      check int "schema-invalid rows counted" invalid_count
+        (diagnostics |> member "schema_violation_rows" |> to_int);
+      check bool "partial totals are not exposed as authoritative" true
+        (history |> member "runtimes" = `Null))
+      [[], malformed, 1, 0; [schema_invalid], "", 0, 1;
+       valid :: schema_invalid :: ignored, malformed, 1, 1];
+    write_decisions path [valid];
+    check string "repair restores readable history" "ready"
+      (read () |> member "state" |> to_string))
+
+let test_runtime_history_directory_read_failure () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let open Yojson.Safe.Util in
+    let empty = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "missing store is genuinely empty" "ready" (empty |> member "state" |> to_string);
+    let directory = Filename.dirname (make_keeper_dir base "unused") in
+    Unix.rmdir directory;
+    write_decisions directory [];
+    let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "unreadable directory is not empty history" "unavailable" (failed |> member "state" |> to_string);
+    check string "directory failure has a typed cause" "directory_unavailable"
+      (failed |> member "decision_read" |> member "cause" |> to_string))
+
+let require_decision_failure expected result =
+  match result with
+  | Error (M.Decisions_unavailable failure) ->
+      check bool "typed decision failure propagates" true (failure = expected)
+  | Error error -> fail ("wrong read failure: " ^ M.read_error_to_string error)
+  | Ok _ -> fail "partial metrics must not be published as a successful read"
+
+let check_projection_failures base expected =
+  require_decision_failure expected (M.compute ~base_path:base ~window_minutes:60);
+  require_decision_failure expected
+    (M.compute_with_buckets ~base_path:base ~window_minutes:60 ~bucket_minutes:5);
+  require_decision_failure expected
+    (M.aggregate_buckets ~base_path:base ~window_min:60 ~bucket_min:5);
+  require_decision_failure expected
+    (M.compute_cost_latency_json ~base_path:base ~window_minutes:60)
+
+let test_existing_projections_refuse_partial_decisions () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "history" in
+    let now = now_unix () in
+    write_decisions path [success_entry ~model:"decision" ~ts:(now -. 10.) ()];
+    write_costs base [cost_entry ~model:"unpaired-cost" ~ts:(now -. 5.) ()];
+    check int "initial complete read includes both sources" 2
+      (compute ~base_path:base ~window_minutes:60).total_entries;
+    let broken = make_keeper_dir base "unreadable" in
+    Unix.mkdir broken 0o700;
+    check_projection_failures base (M.Decision_files_unreadable 1);
+    Unix.rmdir broken;
+    append_raw_line path "{malformed";
+    check_projection_failures base (M.Decision_rows_invalid {malformed_rows=1; schema_violation_rows=0});
+    let directory = Filename.dirname path in
+    Unix.rename directory (directory ^ ".saved");
+    write_decisions directory [];
+    check_projection_failures base M.Decision_directory_unavailable)
+
+let test_metrics_cache_retains_last_good () =
+  Eio_main.run (fun _env ->
+    let module Cache = Server_routes_http_routes_provider_runs.For_testing in
+    let base = test_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      let path = make_keeper_dir base "cached" in
+      write_decisions path [success_entry ~model:"decision" ~ts:(now_unix ()) ()];
+      let cache = Cache.create_cache () and clock = ref 100. in
+      let read () = Eio.Switch.run (fun sw ->
+        Cache.cached_json ~now:(fun () -> !clock) ~sync_first:true ~sw
+          ~cache ~key:"test" ~placeholder:(`Assoc ["state", `String "loading"])
+          ~compute:(fun () -> M.compute ~base_path:base ~window_minutes:60
+            |> Result.map M.to_json |> Result.map_error M.read_error_to_string)) in
+      let open Yojson.Safe.Util in
+      let first = read () in
+      check int "complete initial cache" 1 (first |> member "total_entries" |> to_int);
+      let broken = make_keeper_dir base "unreadable" in
+      Unix.mkdir broken 0o700;
+      clock := 200.;
+      ignore (read () : Yojson.Safe.t);
+      let failed = read () in
+      check int "refresh failure retains previous metrics" 1 (failed |> member "total_entries" |> to_int);
+      check bool "refresh failure is visible beside stale data" true
+        (failed |> member "cache" |> member "last_error" <> `Null);
+      check string "failed refresh never renews freshness" "stale_refreshing"
+        (failed |> member "cache" |> member "state" |> to_string);
+      Unix.rmdir broken;
+      write_decisions path [];
+      clock := 300.;
+      ignore (read () : Yojson.Safe.t);
+      let recovered = read () in
+      check int "successful refresh replaces stale metrics" 0 (recovered |> member "total_entries" |> to_int);
+      check bool "recovery clears the failure" true
+        (recovered |> member "cache" |> member "last_error" = `Null)))
+
+let test_runtime_history_keeps_non_error_outcomes () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "outcomes" in
+    let now = now_unix () in
+    let outcomes = ["success"; "checkpoint"; "input_required"] in
+    write_decisions path (List.mapi (fun index outcome ->
+      match success_entry ~model:"model" ~ts:(now -. float_of_int index) () with
+      | `Assoc fields ->
+        let telemetry = match List.assoc "telemetry" fields with
+          | `Assoc fields -> `Assoc (("outcome", `String outcome) :: List.remove_assoc "outcome" fields)
+          | _ -> fail "expected telemetry" in
+        `Assoc (("provider_context", `Assoc ["executed_runtime_id", `String "account.model"])
+          :: ("telemetry", telemetry) :: List.remove_assoc "telemetry" fields)
+      | _ -> fail "expected object") outcomes);
+    let open Yojson.Safe.Util in
+    let row = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440
+      |> member "runtimes" |> to_list |> List.hd in
+    check int "all three supported non-error outcomes count" 3 (row |> member "success_count" |> to_int);
+    check (list string) "recent records retain yielded outcome identity" outcomes
+      (row |> member "recent_entries" |> to_list |> List.map (fun row -> row |> member "outcome" |> to_string)))
+
+let test_unrenderable_decision_timestamp () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "invalid-time" in
+    (* Start from a valid row: its identity is real, only the observed epoch is corrupt. *)
+    let row = match success_entry ~model:"model" ~ts:(now_unix ()) () with
+      | `Assoc fields -> `Assoc (("ts_unix", `Float 1e300) :: List.remove_assoc "ts_unix" fields)
+      | _ -> fail "expected object" in
+    write_decisions path [row];
+    check_projection_failures base (M.Decision_rows_invalid {malformed_rows=0; schema_violation_rows=1});
+    let json = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "invalid epoch makes runtime history incomplete" "unavailable"
+      Yojson.Safe.Util.(json |> member "state" |> to_string))
+
+let test_runtime_history_reads_rotated_decisions () =
+  let base = test_dir () in
+  let before = List.map (fun name -> name, Sys.getenv_opt name)
+    ["MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED"] in
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun (name, value) -> match value with
+      | Some value -> Unix.putenv name value | None -> Unix.unsetenv name) before;
+    cleanup_dir base) (fun () ->
+    Unix.putenv "MASC_KEEPER_METRICS_MAX_BYTES" "1";
+    Unix.putenv "MASC_KEEPER_METRICS_MAX_ROTATED" "2";
+    let path = make_keeper_dir base "rotated.history" in
+    let now = now_unix () in
+    let row at = match success_entry ~model:"model" ~ts:at () with
+      | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+          "executed_runtime_id", `String "account.model"]) :: fields)
+      | _ -> fail "expected object" in
+    write_decisions path [row (now -. 90000.); row (now -. 30.)];
+    Masc.Keeper_types_support.maybe_rotate_file path;
+    write_decisions path [row (now -. 20.)];
+    Masc.Keeper_types_support.maybe_rotate_file path;
+    write_decisions path [row (now -. 10.)];
+    (* Noncanonical suffixes are not producer-owned retained logs. *)
+    write_decisions (path ^ ".backup") [row (now -. 1.)];
+    let open Yojson.Safe.Util in
+    let json = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "current and numbered logs form a complete history" "ready"
+      (json |> member "state" |> to_string);
+    let runtime = json |> member "runtimes" |> to_list |> List.hd in
+    check int "all in-window rotations count, old and unrelated files excluded" 3
+      (runtime |> member "entry_count" |> to_int);
+    check int "recent list includes retained rotated samples" 3
+      (runtime |> member "recent_entries" |> to_list |> List.length))
+
 let () =
   run "Model_inference_metrics" [
     "basics", [
+      test_case "existing projections propagate incomplete decision reads" `Quick test_existing_projections_refuse_partial_decisions;
+      test_case "metrics cache preserves last-good data on a failed refresh" `Quick test_metrics_cache_retains_last_good;
+      test_case "runtime history preserves yielded non-error outcomes" `Quick test_runtime_history_keeps_non_error_outcomes;
+      test_case "unrenderable timestamp is a typed invalid row" `Quick test_unrenderable_decision_timestamp;
+      test_case "runtime history includes retained rotated logs" `Quick test_runtime_history_reads_rotated_decisions;
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;
       test_case "provider_kind is not reconstructed" `Quick
@@ -1760,6 +2056,11 @@ let () =
         test_public_runtime_lane_label_is_stable_across_windows;
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;
+      test_case "runtime history keeps account attribution" `Quick test_runtime_history_keeps_account_attribution;
+      test_case "runtime history refuses partial decision reads and recovers" `Quick test_runtime_history_unreadable_decision_file;
+      test_case "runtime history reports dangling decision files" `Quick test_runtime_history_dangling_decision_file;
+      test_case "runtime history reports malformed and schema-invalid rows" `Quick test_runtime_history_invalid_decision_rows;
+      test_case "runtime history distinguishes missing and unreadable store" `Quick test_runtime_history_directory_read_failure;
     ];
     "thinking_fraction", [
       test_case "mixed reported yields fraction" `Quick test_thinking_fraction_mixed;

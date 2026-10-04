@@ -48,7 +48,7 @@ let safe = Masc.Tui_terminal_text.sanitize_terminal_text
 (* The snapshot used to print one row per pending stimulus as
    "source: what — next_action" plus a 64-hex address, in queue order, with no
    clock: 31 occurrences of one schedule were 62 lines that read the same. The
-   row now opens with when the thing arrived, says how long it has waited, and
+   row now opens with when the thing arrived, names its lifecycle, and
    a schedule's pending occurrences -- one row from the server since the
    inventory groups them -- show their count and the span of their due
    instants. The exact address stays on its own line because it is the
@@ -57,24 +57,119 @@ let clock_text at =
   let time = Unix.localtime at in
   Printf.sprintf "%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
 
-let float_field key json =
-  match field key json with
-  | Ok (`Float value) -> Some value
-  | Ok (`Int value) -> Some (float_of_int value)
-  | Ok _ | Error _ -> None
+module Inventory = Masc.Server_keeper_waiting_inventory
 
-let int_field key json =
-  match field key json with
-  | Ok (`Int value) -> Some value
-  | Ok _ | Error _ -> None
+let optional_timestamp key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | None | Some `Null -> Ok None
+     | Some (`Float value) when Float.is_finite value -> Ok (Some value)
+     | Some (`Int value) -> Ok (Some (float_of_int value))
+     | Some _ -> Error ("Queue timestamp must be finite: " ^ key))
+  | _ -> Error "Queue row must be an object"
+
+let count_field ?default key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields, default with
+     | Some (`Int count), _ when count >= 0 -> Ok count
+     | None, Some count -> Ok count
+     | Some _, _ | None, None -> Error ("Queue count must be a non-negative integer: " ^ key))
+  | _ -> Error "Queue row detail must be an object"
+
+type row_phase = Pending | Running | Scheduled of float | Due of float | Settling | Terminal | Unavailable
+
+type inventory_row =
+  { source : Inventory.waiting_source
+  ; count : int
+  ; phase : row_phase
+  ; line : string
+  }
+
+let row_phase ~now source row detail =
+  match (source : Inventory.waiting_source) with
+  | Event_queue_pending | Chat_operation_queued | Hitl_pending | Operator_pending_confirm -> Ok Pending
+  | Chat_operation_running | Fusion_running -> Ok Running
+  | Owner_shutdown -> Ok Settling
+  | Read_error -> Ok Unavailable
+  | Schedule_waiting ->
+    let* status = string "status" detail in
+    let* status = Schedule_domain.schedule_status_of_string status in
+    let due () =
+      let* due = optional_timestamp "due_at" row in
+      match due with
+      | None -> Error "Scheduled inventory row has no due_at"
+      | Some at -> Ok at in
+    (match status with
+     | Schedule_domain.Running -> Ok Running
+     | Succeeded | Failed | Cancelled | Expired -> Ok Terminal
+     | Scheduled -> let* at = due () in Ok (if at > now then Scheduled at else Due at)
+     | Due -> let* at = due () in Ok (Due at))
 
 let waiting_text ~now since =
   match Masc_tui_message_layout.age_text ~now ~since with
   | Some age -> " · waiting " ^ age
   | None -> ""
 
+let describe_row ~now row =
+  let* source = string "source" row in
+  let* source = Inventory.source_of_string source in
+  let* what = string "what" row in
+  let* detail = field "detail" row in
+  let* count = match source with
+    | Inventory.Chat_operation_queued -> count_field "queued_count" detail
+    | Event_queue_pending -> count_field ~default:1 "group_count" detail
+    | Chat_operation_running | Hitl_pending | Fusion_running | Schedule_waiting
+    | Owner_shutdown | Operator_pending_confirm | Read_error -> Ok 1 in
+  let* phase = row_phase ~now source row detail in
+  let* since = optional_timestamp "since" row in
+  let clock = match since with Some at -> clock_text at ^ "  " | None -> "       " in
+  let* first_due = optional_timestamp "group_first_due_unix" detail in
+  let* last_due = optional_timestamp "group_last_due_unix" detail in
+  let span = match first_due, last_due with
+    | Some first, Some last when count > 1 ->
+      Printf.sprintf " · due %s \xe2\x86\x92 %s" (clock_text first) (clock_text last)
+    | Some _, Some _ | None, None | Some _, None | None, Some _ -> "" in
+  let timing = match phase with
+    | Pending when source = Inventory.Event_queue_pending ->
+      Option.bind since (fun since -> Masc_tui_message_layout.age_text ~now ~since)
+      |> Option.fold ~none:" · unacknowledged" ~some:(fun age -> " · unacknowledged " ^ age)
+    | Pending -> Option.fold ~none:"" ~some:(waiting_text ~now) since
+    | Scheduled at -> " · scheduled for " ^ Masc_domain.iso8601_of_unix_seconds at
+    | Due at -> " · due " ^ Masc_domain.iso8601_of_unix_seconds at
+    | Running -> " · running"
+    | Settling -> " · settling"
+    | Terminal -> " · terminal"
+    | Unavailable -> " · unavailable" in
+  let address = match detail with
+    | `Assoc fields -> (match List.assoc_opt "source_ref" fields, List.assoc_opt "source_incarnation" fields with
+        | Some (`String reference), Some (`String incarnation) ->
+          let more = if count > 1 then Printf.sprintf " \xc2\xb7 +%d more" (count - 1) else "" in
+          "\n         event " ^ safe reference ^ " " ^ safe incarnation ^ more
+        | Some _, Some _ | Some _, None | None, Some _ | None, None -> "")
+    | _ -> "" in
+  Ok { source; count; phase;
+       line = Printf.sprintf "  %s%s%s%s%s" clock (safe what) span timing address }
+
+let inventory_counts described =
+    let count_phase matches =
+      List.fold_left (fun total row -> if matches row.phase then total + row.count else total) 0 described in
+    let pending = count_phase (function Pending -> true | Running | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> false) in
+      [ "running", count_phase (function Running -> true | Pending | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> false)
+      ; "scheduled", count_phase (function Scheduled _ -> true | Pending | Running | Due _ | Settling | Terminal | Unavailable -> false)
+      ; "due", count_phase (function Due _ -> true | Pending | Running | Scheduled _ | Settling | Terminal | Unavailable -> false)
+      ; "settling", count_phase (function Settling -> true | Pending | Running | Scheduled _ | Due _ | Terminal | Unavailable -> false)
+      ; "terminal", count_phase (function Terminal -> true | Pending | Running | Scheduled _ | Due _ | Settling | Unavailable -> false)
+      ; "unavailable", count_phase (function Unavailable -> true | Pending | Running | Scheduled _ | Due _ | Settling | Terminal -> false)
+      ]
+      |> List.filter (fun (_, count) -> count > 0)
+      |> List.map (fun (label, count) -> Printf.sprintf "%d %s" count label)
+      |> List.cons (Printf.sprintf "%d pending" pending)
+      |> String.concat " · "
+
 let waiting_lines ~now json =
   let* keepers = list "keepers" json in
+  let* global_rows = list "global_waiting_on" json in
+  let* global = map_result (describe_row ~now) global_rows in
   let* groups = map_result (fun keeper ->
     let* state = string "state" keeper in
     let* paused = field "paused" keeper in
@@ -84,44 +179,30 @@ let waiting_lines ~now json =
       | `Null -> Ok "unknown"
       | _ -> Error "Queue paused field must be boolean or null" in
     let* rows = list "waiting_on" keeper in
-    let* described = map_result (fun row ->
-      let* source = string "source" row in
-      let* what = string "what" row in
-      let* detail = field "detail" row in
-      let since = float_field "since" row in
-      let count = Option.value (int_field "group_count" detail) ~default:1 in
-      let clock = match since with Some at -> clock_text at ^ "  " | None -> "       " in
-      let span =
-        match float_field "group_first_due_unix" detail, float_field "group_last_due_unix" detail with
-        | Some first, Some last when count > 1 ->
-          Printf.sprintf " · due %s \xe2\x86\x92 %s" (clock_text first) (clock_text last)
-        | _ -> "" in
-      let waiting = match since with Some at -> waiting_text ~now at | None -> "" in
-      let address = match detail with
-        | `Assoc fields -> (match List.assoc_opt "source_ref" fields, List.assoc_opt "source_incarnation" fields with
-            | Some (`String reference), Some (`String incarnation) ->
-              let more = if count > 1 then Printf.sprintf " \xc2\xb7 +%d more" (count - 1) else "" in
-              "\n         event " ^ safe reference ^ " " ^ safe incarnation ^ more
-            | _ -> "")
-        | _ -> "" in
-      Ok (source, count, since, Printf.sprintf "  %s%s%s%s%s" clock (safe what) span waiting address)) rows in
-    let pending = List.fold_left (fun total (_, count, _, _) -> total + count) 0 described in
+    let* described = map_result (describe_row ~now) rows in
+    let counts = inventory_counts described in
     let header =
-      Printf.sprintf "Queue consumption: %s; server work: %s \xc2\xb7 %d pending in %d %s"
-        consumption (safe state) pending (List.length described)
+      Printf.sprintf "Queue consumption: %s; inventory: %s \xc2\xb7 %s in %d %s"
+        consumption (safe state) counts (List.length described)
         (if List.length described = 1 then "group" else "groups") in
     (* The autonomous lane is what drains the event queue, and it does not
        run while an operator chat holds the turn slot. Said once, above the
        rows it explains, only when both are on the screen. *)
+    let has_events = List.exists (fun row -> row.source = Inventory.Event_queue_pending) described in
     let blocker =
-      let has_pending = List.exists (fun (source, _, _, _) -> source = "event_queue_pending") described in
-      match List.find_opt (fun (source, _, _, _) -> source = "chat_operation_running") described with
-      | Some (_, _, since, _) when has_pending ->
-        let since_text = match since with Some at -> " (chat since " ^ clock_text at ^ ")" | None -> "" in
-        [ "  autonomous turn: waits while the operator chat runs" ^ since_text ]
-      | Some _ | None -> [] in
-    Ok (header :: blocker @ List.map (fun (_, _, _, line) -> line) described)) keepers in
-  Ok (List.concat groups)
+      let chat_running = List.exists (fun row -> row.source = Inventory.Chat_operation_running) described in
+      if has_events && chat_running then
+        [ "  autonomous turn: waits while the chat operation holds the turn slot" ]
+      else [] in
+    let event_note = if has_events then
+        [ "  pending events are unacknowledged; they may already be in the current turn" ]
+      else [] in
+    Ok (header :: blocker @ event_note @ List.map (fun row -> row.line) described)) keepers in
+  let global_lines = match global with
+    | [] -> []
+    | rows -> ("Workspace inventory: " ^ inventory_counts rows)
+        :: List.map (fun row -> row.line) rows in
+  Ok (global_lines @ List.concat groups)
 let operation_lines json =
   let* operations = list "operations" json in
   let* lines = map_result (fun operation ->

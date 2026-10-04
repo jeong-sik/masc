@@ -1266,6 +1266,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                  (Server_repository_pulls.current ()))
               ~extra_headers:cors)
 
+      | `GET, "/api/v1/lanes" ->
+          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
+            (fun state _agent_name ->
+              Server_lane_inventory.snapshot ~config:(Mcp_server.workspace_config state)
+              |> Server_lane_inventory.to_json
+              |> fun json -> h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/briefing" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in

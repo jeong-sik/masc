@@ -1,0 +1,24 @@
+{
+  "head": "cedab0d0e55ab5a0e928ef555cec5d637d8202eb",
+  "parent": "bd414e75e63dc817d9e8aa2adab4fb06c8af7852",
+  "web_tests": 56,
+  "native_tests": 5,
+  "stale_removal_pty_exit": 0,
+  "build_exit": 0,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "ruff_exit": 0,
+  "pyright_errors": 0,
+  "binary_sha256": "7f718630ef1c898a2bdb80f147ced1f3fb12b755b70c9258cebd28700eecd215",
+  "files": {
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pyright.json": "49bd2325f30235453e62b374e3dca8121aae517ed940bad01dccfc58772d0110",
+    "web.log": "a0395947d1e8c979965a824d74ed9c0afb367168ef57c64f52275b8d5aa4a53f",
+    "README.md": "ce0f31ce01a1ba64ddcf2e4fd81312a835056d56f37a5aab732d31bc6cd74fd0",
+    "native.log": "4e50ed4be8606eb4acde8360dfb9b59a141e547c0d7a40e84f2d5be31bfda2b2",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "stale-pty.log": "f3ebda43256efd41d3346d379805bc3e8e43706b821c7f98ab0085239c55e925",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "build.log": "ce12cadc4ee624818a332603f08fc2d41f948431178d7a74f2c7689428288cce"
+  }
+}

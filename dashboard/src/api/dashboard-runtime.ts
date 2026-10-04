@@ -191,6 +191,7 @@ export interface DashboardRuntimeProviderSnapshot {
   model_id?: string | null
   model_api_name?: string | null
   protocol?: string | null
+  usage_read_configured?: boolean
   transport?: string | null
   kind?: string | null
   runtime_kind?: string | null
@@ -676,6 +677,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     model_id: asNullableString(raw.model_id),
     model_api_name: asNullableString(raw.model_api_name),
     protocol: asNullableString(raw.protocol),
+    usage_read_configured: asBoolean(raw.usage_read_configured),
     transport: asNullableString(raw.transport),
     kind: asNullableString(raw.kind),
     runtime_kind: asNullableString(raw.runtime_kind),
@@ -2314,6 +2316,12 @@ export class RuntimeTomlRevisionConflict extends Error {
   }
 }
 
+/** This raw route returns structured HTTP 400 only before a visible file
+ * replacement; after-rename durability failures return a committed receipt. */
+export class RuntimeTomlSaveRejected extends Error {
+  constructor(message: string) { super(message); this.name = 'RuntimeTomlSaveRejected' }
+}
+
 export async function saveRuntimeTomlConfig(
   sourceText: string,
   expectedSourceRevision: string,
@@ -2331,6 +2339,17 @@ export async function saveRuntimeTomlConfig(
     })
     return decodeCommittedRuntimeTomlConfig(raw)
   } catch (error: unknown) {
+    if (error instanceof ApiRequestError && error.method === 'POST'
+      && error.path === '/api/v1/runtime/config/raw' && error.status === 400
+      && !error.timeout && error.configApplied !== true
+      && error.configApplicationState !== 'indeterminate' && !error.authoritativeReloadRequired
+      && error.runtimeSync === undefined) {
+      const failure = error.responseData
+      if (isRecord(failure) && typeof failure.error === 'string' && failure.error.trim() !== ''
+        && (failure.ok === undefined || failure.ok === false)) {
+        throw new RuntimeTomlSaveRejected(error.message)
+      }
+    }
     if (error instanceof ApiRequestError && error.status === 409) {
       const failure = error.responseData
       if (isRecord(failure) && failure.code === 'revision_conflict'

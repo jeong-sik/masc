@@ -303,7 +303,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~candidate_kind ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
     let { Task.Anti_rationalization.schemas = lookup_schemas
         ; dispatch = dispatch_lookup
@@ -364,7 +364,7 @@ let install () =
     let selected_runtime_id = ref None in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
-        match Runtime.verifier_exact_slot_admission ~runtime_id:evaluator_runtime with
+        match Runtime.verifier_exact_slot_admission ~candidate_kind ~runtime_id:evaluator_runtime with
         | Error detail ->
           Error (Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig {field="verifier_exact.cli_slots"; detail}))
@@ -519,53 +519,14 @@ let install () =
          ~claim);
 
   Atomic.set Workspace_hooks.verification_notify_verdict_fn
-    (fun config ~task_id ~producer ~authority ~verification_id ~decision ->
+    (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
        match decision with
        | `Approve notes ->
          Verification_protocol.notify_approve_verification
            ~task_id
            ~authority
            ~verification_id
-           ~notes;
-         (* The approval side of the loop: without this the producer learns
-            its task closed only by noticing its projection empty (#25868).
-            Delivery is best-effort at this boundary — the Board receipt was
-            already committed above, and a Keeper projection must never be
-            able to fail the verdict commit that already happened. *)
-         let delivered =
-           Keeper_task_outcome_wake.wake_approved_producer
-             ~config
-             ~producer
-             ~task_id
-             ~verification_id
-             ~authority
-         in
-         (match delivered with
-          | Keeper_task_outcome_wake.Signaled { keeper_name } ->
-            Log.Misc.info
-              "task outcome approved; producer signaled task_id=%s keeper=%s"
-              task_id keeper_name
-          | Keeper_task_outcome_wake.Durable_deferred { keeper_name; _ } ->
-            Log.Misc.info
-              "task outcome committed; producer wake deferred task_id=%s keeper=%s"
-              task_id keeper_name
-          | Keeper_task_outcome_wake.Durable_wake_failed { keeper_name; detail } ->
-            Log.Misc.warn
-              "task outcome committed; live wake failed task_id=%s keeper=%s detail=%s"
-              task_id keeper_name detail
-          | Keeper_task_outcome_wake.Unroutable_producer { producer; _ } ->
-            Log.Misc.warn
-              "task outcome committed; producer keeper unavailable task_id=%s producer=%s"
-              task_id producer
-          | Keeper_task_outcome_wake.Producer_identity_lookup_failed
-              { producer; detail; _ } ->
-            Log.Misc.warn
-              "task outcome committed; producer lookup failed task_id=%s producer=%s detail=%s"
-              task_id producer detail
-          | Keeper_task_outcome_wake.Durable_queue_failed { keeper_name; detail } ->
-            Log.Misc.error
-              "task outcome durable queue write failed task_id=%s keeper=%s detail=%s"
-              task_id keeper_name detail)
+           ~notes
        | `Reject reason ->
          Verification_protocol.notify_reject_verification
            ~task_id

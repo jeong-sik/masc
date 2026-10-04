@@ -49,7 +49,7 @@ module type Backend = sig
 end
 
 module type S = sig
-  val backend_via : string
+  val backend_via : meta:Keeper_meta_contract.keeper_meta -> string
 
   val container_path_of_host :
     config:Workspace.config ->

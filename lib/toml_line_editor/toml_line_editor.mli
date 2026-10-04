@@ -82,6 +82,15 @@ val edit_root_bool : string -> key:string -> value:bool -> string
     bytes and the key's trailing comment are retained. The caller validates
     the document and boolean type before editing and parses the result. *)
 
+type nested_edit_error = Invalid_document | Unreachable_table
+val edit_nested_bool :
+  string -> path:string list -> key:string -> value:bool ->
+  (string, nested_edit_error) result
+(** Set a boolean on a standard, inline, dotted, or absent table. Only its
+    existing inline assignment is reprinted when necessary; every other
+    declaration stays in place. Read back the complete document to verify
+    that precisely the requested typed value changed. *)
+
 val edit_table_float : string -> path:string -> key:string -> value:float -> string
 (** Set a typed float while retaining unrelated lines and comments. The value
     always carries a decimal point or exponent, so a reader that expects a

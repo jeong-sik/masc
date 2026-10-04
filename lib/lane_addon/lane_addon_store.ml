@@ -27,7 +27,7 @@ let rec durable_directory t ~sync_parent directory =
   if directory = t.root then (
     (try Unix.mkdir directory 0o700; t.root_parent_pending <- true with
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+         if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
            raise (Sys_error "retained evidence root is not a directory"));
     (* Flush only the new root entry, never walk preexisting ancestors.
        Keep the obligation on failure so a retry in this store cannot skip it. *)
@@ -36,7 +36,7 @@ let rec durable_directory t ~sync_parent directory =
     durable_directory t ~sync_parent parent;
     (try Unix.mkdir directory 0o700 with
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+         if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
            raise (Sys_error "retained evidence parent is not a directory"));
     sync_parent parent)
 let write_with ~sync_parent t relative bytes = protect (fun () ->
@@ -56,9 +56,21 @@ let recovery_blob_path hash = Filename.concat "sampling-evidence" (hash ^ ".json
 let write_sampling_blob t bytes =
   match write_blob t bytes with
   | Ok reference -> Ok reference
-  | Error _ ->
-      let* () = write t (recovery_blob_path (digest bytes)) bytes in
-      Ok (blob_reference bytes)
+  | Error detail -> protect (fun () ->
+      (* A missing leaf under a symlinked parent is not an owned missing
+         canonical blob and cannot authorize fallback publication. *)
+      let* () = match Fs_compat.inspect_owned_directory_chain
+          ~ownership_root:t.root (Filename.concat t.root "evidence") with
+        | Ok _ -> Ok ()
+        | Error _ -> Error detail in
+      (* The immutable address is readable from recovery only for these
+         canonical states. Do not advertise a blob behind an unreadable parent. *)
+      match Fs_compat.exact_path_kind ~follow:false
+        (Filename.concat t.root (blob_path (digest bytes))) with
+      | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR ->
+          let* () = write t (recovery_blob_path (digest bytes)) bytes in
+          Ok (blob_reference bytes)
+      | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown -> Error detail)
 type retained_kind = Blob | Sequence
 let retained_address (reference : evidence) =
   match reference.sha256 with
@@ -77,23 +89,37 @@ let read_budget ~max_bytes =
 let bounded_protect f =
   match protect (fun () -> Ok (f ())) with
   | Ok result -> result | Error detail -> Error (Read_failed detail)
-let read_file_bounded ~budget path = bounded_protect (fun () ->
-  let fd = Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
-  let channel = Unix.in_channel_of_descr fd in
-  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-    let stat = Unix.fstat fd in
-    let size = stat.Unix.st_size in
-    if stat.Unix.st_kind <> Unix.S_REG then Error (Read_failed "retained evidence is not a regular file")
-    else if size > budget.remaining then Error Read_limit_exceeded
-    else begin
-      budget.remaining <- budget.remaining - size;
-      try Ok (really_input_string channel size)
-      with End_of_file -> Error (Read_failed "retained file changed during read")
-    end))
+let read_file_bounded ~budget ~ownership_root path = bounded_protect (fun () ->
+  let before = Unix.lstat path in
+  let size = before.Unix.st_size in
+  if before.Unix.st_kind <> Unix.S_REG || before.Unix.st_nlink <> 1 then
+    Error (Read_failed "retained evidence is not a unique regular file")
+  else if size > budget.remaining then Error Read_limit_exceeded
+  else begin
+    budget.remaining <- budget.remaining - size;
+    let* contents = Fs_compat.load_owned_regular_file_range
+      ~ownership_root ~offset:0 ~max_bytes:size path
+      |> Result.map_error (fun error -> Read_failed
+        (Fs_compat.owned_regular_file_read_error_to_string error)) in
+    match contents with
+    | None -> Error (Read_failed "retained file disappeared during read")
+    | Some contents ->
+        let after = Unix.lstat path in
+        let snapshot = contents.snapshot in
+        if snapshot.device <> before.st_dev || snapshot.inode <> before.st_ino
+          || snapshot.file_size <> size || snapshot.modified_at <> before.st_mtime
+          || snapshot.changed_at <> before.st_ctime
+          || after.st_kind <> Unix.S_REG || after.st_nlink <> 1
+          || after.st_dev <> snapshot.device || after.st_ino <> snapshot.inode
+          || after.st_size <> snapshot.file_size || after.st_mtime <> snapshot.modified_at
+          || after.st_ctime <> snapshot.changed_at then
+          Error (Read_failed "retained file changed during read")
+        else Ok contents.content
+  end)
 let read_blob_bounded ~budget t reference =
   let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
   let read relative =
-    let* bytes = read_file_bounded ~budget (Filename.concat t.root relative) in
+    let* bytes = read_file_bounded ~budget ~ownership_root:t.root (Filename.concat t.root relative) in
     if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch") in
   match kind with
   | Sequence -> read (sequence_path hash)

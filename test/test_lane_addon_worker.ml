@@ -1762,7 +1762,83 @@ let test_sampling_blob_read_preserves_canonical_failure () = with_fixture (fun _
     check bool "unreadable canonical parent returns an error without recovery" true
       (Result.is_error (Store.read_blob store reference))))
 
+let test_sampling_publication_requires_readable_address () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "publication-address") in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  ignore (require (Store.write_blob store "retained request"));
+  let canonical_directory = Filename.concat (Store.root store) "evidence" in
+  let saved = canonical_directory ^ ".saved" in
+  Unix.rename canonical_directory saved;
+  write canonical_directory "not a directory";
+  Fun.protect ~finally:(fun () -> Unix.unlink canonical_directory; Unix.rename saved canonical_directory)
+    (fun () ->
+      let result = Store.write_sampling_blob store "known model outcome" in
+      check bool "publication refuses an address whose canonical boundary prevents recovery reads" true
+        (Result.is_error result)))
+
+let test_sampling_publication_rejects_symlink_parent boundary () =
+  with_fixture (fun _ _ dir _ ->
+    let module Store = Masc.Lane_addon_store in
+    let root = Filename.concat dir "publication-owned-root" in
+    let external_dir = Filename.concat dir "external-directory" in
+    Unix.mkdir external_dir 0o700;
+    let bytes = "known outcome stays inside the owned store" in
+    let digest_name = Store.digest bytes ^ ".json" in
+    let link, external_blob = match boundary with
+      | `Root -> root, Filename.concat external_dir ("evidence/" ^ digest_name)
+      | `Canonical ->
+          Unix.mkdir root 0o700;
+          Filename.concat root "evidence", Filename.concat external_dir digest_name
+      | `Recovery ->
+          Unix.mkdir root 0o700;
+          let evidence = Filename.concat root "evidence" in
+          Unix.mkdir evidence 0o700;
+          Unix.mkdir (Filename.concat evidence digest_name) 0o700;
+          Filename.concat root "sampling-evidence", Filename.concat external_dir digest_name in
+    Unix.symlink external_dir link;
+    Fun.protect ~finally:(fun () -> Unix.unlink link) (fun () ->
+      let result = Store.write_sampling_blob (Store.create ~root) bytes in
+      check bool "publication never writes through an external parent" false
+        (Sys.file_exists external_blob);
+      check bool "publication refuses a symlinked ownership boundary" true
+        (Result.is_error result)))
+
+let test_sampling_fallback_rejects_external_links name link () =
+  List.iter (fun blocked -> with_fixture (fun _ _ dir _ ->
+    let module Store = Masc.Lane_addon_store in
+    let store = Store.create ~root:(Filename.concat dir (name ^ "-recovery")) in
+    let bytes = "matching external outcome" in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let reference = require (Store.write_blob store bytes) in
+    let canonical = Filename.concat (Store.root store) ("evidence/" ^ Store.digest bytes ^ ".json") in
+    Unix.unlink canonical;
+    if blocked then Unix.mkdir canonical 0o700;
+    let recovery = Filename.concat (Store.root store) "sampling-evidence" in
+    Unix.mkdir recovery 0o700;
+    let external_path = Filename.concat dir "external.json" in
+    write external_path bytes;
+    let recovery_path = Filename.concat recovery (Store.digest bytes ^ ".json") in
+    link external_path recovery_path;
+    Fun.protect ~finally:(fun () -> Unix.unlink recovery_path) (fun () ->
+      check bool "ordinary read refuses external recovery inode" true
+        (Result.is_error (Store.read_blob store reference));
+      check bool "bounded read refuses external recovery inode" true
+        (Result.is_error (Store.read_blob_bounded ~budget:(Store.read_budget ~max_bytes:4096) store reference)))))
+    [false; true]
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "sampling publication rejects canonical parent symlink" `Quick
+    (test_sampling_publication_rejects_symlink_parent `Canonical);
+  test_case "sampling publication rejects recovery parent symlink" `Quick
+    (test_sampling_publication_rejects_symlink_parent `Recovery);
+  test_case "sampling publication rejects root symlink" `Quick
+    (test_sampling_publication_rejects_symlink_parent `Root);
+  test_case "sampling publication requires readable address" `Quick test_sampling_publication_requires_readable_address;
+  test_case "sampling fallback rejects external symlinks" `Quick
+    (test_sampling_fallback_rejects_external_links "symlink" (fun target path -> Unix.symlink target path));
+  test_case "sampling fallback rejects external hardlinks" `Quick
+    (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
   test_case "sampling retention error uses encoded wire bound" `Quick test_sampling_retention_error_uses_encoded_reply_bound;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;

@@ -23,6 +23,6 @@
     "P3 source-confirmed: old binding_inventory no-sync doc corrected.",
     "Prior test incorrectly expected enabled=true to be rejected as an unknown field; now uses unexpected=true."
   ],
-  "source_checkpoint": "1e15b34f4ad75b8664a6675b84c848db3f0e1f48",
+  "source_checkpoint": "9d2026d60a637b4154b1bae1fd40b664a1ae62bf",
   "authored_direct_runtime_scenarios": 5
 }

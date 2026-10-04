@@ -176,7 +176,6 @@ let render_board_compose (state : state) =
   finish_frame_beside_acting_pane state ~surface_key:"board-compose" ~cursor
     ~rows ~cols buf
 
-
 (* A tail this heading can do without. The two rows above the board each end
    in something atomic -- a key hint, the clause that finishes a sentence --
    and a cut one says nothing a reader can act on: "H:choo" names no key, and
@@ -529,10 +528,7 @@ let board_read_layout = Board_read_layout.create ()
 
 (* The thread beside the post, one screen row at a time (p-7784d032). Owns
    its own allocation and scroll projection so [board_read_pane] only ever
-   touches the shared [board_read_allocation] the stacked layout uses -- the
-   shape test_tui_http_ast.ml's AST contract checks for: each layout
-   consumes its own row budget through the calls that produced it, not by
-   re-reading the record across two branches inside one binding. *)
+   touches the shared [board_read_allocation] the stacked layout uses. *)
 let draw_board_read_side buf (state : state) document ~rows ~body_cols
     ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count =
   let side_budget =

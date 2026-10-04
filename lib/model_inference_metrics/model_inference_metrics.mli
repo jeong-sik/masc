@@ -49,9 +49,10 @@ type bucket_metric = {
     (** error_count / entry_count; 0.0 when bucket is empty. *)
   b_total_cost_usd : float option;
   b_cache_hit_ratio : float option;
-    (** cache_read_tokens / (cache_read_tokens + input_tokens); [Some 0.0]
-        when the denominator is explicitly zero, [None] when no bucket entry
-        reported either field. *)
+    (** Sum of cache reads divided by inclusive input tokens from the same
+        successful entries reporting both fields, with positive input and
+        cache reads between zero and input. [None] when no such pair exists;
+        [Some 0.0] when valid pairs report zero cache reads. *)
 }
 
 type model_bucketed = {
@@ -64,6 +65,14 @@ type latency_bucket = {
   lo_ms : int;
   hi_ms : int option;
   count : int;
+}
+
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
 }
 
 type model_stats = {
@@ -91,6 +100,7 @@ type model_stats = {
   total_input_tokens : int option;
   total_output_tokens : int option;
   total_cache_read_tokens : int option;
+  cached_input : cached_input option;
   total_cache_creation_tokens : int option;
   total_reasoning_tokens : int option;
   usage_sample_count : int;
@@ -161,7 +171,7 @@ val aggregate_buckets :
     - Buckets are keyed by [floor(ts_unix / (bucket_min * 60))].
     - Only buckets with at least one entry are emitted.
     - Buckets are returned oldest-first within each model.
-    - [cache_hit_ratio] is [0.0] when the denominator is zero (never NaN).
+    - [cache_hit_ratio] is [None] when no valid positive-input/cache pair is reported.
     - A non-positive [bucket_min] is treated as [1].
     - Cost-store read failures are returned instead of being projected as an
       empty successful cost stream. *)

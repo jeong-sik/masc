@@ -3967,6 +3967,7 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
 type exact_slot_move =
   | Move_slot_up
   | Move_slot_down
+  | Move_slot_first
 
 (* Both edits below read the declaration under the write lock for the reason
    the append does: the standalone-lane projection shows the slots the
@@ -4040,15 +4041,17 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
   let* edit =
     with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other:_ ~position ->
       let count = List.length slots in
-      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 in
-      if target < 0 || target >= count
+      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 | Move_slot_first -> 0 in
+      if target < 0 || target >= count || (move = Move_slot_first && position = 0)
       then
         Error
           (Printf.sprintf
              "%s is already %s in %s"
              slot
-             (match move with Move_slot_up -> "first" | Move_slot_down -> "last")
+             (match move with Move_slot_up | Move_slot_first -> "first" | Move_slot_down -> "last")
              lane_id)
+      else if move = Move_slot_first then
+        Ok (slot :: List.filteri (fun index _ -> index <> position) slots)
       else
         let at_position = List.nth slots position
         and at_target = List.nth slots target in
@@ -4063,4 +4066,26 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
              slots))
   in
   edit_runtime_lanes ?runtime_config_path edit
+;;
+
+let replace_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~replacement () =
+  let slot = String.trim slot in
+  let replacement = String.trim replacement in
+  if String.equal replacement "" || contains_newline replacement
+  then Error "replacement must be a non-empty runtime id without newlines"
+  else
+    let* edit = with_declared_exact_slots ~lane ~slot
+      (fun ~lane_id:_ ~slot:_ ~slots ~other ~position ->
+        if List.mem replacement (slots @ other)
+        then Error (replacement ^ " is already declared in this lane")
+        else Ok (List.mapi (fun index current ->
+          if index = position then replacement else current) slots)) in
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let current = Option.bind (exact_lane_decl config lane) (fun decl ->
+        if List.mem slot decl.slot_ids then Some Catalog_slots
+        else if List.mem slot decl.cli_slot_ids then Some Cli_slots else None) in
+      match current, exact_slot_list_of_new_slot config replacement with
+      | Some current, Some next when current = next -> edit ~content config
+      | _, None -> Error (no_output_schema_channel_refusal ~slot:replacement ~lane_id:(Standalone_lane.to_id lane))
+      | _ -> Error "Replace a candidate within its HTTP or CLI group; add a candidate to change groups")
 ;;

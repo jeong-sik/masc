@@ -5,20 +5,13 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import zlib
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The surface this opens ("MASC Work") is titled in
-# masc_tui_render_prim.ml and nowhere else in bin/.
-SOURCE_MODULES = (
-    "bin/masc_tui_render_prim.ml",
-)
+
 
 
 def run(executable: str, scenario: str) -> None:

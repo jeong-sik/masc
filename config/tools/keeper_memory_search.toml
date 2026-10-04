@@ -1,7 +1,10 @@
 name = "keeper_memory_search"
 description = """
 Search durable Memory OS facts or raw conversation history, \
-case-insensitively. Facts: whole-query matches first in store order, then \
+case-insensitively. Short ASCII alphanumeric terms (1-2 characters) match \
+ASCII word boundaries (Korean suffixes remain searchable); other terms \
+retain substring matching. \
+Facts: whole-query matches first in store order, then \
 claims holding any whitespace-separated term (3+ characters match inside \
 words) by BM25. History needs a non-empty query, matched whole or by every \
 term, newest first. The default reads only current facts; source='all' \

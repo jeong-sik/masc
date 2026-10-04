@@ -5,7 +5,7 @@ type task = { task_id : string; title : string; keeper : string }
 type relation = Related | Unrelated
 type trace = { run_id : string; slot_id : string }
 type task_relation = { task_id : string; relation : relation; trace : trace }
-type request = Grade of goal | Relation of { goal : goal; task_title : string }
+type request = Grade of { goal : goal; grades : (Candle_grade.t * string) list } | Relation of { goal : goal; task_title : string }
   | Weights of { goal : goal; tasks : task list; keepers : string list; weight_max : int }
 type decision = Grade_decided of Candle_grade.t | Relation_decided of relation
   | Weights_decided of (string * int) list
@@ -25,7 +25,8 @@ let goal_json (g : goal) = `Assoc ["title", `String g.title; "metric", nullable 
   "target_value", nullable g.target_value]
 let stage = function Grade _ -> "grade" | Relation _ -> "relation" | Weights _ -> "weights"
 let input = function
-  | Grade g -> `Assoc ["goal", goal_json g]
+  | Grade g -> `Assoc ["goal", goal_json g.goal;
+      "grades", `Assoc (List.map (fun (grade, criterion) -> Candle_grade.to_string grade, `String criterion) g.grades)]
   | Relation r -> `Assoc ["goal", goal_json r.goal; "task_title", `String r.task_title]
   | Weights w -> `Assoc ["goal", goal_json w.goal;
       "tasks", `List (List.map (fun (t : task) -> `Assoc ["title", `String t.title; "assignee", `String t.keeper]) w.tasks);
@@ -35,7 +36,7 @@ let object_schema properties = `Assoc ["type", `String "object";
   "additionalProperties", `Bool false]
 let enum values = `Assoc ["type", `String "string"; "enum", `List (List.map (fun s -> `String s) values)]
 let schema = function
-  | Grade _ -> object_schema ["grade", enum (List.map Candle_grade.to_string Candle_grade.all)]
+  | Grade g -> object_schema ["grade", enum (List.map (fun (grade, _) -> Candle_grade.to_string grade) g.grades)]
   | Relation _ -> object_schema ["relation", enum ["related"; "unrelated"]]
   | Weights w -> object_schema ["weights", object_schema (List.map (fun name -> name,
       `Assoc ["type", `String "integer"; "minimum", `Int 0; "maximum", `Int w.weight_max]) w.keepers)]
@@ -54,8 +55,10 @@ let decode request json =
   let context = "candle appraisal " ^ stage request in
   let* fields = Candle_json.object_fields ~context json in
   let* decision, remaining = match request with
-    | Grade _ -> let* grade, rest = Candle_json.field ~context "grade" grade_of_json fields in
-      Ok (Grade_decided grade, rest)
+    | Grade g -> let* grade, rest = Candle_json.field ~context "grade" grade_of_json fields in
+      if List.exists (fun (configured, _) -> configured = grade) g.grades
+      then Ok (Grade_decided grade, rest)
+      else Error "grade is not in the captured policy"
     | Relation _ -> let* relation, rest = Candle_json.field ~context "relation" relation_of_text fields in
       Ok (Relation_decided relation, rest)
     | Weights w -> let* weights, rest = Candle_json.field ~context "weights" weights_of_json fields in

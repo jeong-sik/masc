@@ -1,0 +1,8 @@
+Testing `Dashboard cache cancellation'.
+This run has ID `E212TB5P'.
+
+  [OK]          offload          0   request timeout stops a fill worker.
+  [OK]          offload          1   request timeout stops a lazy payload wor...
+
+Full test results in `/masc-work/jazz-developer/masc/.worktrees/36496-pool-cancel/_build/_tests/Dashboard cache cancellation'.
+Test Successful in 0.064s. 2 tests run.

@@ -1070,6 +1070,55 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
+  let keys =
+    [ "max-output-tokens"
+    ; "thinking-control-format"
+    ; thinking_control_token_key
+    ; "reasoning-streaming-format"
+    ; "supports-tool-choice"
+    ; "supports-required-tool-choice"
+    ; "supports-named-tool-choice"
+    ; "supports-parallel-tool-calls"
+    ; "supports-image-input"
+    ; "supports-audio-input"
+    ; "supports-video-input"
+    ; "supports-multimodal-inputs"
+    ; "supports-response-format-json"
+    ; "supports-structured-output"
+    ; "supports-system-prompt"
+    ; "supports-prompt-caching"
+    ; "supports-top-k"
+    ; "supports-min-p"
+    ; "supports-seed"
+    ; "emits-usage-tokens"
+    ]
+  in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown model capabilities key %S; expected %s"
+                  key
+                  (String.concat ", " keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTableArray _ -> error path "capabilities must be a TOML table"
+  in
+  let ( let* ) = Result.bind in
+  let* () =
+    match unknown_key_errors with
+    | [] -> Ok ()
+    | errors -> Error errors
+  in
   (* Exact TOML presence: [None] is "the operator wrote nothing here", which
      each consumer resolves against the layer it owns. A [false] default here
      made an unwritten key indistinguishable from a written [false] (#37435). *)
@@ -1119,7 +1168,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                \"chat-template-token\""))
     | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
-  let ( let* ) = Result.bind in
   let* thinking_control_format = thinking_control_format_result in
   let* reasoning_streaming_format = reasoning_streaming_format_result in
   let* max_output_tokens = positive_int_opt_field "max-output-tokens" in
@@ -2984,6 +3032,7 @@ let typesafeai_keys =
   ; "absorb_gate"
   ; "context_review"
   ; "skill_applicability"
+  ; "librarian_preflight"
   ; "excluded_keepers"
   ]
 ;;
@@ -3175,6 +3224,10 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
+    let librarian_preflight =
+      typed_find_or "a boolean" path tbl "librarian_preflight" Otoml.get_boolean
+        ~default:d.librarian_preflight
+    in
     (match
        ( unknown
        , enabled
@@ -3184,6 +3237,7 @@ let parse_typesafeai (toml : Otoml.t)
        , absorb_gate
        , context_review
        , skill_applicability
+       , librarian_preflight
        , excluded_keepers )
      with
      | ( []
@@ -3194,6 +3248,7 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
+       , Ok librarian_preflight
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
@@ -3203,6 +3258,7 @@ let parse_typesafeai (toml : Otoml.t)
          ; absorb_gate
          ; context_review
          ; skill_applicability
+         ; librarian_preflight
          ; excluded_keepers
          }
      | _ ->
@@ -3215,6 +3271,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability
+          @ result_errors librarian_preflight
           @ result_errors excluded_keepers))
   | Some _ -> Error (error path "[typesafeai] must be a TOML table")
 ;;

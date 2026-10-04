@@ -144,6 +144,10 @@ def journey(executable, no_color=False):
         compact_trend = capture(process, fd, output, "trend-compact", 30, 80, b"UTC days reported")
         if b"100%" not in compact_trend or b"Latest report" not in compact_trend:
             raise AssertionError("compact Trend hid the measurement or its scale")
+        for reading in (trend, compact_trend):
+            for meaning in ("↓ below zero", "↑ above limit"):
+                if meaning.encode() not in reading:
+                    raise AssertionError(f"Trend omitted range meaning {meaning!r}")
         _keyboard_harness.send_and_wait(process, fd, output, b"w", b"1 UTC days")
         _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Keeper usage")
         capture(process, fd, output, "keepers", 30, 120, b"Keeper usage")

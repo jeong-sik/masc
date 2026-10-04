@@ -3032,6 +3032,8 @@ let turn_log_holds_the_turn turn_log =
 ;;
 
 type inflight_phase =
+  | Turn_preflight of Masc_tui_keeper_chat_queue.item
+      (** Retained local input; no HTTP POST has been attempted. *)
   | Turn_streaming
   | Turn_reconciling
 
@@ -4706,6 +4708,12 @@ type board_list_reading =
 type local_intervention =
   | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
   | Retained_after_stop
+  | Retained_before_dispatch
+
+type suspended_keeper_input =
+  { ski_queue : Masc_tui_keeper_chat_queue.t
+  ; ski_waiting : (string * string * local_intervention) list
+  }
 
 (* What the slot editor edits: an exact-output lane's declared [slots], or
    [\[runtime\].media_failover]. Both are an ordered list of runtime ids that
@@ -5070,7 +5078,7 @@ type state = {
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
-  mutable suspended_keeper_inputs: (workspace_input_identity option * Masc_tui_keeper_chat_queue.t) list;
+  mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
@@ -7350,7 +7358,7 @@ let working_chat_for_keeper state keeper_name =
     let streaming =
       match entry.phase with
       | Turn_streaming -> true
-      | Turn_reconciling -> false
+      | Turn_preflight _ | Turn_reconciling -> false
     in
     String.equal entry.sent_request.keeper_name keeper_name
     && streaming
@@ -7359,7 +7367,7 @@ let working_chat_for_keeper state keeper_name =
 
 let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name (entry : inflight) =
   let held_input = List.exists (fun (name, _, intervention) -> name = keeper_name
-    && match intervention with Awaiting_control _ -> true | Retained_after_stop -> false)
+    && match intervention with Awaiting_control _ -> true | Retained_after_stop | Retained_before_dispatch -> false)
     state.keeper_interactive_waiting in
   let newer_input = held_input
     || match List.find_opt (fun item -> item.sent_request.keeper_name = keeper_name) state.msg_inflight with
@@ -7373,6 +7381,57 @@ let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name 
     if explicit || newer_input then Masc_tui_esc_interrupt.Launch_interrupt
     else Masc_tui_esc_interrupt.action ~now_ns
       (Masc_tui_keeper_chat_transcript.interrupt entry.log.tl_transcript)
+
+(* Called before withdrawing request owners. Only a preflight owner proves
+   that its request is still local; a silent stream may already be accepted. *)
+let retain_preflight_inputs (state : state) entries =
+  List.iter (fun (entry : inflight) ->
+    match entry.phase with
+    | Turn_streaming | Turn_reconciling -> ()
+    | Turn_preflight item ->
+      let request = item.Masc_tui_keeper_chat_queue.request in
+      if item.intent = Masc_tui_keeper_chat_queue.Next
+         && state.msg_target_keeper_name = Some request.keeper_name
+         && Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+              ~keeper_name:request.keeper_name = []
+         && Buffer.length state.msg_input = 0
+         && state.msg_attachments = [] && state.msg_references = []
+         && Option.is_none state.msg_recall_replaces
+      then begin
+        state.msg_history <- List.filter (fun row ->
+          not (String.equal row.me_keeper_name request.keeper_name
+               && String.equal row.me_request_id request.request_id
+               && match row.me_role with Message_user _ -> true | _ -> false))
+          state.msg_history;
+        Buffer.add_string state.msg_input request.message;
+        state.msg_attachments <- request.attachments;
+        state.msg_references <- request.references;
+        state.msg_attachments_since <- None
+      end else begin
+        state.msg_queued <- Masc_tui_keeper_chat_queue.restore_unsent state.msg_queued item;
+        state.keeper_interactive_waiting <-
+          (request.keeper_name, request.request_id, Retained_before_dispatch)
+          :: List.filter (fun (_, id, _) -> id <> request.request_id)
+            state.keeper_interactive_waiting
+      end) entries
+;;
+
+(* Suspension changes workspace ownership, not a prior server stop receipt.
+   Keep real stop reasons; other unsent input needs only explicit local resume. *)
+let suspend_keeper_input state =
+  let waiting = Masc_tui_keeper_chat_queue.waiting state.msg_queued
+    |> List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+      let name = item.request.keeper_name and id = item.request.request_id in
+      let reason = match List.find_opt (fun (held_name, held_id, _) ->
+        held_name = name && held_id = id) state.keeper_interactive_waiting with
+        | Some (_, _, Retained_after_stop) -> Retained_after_stop
+        | Some (_, _, (Awaiting_control _ | Retained_before_dispatch)) | None -> Retained_before_dispatch in
+      name, id, reason) in
+  { ski_queue = state.msg_queued; ski_waiting = waiting }
+
+let restore_suspended_keeper_input state held =
+  state.msg_queued <- held.ski_queue;
+  state.keeper_interactive_waiting <- held.ski_waiting
 
 (* Authority withdrawal drops local request owners, not submitted server work. *)
 let withdraw_keeper_chat_requests (state : state) =
@@ -7392,6 +7451,23 @@ let withdraw_keeper_chat_requests (state : state) =
 
 let keeper_chat_control_generation state keeper_name =
   Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
+
+(* These messages never paused the server. Explicit local resume authorizes
+   their first POST; an actual stop still needs the server's resume receipt. *)
+let resume_preflight_keeper_input ~owner_paused state keeper_name =
+  let holds = List.filter_map (fun (name, _, intervention) ->
+    if name = keeper_name then Some intervention else None) state.keeper_interactive_waiting in
+  if not owner_paused
+     && List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
+  then begin
+    let generation = keeper_chat_control_generation state keeper_name in
+    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+      let intervention = match intervention with
+        | Retained_before_dispatch when name = keeper_name -> Awaiting_control {generation; target=None}
+        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
+      name, id, intervention) state.keeper_interactive_waiting;
+    true
+  end else false
 
 let advance_keeper_chat_control state keeper_name =
   let generation = keeper_chat_control_generation state keeper_name + 1 in
@@ -7492,7 +7568,7 @@ let finish_keeper_chat_control state keeper_name ~generation =
       let intervention = match intervention with
         | Awaiting_control held when name = keeper_name && held.generation = generation ->
           Awaiting_control {held with generation = next}
-        | Awaiting_control _ | Retained_after_stop -> intervention in
+        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
       name, id, intervention) state.keeper_interactive_waiting;
     true
   end
@@ -7500,7 +7576,7 @@ let finish_keeper_chat_control state keeper_name ~generation =
 let release_retained_keeper_input state keeper_name =
   state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
     name <> keeper_name || match intervention with
-    | Retained_after_stop -> false | Awaiting_control _ -> true)
+    | Retained_after_stop | Retained_before_dispatch -> false | Awaiting_control _ -> true)
     state.keeper_interactive_waiting
 
 (* A receipt callback finishes control before its outcome arrives, advancing
@@ -7904,6 +7980,23 @@ let composing_for_keeper (state : state) keeper_name =
   && composer_is_live state
   && Buffer.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
+
+(* A fresh Enter may bypass input held by an explicit stop. A refused
+   preflight keeps its place until local resume; unmarked input remains owned
+   by the generic drainer and its composer/recall checks. *)
+let next_authorized_keeper_input state keeper_name =
+  let rec ready = function
+    | [] -> None
+    | (item : Masc_tui_keeper_chat_queue.item) :: rest ->
+      match List.find_opt (fun (name, id, _) ->
+        name = keeper_name && id = item.request.request_id) state.keeper_interactive_waiting with
+      | Some (_, _, Awaiting_control held)
+        when held.generation = keeper_chat_control_generation state keeper_name ->
+          Some (item, held.target)
+      | Some (_, _, Retained_before_dispatch) -> None
+      | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
+  in
+  ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
@@ -11159,7 +11252,7 @@ let runtime_selection_summary_lines ~cols state =
     | Some snapshot, Runtime_all ->
         List.nth_opt snapshot.Tui_decode.rss_resolved.rrs_runtimes state.runtime_cursor
         |> Option.map (fun runtime -> runtime,
-            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.ro_id, None) in
+            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.Tui_decode.ro_id, None) in
   match selected with
   | None -> []
   | Some (runtime, probe, lane) ->
@@ -11692,6 +11785,8 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             (match entry.phase, entry.origin with
+             | Turn_preflight _, (Promoted_queue _ | Direct_submission) ->
+                 Some (entry.sent_request, Local_pending)
              | Turn_reconciling, (Promoted_queue _ | Direct_submission) ->
                  Some (entry.sent_request, Rechecking_delivery)
              | Turn_streaming, Promoted_queue _ ->
@@ -11700,6 +11795,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
         | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             let delivery = match entry.phase with
+              | Turn_preflight _ -> Local_pending
               | Turn_streaming -> Keeper_queued
               | Turn_reconciling -> Rechecking_delivery in
             Some (entry.sent_request, delivery)
@@ -11755,7 +11851,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         (0, 0, 0) waiting_items in
     let retained = List.exists (fun (name, _, intervention) ->
       name = keeper_name && match intervention with
-      | Retained_after_stop -> true | Awaiting_control _ -> false)
+      | Retained_after_stop | Retained_before_dispatch -> true | Awaiting_control _ -> false)
       state.keeper_interactive_waiting in
     let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
     let queue_rows =
@@ -11793,7 +11889,11 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         @ local_rows
     in
     activity @ (if retained then
-      [plain "Input retained after Esc; /queue resume sends it"]
+      [plain (if List.exists (fun (name, _, intervention) ->
+         name = keeper_name && intervention = Retained_after_stop)
+         state.keeper_interactive_waiting
+       then "Input retained after Esc; /queue resume sends it"
+       else "Input retained before sending; /queue resume sends it")]
       else []) @ queue_rows
 ;;
 
@@ -11832,7 +11932,7 @@ let keeper_message_activity_rows (state : state) =
                   delivery = Rechecking_delivery
                   && Masc_tui_keeper_chat_projection.same_request_identity
                     request entry.sent_request) waiting)
-          | Turn_streaming -> false) own then
+          | Turn_preflight _ | Turn_streaming -> false) own then
         attention "메시지 전달 재확인 중";
       if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
         add "이어서 처리하기를 기다리는 중";
@@ -11887,9 +11987,11 @@ let keeper_message_activity_rows (state : state) =
         else if count Keeper_queued > 0 then add "접수됨"
       end;
       if List.exists (fun (name, _, intervention) ->
-          String.equal name keeper_name && match intervention with
-          | Retained_after_stop -> true | Awaiting_control _ -> false)
-          state.keeper_interactive_waiting then attention "중단 뒤 보관 중 · /queue resume";
+          String.equal name keeper_name && intervention = Retained_after_stop)
+          state.keeper_interactive_waiting then attention "중단 뒤 보관 중 · /queue resume"
+      else if List.exists (fun (name, _, intervention) ->
+          String.equal name keeper_name && intervention = Retained_before_dispatch)
+          state.keeper_interactive_waiting then attention "전송 전 보관 중 · /queue resume";
       let folded = match state.msg_live with
         | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
             keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
@@ -11913,7 +12015,7 @@ let keeper_message_activity_needs_attention (state : state) =
           | Keeper_turn_unavailable _ -> true
           | Keeper_turn_running _ | Keeper_turn_idle -> false) state.keeper_turns
       || List.exists (fun entry -> String.equal entry.sent_request.keeper_name name
-          && (match entry.phase with Turn_reconciling -> true | Turn_streaming -> false
+          && (match entry.phase with Turn_reconciling -> true | Turn_preflight _ | Turn_streaming -> false
               || match Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript with
                  | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false)) state.msg_inflight
       || List.exists (fun (request, result) ->
@@ -11968,7 +12070,7 @@ let keeper_message_inflight_drawn (state : state) =
       let reconciling =
         match entry.phase with
         | Turn_reconciling -> 1
-        | Turn_streaming -> 0
+        | Turn_preflight _ | Turn_streaming -> 0
       in
       if List.exists same_execution groups then
         List.map

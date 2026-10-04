@@ -74,7 +74,8 @@
         <phase>Completed</phase>
         <phase>Dropped</phase>
         <action>Request_complete | Record_proof_proven | Record_proof_refuted | Confirm_completion | Pause | Resume | Block | Unblock | Drop | Reopen</action>
-        [parity B8: Paused/Blocked phase와 Pause/Resume/Block/Unblock action은 아직 goal_phase.mli에 없다 — 목표 지점 선언.]
+        [parity B8: Paused/Blocked는 이전 진행 상태를 보존한다. Pause/Block은 새 Goal 검증 진입을 멈추고,
+         Resume/Unblock은 보존한 상태를 복원한다. 연결된 Task는 별도로 진행된다 (goal_phase.mli, #41151).]
         <invariant>status 필드는 받지 않는다. 들어오면 decode 실패 → 손상 정책 적용.
                    (goal_store.ml 화이트리스트 디코드)</invariant>
       </lifecycle>
@@ -331,7 +332,12 @@
       가장 아래 PR 만 main 을 base 로 삼는다. 피처 개발과 CI 개선은 각자의 스택에서 진행한다.
     </work_unit>
     <build_and_ci>
-      자동 CI 를 돌리지 않는다. PR·일반 branch push·주기 실행으로 CI 를 시작하지 않는다.
+      PR·일반 branch push 로 자동 CI 를 시작하지 않는다.
+      운영자가 요청한 main 최소 빌드 관측은 예외다. 30분 주기로 실행 파일 4개만 확인하며,
+      문서·changelog 외 입력이 이미 성공한 빌드와 같으면 toolchain 준비와 빌드를 생략한다.
+      실행 중인 빌드는 취소하지 않고 중복 실행을 직렬화한다. 실제 빌드 SHA 와 생략을 구분해 기록한다.
+      이 관측은 PR 승인이나 Release/Tag 전체 검증을 대체하지 않는다.
+      그 밖의 주기 CI 는 운영자의 명시 요청 없이 추가하지 않는다.
       로컬 전체 빌드와 CI watch·대기·반복 조회를 하지 않는다. 기능 구현을 계속 진행한다.
       Release/Tag 이전 CI 는 명시적으로 요청한 최소 검사만 실행한다.
       짧고 가벼운 검사를 우선 선택한다. "2분 정도"는 검사 규모를 설명하는 예시이며,

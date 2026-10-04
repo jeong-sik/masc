@@ -66,3 +66,27 @@ After #41134/#41136 merged, the branch was rebased onto main
 consumer typechecks, 113 dashboard cases and whole dashboard TypeScript check
 were rerun successfully on that base. The browser-tested Goal source files were
 unchanged; its retained screenshots remain source-fixture evidence.
+
+
+## Current main integration and idempotent-response check
+
+Integrated main `6fc062feee7e33a271e09dc155d9feffee923704` cleanly. The
+reported repeated Pause/Block object-phase response was not reachable at the
+reviewed head: the public action dispatch enters `finish_goal_suspension`
+before the generic `Already` handler. It returns the nested Goal with a string
+phase and sibling resume phase. The response regression now checks both kinds
+across all three restoration states, `noop: true`, and unchanged stored bytes.
+No production response change was required. Constitution parity B8 now reflects
+implemented suspension instead of describing it as absent.
+
+The first regular focused Dune build exposed missing direct test dependencies
+(Unix and Yojson; all directly used modules were then declared). After that
+repair, the repository wrapper built `test_goal_suspension.exe`,
+`test_goal_phase_all.exe` and `test_goal_suspension_projection.exe`; their native
+executions passed **7 + 10 + 2 = 19** tests. Logs are retained locally as
+`/tmp/pr41151-focused-build.log`, `/tmp/pr41151-focused-build2.log` and
+`/tmp/pr41151-test_goal_*.log`. The first build failure is not counted as a pass.
+Dashboard sources did not change between the earlier main base and this one;
+the historical 113 Web tests and browser captures were not rerun. No full
+server/TUI executable build, new PTY/browser execution, CI or deployment is
+claimed by this integration.

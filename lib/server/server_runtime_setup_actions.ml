@@ -77,7 +77,8 @@ let private_key ~sw pending secret =
     pending := key :: !pending;
     Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted key);
     Ok ["credential_file",`String (Runtime_setup_credentials.reference_path key)]
-let source_template ~sw ~pending ~workspace config request =
+type source_use = Observe_source | Save_source
+let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request =
   let* request = fields ["integration_id";"endpoint";"api_key";"account_ref"] ["integration_id"] request in
   let* id = text (value "integration_id" request) in
   let inventory = Runtime_wizard_inventory.to_json config in
@@ -122,6 +123,11 @@ let source_template ~sw ~pending ~workspace config request =
        | None, Some (`String _) when http -> Ok ()
        | _ -> Error Disabled_connection)
     | Some _ | None -> Ok () in
+  let existing_inline = match use, account, List.assoc_opt "api_key" request,
+      declared_provider config id with
+    | Save_source, None, None, Some ({credentials=Some (Runtime_schema.Inline _); _} as provider)
+      when http -> Some provider
+    | _ -> None in
   let* credentials = match account,List.assoc_opt "api_key" request with
     | Some (Runtime_setup_accounts.Antigravity_account account),None
       when choice=Runtime_setup_spec.Antigravity -> Ok ["credential_file",`String account.credential_file]
@@ -136,7 +142,8 @@ let source_template ~sw ~pending ~workspace config request =
       (match declared_provider config id with
        | Some provider ->
          (match (provider.credentials : Runtime_schema.credential option),http with
-          | Some (Runtime_schema.Inline secret),true -> private_key ~sw pending secret
+          | Some (Runtime_schema.Inline secret),true ->
+              if Option.is_some existing_inline then Ok [] else private_key ~sw pending secret
           | Some (Runtime_schema.Inline _),false -> Error Credential_unavailable
           | Some (Runtime_schema.File path),_ -> Ok ["credential_file",`String path]
           | Some (Runtime_schema.Env name),_ -> Ok ["api_key_env",`String name]
@@ -166,7 +173,7 @@ let source_template ~sw ~pending ~workspace config request =
     | (Runtime_setup_spec.Claude_code | Codex | Muse),Some (Runtime_setup_accounts.Antigravity_account _) ->
       Error Invalid_request
     | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity),_ -> Ok [] in
-  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice)
+  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice,existing_inline)
 let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
@@ -387,7 +394,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id,choice=source_template ~sw ~pending ~workspace:base_path config request in
+    let* template,id,choice,_=source_template ~sw ~pending ~workspace:base_path config request in
     let* json = match choice with
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
@@ -416,7 +423,7 @@ let context ~binary ~net ~base_path request =
     let* load=match value "load" request with `Bool value -> Ok value | _ -> Error Invalid_request in
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
+    let* template,id,choice,_=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
     let observed = match choice with
       | Runtime_setup_spec.Antigravity ->
         let* command=text (value "command" template) in
@@ -476,7 +483,7 @@ let save ~binary ~base_path request =
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,provider_id,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,provider_id,choice,existing_inline=source_template ~use:Save_source ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let* reported_models=match choice with
@@ -486,10 +493,14 @@ let save ~binary ~base_path request =
           | Claude_code | Codex | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
           let* spec=model_spec ~reported_models template model in
-          let spec = match declared_provider config provider_id with
-            | None -> spec
+          let* spec = match existing_inline with
             | Some provider ->
-              (match Runtime_setup_spec.for_provider spec provider with Some spec -> spec | None -> spec) in
+                (match Runtime_setup_spec.for_existing_inline_provider spec provider with
+                 | Some spec -> Ok spec | None -> Error Unsupported_connection)
+            | None -> Ok (match declared_provider config provider_id with
+                | None -> spec
+                | Some provider ->
+                  (match Runtime_setup_spec.for_provider spec provider with Some spec -> spec | None -> spec)) in
           let* spec = Runtime_setup_spec.resolve_provider spec config.providers
             |> Result.map_error (fun _ -> Unsupported_connection) in
           let* tail=specs tail in Ok (spec::tail) in

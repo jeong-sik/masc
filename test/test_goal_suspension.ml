@@ -74,7 +74,19 @@ let test_restore_matrix () = with_workspace @@ fun config _ ->
       check bool "storage round trip retains full lifecycle" true
         (GP.of_fields (Goal_store.goal_to_yojson (saved config goal.id)) = Ok suspended);
       let before = Fs_compat.load_file (Goal_store.goals_path config) in
-      change config goal.id first;
+      let repeated = transition config goal.id first |> success in
+      let open Yojson.Safe.Util in
+      check bool "repeated suspension is a no-op" true (member "noop" repeated |> to_bool);
+      let returned_goal = member "goal" repeated in
+      check string "repeated response keeps the public Goal phase a string"
+        (GP.to_string suspended) (member "phase" returned_goal |> to_string);
+      check string "repeated response keeps the restore target beside phase"
+        (GP.to_string live) (member "resume_phase" returned_goal |> to_string);
+      (match member "phase" repeated with
+       | `Null -> ()
+       | `String value -> check string "optional top-level phase remains a string"
+           (GP.to_string suspended) value
+       | _ -> fail "idempotent response changed the public phase field to an object");
       check string "same suspension does not rewrite" before (Fs_compat.load_file (Goal_store.goals_path config));
       change config goal.id "block"; phase (GP.Blocked target) (saved config goal.id);
       refused (transition config goal.id "resume");

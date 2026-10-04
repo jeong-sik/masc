@@ -473,6 +473,7 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_metrics_rotation
+  test_keeper_metrics_storage
   test_tool_error
   test_tool_token
   test_keeper_unified_claim_progress
@@ -832,6 +833,7 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_metrics_rotation
+  test_keeper_metrics_storage
   test_tool_error
   test_tool_token
   test_keeper_unified_claim_progress
@@ -9353,9 +9355,9 @@
 (test
  (name test_goal_suspension)
  (modules test_goal_suspension)
- (libraries masc masc_goal alcotest eio_main))
+ (libraries masc masc_goal masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
 
 (test
  (name test_goal_suspension_projection)
  (modules test_goal_suspension_projection)
- (libraries masc_dashboard masc_goal alcotest))
+ (libraries masc_dashboard masc_goal alcotest yojson))

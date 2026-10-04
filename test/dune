@@ -8137,7 +8137,9 @@
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
  (deps ../addons/fusion_judge.py ../addons/fusion_sampling.py ../addons/protocol.py ../addons/output-statistics/server.py
-       ../addons/msx-observer/server.py ../addons/tests/test_packages.py
+       ../addons/msx-observer/server.py ../addons/wkbl-score-runs/server.py
+       ../addons/wkbl-score-runs/fixtures/046-01-48-X2.json
+       ../addons/tests/test_packages.py
        ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
        ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)

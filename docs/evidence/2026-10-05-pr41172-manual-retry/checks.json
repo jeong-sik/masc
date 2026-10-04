@@ -1,0 +1,32 @@
+{
+  "base": "cf9635ecb077e83176de2bdedbf3028d2d6b77ae",
+  "comment": 4179163353,
+  "red": {
+    "failed": 2,
+    "passed_controls": 2,
+    "skipped": 47
+  },
+  "green": {
+    "passed": 198,
+    "files": 4
+  },
+  "tsc_errors": 0,
+  "eslint_errors": 0,
+  "source_sha256": {
+    "dashboard/src/lib/exact-lane-activity-session.ts": "aba6f8958eb673c0e938015147b28355e612aaf65e0122a7096769c8d6cb7765",
+    "dashboard/src/components/exact-lane-activity-panel.ts": "97b0c9cba67922dd85ce5419edc8c91851e003835864584f384a836799d517bc",
+    "dashboard/src/components/model-setup-resume-control.ts": "3066e9d2d9ad9435cba5100a6376cc8254aa078bbf9a5f7f1588fcde4a8a492d",
+    "dashboard/src/components/runtime-toml-editor.ts": "36d34fc8eb539d49f066a9d03be5f275fda178d8571ee5e6b946ec9884011b5e",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "72bfb9243c3904a3260693242df4938dfced11de611cd978c961ba1159983bf9",
+    "dashboard/src/components/settings-surface.test.ts": "ef3fdb3e19596017eee32e6ace57b67c5eaa8a0d0d8f9e27e24f9aa144cd3396"
+  },
+  "raw_sha256": {
+    "pr41172-manual-retry-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41172-manual-retry-green-final.log": "93ab10d71a3468602e5850649105a2758d2f3aa2d91d7aa49547f98276a1e71d",
+    "pr41172-manual-retry-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41172-manual-retry-eslint-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41172-manual-retry-green.log": "18d6822c9a582082d4211090265ff458db4e1628e2802b6aa3df229368ee758a",
+    "pr41172-manual-retry-tsc-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41172-manual-retry-red.log": "8913c72343a51eacff9e100f71e039c6c1461c408b37713aaaad3cb92fa6ee97"
+  }
+}

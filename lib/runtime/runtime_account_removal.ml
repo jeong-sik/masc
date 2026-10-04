@@ -188,7 +188,7 @@ let remove text ~id =
       config.exact_output_lane_decls
   in
   let* () =
-    match List.find_opt (fun (_, slots, cli, _) -> slots = [] && cli = []) exact_lanes with
+    match List.find_opt (fun ((lane : S.exact_output_lane_decl), slots, cli, _) -> lane.enabled && slots = [] && cli = []) exact_lanes with
     | Some ((lane : S.exact_output_lane_decl), _, _, _) -> Error (Exact_lane_emptied lane.id)
     | None -> Ok ()
   in

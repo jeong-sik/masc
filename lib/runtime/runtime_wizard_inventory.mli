@@ -10,7 +10,9 @@
     [integrations] independently projects configured providers, AGENT_CORE
     provider prototypes, and named CLI/local-server transports. Setup and
     verification support describe adapter capability, never account access or
-    measured readiness. Unsupported protocols remain visible with null protocol
+    measured readiness. Antigravity rows expose their declared [provider_timeout_s]
+    so selecting a saved account preserves its exact transport identity.
+    Unsupported protocols remain visible with null protocol
     or unsupported status. Catalog endpoint credentials are also redacted.
 
     [account_groups] groups configured official-client providers by the same

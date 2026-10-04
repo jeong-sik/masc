@@ -100,8 +100,10 @@ class ItemWire(authority.WorkspaceWire):
                     row["runtime_id"] = "a.boot.ready"
                 if missing:
                     row.pop("candle_account_revision")
+                    row["runtime_id"] = "a.public.missing"
                 elif malformed:
                     row["candle_account_revision"] = {"unexpected": "object"}
+                    row["runtime_id"] = "a.public.malformed"
         return status, payload
 
     def change_account(self, state):
@@ -395,11 +397,22 @@ def run(binary, captures):
                 ("missing", "4250", b"Balance 4.250 Candle"),
                 ("malformed", "5250", b"Balance 5.250 Candle"),
             ):
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                 with wire.lock:
-                    before_events = len(wire.events)
                     wire.missing_revision = public_revision == "missing"
                     wire.malformed_revision = public_revision == "malformed"
+                os.write(fd, b"r")
+                # The marker travels in the same public row as the invalid
+                # revision. Its rendered frame proves that row was applied,
+                # not merely requested concurrently with a private Item read.
+                marker = ("a.public." + public_revision).encode()
+                wait(lambda text: b"MASC Keepers" in text and marker in text,
+                     "public " + public_revision + " revision was not applied")
+                capture("a-public-roster-" + public_revision)
+                with wire.lock:
+                    before_events = len(wire.events)
                     wire.returned_balance = balance
+                open_items()
                 os.write(fd, b"r")
                 def fresh_items():
                     with wire.lock:

@@ -10107,6 +10107,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_surface_inflight <- None;
   state.runtime_surface_force_pending <- false;
   state.runtime_surface <- None;
+  state.runtime_evidence <- None;
   state.runtime_surface_error <- None;
   state.runtime_detail_target <- None;
   state.runtime_lane_pick <- None;
@@ -15800,6 +15801,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if is_current then
         (match result with
          | Ok load ->
+             state.runtime_evidence <- Some load.Masc_tui_loader.rsl_evidence;
              let previous_probe =
                Option.bind state.runtime_surface (fun snapshot ->
                    snapshot.Tui_decode.rss_probe)
@@ -15826,6 +15828,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          | Error detail ->
              (* The last joined reading remains visible. An authority read or
                 decode failure is not an empty lane inventory. *)
+             state.runtime_evidence <- Some (Error "runtime history not refreshed; runtime identity read failed");
              state.runtime_surface_error <- Some detail;
              Masc_tui_types.runtime_lane_list_reread state
                ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail));

@@ -249,7 +249,7 @@ let render_keeper_prompt_feedback (agg : aggregate) =
 
 let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries, cost_read = read_all_entries ~base_path ~since_unix in
+  let entries, cost_read, _decision_read = read_all_entries ~base_path ~since_unix in
   let model_stats_list = aggregate_by_model entries in
   (* per-agent rows - sorted by cost descending, skip zero-signal rows *)
   let per_agent =
@@ -338,3 +338,38 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
     ; "generated_at", `Float (Time_compat.now ())
     ]
 ;;
+
+let compute_runtime_metrics_json ~base_path ~window_minutes =
+  let observed_at = Time_compat.now () in
+  let since_unix = observed_at -. (Float.of_int window_minutes *. 60.0) in
+  let entries, cost_read, decision_read = read_all_entries ~base_path ~since_unix in
+  let unavailable diagnostic =
+    `Assoc [ "state", `String "unavailable";
+      "observed_at", `Float observed_at; "window_minutes", `Int window_minutes;
+      "decision_read", `Assoc diagnostic ] in
+  match decision_read with
+  | Decision_directory_unavailable -> unavailable ["cause", `String "directory_unavailable"]
+  | Decision_files_unreadable count ->
+      unavailable ["cause", `String "files_unreadable"; "unreadable_files", `Int count]
+  | Decision_rows_invalid { malformed_rows; schema_violation_rows } ->
+      unavailable ["cause", `String "rows_invalid";
+        "malformed_rows", `Int malformed_rows;
+        "schema_violation_rows", `Int schema_violation_rows]
+  | Decisions_read ->
+  let attributed = List.filter_map (fun (entry : raw_entry) ->
+    match entry.executed_runtime_id with
+    | Some runtime_id -> Some { entry with model = runtime_id }
+    | None -> None) entries in
+  let runtimes = aggregate_by_model attributed |> List.map (fun stats ->
+    match model_stats_to_json ~model_label:stats.model_id stats with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "model_id", value -> "runtime_id", value
+        | field -> field) fields)
+    | json -> json) in
+  `Assoc [ "state", `String "ready";
+    "observed_at", `Float observed_at;
+    "window_minutes", `Int window_minutes;
+    "attributed_entries", `Int (List.length attributed);
+    "unattributed_entries", `Int (List.length entries - List.length attributed);
+    "cost_read", cost_read_to_json cost_read;
+    "runtimes", `List runtimes ]

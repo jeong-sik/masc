@@ -5794,6 +5794,7 @@ type state = {
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
+  mutable runtime_evidence: (Masc_tui_runtime_evidence.t, string) result option;
   mutable runtime_surface_error: string option;
   mutable runtime_surface_scroll: int;
   mutable runtime_detail_target: runtime_detail_target option;
@@ -8490,6 +8491,7 @@ let create_state
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;
+  runtime_evidence = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
   runtime_detail_target = None;

@@ -20,7 +20,7 @@ CURATOR_OCAML_BIN=/path/to/ocaml-5.5.1/bin python3 docs/evidence/2026-10-04-cura
 git diff --check
 ```
 
-Seven full ML/MLI sources parsed with OCaml 5.5.1. The installed Eio 1.3
+Seven full ML/MLI sources parsed with OCaml 5.5.1. The installed Eio
 `core/eio__core.mli` and `core/promise.ml` were read to verify cross-domain
 promise resolution, enqueue semantics and waiter cancellation.
 

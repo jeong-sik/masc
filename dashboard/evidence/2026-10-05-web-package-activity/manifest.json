@@ -31,6 +31,7 @@
     "dashboard/src/lib/lane-package-activity.ts": "e48beccfe028747f9aef38b99a6087d42dd0671fbbf078b0772c6a1b356c5511",
     "docs/guides/web-lane-addons.md": "22406f184aff047a9a2ca0f723223444f5bc53dd60e6e878b8886db211e4c140",
     "lib/lane_addon/lane_addon_config.ml": "151084261c5e45fb03c70548008bec61c282c74504208cc242912025c1d462e1",
-    "lib/lane_addon/lane_addon_declaration.ml": "a16a3971539f837a7b312465809befe3df634cc19c0097c041c3d478d465d8fe"
+    "lib/lane_addon/lane_addon_declaration.ml": "a16a3971539f837a7b312465809befe3df634cc19c0097c041c3d478d465d8fe",
+    "changelog.d/41208.md": "030a68d46cb8e6ed2750f6c18b71aa41eaa6734d36c87058b2abbcb51b7b9910"
   }
 }

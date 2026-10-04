@@ -1,0 +1,668 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-retry-result-20261005/dashboard
+
+ ❯ src/components/exact-lane-activity-panel.test.ts (51 tests | 2 failed | 47 skipped) 10131ms
+   ❯ Exact activity operator flow (42)
+     × settles only the resolved setup error after manual retry: success 5047ms
+     × settles only the resolved setup error after manual retry: refresh 5028ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > settles only the resolved setup error after manual retry: success
+TestingLibraryElementError: Found multiple elements with the text: /재개를 확인하지 못했습니다/
+
+Here are the matching elements:
+
+Ignored nodes: comments, script, style
+[36m<p[39m
+  [33mrole[39m=[32m"alert"[39m
+[36m>[39m
+  [0m설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.[0m
+[36m</p>[39m
+
+Ignored nodes: comments, script, style
+[36m<p[39m
+  [33mrole[39m=[32m"alert"[39m
+[36m>[39m
+  [0m설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.[0m
+[36m</p>[39m
+
+(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden v2-monitoring-panel"[39m
+        [33mdata-section-card[39m=[32m"true"[39m
+        [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+        [33mdata-section-card-class-length[39m=[32m"19"[39m
+        [33mdata-section-card-content-state[39m=[32m"node"[39m
+        [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+        [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+        [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+        [33mdata-section-card-has-right-slot[39m=[32m"true"[39m
+        [33mdata-section-card-has-status[39m=[32m"false"[39m
+        [33mdata-section-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-section-card-has-tone[39m=[32m"false"[39m
+        [33mdata-section-card-label-source[39m=[32m"label"[39m
+        [33mdata-section-card-label-state[39m=[32m"text"[39m
+        [33mdata-section-card-label-text-length[39m=[32m"12"[39m
+        [33mdata-section-card-status[39m=[32m""[39m
+        [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+        [33mdata-section-card-status-length[39m=[32m"0"[39m
+        [33mdata-section-card-tail-source[39m=[32m"right"[39m
+        [33mdata-section-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-section-card-tone-length[39m=[32m"0"[39m
+        [33mdata-section-card-variant[39m=[32m"light"[39m
+        [33mdata-surface-card[39m=[32m"true"[39m
+        [33mdata-surface-card-class-length[39m=[32m"19"[39m
+        [33mdata-surface-card-content-state[39m=[32m"node"[39m
+        [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-surface-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+        [33mdata-surface-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-surface-card-tone[39m=[32m""[39m
+        [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+        [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+        [33mdata-surface-card-variant[39m=[32m"light"[39m
+        [33mdata-testid[39m=[32m"runtime-toml-editor"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+          [36m>[39m
+            [0mruntime.toml[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-section-head-tail[39m=[32m"true"[39m
+            [33mstyle[39m=[32m"margin-left: auto; display: inline-flex; gap: 4px; align-items: center;"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"rt-status is-saved"[39m
+              [33mdata-testid[39m=[32m"runtime-toml-status"[39m
+            [36m>[39m
+              [0msaved[0m
+            [36m</span>[39m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+            [33mclass[39m=[32m"set-card"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m설정 재개[0m
+            [36m</button>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rt-shell"[39m
+          [36m>[39m
+            [36m<nav[39m
+              [33maria-label[39m=[32m"런타임 편집기 섹션"[39m
+              [33mclass[39m=[32m"rt-nav"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rt-nav-h"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"eyebrow"[39m
+                [36m>[39m
+                  [0mOperator[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-title"[39m
+                [36m>[39m
+                  [0m런타임 편집기[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-sub mono"[39m
+                [36m>[39m
+                  [0mconfig/runtime.toml[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"rt-nav-item on"[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-routing"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◷[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m라우팅[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-lanes"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m⇄[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0mLane 후보[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-providers"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◇[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m프로바이더[0m
+                [36m...
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden v2-monitoring-panel"[39m
+          [33mdata-section-card[39m=[32m"true"[39m
+          [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+          [33mdata-section-card-class-length[39m=[32m"19"[39m
+          [33mdata-section-card-content-state[39m=[32m"node"[39m
+          [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+          [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+          [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+          [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+          [33mdata-section-card-has-right-slot[39m=[32m"true"[39m
+          [33mdata-section-card-has-status[39m=[32m"false"[39m
+          [33mdata-section-card-has-test-id[39m=[32m"true"[39m
+          [33mdata-section-card-has-tone[39m=[32m"false"[39m
+          [33mdata-section-card-label-source[39m=[32m"label"[39m
+          [33mdata-section-card-label-state[39m=[32m"text"[39m
+          [33mdata-section-card-label-text-length[39m=[32m"12"[39m
+          [33mdata-section-card-status[39m=[32m""[39m
+          [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+          [33mdata-section-card-status-length[39m=[32m"0"[39m
+          [33mdata-section-card-tail-source[39m=[32m"right"[39m
+          [33mdata-section-card-test-id-length[39m=[32m"19"[39m
+          [33mdata-section-card-tone-length[39m=[32m"0"[39m
+          [33mdata-section-card-variant[39m=[32m"light"[39m
+          [33mdata-surface-card[39m=[32m"true"[39m
+          [33mdata-surface-card-class-length[39m=[32m"19"[39m
+          [33mdata-surface-card-content-state[39m=[32m"node"[39m
+          [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+          [33mdata-surface-card-has-test-id[39m=[32m"true"[39m
+          [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+          [33mdata-surface-card-test-id-length[39m=[32m"19"[39m
+          [33mdata-surface-card-tone[39m=[32m""[39m
+          [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+          [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+          [33mdata-surface-card-variant[39m=[32m"light"[39m
+          [33mdata-testid[39m=[32m"runtime-toml-editor"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+            [36m>[39m
+              [0mruntime.toml[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-section-head-tail[39m=[32m"true"[39m
+              [33mstyle[39m=[32m"margin-left: auto; display: inline-flex; gap: 4px; align-items: center;"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"rt-status is-saved"[39m
+                [33mdata-testid[39m=[32m"runtime-toml-status"[39m
+              [36m>[39m
+                [0msaved[0m
+              [36m</span>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+              [33mclass[39m=[32m"set-card"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"btn"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m설정 재개[0m
+              [36m</button>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"set-hint"[39m
+              [36m>[39m
+                [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"rt-shell"[39m
+            [36m>[39m
+              [36m<nav[39m
+                [33maria-label[39m=[32m"런타임 편집기 섹션"[39m
+                [33mclass[39m=[32m"rt-nav"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-h"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"eyebrow"[39m
+                  [36m>[39m
+                    [0mOperator[0m
+                  [36m</div>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"rt-nav-title"[39m
+                  [36m>[39m
+                    [0m런타임 편집기[0m
+                  [36m</div>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"rt-nav-sub mono"[39m
+                  [36m>[39m
+                    [0mconfig/runtime.toml[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"rt-nav-item on"[39m
+                  [33mdata-testid[39m=[32m"runtime-toml-nav-routing"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                  [36m>[39m
+                    [0m◷[0m
+                  [36m</span>[39m
+                  [36m<span>[39m
+                    [0m라우팅[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"rt-nav-item "[39m
+                  [33mdata-testid[39m=[32m"runtime-toml-nav-lanes"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                  [36m>[39m
+                    [0m⇄[0m
+                  [36m</span>[39m
+                  [36m<span>[39m
+                    [0mLane 후보[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"rt-nav-item "[39m
+                  [33mdata-testid[39m=[32m"runtime-toml-nav-providers"[39m
+                  [33mtype[...
+ ❯ Module.waitForWrapper ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ src/components/exact-lane-activity-panel.test.ts:91:16
+     89|       ? { kind: 'failed', reason: 'activation_failed' } : { kind: 'act…
+     90|     if (kind === 'failed' || kind === 'authority') expect(view.getByTe…
+     91|     else await waitFor(() => expect(view.queryByText(/재개를 확인하지 못했습니다/)…
+       |                ^
+     92|     if (kind === 'refresh') expect(view.getByText(/fixture refresh fai…
+     93|     view.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > settles only the resolved setup error after manual retry: refresh
+TestingLibraryElementError: Found multiple elements with the text: /재개를 확인하지 못했습니다/
+
+Here are the matching elements:
+
+Ignored nodes: comments, script, style
+[36m<p[39m
+  [33mrole[39m=[32m"alert"[39m
+[36m>[39m
+  [0m설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요. 설정 저장 후 목록 갱신 실패: fixture refresh failed[0m
+[36m</p>[39m
+
+Ignored nodes: comments, script, style
+[36m<p[39m
+  [33mrole[39m=[32m"alert"[39m
+[36m>[39m
+  [0m설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요. 설정 저장 후 목록 갱신 실패: fixture refresh failed[0m
+[36m</p>[39m
+
+(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden v2-monitoring-panel"[39m
+        [33mdata-section-card[39m=[32m"true"[39m
+        [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+        [33mdata-section-card-class-length[39m=[32m"19"[39m
+        [33mdata-section-card-content-state[39m=[32m"node"[39m
+        [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+        [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+        [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+        [33mdata-section-card-has-right-slot[39m=[32m"true"[39m
+        [33mdata-section-card-has-status[39m=[32m"false"[39m
+        [33mdata-section-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-section-card-has-tone[39m=[32m"false"[39m
+        [33mdata-section-card-label-source[39m=[32m"label"[39m
+        [33mdata-section-card-label-state[39m=[32m"text"[39m
+        [33mdata-section-card-label-text-length[39m=[32m"12"[39m
+        [33mdata-section-card-status[39m=[32m""[39m
+        [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+        [33mdata-section-card-status-length[39m=[32m"0"[39m
+        [33mdata-section-card-tail-source[39m=[32m"right"[39m
+        [33mdata-section-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-section-card-tone-length[39m=[32m"0"[39m
+        [33mdata-section-card-variant[39m=[32m"light"[39m
+        [33mdata-surface-card[39m=[32m"true"[39m
+        [33mdata-surface-card-class-length[39m=[32m"19"[39m
+        [33mdata-surface-card-content-state[39m=[32m"node"[39m
+        [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-surface-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+        [33mdata-surface-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-surface-card-tone[39m=[32m""[39m
+        [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+        [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+        [33mdata-surface-card-variant[39m=[32m"light"[39m
+        [33mdata-testid[39m=[32m"runtime-toml-editor"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+          [36m>[39m
+            [0mruntime.toml[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-section-head-tail[39m=[32m"true"[39m
+            [33mstyle[39m=[32m"margin-left: auto; display: inline-flex; gap: 4px; align-items: center;"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"rt-status is-saved"[39m
+              [33mdata-testid[39m=[32m"runtime-toml-status"[39m
+            [36m>[39m
+              [0msaved[0m
+            [36m</span>[39m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+            [33mclass[39m=[32m"set-card"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m설정 재개[0m
+            [36m</button>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rt-shell"[39m
+          [36m>[39m
+            [36m<nav[39m
+              [33maria-label[39m=[32m"런타임 편집기 섹션"[39m
+              [33mclass[39m=[32m"rt-nav"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rt-nav-h"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"eyebrow"[39m
+                [36m>[39m
+                  [0mOperator[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-title"[39m
+                [36m>[39m
+                  [0m런타임 편집기[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-sub mono"[39m
+                [36m>[39m
+                  [0mconfig/runtime.toml[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"rt-nav-item on"[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-routing"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◷[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m라우팅[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-lanes"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m⇄[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0mLane 후보[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-providers"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◇[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m프로바이더[0m
+                [36m...
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden v2-monitoring-panel"[39m
+          [33mdata-section-card[39m=[32m"true"[39m
+          [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+          [33mdata-section-card-class-length[39m=[32m"19"[39m
+          [33mdata-section-card-content-state[39m=[32m"node"[39m
+          [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+          [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+          [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+          [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+          [33mdata-section-card-has-right-slot[39m=[32m"true"[39m
+          [33mdata-section-card-has-status[39m=[32m"false"[39m
+          [33mdata-section-card-has-test-id[39m=[32m"true"[39m
+          [33mdata-section-card-has-tone[39m=[32m"false"[39m
+          [33mdata-section-card-label-source[39m=[32m"label"[39m
+          [33mdata-section-card-label-state[39m=[32m"text"[39m
+          [33mdata-section-card-label-text-length[39m=[32m"12"[39m
+          [33mdata-section-card-status[39m=[32m""[39m
+          [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+          [33mdata-section-card-status-length[39m=[32m"0"[39m
+          [33mdata-section-card-tail-source[39m=[32m"right"[39m
+          [33mdata-section-card-test-id-length[39m=[32m"19"[39m
+          [33mdata-section-card-tone-length[39m=[32m"0"[39m
+          [33mdata-section-card-variant[39m=[32m"light"[39m
+          [33mdata-surface-card[39m=[32m"true"[39m
+          [33mdata-surface-card-class-length[39m=[32m"19"[39m
+          [33mdata-surface-card-content-state[39m=[32m"node"[39m
+          [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+          [33mdata-surface-card-has-test-id[39m=[32m"true"[39m
+          [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+          [33mdata-surface-card-test-id-length[39m=[32m"19"[39m
+          [33mdata-surface-card-tone[39m=[32m""[39m
+          [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+          [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+          [33mdata-surface-card-variant[39m=[32m"light"[39m
+          [33mdata-testid[39m=[32m"runtime-toml-editor"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+            [36m>[39m
+              [0mruntime.toml[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-section-head-tail[39m=[32m"true"[39m
+              [33mstyle[39m=[32m"margin-left: auto; display: inline-flex; gap: 4px; align-items: center;"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"rt-status is-saved"[39m
+                [33mdata-testid[39m=[32m"runtime-toml-status"[39m
+              [36m>[39m
+                [0msaved[0m
+              [36m</span>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+              [33mclass[39m=[32m"set-card"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"btn"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m설정 재개[0m
+              [36m</button>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"set-hint"[39m
+              [36m>[39m
+                [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"rt-shell"[39m
+            [36m>[39m
+              [36m<nav[39m
+                [33maria-label[39m=[32m"런타임 편집기 섹션"[39m
+                [33mclass[39m=[32m"rt-nav"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-h"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"eyebrow"[39m
+                  [36m>[39m
+                    [0mOperator[0m
+                  [36m</div>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"rt-nav-title"[39m
+                  [36m>[39m
+                    [0m런타임 편집기[0m
+                  [36m</div>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"rt-nav-sub mono"[39m
+                  [36m>[39m
+                    [0mconfig/runtime.toml[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"rt-nav-item on"[39m
+                  [33mdata-testid[39m=[32m"runtime-toml-nav-routing"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                  [36m>[39m
+                    [0m◷[0m
+                  [36m</span>[39m
+                  [36m<span>[39m
+                    [0m라우팅[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"rt-nav-item "[39m
+                  [33mdata-testid[39m=[32m"runtime-toml-nav-lanes"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                  [36m>[39m
+                    [0m⇄[0m
+                  [36m</span>[39m
+                  [36m<span>[39m
+                    [0mLane 후보[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"rt-nav-item "[39m
+                  [33mdata-testid[39m=[32m"runtime-toml-nav-providers"[39m
+                  [33mtype[...
+ ❯ Module.waitForWrapper ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ src/components/exact-lane-activity-panel.test.ts:91:16
+     89|       ? { kind: 'failed', reason: 'activation_failed' } : { kind: 'act…
+     90|     if (kind === 'failed' || kind === 'authority') expect(view.getByTe…
+     91|     else await waitFor(() => expect(view.queryByText(/재개를 확인하지 못했습니다/)…
+       |                ^
+     92|     if (kind === 'refresh') expect(view.getByText(/fixture refresh fai…
+     93|     view.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed | 47 skipped (51)
+   Start at  06:25:37
+   Duration  11.60s (tests 88%, import 5%, transform 5%, environment 1%, setup 1%)
+

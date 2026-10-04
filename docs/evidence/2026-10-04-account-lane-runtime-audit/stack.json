@@ -1,0 +1,62 @@
+[
+  {
+    "number": 41106,
+    "url": "https://github.com/jeong-sik/masc/pull/41106",
+    "head": "0e1e67b07f6222141e6d2d27615521b6a775522b",
+    "base": "7de37c58f6718e557960059840bcd6d057ab63ae",
+    "base_ref": "fix/task-2054-setup-save-publishes-registry",
+    "draft": true,
+    "state": "open",
+    "stack": null
+  },
+  {
+    "number": 41107,
+    "url": "https://github.com/jeong-sik/masc/pull/41107",
+    "head": "0d328ebc60480f7a2d130f69315332ffd4d01766",
+    "base": "0e1e67b07f6222141e6d2d27615521b6a775522b",
+    "base_ref": "fix/account-model-variants-20261004",
+    "draft": true,
+    "state": "open",
+    "stack": null
+  },
+  {
+    "number": 41108,
+    "url": "https://github.com/jeong-sik/masc/pull/41108",
+    "head": "a2818e9dc66125775fc7e36d5a4d23ef6259f442",
+    "base": "0d328ebc60480f7a2d130f69315332ffd4d01766",
+    "base_ref": "fix/grouped-account-setup-stack-20261004",
+    "draft": true,
+    "state": "open",
+    "stack": null
+  },
+  {
+    "number": 41109,
+    "url": "https://github.com/jeong-sik/masc/pull/41109",
+    "head": "ea177c156c2c8f29a9f54c0f53407f7097d82b53",
+    "base": "a2818e9dc66125775fc7e36d5a4d23ef6259f442",
+    "base_ref": "fix/login-activation-stack-20261004",
+    "draft": true,
+    "state": "open",
+    "stack": null
+  },
+  {
+    "number": 41110,
+    "url": "https://github.com/jeong-sik/masc/pull/41110",
+    "head": "ffdf693772b6425bc91653cb05a0356fc1649878",
+    "base": "ea177c156c2c8f29a9f54c0f53407f7097d82b53",
+    "base_ref": "fix/provider-usage-stack-20261004",
+    "draft": true,
+    "state": "open",
+    "stack": null
+  },
+  {
+    "number": 41113,
+    "url": "https://github.com/jeong-sik/masc/pull/41113",
+    "head": "932f3feb4888684edefa61e8518e30c24cf41886",
+    "base": "ffdf693772b6425bc91653cb05a0356fc1649878",
+    "base_ref": "fix/context-runtime-visibility-stack-20261004",
+    "draft": true,
+    "state": "open",
+    "stack": null
+  }
+]

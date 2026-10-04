@@ -1,0 +1,51 @@
+{
+  "base": "7de37c58f6718e557960059840bcd6d057ab63ae",
+  "source_reviews": [
+    {
+      "scope": "lower six integration",
+      "head": "932f3feb4888684edefa61e8518e30c24cf41886",
+      "verdict": "PASS",
+      "reviewer": "review_usage",
+      "scope_note": "No integration P0/P1/P2; excludes independent approval of own Usage/status implementation. Published heads differ from prior implementation only by accumulated changelogs."
+    },
+    {
+      "scope": "metrics history",
+      "head": "4f16ccd446dadd40eba932d9d4a0424529680fd6",
+      "base": "46b22b9586916189d9140c31ffc17e8a838d8609",
+      "verdict": "PASS",
+      "reviewer": "review_usage"
+    },
+    {
+      "scope": "empty successful usage reads",
+      "head": "c331df292b6e2d4577e1ed8a86e97a06f8d7b7ff",
+      "base": "f94b13c147d662b9dae9383cfe52e830c0f887a5",
+      "diff_sha256": "e0d0f707242c816be3a7deecd8aea4dcec6416af595badcc3fdc4f5fe6d881a0",
+      "verdict": "PASS",
+      "reviewer": "respond_login_activation"
+    },
+    {
+      "scope": "existing grouping and account scope display",
+      "heads": [
+        "370a6bb098736794f418731e02ed44c2b66a7c4f",
+        "653f6981ed0392f2608361fa86bcdda33941dde5"
+      ],
+      "verdict": "PASS",
+      "reviewer": "parent",
+      "scope_note": "Complete source diffs read; no P0/P1/P2 finding. Author agent focused tests reported separately."
+    },
+    {
+      "scope": "status width and selected account reading",
+      "head": "4fcde00df90df0ed42debffc5e9f9945b69e848f",
+      "verdict": "PASS",
+      "reviewer": "parent",
+      "scope_note": "Complete renderer/helper/test diffs read; no P0/P1/P2 source finding. New-binary behavior not proved."
+    },
+    {
+      "scope": "stale source response repair",
+      "head": "be6d277599844a6a9651ca7f4729edf1d87c0f6d",
+      "verdict": "PASS",
+      "reviewer": "parent",
+      "scope_note": "Complete production, protocol, docs and regression diff read; generation gates all source successes/failures before state changes, captured exact target and navigation/workspace cancellation checked. Syntax-only execution evidence; new PTY authored."
+    }
+  ]
+}

@@ -19208,6 +19208,7 @@ and is loaded on demand through keeper_skill.
       let recovered_paste = Option.is_some interrupted_paste in
       let browser_activity_on_screen () =
         state.view = Lanes && Option.is_some state.browser_activity_open
+        && not state.help_open
         && (let terminal_rows, _ = get_terminal_size () in
             match Masc_tui_render.frame_choice state ~terminal_rows with
             | `Surface | `Too_small _ -> true

@@ -4,7 +4,7 @@ import os
 import sys
 import time
 
-import test_tui_keyboard_input as keyboard
+import tui_keyboard_walk as keyboard
 
 
 

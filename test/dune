@@ -4014,7 +4014,11 @@
 
 (rule
  (alias runtest-test_tui_metrics_source_status)
- (deps test_tui_metrics_source_status.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_metrics_source_status.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_metrics_source_status.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -4023,7 +4027,13 @@
 
 (rule
  (alias runtest-test_tui_approval_progress)
- (deps test_tui_approval_progress.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_approval_progress.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action (run python3 %{dep:test_tui_approval_progress.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -4032,7 +4042,13 @@
 
 (rule
  (alias runtest-test_tui_chat_input_safety)
- (deps test_tui_chat_input_safety.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_chat_input_safety.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action (run python3 %{dep:test_tui_chat_input_safety.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -4041,7 +4057,10 @@
 
 (rule
  (alias runtest-test_tui_chat_copy_pty)
- (deps test_tui_chat_copy_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_chat_copy_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_chat_copy_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -4050,7 +4069,12 @@
 
 (rule
  (alias runtest-test_tui_snapshot_response_order)
- (deps test_tui_snapshot_response_order.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_snapshot_response_order.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py
+  tui_keyboard_schedule.py)
  (action (run python3 %{dep:test_tui_snapshot_response_order.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -4059,7 +4083,10 @@
 
 (rule
  (alias runtest-test_tui_connectors_entry)
- (deps test_tui_connectors_entry.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_connectors_entry.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_connectors_entry.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -4174,28 +4201,136 @@
 
 (rule
  (alias runtest-test_tui_chat_input_pty)
- (deps test_tui_chat_input_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_chat_input_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_chat_input_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_keyboard_general_pty)
- (deps test_tui_keyboard_general_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_general_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_keyboard_general_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_keyboard_surfaces_pty)
- (deps test_tui_keyboard_surfaces_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_surfaces_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_keyboard_surfaces_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_keyboard_overview_pty)
- (deps test_tui_keyboard_overview_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_overview_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_keyboard_overview_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_home_decision_receipt_pty)
  (deps test_tui_home_decision_receipt_pty.py test_tui_home_decision_cards_pty.py
-       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_decision_receipt_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -4206,7 +4341,10 @@
 (rule
  (alias runtest-test_tui_home_receipt_pty)
  (enabled_if (= %{system} linux))
- (deps test_tui_home_receipt_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_home_receipt_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_home_receipt_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -4216,12 +4354,54 @@
 
 (rule
  (alias runtest-test_tui_keyboard_rosters_pty)
- (deps test_tui_keyboard_rosters_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_rosters_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_keyboard_rosters_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_keyboard_board_terminal_pty)
- (deps test_tui_keyboard_board_terminal_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_board_terminal_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_keyboard_board_terminal_pty.py} %{dep:../bin/masc_tui.exe})))
 
 ; The default runtest alias already runs this scenario through the keyboard aggregate.
@@ -4229,8 +4409,44 @@
 ; repeating the walk in every full test run.
 (rule
  (alias runtest-test_tui_context_inspector)
- (deps test_tui_context_inspector.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_context_inspector.py
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_context_inspector.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_verify_tui_keyboard_split)
+ (deps test_verify_tui_keyboard_split.py ../scripts/verify-tui-keyboard-split.py)
+ (action (run python3 %{dep:test_verify_tui_keyboard_split.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_verify_tui_keyboard_split)))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
@@ -4242,7 +4458,31 @@
  (alias runtest-test_tui_keyboard_input-memory-journal)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4260,7 +4500,31 @@
  (alias runtest-test_tui_keyboard_input-voice-wizard)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4276,7 +4540,31 @@
  (alias runtest-test_tui_keyboard_input-code-memo)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4297,7 +4585,31 @@
  (alias runtest-test_tui_keyboard_input-first-install-credential)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4317,7 +4629,31 @@
  (alias runtest-test_tui_keyboard_input-exit-reason)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4337,7 +4673,31 @@
  (alias runtest-test_tui_keyboard_input-mermaid-chat)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4357,7 +4717,31 @@
  (alias runtest-test_tui_keyboard_input-changes-newline)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4378,7 +4762,31 @@
  (alias runtest-test_tui_keyboard_input-schedule-delivery)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4394,7 +4802,31 @@
  (alias runtest-test_tui_keyboard_input-schedule-source-status)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4414,7 +4846,31 @@
  (alias runtest-test_tui_keyboard_input-board-compose-footer)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4435,7 +4891,31 @@
  (alias runtest-test_tui_keyboard_input-msx-spectator)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4449,7 +4929,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-msx-retained)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} msx-retained)))
 
@@ -4459,7 +4965,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-msx-retained-tick)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} msx-retained-tick)))
 
@@ -4471,7 +5003,31 @@
  (alias runtest-test_tui_keyboard_input-msx-size)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4487,7 +5043,31 @@
  (alias runtest-test_tui_keyboard_input-dos-live)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4503,7 +5083,31 @@
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4519,7 +5123,31 @@
  (alias runtest-test_tui_keyboard_input-send-on-stop)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4535,7 +5163,31 @@
  (alias runtest-test_tui_keyboard_input-quit-waiting)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4551,7 +5203,31 @@
  (alias runtest-test_tui_keyboard_input-chat-retained-stop)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4567,7 +5243,31 @@
  (alias runtest-test_tui_keyboard_input-ctrl-y)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4583,7 +5283,31 @@
  (alias runtest-test_tui_keyboard_input-held-back-override)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4599,7 +5323,31 @@
  (alias runtest-test_tui_keyboard_input-theme-scheme)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4615,7 +5363,31 @@
  (alias runtest-test_tui_keyboard_input-msx-palette)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4631,7 +5403,31 @@
  (alias runtest-test_tui_keyboard_input-planning-review)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4647,7 +5443,31 @@
  (alias runtest-test_tui_keyboard_input-repositories)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4661,7 +5481,12 @@
 
 (rule
  (alias runtest-test_tui_workspace_read_error)
- (deps test_tui_workspace_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_workspace_read_error.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_repositories.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_workspace_read_error.py} %{dep:../bin/masc_tui.exe})))
 
@@ -4671,7 +5496,10 @@
 
 (rule
  (alias runtest-test_tui_system_logs_read_error)
- (deps test_tui_system_logs_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_system_logs_read_error.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_system_logs_read_error.py} %{dep:../bin/masc_tui.exe})))
 
@@ -4683,7 +5511,31 @@
  (alias runtest-test_tui_keyboard_input-project-changes)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4697,7 +5549,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-browser-screenshot)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
    %{dep:../bin/masc_tui.exe} browser-screenshot)))
@@ -4710,7 +5588,31 @@
  (alias runtest-test_tui_keyboard_input-config)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4726,7 +5628,31 @@
  (alias runtest-test_tui_keyboard_input-chat-clarity)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4742,7 +5668,31 @@
  (alias runtest-test_tui_keyboard_input-runtime)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4756,7 +5706,11 @@
 
 (rule
  (alias runtest-test_tui_runtime_read_error)
- (deps test_tui_runtime_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_runtime_read_error.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_runtime_read_error.py} %{dep:../bin/masc_tui.exe})))
 
@@ -4768,7 +5722,31 @@
  (alias runtest-test_tui_keyboard_input-resources)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4782,7 +5760,7 @@
 
 (rule
  (alias runtest-test_tui_resources_pty)
- (deps test_tui_resources_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_resources_pty.py tui_keyboard_harness.py tui_keyboard_resources.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_resources_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -4792,7 +5770,11 @@
 
 (rule
  (alias runtest-test_tui_resources_read_error)
- (deps test_tui_resources_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_resources_read_error.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_resources.py)
  (action
   (run python3 %{dep:test_tui_resources_read_error.py} %{dep:../bin/masc_tui.exe})))
 
@@ -4804,7 +5786,31 @@
  (alias runtest-test_tui_keyboard_input-keepers-lanes)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4820,7 +5826,31 @@
  (alias runtest-test_tui_keyboard_input-keeper-settings-activation)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4836,7 +5866,31 @@
  (alias runtest-test_tui_keyboard_input-board-json)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4852,7 +5906,31 @@
  (alias runtest-test_tui_keyboard_input-skill-usage-coverage)
  (deps
   test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run
    python3
@@ -4866,7 +5944,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-tools-purpose)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} tools-purpose)))
 
@@ -4876,7 +5980,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-acting-call-evidence)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} acting-call-evidence)))
 
@@ -5016,7 +6146,12 @@
 
 (rule
  (alias runtest-test_tui_goal_confirmation_pty)
- (deps test_tui_goal_confirmation_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_goal_confirmation_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py
+  tui_keyboard_planning.py)
  (action
   (run python3 %{dep:test_tui_goal_confirmation_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -5929,14 +7064,66 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-fusion-history)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
   %{dep:../bin/masc_tui.exe} fusion-history)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-dashboard-usage)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
    %{dep:../bin/masc_tui.exe} dashboard-usage)))
@@ -5951,7 +7138,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-http-badge-refresh)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
    %{dep:../bin/masc_tui.exe} http-badge-refresh)))
@@ -5962,7 +7175,31 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-http-conditional-read)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
    %{dep:../bin/masc_tui.exe} http-conditional-read)))
@@ -5973,7 +7210,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-observer-reconnect)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
    %{dep:../bin/masc_tui.exe} observer-reconnect)))
@@ -5988,7 +7251,10 @@
 
 (rule
  (alias runtest-test_tui_board_scroll)
- (deps test_tui_board_scroll.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_board_scroll.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_board_scroll.py} %{dep:../bin/masc_tui.exe})))
 
@@ -5998,7 +7264,10 @@
 
 (rule
  (alias runtest-test_tui_board_heading_width)
- (deps test_tui_board_heading_width.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_board_heading_width.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_board_heading_width.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6008,7 +7277,10 @@
 
 (rule
  (alias runtest-test_tui_board_closed_marker)
- (deps test_tui_board_closed_marker.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_board_closed_marker.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_board_closed_marker.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6018,7 +7290,10 @@
 
 (rule
  (alias runtest-test_tui_config_paths_row)
- (deps test_tui_config_paths_row.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_config_paths_row.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_config_paths_row.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6028,7 +7303,11 @@
 
 (rule
  (alias runtest-test_tui_runtime_config_read_error)
- (deps test_tui_runtime_config_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_runtime_config_read_error.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_runtime_config_read_error.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6038,19 +7317,32 @@
 
 (rule
  (alias runtest-test_tui_tab_strip_pty)
- (deps test_tui_tab_strip_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_tab_strip_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_queue_visibility_pty)
- (deps test_tui_queue_visibility_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_queue_visibility_pty.py
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py
+  ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_queue_visibility_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_stored_image_pty)
- (deps test_tui_stored_image_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_stored_image_pty.py
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py
+  ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_stored_image_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6064,7 +7356,10 @@
 
 (rule
  (alias runtest-test_tui_play_invites_pty)
- (deps test_tui_play_invites_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_play_invites_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_play_invites_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6074,7 +7369,13 @@
 
 (rule
  (alias runtest-test_tui_play_card_pty)
- (deps test_tui_play_card_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_play_card_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_play_card_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6088,7 +7389,12 @@
 
 (rule
  (alias runtest-test_tui_acting_pane_floor_pty)
- (deps test_tui_acting_pane_floor_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_acting_pane_floor_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_acting_pane_floor_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6098,7 +7404,13 @@
 
 (rule
  (alias runtest-test_tui_fifo_admission_pty)
- (deps test_tui_fifo_admission_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_fifo_admission_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_fifo_admission_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6108,7 +7420,13 @@
 
 (rule
  (alias runtest-test_tui_paste_pause_pty)
- (deps test_tui_paste_pause_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_paste_pause_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_paste_pause_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6118,7 +7436,12 @@
 
 (rule
  (alias runtest-test_tui_input_frame_pty)
- (deps test_tui_input_frame_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_input_frame_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_input_frame_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6129,7 +7452,10 @@
 
 (rule
  (alias runtest-test_tui_approvals_ring_pty)
- (deps test_tui_approvals_ring_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_approvals_ring_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_approvals_ring_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6139,7 +7465,13 @@
 
 (rule
  (alias runtest-test_tui_batch_status_pty)
- (deps test_tui_batch_status_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_batch_status_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_batch_status_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6149,7 +7481,11 @@
 
 (rule
  (alias runtest-test_tui_approval_detail_scroll_pty)
- (deps test_tui_approval_detail_scroll_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_approval_detail_scroll_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_approval_detail_scroll_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6159,7 +7495,11 @@
 
 (rule
  (alias runtest-test_tui_memory_fact_detail_pty)
- (deps test_tui_memory_fact_detail_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_memory_fact_detail_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_memory.py)
  (action
   (run python3 %{dep:test_tui_memory_fact_detail_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6169,7 +7509,11 @@
 
 (rule
  (alias runtest-test_tui_memory_health_read_error)
- (deps test_tui_memory_health_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_memory_health_read_error.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_memory.py)
  (action
   (run python3 %{dep:test_tui_memory_health_read_error.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6179,7 +7523,11 @@
 
 (rule
  (alias runtest-test_tui_memory_default_view_pty)
- (deps test_tui_memory_default_view_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_memory_default_view_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_memory.py)
  (action
   (run python3 %{dep:test_tui_memory_default_view_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6189,7 +7537,12 @@
 
 (rule
  (alias runtest-test_tui_lane_detail_says_what_the_lane_answers)
- (deps test_tui_lane_detail_says_what_the_lane_answers.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_lane_detail_says_what_the_lane_answers.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_lane_detail_says_what_the_lane_answers.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6199,7 +7552,11 @@
 
 (rule
  (alias runtest-test_tui_search_count)
- (deps test_tui_search_count.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_search_count.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_memory.py)
  (action
   (run python3 %{dep:test_tui_search_count.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6209,7 +7566,10 @@
 
 (rule
  (alias runtest-test_tui_reading_ends)
- (deps test_tui_reading_ends.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_reading_ends.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_reading_ends.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6219,7 +7579,11 @@
 
 (rule
  (alias runtest-test_tui_selection_visibility)
- (deps test_tui_selection_visibility.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_selection_visibility.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_selection_visibility.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6229,7 +7593,10 @@
 
 (rule
  (alias runtest-test_tui_browser_lane_scroll)
- (deps test_tui_browser_lane_scroll.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_browser_lane_scroll.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_browser_lane_scroll.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6239,12 +7606,18 @@
 
 (rule
  (alias runtest-test_tui_browser_action_navigation)
- (deps test_tui_browser_action_navigation.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_browser_action_navigation.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_browser_action_navigation.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_browser_follow)
- (deps test_tui_browser_follow.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_browser_follow.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_browser_follow.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -6257,7 +7630,11 @@
 
 (rule
  (alias runtest-test_tui_ask_alternative)
- (deps test_tui_ask_alternative.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_ask_alternative.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_ask_alternative.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -6280,7 +7657,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-tools-request-identity)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} tools-request-identity)))
 
@@ -6290,7 +7693,12 @@
 
 (rule
  (alias runtest-test_tui_lane_pagination)
- (deps test_tui_lane_pagination.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_lane_pagination.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_lane_pagination.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6308,7 +7716,10 @@
   masc.skill_snapshot_service))
 (rule
  (alias runtest-test_tui_tools_poll_continuity)
- (deps test_tui_tools_poll_continuity.py test_tui_keyboard_input.py)
+ (deps
+  test_tui_tools_poll_continuity.py
+  tui_keyboard_harness.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_tools_poll_continuity.py}
    %{dep:../bin/masc_tui.exe})))
@@ -6319,7 +7730,11 @@
 
 (rule
  (alias runtest-test_tui_lane_payload_availability)
- (deps test_tui_lane_payload_availability.py test_tui_keyboard_input.py)
+ (deps
+  test_tui_lane_payload_availability.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_lane_payload_availability.py} %{exe:../bin/masc_tui.exe})))
 
@@ -6329,7 +7744,17 @@
 
 (rule
  (alias runtest-test_tui_measurement_pty)
- (deps test_tui_measurement_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_measurement_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_observer.py
+  tui_keyboard_repositories.py
+  tui_keyboard_runtime.py
+  tui_keyboard_tools.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_measurement_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6339,7 +7764,11 @@
 
 (rule
  (alias runtest-test_tui_board_answer_source)
- (deps test_tui_board_answer_source.py test_tui_keyboard_input.py)
+ (deps
+  test_tui_board_answer_source.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_board_answer_source.py} %{exe:../bin/masc_tui.exe})))
 
@@ -6349,7 +7778,12 @@
 
 (rule
  (alias runtest-test_tui_lane_detail_owner)
- (deps test_tui_lane_detail_owner.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_lane_detail_owner.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_lane_detail_owner.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6359,7 +7793,9 @@
 
 (rule
  (alias runtest-test_tui_goal_source_availability)
- (deps test_tui_goal_source_availability.py test_tui_keyboard_input.py)
+ (deps
+  test_tui_goal_source_availability.py
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_goal_source_availability.py} %{exe:../bin/masc_tui.exe})))
 
@@ -6369,7 +7805,9 @@
 
 (rule
  (alias runtest-test_tui_goal_proof_identity)
- (deps test_tui_goal_proof_identity.py test_tui_keyboard_input.py)
+ (deps
+  test_tui_goal_proof_identity.py
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_goal_proof_identity.py} %{exe:../bin/masc_tui.exe})))
 
@@ -6402,7 +7840,33 @@
 
 (rule
  (alias runtest-test_tui_keyboard_input-msx-background-poll)
- (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} msx-background-poll)))
 
@@ -6736,7 +8200,10 @@
 
 (rule
  (alias runtest-test_tui_browser_history)
- (deps test_tui_browser_history.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_browser_history.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_browser_history.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -6785,7 +8252,10 @@
 
 (rule
  (alias runtest-test_tui_lane_package_pty)
- (deps test_tui_lane_package_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_lane_package_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_lane_package_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6819,13 +8289,19 @@
 
 (rule
  (alias runtest-test_tui_lane_visual_pty)
- (deps test_tui_lane_visual_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_lane_visual_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_lane_visual_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
  (alias runtest-test_tui_lane_operator_pty)
- (deps test_tui_lane_operator_pty.py test_tui_lane_visual_pty.py
-   test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_lane_operator_pty.py
+  test_tui_lane_visual_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_lane_operator_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (include stanzas/test_operator_media_inspection.inc)
@@ -6856,7 +8332,11 @@
 
 (rule
  (alias runtest-test_tui_verdict_refresh_pty)
- (deps test_tui_verdict_refresh_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_verdict_refresh_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_verdict_refresh_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6872,7 +8352,12 @@
 
 (rule
  (alias runtest-test_tui_jev_readiness)
- (deps test_tui_jev_readiness.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_jev_readiness.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action (run python3 %{dep:test_tui_jev_readiness.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -6916,7 +8401,10 @@
 
 (rule
  (alias runtest-test_tui_chat_command_menu_pty)
- (deps test_tui_chat_command_menu_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_chat_command_menu_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_chat_command_menu_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6926,7 +8414,11 @@
 
 (rule
  (alias runtest-test_tui_judgement_read_error)
- (deps test_tui_judgement_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_judgement_read_error.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_judgement_read_error.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6936,7 +8428,11 @@
 
 (rule
  (alias runtest-test_tui_verdict_request_identity_pty)
- (deps test_tui_verdict_request_identity_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_verdict_request_identity_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_verdict_request_identity_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -6946,7 +8442,12 @@
 
 (rule
  (alias runtest-test_tui_tool_results_pty)
- (deps test_tui_tool_results_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_tool_results_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_tool_results_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -6955,7 +8456,13 @@
 
 (rule
  (alias runtest-test_tui_account_login_pty)
- (deps test_tui_account_login_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_account_login_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action (run python3 %{dep:test_tui_account_login_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias
  (name runtest)
@@ -6963,7 +8470,13 @@
 
 (rule
  (alias runtest-test_tui_emblem_screen_pty)
- (deps test_tui_emblem_screen_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_emblem_screen_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action (run python3 %{dep:test_tui_emblem_screen_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias
  (name runtest)
@@ -6997,7 +8510,15 @@
 
 (rule
  (alias runtest-test_tui_chat_activity_pane_pty)
- (deps test_tui_chat_activity_pane_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_chat_activity_pane_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_observer.py
+  tui_keyboard_runtime.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_chat_activity_pane_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7007,7 +8528,13 @@
 
 (rule
  (alias runtest-test_tui_chat_load_errors_pty)
- (deps test_tui_chat_load_errors_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_chat_load_errors_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_chat_load_errors_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7017,7 +8544,31 @@
 (include stanzas/test_tui_schedule_detail_viewport_pty.inc)
 (rule
  (alias runtest-test_tui_keeper_create_journey_pty)
- (deps test_tui_keeper_create_journey_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_keeper_create_journey_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_keeper_create_journey_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -7025,7 +8576,31 @@
  (deps (alias runtest-test_tui_keeper_create_journey_pty)))
 (rule
  (alias runtest-test_tui_keeper_draft_payload_pty)
- (deps test_tui_keeper_draft_payload_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_keeper_draft_payload_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_keeper_draft_payload_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -7038,7 +8613,11 @@
 
 (rule
  (alias runtest-test_tui_home_journey_pty)
- (deps test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_home_journey_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_home_journey_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -7047,7 +8626,12 @@
 
 (rule
  (alias runtest-test_tui_home_viewports_pty)
- (deps test_tui_home_viewports_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_home_viewports_pty.py
+  test_tui_home_journey_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_home_viewports_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -7055,7 +8639,14 @@
  (deps (alias runtest-test_tui_home_viewports_pty)))
 (rule
  (alias runtest-test_tui_home_layout_pty)
- (deps test_tui_home_layout_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_home_layout_pty.py
+  test_tui_home_journey_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action (run python3 %{dep:test_tui_home_layout_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -7064,16 +8655,23 @@
 
 (rule
  (alias runtest-test_tui_home_decision_cards_pty)
- (deps test_tui_home_decision_cards_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_home_decision_cards_pty.py
+  test_tui_home_journey_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_harness.py)
  (action (run python3 %{dep:test_tui_home_decision_cards_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_home_decision_cards_pty)))
 
-(rule
- (alias runtest-test_tui_palette_input_viewport_pty)
- (deps test_tui_palette_input_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+(rule (alias runtest-test_tui_palette_input_viewport_pty)
+ (deps
+  test_tui_palette_input_viewport_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_palette_input_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7083,7 +8681,13 @@
 
 (rule
  (alias runtest-test_tui_skills_usage_summary)
- (deps test_tui_skills_usage_summary.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_skills_usage_summary.py
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_skills_usage_summary.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7096,7 +8700,31 @@
 (rule
  (alias runtest-test_tui_home_failure_task_pty)
  (deps test_tui_home_failure_task_pty.py test_tui_home_decision_cards_pty.py
-       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_failure_task_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7106,7 +8734,31 @@
 
 (rule
  (alias runtest-test_tui_home_queue_identity_pty)
- (deps test_tui_home_queue_identity_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_home_queue_identity_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_queue_identity_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7117,7 +8769,31 @@
 (rule
  (alias runtest-test_tui_home_overflow_pty)
  (deps test_tui_home_overflow_pty.py test_tui_home_decision_cards_pty.py
-       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_overflow_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7128,7 +8804,31 @@
 (rule
  (alias runtest-test_tui_home_identity_decision_pty)
  (deps test_tui_home_identity_decision_pty.py test_tui_home_decision_cards_pty.py
-       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_identity_decision_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7139,7 +8839,31 @@
 (rule
  (alias runtest-test_tui_home_question_recovery_pty)
  (deps test_tui_home_question_recovery_pty.py test_tui_home_decision_cards_pty.py
-       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_question_recovery_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7150,7 +8874,31 @@
 (rule
  (alias runtest-test_tui_home_composer_focus_pty)
  (deps test_tui_home_composer_focus_pty.py test_tui_home_decision_cards_pty.py
-       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_composer_focus_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7161,7 +8909,31 @@
 (rule
  (alias runtest-test_tui_home_scoped_identity_pty)
  (deps test_tui_home_scoped_identity_pty.py test_tui_home_decision_cards_pty.py
-       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_home_scoped_identity_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7187,7 +8959,31 @@
 
 (rule
  (alias runtest-test_tui_preset_viewport_pty)
- (deps test_tui_preset_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_preset_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_preset_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7198,13 +8994,61 @@
 (rule
  (alias runtest-test_tui_memory_provenance_layout_pty)
  (deps test_tui_memory_provenance_layout_pty.py test_tui_memory_fact_detail_pty.py
-       test_tui_keyboard_input.py ../bin/masc_tui.exe)
+       test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_memory_provenance_layout_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias (name runtest) (deps (alias runtest-test_tui_memory_provenance_layout_pty)))
 
 (rule
  (alias runtest-test_tui_goal_detail_viewport_pty)
- (deps test_tui_goal_detail_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_goal_detail_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_goal_detail_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7214,25 +9058,121 @@
 
 (rule
  (alias runtest-test_tui_agenda_navigation_pty)
- (deps test_tui_agenda_navigation_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_agenda_navigation_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_agenda_navigation_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias (name runtest) (deps (alias runtest-test_tui_agenda_navigation_pty)))
 
 (rule
  (alias runtest-test_tui_work_rows_pty)
- (deps test_tui_work_rows_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_work_rows_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_work_rows_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias (name runtest) (deps (alias runtest-test_tui_work_rows_pty)))
 
 (rule
  (alias runtest-test_tui_usage_rows_pty)
- (deps test_tui_usage_rows_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_usage_rows_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_usage_rows_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias (name runtest) (deps (alias runtest-test_tui_usage_rows_pty)))
 
 (rule
  (alias runtest-test_tui_answering_layout_pty)
- (deps test_tui_answering_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_answering_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_answering_layout_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7242,7 +9182,15 @@
 
 (rule
  (alias runtest-test_tui_client_connector_layout_pty)
- (deps test_tui_client_connector_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_client_connector_layout_pty.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_observer.py
+  tui_keyboard_runtime.py
+  tui_keyboard_tools.py
+  ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_client_connector_layout_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias
  (name runtest)
@@ -7256,7 +9204,10 @@
 
 (rule
  (alias runtest-test_tui_tools_layout_pty)
- (deps test_tui_tools_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_tools_layout_pty.py
+  tui_keyboard_harness.py
+  tui_keyboard_tools.py
+  ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_tools_layout_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -7274,7 +9225,31 @@
 
 (rule
  (alias runtest-test_tui_task_metadata_viewport_pty)
- (deps test_tui_task_metadata_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_task_metadata_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
  (action (run python3 %{dep:test_tui_task_metadata_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias
  (name runtest)
@@ -7300,7 +9275,10 @@
 
 (rule
  (alias runtest-test_tui_lane_initial_authority)
- (deps test_tui_lane_initial_authority.py test_tui_keyboard_input.py)
+ (deps test_tui_lane_initial_authority.py
+       tui_keyboard_harness.py
+       tui_keyboard_keepers.py
+       tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_lane_initial_authority.py} %{exe:../bin/masc_tui.exe})))
 
@@ -7315,7 +9293,9 @@
 
 (rule
  (alias runtest-test_tui_memory_recall_state_pty)
- (deps test_tui_memory_recall_state_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_memory_recall_state_pty.py
+       tui_keyboard_harness.py
+       tui_keyboard_memory.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_memory_recall_state_pty.py} %{dep:../bin/masc_tui.exe})))
 

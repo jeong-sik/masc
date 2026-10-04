@@ -1940,18 +1940,22 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    id-less acceptance, which would inherit that seq while the leftover bytes
    glued onto the next chunk -- so each (re)connect starts a fresh one and
    asks the server to resume from the log's last seq instead. *)
-let post_keeper_chat_watching ~expected_workspace ~check_request ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
+let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
   let enqueue_async = enqueue in
   let host = server_peer_host in
   match Eio_context.get_clock_opt () with
   | None ->
-      enqueue_async mailbox
-        (Keeper_chat_stream_unavailable
-           ( request
-           , "sending without a live view: no Eio clock to bound the stream" ));
       (match check_request () with
        | Error detail -> Error (Keeper_chat.Transport_error detail)
-       | Ok () -> Masc_tui_http.post_keeper_chat ~expected_workspace ~admission_intent ~host ~port request)
+       | Ok () ->
+           if start_first_post () then begin
+             enqueue_async mailbox
+               (Keeper_chat_stream_unavailable
+                  ( request
+                  , "sending without a live view: no Eio clock to bound the stream" ));
+             Masc_tui_http.post_keeper_chat ~expected_workspace ~admission_intent ~host ~port request
+           end
+           else Error (Keeper_chat.Transport_error "Workspace authority withdrawn"))
   | Some clock ->
       (* After the highest seq this watcher has handed to the mailbox. The
          log is folded by the main loop, so at the moment of a re-POST it may
@@ -1964,9 +1968,11 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~enqueue ~contr
         | Masc.Keeper_chat_event_log.After_seq held ->
             Masc.Keeper_chat_event_log.replay_position_advance !delivered held
       in
-      let rec watch ~since_seq was_unverified =
+      let rec watch ~first_post ~since_seq was_unverified =
         match check_request () with
         | Error detail -> Error (Keeper_chat.Transport_error detail)
+        | Ok () when first_post && not (start_first_post ()) ->
+            Error (Keeper_chat.Transport_error "Workspace authority withdrawn")
         | Ok () ->
         let decoder = Keeper_chat_live.create () in
         (* Each idempotent re-subscribe has its own SSE grammar state. The
@@ -2005,7 +2011,7 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~enqueue ~contr
             (* A checkpoint closes this transport segment, not the durable
                request. Subscribe after its last journal sequence to receive
                the eventual answer under the same operation identity. *)
-            watch ~since_seq:(resume_position ()) false
+            watch ~first_post:false ~since_seq:(resume_position ()) false
         | Error error
           when Keeper_chat.error_certainty ~was_unverified error
                = Keeper_chat.Outcome_unverified ->
@@ -2021,10 +2027,10 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~enqueue ~contr
                one watcher observes terminal truth, so NEXT cannot overlap a
                turn whose first stream merely disappeared. *)
             Eio.Time.sleep clock 0.5;
-            watch ~since_seq:(resume_position ()) true
+            watch ~first_post:false ~since_seq:(resume_position ()) true
         | (Ok _ | Error _) as terminal -> terminal
       in
-      watch ~since_seq:Masc.Keeper_chat_event_log.Whole_turn false
+      watch ~first_post:true ~since_seq:Masc.Keeper_chat_event_log.Whole_turn false
 
 let inflight_entry_by_request_id state request_id =
   List.find_opt
@@ -6879,7 +6885,7 @@ let take_pending_attachments state =
   (staged, references)
 ;;
 
-let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
+let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
@@ -6900,15 +6906,12 @@ let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only)
       advance_keeper_chat_control state request.Keeper_chat.keeper_name
     | Keeper_chat.Queue_only -> keeper_chat_control_generation state request.Keeper_chat.keeper_name in
   let submitted_at, origin =
-    match promoted with
-    | None -> Unix.gettimeofday (), Direct_submission
-    | Some (item : Chat_queue.item) ->
-        ( item.submitted_at
-        , Promoted_queue
-            { submission_seq = item.submission_seq
-            ; intent = item.intent
-            ; causal_parent_request_id = item.causal_parent_request_id
-            } )
+    ( promoted.submitted_at
+    , Promoted_queue
+        { submission_seq = promoted.submission_seq
+        ; intent = promoted.intent
+        ; causal_parent_request_id = promoted.causal_parent_request_id
+        } )
   in
   let log =
     turn_log_create
@@ -6922,7 +6925,7 @@ let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only)
     ; sent_at = Unix.gettimeofday ()
     ; control_generation
     ; origin
-    ; phase = Turn_streaming
+    ; phase = Turn_preflight promoted
     ; log
     }
     :: state.msg_inflight;
@@ -6932,19 +6935,20 @@ let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only)
       state.msg_target_keeper_name
   then state.msg_live <- Some log;
   let run () =
-    if enqueue_dispatch_start ~enqueue:enqueue_async mailbox request false
-    then begin
-      let result =
-        try
-          post_keeper_chat_watching ~expected_workspace ~check_request ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port ~log:log.tl_log
-            request
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
-      in
-      enqueue_dispatch_ack ~enqueue:enqueue_async mailbox (fun acknowledge ->
-        Keeper_chat_done (request, false, result, acknowledge))
-    end
+    let start_first_post () =
+      enqueue_dispatch_start ~enqueue:enqueue_async mailbox request false
+    in
+    let result =
+      try
+        post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post
+          ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port
+          ~log:log.tl_log request
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
+    in
+    enqueue_dispatch_ack ~enqueue:enqueue_async mailbox (fun acknowledge ->
+      Keeper_chat_done (request, false, result, acknowledge))
   in
   (match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -10417,6 +10421,9 @@ let apply_server_identity_reading state reading =
     | _ -> false
   in
   if not same_workspace then begin
+    (* Recover local input before cancellation drops its preflight owner.
+       Streaming/reconciling owners may have reached the server. *)
+    Masc_tui_types.retain_preflight_inputs state state.msg_inflight;
     withdraw_keeper_items state;
     let Workspace_authority generation = state.workspace_authority in
     state.workspace_authority <- Workspace_authority (generation + 1);
@@ -10463,10 +10470,8 @@ let apply_server_identity_reading state reading =
       state.msg_attachments_since <- since;
       state.msg_queued <- queue;
       state.keeper_interactive_waiting <- Chat_queue.waiting queue
-        |> List.filter_map (fun (item : Chat_queue.item) -> match item.intent with
-           | Chat_queue.Next -> None
-           | Chat_queue.Steer_after_interrupt ->
-               Some (item.request.keeper_name, item.request.request_id, Retained_after_stop));
+        |> List.map (fun (item : Chat_queue.item) ->
+             item.request.keeper_name, item.request.request_id, Retained_after_stop);
       state.suspended_keeper_inputs <- List.remove_assoc withdrawn_workspace
         state.suspended_keeper_inputs;
       state.msg_unconfirmed_workspace <-
@@ -14610,6 +14615,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           with
           | Some entry
             when Keeper_chat.same_request_identity entry.sent_request request ->
+              (* The first POST may happen once this acknowledgement leaves.
+                 A later checkpoint/reconnect must never restore a draft. *)
+              entry.phase <- Turn_streaming;
               append_user_history_once ~submitted_at:entry.submitted_at state
                 request;
               consume_dispatched_message_draft state request;
@@ -15259,6 +15267,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (* The POST never left. Nothing durable was written for it, so there is
          nothing to reconcile: say what happened and let the operator send
          again if they want to. *)
+      (match inflight_entry_by_request_id state request.Keeper_chat.request_id with
+       | Some entry when Keeper_chat.same_request_identity entry.sent_request request ->
+           Masc_tui_types.retain_preflight_inputs state [entry]
+       | Some _ | None -> ());
       settle_live_turn state request;
       (match inflight_by_request_id state request.Keeper_chat.request_id with
        | Some current when Keeper_chat.same_request_identity current request ->

@@ -20,6 +20,18 @@ let length = List.length
 let waiting queue = queue
 let cap = 32
 
+let restore_unsent queue item =
+  if List.exists (fun held ->
+      String.equal held.request.Chat.request_id item.request.Chat.request_id) queue
+  then queue
+  else
+    (* An empty queue can restart its local ordinals while this item is in
+       preflight. Its restored ordinal must still precede newer local input. *)
+    let submission_seq = List.fold_left (fun earlier held ->
+        min earlier (held.submission_seq - 1)) item.submission_seq queue in
+    { item with submission_seq } :: queue
+;;
+
 let next_submission_seq queue =
   List.fold_left (fun next item -> max next (item.submission_seq + 1)) 0 queue
 ;;

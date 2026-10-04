@@ -8,7 +8,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+from stdio_fixture import run_stdio
 import sys
 import tempfile
 import tomllib
@@ -34,7 +34,7 @@ def exchange(package, calls, binding):
         requests.append({"jsonrpc": "2.0", "id": identity, "method": "tools/call", "params": {
             "name": "lane_observe", "arguments": {"binding": binding, "sources": sources}}})
     with tempfile.TemporaryDirectory() as directory:
-        result = subprocess.run([sys.executable, str(ADDONS / package / "server.py")], cwd=directory,
+        result = run_stdio([sys.executable, str(ADDONS / package / "server.py")], cwd=directory,
             input="".join(json.dumps(item) + "\n" for item in requests),
             capture_output=True, text=True, check=True, timeout=10)
     if result.stderr:

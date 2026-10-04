@@ -125,8 +125,8 @@ let test_section_draws_three_line_shapes () =
   check string "plain usage title" " Plan usage" (plain section.title);
   let text = String.concat "\n" lines in
   List.iter (fun fact -> check bool ("retains " ^ fact) true (contains ~affix:fact text))
-    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Used 67%"; "Used 44%"; "Used 100%"
-    ; "Model call limit"; " in 4h12m"; "heard 3m00s ago"; "reset time passed"
+    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Reported 67%"; "Reported 44%"; "Reported 100%"
+    ; "Model call limit"; " in 4h12m"; "reported 3m00s ago"; "reset time passed"
     ; "no newer report"; "Last report"; "exhausted (observed)"; "catalogue reopens"; " in 2h00m" ];
   check bool "exhausted account is first" true
     (match lines with first :: _ -> contains ~affix:"Kimi Coding" first | [] -> false);
@@ -193,7 +193,7 @@ let test_meter_width_is_bounded () =
   let _, wide_cells = meter_of wide in
   check int "a wide terminal draws a 24-cell meter" 24 wide_cells;
   check bool "a wide terminal keeps the hearing age" true
-    (List.exists (contains ~affix:"heard 3m00s ago") (reported_section ~width:120 ()));
+    (List.exists (contains ~affix:"reported 3m00s ago") (reported_section ~width:120 ()));
   let narrow = claude_five_hour (reported_section ~width:44 ()) in
   let _, narrow_cells = meter_of narrow in
   check bool "a narrow card keeps a readable, bounded meter" true
@@ -203,7 +203,7 @@ let test_meter_width_is_bounded () =
   let separate = reported_section ~width:70 () in
   let text = String.concat "\n" separate in
   check bool "one passed reset keeps the other account's report age" true
-    (contains ~affix:"Claude Max" text && contains ~affix:"heard 3m00s ago" text);
+    (contains ~affix:"Claude Max" text && contains ~affix:"reported 3m00s ago" text);
   check bool "the past-reset card keeps the reset state" true
     (contains ~affix:"reset time passed" text);
   List.iter (fun line -> check bool "separate cards fit the supplied width" true
@@ -283,8 +283,8 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   let text = String.concat "\n" (List.map plain section.lines) in
   List.iter (fun fact -> check bool ("window role retains " ^ fact) true
     (contains ~affix:fact text))
-    [ "Used 100%"; "Model call limit"; "Other use · does not block model calls"
-    ; "Unclassified limit"; "Used 80%" ];
+    [ "Reported 100%"; "Model call limit"; "Other use · does not block model calls"
+    ; "Unclassified limit"; "Reported 80%" ];
   check bool "the source label is retained" true
     (List.exists (fun line -> contains ~affix:"1 x unit 5" (plain line)) section.lines);
   check bool "missing reset stays distinct from zero" true

@@ -34,6 +34,7 @@ let post ~id ~author : Board.post =
   ; post_kind = Board.Automation_post
   ; meta_json = None
   ; visibility = Board.Public
+  ; audience = None
   ; created_at = 0.
   ; content_updated_at = 0.
   ; updated_at = 0.

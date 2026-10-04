@@ -1,0 +1,11 @@
+id = "assembled-fusion-report"
+run_id = "assembled-fusion"
+manifest_path = "../../../../addons/fusion-report/lane.toml"
+
+[binding]
+[[binding.sources]]
+source_id = "judge"
+kind = "lane_output"
+installation_id = "fusion-judge"
+output_id = "result"
+selection = "latest_completed"

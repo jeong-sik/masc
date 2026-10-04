@@ -1678,7 +1678,7 @@ let test_retry_read_failure_recovers_and_rearms_after_deadline () =
   Eio.Switch.on_release sw Keeper_chat_operation_store.For_testing.clear_runtime_retry_read_fault;
   ready := true;
   Keeper_chat_operation_store.For_testing.fail_next_runtime_retry_read ();
-  let interval = Env_config_keeper.KeeperKeepalive.sleep_chunk_sec in
+  let interval = (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ()) in
   let actual, resumed_at = Eio.Time.with_timeout_exn env#clock (4. *. interval +. 2.)
     (fun () -> Eio.Promise.await resumed) in
   check bool "same original operation resumes without an external wake" true

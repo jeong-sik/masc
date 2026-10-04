@@ -10,20 +10,18 @@ import sys
 
 import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+import tui_keyboard_chat as chat
+import tui_keyboard_keepers as keepers
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
-    "bin/masc_tui_surface_navigation.ml", "bin/masc_tui_surface_navigation.mli",
-    "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
-)
+
 CHAT_PATH = "/api/v1/keepers/chat/stream"
 
 
 def mouse_home_retains_composer(executable):
     fixtures, _items, _new = h.approval_selection_http_fixtures()
     fixtures[cards.OPERATOR_PATH] = h.approval_selection_snapshot([])
-    fixtures[CHAT_PATH] = h.RequestHttpResponse(h.keeper_chat_succeeded_response)
+    fixtures[CHAT_PATH] = h.RequestHttpResponse(chat.keeper_chat_succeeded_response)
     fixtures["/api/v1/keepers/beta/chat/history"] = (200, [])
     requests = []
     draft = b"beta-mouse-home-unsent"
@@ -32,7 +30,7 @@ def mouse_home_retains_composer(executable):
 
     def prepare(base):
         home.seed_goals(base)
-        h.seed_image_workspace(base)
+        chat.seed_image_workspace(base)
 
     def interact(process, fd, _slave, output, base):
         h.wait_for_output(process, fd, output, b"No decision is waiting",
@@ -42,7 +40,7 @@ def mouse_home_retains_composer(executable):
         # Establish a named Home continuation, then compose on the list
         # surface rather than in the chat view's separate key dispatcher.
         h.send_and_wait(process, fd, output, b"c", b"Esc:list")
-        image = Path(base, h.IMAGE_NAME)
+        image = Path(base, chat.IMAGE_NAME)
         h.send_and_wait(process, fd, output, f"/attach {image}\r".encode(), b"attached ")
         h.send_and_wait(process, fd, output, f"/ref {reference}\r".encode(), b"reference(s)")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
@@ -54,7 +52,7 @@ def mouse_home_retains_composer(executable):
 
         # The helper reads the tab's actual terminal cells before emitting
         # SGR press/release; no keyboard escape can release focus first.
-        h.press_label_on_screen(process, fd, output, b"Dashboard",
+        keepers.press_label_on_screen(process, fd, output, b"Dashboard",
                                 row=1, needle=destination)
         h.drain_until_quiet(process, fd, output)
         visible = h.screen_text(bytes(output))

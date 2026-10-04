@@ -106,5 +106,8 @@ type 'option decoded_choice =
 
 val decode_choice :
   'option choice_set -> answer -> ('option decoded_choice, string) result
-(** [Error] when [answer] is not a choice answer, or when its choice or any of
-    its probability keys is not the label of an option in the set. *)
+(** Requires each declared option exactly once, finite probabilities in [0, 1]
+    summing to 1 (within floating-point summation roundoff), and a selected
+    option with maximal probability. Ties are valid. Confidence must be finite
+    and within [0, 1]; it is not an acceptance threshold. Invalid answers return
+    [Error] before an option can authorize a caller's effect. *)

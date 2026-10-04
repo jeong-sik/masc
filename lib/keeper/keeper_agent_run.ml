@@ -1695,7 +1695,7 @@ let run_turn
                 | Ok (Keeper_checkpoint_store.Stale_noop _) -> Ok ()
                 | Error _ as error -> error
          in
-         let call_run_named ?raw_trace ~initial_messages () =
+         let call_run_named ~raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost
                    budget. Explicit cancellation and provider/tool progress
                    boundaries settle the lane, while usage remains observational. *)
@@ -1719,7 +1719,7 @@ let run_turn
                       ~goal_metadata:input_metadata
                       ~session_id:
                         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                      ?raw_trace
+                      ~raw_trace
                       ~system_prompt:turn_system_prompt
                       ~tools:built_tools
                       ~loading_plan
@@ -1954,7 +1954,7 @@ let run_turn
                  degrades to [None] (turn runs untraced, typed record
                  emitted) — sink trouble never fails the turn pre-dispatch. *)
          (match
-                 call_run_named ?raw_trace ~initial_messages:history_messages ()
+                 call_run_named ~raw_trace ~initial_messages:history_messages ()
                with
                | Error e ->
                  (match

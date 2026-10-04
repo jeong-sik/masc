@@ -478,10 +478,16 @@
   masc_tui_keeper_chat_projection masc_tui_sse_lines yojson))
 
 (library
+ (name masc_tui_lane_application)
+ (wrapped false)
+ (modules masc_tui_lane_application)
+ (libraries yojson))
+
+(library
  (name masc_tui_lane_declaration)
  (wrapped false)
  (modules masc_tui_lane_declaration)
- (libraries yojson otoml masc.toml_line_editor))
+ (libraries yojson otoml masc.toml_line_editor masc_tui_lane_application))
 
 (library
  (name masc_tui_schema_form)
@@ -523,7 +529,7 @@
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
+ (libraries masc masc_tui_lane_application masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
 
 ;; The Fusion launch form: what it offers, what a submit means, what the
 ;; overlay says. Names Fusion_types for the topology sum, so it lists
@@ -1405,6 +1411,7 @@
   masc_workspace
   masc_tui_answering
   masc.masc_tool_blob_store
+  masc_tui_lane_application
   masc_tui_lane_addons
   masc_tui_lane_broadcast_pending
   masc_tui_fusion_launch
@@ -1917,6 +1924,7 @@
   masc.voice_setup
   masc.voice_config
   masc.workspace_connection
+  masc_tui_lane_application
   masc_tui_lane_addons
   masc_tui_lane_broadcast_pending
   masc_tui_fusion_launch

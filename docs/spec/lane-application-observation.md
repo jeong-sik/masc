@@ -59,12 +59,24 @@ configuration remains available to other callers, but its application state is
 
 ## Delivery boundary and next consumers
 
-This contract is the backend unit of F8. Existing TUI/Web decoders ignore these
-additional fields; they do not yet render them or bind them to saved intent.
-Next, consume this closed state in the TUI, retain editing while background
-observation refreshes, and then connect Web observation to its existing visible
-panel refresh cadence. F8 is incomplete until both consumers and the actual
-runtime path have been verified.
+The TUI decodes these states and shows them beside current installations and
+accepted declaration files. A dirty draft is never the application target. The
+accepted base file remains the target after a comparison read; accepting that
+revision or a successful save changes it. A different source/input revision,
+incomplete inventory or failed read cannot confirm application.
+
+While an editing panel is open, the existing visible-pane cadence reads application
+status using an independent request ticket. This does not set foreground loading,
+clear drafts, replace a frozen Slice, or erase a save failure/receipt. In the TOML
+view, `r` requests that observation immediately. Explicit saves invalidate earlier
+observations and trigger a new read after their response. Foreground inventory
+reads supersede background reads. Workspace ownership and ticket identity prevent
+late replies from crossing a workspace reset or explicit action generation.
+
+Web still ignores these fields. Its decoder, saved-intent correlation and visible
+panel refresh consumer remain to be connected. F8 is incomplete until both
+consumers and the actual runtime path have been verified. The TUI source change
+and focused pure-module tests do not prove a running terminal or worker.
 
 The separation follows the established distinction between desired configuration
 and system-observed status in [Kubernetes object spec and status](https://kubernetes.io/docs/concepts/overview/working-with-objects/#object-spec-and-status).

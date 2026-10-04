@@ -1,6 +1,7 @@
 module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
+module Application = Masc_tui_lane_application
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
@@ -14,6 +15,7 @@ type declaration = {
   source_path : string; installation_id : string option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
+  application : Application.observation option;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -54,6 +56,7 @@ type t = {
   current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
+  application_reading : configuration Application.reading;
   snapshot_read_error : string option;
       (** The last failed inventory read. Input and request diagnostics do
           not erase it; a successful inventory read does. *)
@@ -82,6 +85,12 @@ val installation_reading : t -> installation_reading
 val initial : t
 val parse_request : string -> (request, string) result
 val decode : Yojson.Safe.t -> (snapshot, string) result
+val decode_configuration : Yojson.Safe.t -> (configuration, string) result
+val begin_application_read : t -> (t * Application.ticket) option
+val finish_application_read : t -> Application.ticket -> (configuration, string) result -> t
+val receive_application_inventory : t -> (configuration, string) result -> t
+(** Independent observation ownership. These functions preserve editor, receipt,
+    explicit-action diagnostics, selected rows and any frozen Slice. *)
 val decode_slice : snapshot:snapshot -> Yojson.Safe.t -> (snapshot, string) result
 val selected_declaration : t -> declaration option
 val selected_document : t -> Document.session option

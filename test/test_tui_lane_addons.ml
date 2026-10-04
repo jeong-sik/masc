@@ -110,7 +110,7 @@ let configuration_and_ports () =
       "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills"}}],
     "configuration":{"directory":"/config/lane-addons","complete":false,
       "declarations":[{"id":"custom","source_path":"/config/lane-addons/custom.toml",
-        "enabled":true,"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
+        "enabled":true,"source_revision":"source-1","application":{"kind":"starting"},"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
       "issues":[{"id":null,"source_path":"/config/lane-addons/broken.toml","message":"invalid TOML"},
         {"id":null,"source_path":"/config/lane-addons","message":"inventory unavailable"},
         {"id":null,"source_path":"/config/lane-addons/nested/a.toml","message":"nested file"},
@@ -140,14 +140,14 @@ let configuration_and_ports () =
     (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";instance_id=None}] true));
   check bool "same ID issue elsewhere blocks removal" true
     (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";
-      desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only}] true));
+      desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only;application=None}] true));
   check bool "invalid owned file with no recoverable ID blocks removal" true
     (Option.is_some (removal [{owned with installation_id=None;desired=None;applied=None;
-      instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only}] true));
+      instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true));
   check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
   check (option string) "unrelated invalid declaration does not block cleanup" None
     (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
-      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only}] true);
+      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true);
   check (option string) "manual cleanup remains available" None
     (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
 
@@ -463,7 +463,7 @@ let context_flow_uses_declared_connections () =
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
       instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
-      enabled=Some true;origin=UI.Parsed_declaration} in
+      enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -775,7 +775,7 @@ let refresh_preserves_operator_target () =
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -841,7 +841,7 @@ let detail_keeps_installation_ownership () =
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
@@ -1121,7 +1121,7 @@ let empty_completed_results_keep_capability_identity_and_input_details () =
   let declaration name (item : UI.instance) : UI.declaration = {
     source_path=Option.get item.source_path;installation_id=Some name;
     desired=Some "1";applied=Some "1";instance_id=Some item.id;
-    issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
+    issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let coverage : UI.Row.coverage = {source_id="panel-input";incarnation="unobserved";
     cursor=None;complete=false;detail=Some "Waiting for supplied input observations"} in
   let snapshot : UI.snapshot = {instances=[judge;panel];complete=None;
@@ -1169,7 +1169,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
   let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
     desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
-    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration} in
+    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
   let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
     kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";
@@ -1254,7 +1254,7 @@ let declared_layers_use_exact_configured_owners () =
   let declaration id (item : UI.instance) : UI.declaration = {
     source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
     instance_id=Some item.id;desired=Some "1";applied=Some "1";issues=[];
-    enabled=Some true;origin=UI.Parsed_declaration} in
+    enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let roots = [worker "a" [];worker "b" []] in
   let branches = [worker "c" ["a"];worker "d" ["a";"b"]] in
   let joined = worker "e" ["c";"d"] in
@@ -1375,7 +1375,47 @@ let declared_layers_use_exact_configured_owners () =
     (List.mem "Stored bindings · producer incarnations are not reconstructed as current layers" history
      && not (List.mem "Layer 0" history))
 
+let application_reads_preserve_editor () =
+  let configuration kind = UI.decode_configuration (Yojson.Safe.from_string
+    (Printf.sprintf {|{"configuration":{"directory":"/config","complete":true,"issues":[],
+      "declarations":[{"id":"research","source_path":"/config/research.toml","enabled":false,
+      "source_revision":"off-bytes","desired_revision":"inputs","applied_revision":null,
+      "instance_id":null,"application":{"kind":"%s"}}]}}|} kind)) |> ok in
+  let base : Draft.document = {file_name="research.toml";source_path="/config/research.toml";
+    source_text="id=\"research\"\nenabled=false\n";source_revision="off-bytes";
+    desired_revision=Some "inputs";valid=true;messages=[]} in
+  let session = {(Draft.from_document base) with text="id=\"research\"\nenabled=true\n";
+    message=Some "last save receipt retained"} in
+  let frozen : UI.snapshot = {instances=[];configuration=Some (configuration "cleaning");
+    output={UI.Row.rows=[];coverage=[]};complete=Some false} in
+  let before = {UI.initial with generation=7;snapshot=Some frozen;documents=[session];
+    document_key=Some session.file_name;editor_ready=true;scroll=19;
+    receipt=Some (`String "receipt");error=Some (UI.Request_failure "last save failed")} in
+  let pending,ticket = match UI.begin_application_read before with
+    | Some pair -> pair | None -> fail "editor must permit an independent observation" in
+  check bool "observation never takes foreground loading" false pending.loading;
+  let after = UI.finish_application_read pending ticket (Ok (configuration "inactive")) in
+  check bool "draft, editor, receipt and request failure survive" true
+    (after.documents=before.documents && after.document_key=before.document_key
+     && after.editor_ready && after.receipt=before.receipt && after.error=before.error
+     && after.scroll=before.scroll && after.snapshot=before.snapshot);
+  let visible = UI.lines ~width:240 after in
+  check bool "saved Off can finish while unsaved On stays editable" true
+    (List.exists (String.starts_with ~prefix:"Accepted file application · Off · worker cleanup confirmed") visible);
+  let pending,ticket = Option.get (UI.begin_application_read after) in
+  let failed = UI.finish_application_read pending ticket (Error "application endpoint unavailable") in
+  check bool "read failure leaves saved receipt and draft intact" true
+    (failed.documents=after.documents && failed.receipt=after.receipt && failed.error=after.error);
+  check bool "read failure replaces application completion" true
+    (List.exists (String.starts_with ~prefix:"Accepted file application · Application unknown:")
+      (UI.lines ~width:240 failed));
+  let stale = UI.finish_application_read {pending with generation=8}
+      ticket (Ok (configuration "inactive")) in
+  check bool "explicit action invalidates prior response" true
+    (UI.Application.value stale.application_reading=UI.Application.value after.application_reading)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "application reads preserve editor and save diagnostics" `Quick application_reads_preserve_editor;
   test_case "empty completed results show capability, identity and input details" `Quick
     empty_completed_results_keep_capability_identity_and_input_details;
   test_case "declared layers use exact configured owners" `Quick

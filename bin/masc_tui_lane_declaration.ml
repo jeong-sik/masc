@@ -116,7 +116,7 @@ let decode_response request ~status ~body =
 let write_summary receipt =
   (match receipt.state with Created -> "Created" | Saved -> "Saved" | Unchanged -> "Unchanged")
   ^ (match receipt.durability with Durable -> " · durable" | Unconfirmed detail -> " · durability unconfirmed: " ^ detail)
-  ^ " · pending reconciliation (r inspects application)"
+  ^ " · file receipt; worker application is tracked separately"
 let after_response (session : session) = function
   | Read_document document -> {session with current=Some document;
       message=Some "Current file loaded; draft preserved. u uses this revision; U replaces the draft."}
@@ -136,6 +136,22 @@ let parse_source text =
     | Ok _ -> Error "Declaration requires a TOML table"
     | Error detail -> Error detail
   with Otoml.Duplicate_key detail -> Error detail
+let application_target (session : session) =
+  match session.base with
+  | None -> Error "Save this draft before tracking application"
+  | Some document when not document.valid -> Error "Accepted file is not a valid declaration"
+  | Some document ->
+      let* fields = parse_source document.source_text in
+      let* installation_id = match List.assoc_opt "id" fields with
+        | Some (Otoml.TomlString id) when String.trim id <> "" -> Ok id
+        | _ -> Error "Accepted file has no valid installation ID" in
+      let* enabled = match List.assoc_opt "enabled" fields with
+        | None -> Ok true | Some (Otoml.TomlBoolean enabled) -> Ok enabled
+        | Some _ -> Error "Accepted file has no valid activity setting" in
+      let* desired_revision = match document.desired_revision with
+        | Some revision -> Ok revision | None -> Error "Accepted file has no worker input revision" in
+      Ok {Masc_tui_lane_application.source_path=document.source_path;installation_id;
+        source_revision=document.source_revision;desired_revision;enabled}
 let draft_enabled (session : session) =
   let* fields = parse_source session.text in
   match List.assoc_opt "enabled" fields with
@@ -150,7 +166,7 @@ let toggle_enabled (session : session) =
   if observed = enabled then Error "The draft enabled key did not change"
   else Ok {changed with message=Some
     ((if observed then "Enable" else "Disable")
-     ^ " staged in draft; s saves. Actual worker state is read with r after saving.")}
+     ^ " staged in draft; s saves. Worker application refreshes separately.")}
 let summary (session : session) =
   ["TOML draft " ^ session.file_name;
    (match draft_enabled session with

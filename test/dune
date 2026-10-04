@@ -8255,6 +8255,11 @@
  (libraries alcotest unix yojson masc masc_tui_package_browser))
 
 (test
+ (name test_tui_lane_application)
+ (modules test_tui_lane_application)
+ (libraries alcotest yojson masc_tui_lane_application masc_tui_lane_declaration))
+
+(test
  (name test_tui_lane_addons)
  (modules test_tui_lane_addons)
  (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions otoml masc_tui_lane_declaration masc_tui_message_layout))

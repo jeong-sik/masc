@@ -191,3 +191,17 @@ TOML 관리 설치라면 일치하는 설치 선언 파일도 디스크에서 �
 그 사이 변경된 선언은 거절하고, 다른 인스턴스가 이어받은 선언은 보존한다. DOS 설치 제거는 그 DOS 머신도 종료한다.
 통계·관측 패키지를 제거해도 별도 생산자는 계속 진행하며 과거 관측·근거는 남는다. `Esc`·`q`는 화면만 닫고, 기존 owner 작업 취소나 Keeper 필수 검토를 추가하지 않는다.
 목록에 없는 실행을 붙일 때는 `A`에서 `attach {"manifest_path":…,"run_id":…,"binding":…}`를 입력해 선언 없이도 붙일 수 있다.
+
+## Saved configuration and application
+
+The declaration editor keeps the accepted file separate from your draft. The
+application line follows that accepted file through startup, old-worker cleanup,
+applied, off, failure or unknown. Changing the draft with Space or E does not
+change that target until you explicitly save. A comparison read (`l`) keeps the
+previous target until you adopt the current revision (`u` or `U`).
+
+Application reads follow the existing refresh cadence while the panel is visible.
+Press `r` in the TOML view to request a read immediately. This read leaves your
+draft, save receipt and save errors intact and does not occupy the save request.
+A different reconciled source or worker-input revision is shown as unconfirmed;
+missing workers alone do not confirm Off.

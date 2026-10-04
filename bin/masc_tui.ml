@@ -7533,7 +7533,10 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   else if action = Inbox.Resume
           && state.workspace_identity = Workspace_identity_match
           && keeper_available_for_new_message state keeper_name
-          && resume_preflight_keeper_input state keeper_name then begin
+          && (match List.find_opt (fun (keeper : keeper) ->
+                String.equal keeper.k_name keeper_name) state.keepers with
+              | Some keeper -> resume_preflight_keeper_input ~owner_paused:keeper.k_paused state keeper_name
+              | None -> false) then begin
     launch_waiting_keeper_input state ~mailbox ~keeper_name;
     chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
       "Resumed locally retained input"

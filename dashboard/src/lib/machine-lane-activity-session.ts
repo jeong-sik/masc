@@ -16,7 +16,7 @@ type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
 type Observed = { activity: Extract<LaneInventoryRow['state'], { kind: 'machine' }>['activity']; at: number }
 type State = {
-  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving';
+  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving' | 'followup';
   error: string | null; notice: string | null; followupError: string | null;
   receipt: CommittedRuntimeTomlConfig | null; uncertain: boolean;
   observed: Observed | null; observationError: string | null;
@@ -173,7 +173,7 @@ export class MachineLaneActivitySession {
         throw new Error('저장 응답이 제출한 파일과 일치하지 않습니다. 현재 설정을 다시 읽으세요.')
       committed = true
       announceRuntimeTomlWritten()
-      this.update({ receipt, current: null, observed: null, uncertain: receipt.commit.durability !== 'durable',
+      this.update({ phase: 'followup', receipt, current: null, observed: null, uncertain: receipt.commit.durability !== 'durable',
         draft: receipt.commit.durability === 'durable' ? { ...draft, base: saved } : draft,
         notice: '파일 저장 응답을 받았습니다. 현재 설정과 적용 상태를 다시 확인합니다.' })
       // Raw save publishes machine activity; model setup resume cannot load

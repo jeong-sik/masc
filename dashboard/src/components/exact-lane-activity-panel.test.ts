@@ -6,7 +6,7 @@ import { parseLaneInventory } from '../api/lane-inventory'
 import inventory from '../api/fixtures/lane-inventory.json'
 import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
-import { RuntimeTomlRevisionConflict, type RuntimeTomlConfig } from '../api/dashboard-runtime'
+import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
 import { readExactActivity, writeExactActivity } from '../lib/exact-lane-activity'
 import { exactLaneActivitySessionFor, resetExactLaneActivitySessionsForTesting } from '../lib/exact-lane-activity-session'
 import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
@@ -107,6 +107,38 @@ describe('Exact activity operator flow', () => {
     await waitFor(() => expect(next.view.getByText(/관측 상태: off/)).toBeTruthy())
     expect(next.view.getByText(/Exact registry 적용됨/)).toBeTruthy()
     expect(next.view.getByRole('button', { name: '활동 설정 닫기' })).toBeTruthy()
+  })
+  it('keeps a verified durable receipt certain when authority changes during follow-up', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    followup.refreshRuntimeConfigConsumers.mockReturnValueOnce(pending.promise)
+    const saving = session.save(authority)
+    await waitFor(() => expect(session.state.value.receipt?.commit.durability).toBe('durable'))
+    expect(session.state.value.phase).toBe('followup')
+    expect(session.ready(authority)).toBe(false)
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    await session.read(authority)
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    workspace('/fixture/B')
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.receipt?.commit.durability).toBe('durable')
+    pending.resolve(); await saving
+    expect(session.state.value.uncertain).toBe(false)
+  })
+  it('still marks an unresolved sent save unknown when authority changes', async () => {
+    const { authority, session } = await draft(), pending = deferred<ReturnType<typeof receipt>>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async (_text, _revision, options) => {
+      options?.beforeDispatch?.(); return pending.promise
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    workspace('/fixture/B')
+    expect(session.state.value.uncertain).toBe(true)
+    pending.resolve(receipt(off)); await saving
+    expect(session.state.value.uncertain).toBe(true)
+    expect(session.state.value.receipt).toBeNull()
   })
   it('refreshes Runtime and All Lanes after a successful manual setup retry', async () => {
     let published = false
@@ -267,6 +299,67 @@ describe('Exact activity operator flow', () => {
     workspace('/fixture/B'); const fresh = workspace('/fixture/A'); await session.read(fresh)
     response.resolve(receipt(off)); expect(await saving).toBe(false)
     expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current?.source_text).toBe(source)
+    expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+  })
+  it.each(['raw', 'patch'] as const)('invalidates a retained activity basis after an owned %s file commit', async mode => {
+    const { session, authority } = await draft()
+    const raw = runtimeTomlSessionFor(authority)
+    await raw.read(authority, 'reload')
+    const activityBase = session.state.value.draft?.base
+    expect(await raw.write(authority, async options => {
+      options.beforeDispatch?.()
+      stored = off
+      return receipt(off)
+    }, mode === 'raw' ? off : undefined)).toBe(true)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.draft?.base).toBe(activityBase)
+    expect(session.state.value.draft?.enabled).toBe(false)
+    expect(raw.state.value.needsRead).toBe(false)
+    expect(raw.state.value.config?.source_text).toBe(off)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+  it('keeps a clean activity reading unavailable when a raw commit changes its file', async () => {
+    const authority = executionWorkspaceAuthority.peek()!, session = exactLaneActivitySessionFor(authority, lane)
+    await session.read(authority)
+    const raw = runtimeTomlSessionFor(authority); await raw.read(authority, 'reload')
+    expect(await raw.write(authority, async () => { stored = off; return receipt(off) }, off)).toBe(true)
+    expect(session.state.value.current).toBeNull()
+    expect(session.ready(authority)).toBe(false)
+    await session.read(authority)
+    expect(session.state.value.draft?.enabled).toBe(false)
+    expect(session.state.value.current?.source_text).toBe(off)
+  })
+  it('preserves a retryable source after typed pre-replacement raw-save rejection', async () => {
+    const { session, authority } = await draft(), before = session.state.value.current
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlSaveRejected('HTTP 400: fixture admission refused'))
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.current).toBe(before)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.draft?.enabled).toBe(false)
+    expect(session.state.value.error).toContain('저장 전에 거절')
+    expect(session.state.value.error).not.toContain('불확실')
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+    expect(await session.save(authority)).toBe(true)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(2)
+  })
+  it('does not restore an invalidated current source when a known rejection arrives late', async () => {
+    const { session, authority } = await draft(), response = deferred<void>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async () => {
+      await response.promise
+      throw new RuntimeTomlSaveRejected('HTTP 400: fixture admission refused')
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    announceRuntimeTomlWritten()
+    expect(session.state.value.current).toBeNull()
+    response.resolve()
+    expect(await saving).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.ready(authority)).toBe(false)
     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
   })
   it('requires a read after an unanswered write and does not blindly repeat it', async () => {

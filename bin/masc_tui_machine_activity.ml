@@ -64,7 +64,7 @@ let finish_read request result t =
   | Error detail -> {t with message=Some (detail ^ " · draft retained")}
   | Ok {document=current;activity=observed} ->
     (match activity t.owner.machine current with
-     | Error detail -> {t with message=Some detail}
+     | Error detail -> {t with observed=Some observed;message=Some detail}
      | Ok enabled ->
        let retain = match t.draft with
          | None -> false

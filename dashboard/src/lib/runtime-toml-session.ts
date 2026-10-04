@@ -1,8 +1,8 @@
-import { effect, signal } from '@preact/signals'
+import { batch, effect, signal } from '@preact/signals'
 import { fetchRuntimeTomlConfig, type CommittedRuntimeTomlConfig, type RuntimeTomlConfig } from '../api/dashboard'
 import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlCurrentSource, type RuntimeTomlRequestOptions } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
-import { runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { runtimeConfigCommitReceiptNotice } from './runtime-config-receipt'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
@@ -165,6 +165,12 @@ export class RuntimeTomlSession {
             + (latest.draft !== submitted && latest.draft !== before.draft ? ' 저장 중 추가한 초안은 저장되지 않았습니다.' : '')
           : 'runtime assignment unchanged' })
       if ('unchanged' in result) return false
+      // The file receipt invalidates other editors even if setup resume fails.
+      // This session has already adopted that receipt, so keep its own basis.
+      batch(() => {
+        announceRuntimeTomlWritten()
+        this.generation = runtimeTomlSourceGeneration.peek()
+      })
       // Unmount does not interrupt the saved file's session. A different
       // workspace does prevent follow-up writes to model setup.
       if (!this.admits(authority)) return true

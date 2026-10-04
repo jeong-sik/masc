@@ -20084,9 +20084,11 @@ and is loaded on demand through keeper_skill.
                 (match view.installer with
                  | Some installer ->
                      if key="pageup" || key="pagedown" then (
-                       let _, cols = get_terminal_size () in
-                       let last = List.length (Addons.lines ~height:(surface_rows state) ~width:(framed_inner_width cols) view)-1 in
-                       update {view with scroll=max 0 (min last (view.scroll + (if key="pagedown" then 1 else -1)))})
+                       let terminal_rows, cols = get_terminal_size () in
+                       let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                       let count = List.length (Addons.lines ~height ~width:(framed_inner_width cols) view) in
+                       let move = if key="pagedown" then Masc_tui_scroll.down else Masc_tui_scroll.up in
+                       update {view with scroll=move ~count ~height view.scroll})
                      else if view.loading then (
                        if key="esc" then invalidate {view with installer=None;loading=false;error=None;scroll=0})
                      else (match Masc_tui_lane_installer.handle ~key installer with

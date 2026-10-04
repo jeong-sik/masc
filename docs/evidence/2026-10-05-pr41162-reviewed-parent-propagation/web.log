@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/lane-inventory.test.ts src/components/lane-inventory-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+   Start at  03:25:09
+   Duration  1.82s (import 39%, transform 26%, environment 17%, setup 13%, tests 5%)
+

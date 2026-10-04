@@ -1313,8 +1313,10 @@ let test_judge_rejects_blank_conclusions () =
         ; "supported", recommend blank "evidence", "decision.action"
         ; "supported", recommend "act" blank, "decision.rationale"
         ])
-    [ ""; " \t\n\r\012" ];
-  let answer = "  Preserve the evidence.\n" in
+    [ ""; " \t\n\r\012"; "\u{00a0}"; "\u{0085}"; "\u{3000}"
+    ; "\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}"
+    ];
+  let answer = "\u{00a0}근거를 보존합니다. Evidence.\u{3000}\n" in
   let json = `Assoc [ "resolved_answer", `String answer
     ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String answer ] ] in
   match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with

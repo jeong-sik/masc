@@ -56,20 +56,39 @@ let string_codec =
         | _ -> Error (path ^ ": expected string"))
   }
 
-(* Match [String.trim]'s whitespace set in both the schema and decoder.
-   Preserve the original content once it contains an actual answer. *)
+(* Unicode White_Space is the single classification authority. Derive the
+   schema character class from the same property used by the decoder, once at
+   module initialization. Preserve any supported answer bytes unchanged. *)
+let nonblank_pattern =
+  let pattern = Buffer.create 64 in
+  Buffer.add_string pattern "[^";
+  for code = Uchar.to_int Uchar.min to Uchar.to_int Uchar.max do
+    if Uchar.is_valid code then begin
+      let uchar = Uchar.of_int code in
+      if Uucp.White.is_white_space uchar then Buffer.add_utf_8_uchar pattern uchar
+    end
+  done;
+  Buffer.add_char pattern ']';
+  Buffer.contents pattern
+
 let nonblank_string_codec =
   { schema =
       `Assoc
         [ "type", `String "string"
-        ; "pattern", `String "[^ \t\n\r\012]"
+        ; "pattern", `String nonblank_pattern
         ]
   ; decode =
       (fun path json ->
         let* value = string_codec.decode path json in
-        if String.equal (String.trim value) ""
-        then Error (path ^ ": expected nonblank string")
-        else Ok value)
+        let* has_content = Uutf.String.fold_utf_8
+            (fun result _ char ->
+              let* found = result in
+              match char with
+              | `Uchar uchar -> Ok (found || not (Uucp.White.is_white_space uchar))
+              | `Malformed _ -> Error (path ^ ": expected UTF-8 string"))
+            (Ok false) value in
+        if has_content then Ok value
+        else Error (path ^ ": expected nonblank string"))
   }
 
 let enum_codec values =

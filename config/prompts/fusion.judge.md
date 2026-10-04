@@ -72,3 +72,5 @@ has no findings. A decision.kind of answer requires a nonblank answer; recommend
 requires a nonblank action and rationale. Both require a nonblank resolved_answer.
 Insufficient uses missing (an array of strings) and may leave resolved_answer
 empty when the evidence cannot support an answer.
+
+Nonblank conclusions must contain content beyond Unicode whitespace.

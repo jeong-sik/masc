@@ -128,7 +128,8 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
       (type_strings field);
     match schema_member "pattern" field with
     | Some (`String pattern) ->
-      check string "conclusion excludes String.trim whitespace" "[^ \t\n\r\012]" pattern
+      check string "conclusion excludes Unicode White_Space"
+        "[^\t\n\011\012\r \u{0085}\u{00a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}]" pattern
     | _ -> fail "conclusion has no nonblank constraint"
   in
   List.iter (fun branch ->

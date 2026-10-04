@@ -124,6 +124,8 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
        ; Fusion_judge_parse.wire_decision_recommend ])
     (List.concat_map branch_kind branches |> List.sort String.compare);
   let check_nonblank field =
+    check (list string) "nonblank conclusion requires a string" ["string"]
+      (type_strings field);
     match schema_member "pattern" field with
     | Some (`String pattern) ->
       check string "conclusion excludes String.trim whitespace" "[^ \t\n\r\012]" pattern
@@ -135,8 +137,8 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
          [ Fusion_judge_parse.wire_field_decision
          ; Fusion_judge_parse.wire_field_resolved_answer ])
       (required_strings branch);
-    check bool "synthesis branch is closed" false
-      (allows_additional_properties branch);
+    check bool "synthesis branch explicitly forbids additional properties" true
+      (schema_member "additionalProperties" branch = Some (`Bool false));
     let decision = schema_property Fusion_judge_parse.wire_field_decision branch in
     let resolved = schema_property Fusion_judge_parse.wire_field_resolved_answer branch in
     (match branch_kind branch with

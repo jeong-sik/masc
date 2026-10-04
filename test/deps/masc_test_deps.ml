@@ -296,7 +296,6 @@ let read_file path =
          path
          msg)
 
-let read_source_file rel = read_file (source_path rel)
 
 let config_dir_resolver_source_path =
   "lib/config_dir_resolver/config_dir_resolver.ml"

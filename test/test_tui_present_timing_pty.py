@@ -1,12 +1,12 @@
 """A real TUI session attaches output accounting to its slow Present samples."""
 import math
 import os
-from pathlib import Path
 import re
 import sys
 import tempfile
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 

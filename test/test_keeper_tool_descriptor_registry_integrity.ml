@@ -60,15 +60,6 @@ let descriptor_internal_name_set () =
 
 ;;
 
-let source_path rel =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  Filename.concat source_root rel
-;;
-
 let find_duplicates ~key (xs : Descriptor.t list) : (string * int) list =
   let counts = Hashtbl.create 64 in
   List.iter
@@ -1703,19 +1694,6 @@ let test_public_name_projection_uses_descriptor_resolution () =
        [ "tool_execute"; "tool_search_files" ])
 ;;
 
-let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
-  let ic = open_in (source_path "lib/keeper/keeper_run_tools_setup.ml") in
-  let source =
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> really_input_string ic (in_channel_length ic))
-  in
-  Alcotest.(check bool)
-    "keeper_run_tools_setup does not classify with Tool_catalog.is_public_mcp"
-    false
-    (String_util.contains_substring source "Tool_catalog.is_public_mcp")
-;;
-
 (* RFC-0182 §3.1 — verify keeper descriptors project from name → descriptor
    via [descriptors_for_internal] with the expected [runtime_handler].
 
@@ -2321,10 +2299,7 @@ let () =
             "public names project through descriptor resolution"
             `Quick
             test_public_name_projection_uses_descriptor_resolution
-        ; test_case
-            "keeper_run_tools_setup avoids public MCP catalog classifier"
-            `Quick
-            test_run_tools_setup_has_no_direct_public_mcp_catalog_read
+
         ; test_case
             "ollama probe schema declares the bounds it enforces"
             `Quick

@@ -1,10 +1,11 @@
+import unicodedata
 """Command discovery stays separate from draft, execution, and runtime status."""
 import json
 import os
 import re
 import sys
-import unicodedata
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 
 CHAT = "Keepers ▸ alpha ▸ chat".encode()

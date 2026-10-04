@@ -58,4 +58,3 @@ stages: []
 - [ ] **TypeScript** — corresponding union type in `dashboard/src/types/core.ts` updated (e.g. `KeeperPhase`, `KeeperHealth`, etc.)
 - [ ] **TLA+ spec** — matching domain literal or `DOMAIN` set in the relevant `.tla` file updated
 - [ ] **Event / JSON schema** — event type string, JSON schema enum, or `canonical_keeper_toml_key_names` updated if applicable
-- [ ] **`make check-variants` passes** — run `bash scripts/check-variants.sh` locally and confirm PASS

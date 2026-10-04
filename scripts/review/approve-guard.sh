@@ -112,7 +112,8 @@ if [ "$check_only" -eq 0 ]; then
   [ "$me" != "$pr_author" ] || refuse "the PR author cannot approve their own change"
   [ -s "$body" ] || refuse "review body missing or empty"
   review_body=$(cat "$body")
-  vline=$(printf '%s\n' "$review_body" | head -n 1 | tr -d '\r')
+  vline=${review_body%%$'\n'*}
+  vline=${vline//$'\r'/}
   if [ "$review_policy" = source ]; then
     pattern='^verdict: PASS head: ([0-9a-f]{40}) by: ([A-Za-z0-9._-]+)$'
     [[ "$vline" =~ $pattern ]] || refuse "source review requires a runless exact-head verdict"

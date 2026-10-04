@@ -12,10 +12,10 @@
       2. TOML value from [<resolved config root>/runtime.toml]
       3. Hardcoded default in the owning [Env_config_*] reader.
 
-    The TOML loader runs at server startup, before any module that reads
-    these env vars initializes. It stores boot defaults in a process-local
-    override table so existing config readers can resolve TOML-backed values
-    without mutating the parent environment. This file is startup-only today;
+    The TOML loader runs at server startup, after OCaml module initialization.
+    It stores boot defaults in a process-local override table; TOML-backed
+    readers resolve that table when called instead of caching module-load
+    values. The parent environment is not mutated. This file is startup-only today;
     there is no hot-reload path.
 
     @since 0.7.1 *)
@@ -54,6 +54,9 @@ val load_failure_to_string : load_failure -> string
 (** Renders as before: "read <path>: <detail>", "parse …", "validate …". *)
 
 val load_and_apply : base_path:string -> (int, load_failure) result
+(** Validates the registry's effective readers before applying overrides, even
+    with no TOML file. Strict malformed environment input is a [Validate]
+    failure at startup rather than a later Keeper-cycle exception. *)
 
 (** Read the raw TOML value for [env_name] from the shadow registry.
     Returns [None] when the key was absent from [runtime.toml]

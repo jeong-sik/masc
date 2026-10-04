@@ -4388,6 +4388,49 @@ let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
   lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
 
 let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
+  let preflight_lines = match detail.lrd_librarian_preflight with
+    | None -> []
+    | Some reading ->
+      let decision = match reading.lp_status with
+        | Tui_decode.Preflight_awaiting -> "응답 대기"
+        | Tui_decode.Preflight_not_called reason -> "호출하지 않음 · " ^ reason
+        | Tui_decode.Preflight_failed reason -> "호출 실패 · " ^ reason
+        | Tui_decode.Preflight_invalid reason -> "답변 거절 · " ^ reason
+        | Tui_decode.Preflight_judged judgment ->
+          Masc.Typesafeai_librarian_preflight.decision_label judgment.choice in
+      let path = match reading.lp_generation_path with
+        | Tui_decode.Generation_not_entered -> "생성 Lane 진입 전"
+        | Tui_decode.Generation_full_lane -> "생성 Lane 진입 · 실제 요청 수는 별도 기록"
+        | Tui_decode.Generation_jev_no_change -> "생성 호출 생략 · 빈 변경 검증 통과" in
+      let probabilities = match reading.lp_status with
+        | Tui_decode.Preflight_judged judgment ->
+          [Printf.sprintf "Confidence %.3f" judgment.confidence]
+          @ List.map (fun (decision, probability) ->
+              Printf.sprintf "%s %.3f" (Masc.Typesafeai_librarian_preflight.decision_label decision) probability)
+              judgment.probabilities
+        | _ -> [] in
+      let elapsed = match reading.lp_elapsed_s with
+        | None -> [] | Some seconds -> [Printf.sprintf "JEV elapsed %.3fs" seconds] in
+      let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
+      let rejection = match reading.lp_domain_rejection with
+        | None -> [] | Some reason -> ["검증 거절 → 생성 Lane · " ^ reason] in
+      let document = String.concat "\n"
+        (["JEV PREFLIGHT · " ^ decision; path]
+         @ model @ elapsed @ probabilities @ rejection
+         @ ["기억 저장 결과는 아래 after/absorption 및 실행 상태에서 확인"; ""]) in
+      let document =
+        if String.length document <= lane_run_preview_source_max_bytes then document
+        else
+          let notice = Printf.sprintf "\n… truncated preflight, total %d bytes" (String.length document) in
+          let room = lane_run_preview_source_max_bytes - String.length notice in
+          let cut = String_util.utf8_char_boundary document room in
+          String.sub document 0 cut ^ notice in
+      String.split_on_char '\n' document
+      |> List.concat_map (fun text ->
+          Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
+          |> List.map (fun line -> Theme.info (), line))
+  in
+  preflight_lines @
   match detail.lrd_output_availability, detail.lrd_output with
   | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]
   | Some availability, output ->
@@ -9606,10 +9649,16 @@ let render_runtime (state : state) =
     | Masc_tui_types.Runtime_lanes -> List.length candidates
     | Masc_tui_types.Runtime_all -> List.length all_runtimes
   in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
+    match state.runtime_surface with
+    | None -> "reading unavailable"
+    | Some snapshot ->
+        (match Masc_domain.parse_iso8601_opt snapshot.rss_resolved.rrs_generated_at_iso with
+         | None -> "reading time unavailable"
+         | Some generated_at ->
+             let recorded = Unix.localtime generated_at in
+             Printf.sprintf "reading %02d:%02d:%02d"
+               recorded.Unix.tm_hour recorded.Unix.tm_min recorded.Unix.tm_sec)
   in
   let header =
     match state.runtime_surface with
@@ -11984,18 +12033,39 @@ let render_config_models (state : state) =
        (* [box_line] spends cells on the two border glyphs and the padding
           either side, and this pane adds two more for its own indent. A
           width that ignores them wraps the last column onto its own row,
-          which reads as a blank value. *)
+          which reads as a blank value. The pane is the truth the table is
+          fitted against: handing the table a floor of 40 on a terminal
+          narrower than that drew mandatory readings into cells the frame
+          then cut (#28905 review). [render] uses the pane to choose the
+          stacked layout before that cut can eat a value. *)
        let table =
          Masc_tui_model_runtime_table.render
            ~width:(max 40 (cols - 6 - 2))
+           ~pane:(max 1 (cols - 6 - 2))
            state.config_models_rows
        in
        let total = List.length table in
+       (* The cursor walks bindings, not lines. In table mode line 0 is the
+          header, so binding [i] is line [i+1] and that is what the window
+          follows. In stacked mode the item's first line is the binding's
+          line: the cursor still selects the same record it did before the
+          resize, which is the whole point of the transition. *)
+       let pane_width = max 1 (cols - 6 - 2) in
+       let table_mode =
+         Masc_tui_model_runtime_table.fits ~width:pane_width state.config_models_rows
+       in
+       let cursor_line =
+         if table_mode then state.config_models_cursor + 1
+         else
+           List.nth_opt
+             (Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width state.config_models_rows)
+             state.config_models_cursor
+           |> Option.value ~default:0
+       in
        let max_scroll = max 0 (total - table_height) in
        (* The window follows the cursor rather than the other way round: a
           cursor the frame does not draw is a selection the reader cannot
           see, and [e] would act on a row that is off screen. *)
-       let cursor_line = state.config_models_cursor + 1 in
        let scroll = max 0 (min state.config_scroll max_scroll) in
        let scroll =
          if cursor_line < scroll then cursor_line
@@ -12008,14 +12078,15 @@ let render_config_models (state : state) =
           key, a list that shrank -- drew its rows outside the window, and
           they came out blank. *)
        let table_window = Rows.of_list ~first:scroll ~height:table_height table in
-       (* Row 0 of [table] is the header, so a cursor over the data rows is
-          one lower than the line it marks. *)
+       (* Row 0 of [table] is the header in table mode, so a cursor over the
+          data rows is one lower than the line it marks. Stacked mode has no
+          header: line 0 is the first binding's item. *)
        for i = 0 to table_height - 1 do
          let index = scroll + i in
          match Rows.at table_window index with
          | Some line ->
              let marked =
-               if index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
+               if table_mode && index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
                else if index = cursor_line then Ansi.bold ^ Theme.info () ^ "> " ^ line ^ Ansi.reset
                else "  " ^ line
              in

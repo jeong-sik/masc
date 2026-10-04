@@ -6,15 +6,16 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
-from typing import Any, cast
 import zlib
+from pathlib import Path
+from typing import Any, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
 
 
@@ -58,13 +59,13 @@ def run_case(executable: str, fixture_path: Path) -> None:
     run = cast(dict[str, Any], detail["run"])
     run_id = cast(str, run["run_id"])
     gate = cast(dict[str, Any], run["output"]["absorb_gate"])
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-    fixtures[h.lane_runs_path("librarian_exact")] = (200, fixture["page"])
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (200, fixture["page"])
     detail_reads: list[str] = []
 
-    def read_detail() -> h.HttpResponse:
+    def read_detail() -> _keyboard_harness.HttpResponse:
         detail_reads.append(run_id)
         return 200, detail
 
@@ -77,22 +78,22 @@ def run_case(executable: str, fixture_path: Path) -> None:
         output: bytearray,
         _base: str,
     ) -> None:
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process, fd, output, rows=42, columns=180, needle=b"MASC Dashboard"
         )
-        h.palette_go(process, fd, output, b"go lanes", b"Librarian")
-        h.send_and_wait(
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"Librarian")
+        _keyboard_harness.send_and_wait(
             process,
             fd,
             output,
             b"/Librarian",
             re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian"),
         )
-        h.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
-        h.send_and_wait(process, fd, output, b"\r", b"1 loaded / 1 retained")
-        h.send_and_wait(process, fd, output, b"\r", b"absorb_gate")
-        h.drain_until_quiet(process, fd, output)
-        first_screen = h.screen_text(bytes(output))
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"1 loaded / 1 retained")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"absorb_gate")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        first_screen = _keyboard_harness.screen_text(bytes(output))
         status = cast(str, run["status"]).encode()
         for needle in (b"absorb_gate", gate["status"].encode(), b"RUN  " + status):
             if needle not in first_screen:
@@ -188,14 +189,14 @@ def run_case(executable: str, fixture_path: Path) -> None:
         for _ in range(output_pane_rows(first_screen)):
             if all(rendered(needle) for needle in needles):
                 break
-            h.read_available(fd, output)
+            _keyboard_harness.read_available(fd, output)
             start = len(output)
             # Visit each row: the compare pane's PageDown step can exceed its
             # visible body, skipping request metadata between page windows.
             os.write(fd, b"j")
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
-            h.drain_until_quiet(process, fd, output)
-            screen = h.screen_text(bytes(output))
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            screen = _keyboard_harness.screen_text(bytes(output))
             seen += b"\n" + screen
             joined += b"\n" + unwrapped(screen)
         for needle in needles:
@@ -207,8 +208,8 @@ def run_case(executable: str, fixture_path: Path) -> None:
                 raise AssertionError("the real model output did not exceed the preview")
             if b"EXACT_OUTPUT_TAIL" in first_screen:
                 raise AssertionError("the fixture did not exercise the bounded preview")
-            h.send_and_wait(process, fd, output, b"\x1b[F", b"truncated, total")
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"absorb_gate")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", b"truncated, total")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"absorb_gate")
 
         print(
             "LIBRARIAN_ABSORB_GATE_PTY_EVIDENCE "
@@ -233,7 +234,7 @@ def run_case(executable: str, fixture_path: Path) -> None:
         )
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Librarian absorb gate: " + scenario,
         interact=interact,
@@ -242,7 +243,7 @@ def run_case(executable: str, fixture_path: Path) -> None:
 
 
 def main() -> None:
-    executable = h.tui_executable(sys.argv[1])
+    executable = _keyboard_harness.tui_executable(sys.argv[1])
     producer = str(Path(sys.argv[2]).resolve())
     cancellation_producer = str(Path(sys.argv[3]).resolve())
     producer_timeout = 120

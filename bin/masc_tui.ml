@@ -19628,20 +19628,25 @@ and is loaded on demand through keeper_skill.
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if not (String.equal name "") then begin
-                   state.runtime_lane_name_draft <- None;
-                   Masc_tui_types.dismiss_runtime_lane_notice state;
                    match entry with
-                   | Masc_tui_types.Naming_new_lane _ ->
-                     (* A lane is its candidates, so it comes to exist with
-                        one: the picker that opens here declares it. *)
-                     Masc_tui_types.open_runtime_lane_pick state
-                       (Masc_tui_types.Pick_new_lane name)
-                   | Masc_tui_types.Renaming_lane { lane; _ } ->
-                     (* The rename lands in one write, references and all, so
-                        there is nothing to pick and nothing to follow. *)
-                     launch_runtime_lane_write state ~mailbox:async_messages
-                       ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
-                       Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
+                   | Masc_tui_types.Renaming_lane _
+                     when Masc_tui_types.runtime_lane_write_busy state ->
+                       state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+                   | _ ->
+                     state.runtime_lane_name_draft <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
+                     match entry with
+                     | Masc_tui_types.Naming_new_lane _ ->
+                       (* A lane is its candidates, so it comes to exist with
+                          one: the picker that opens here declares it. *)
+                       Masc_tui_types.open_runtime_lane_pick state
+                         (Masc_tui_types.Pick_new_lane name)
+                     | Masc_tui_types.Renaming_lane { lane; _ } ->
+                       (* The rename lands in one write, references and all, so
+                          there is nothing to pick and nothing to follow. *)
+                       launch_runtime_lane_write state ~mailbox:async_messages
+                         ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+                         Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
                  end
                | "\127" | "\b" | "backspace" ->
                  let length = String.length draft in

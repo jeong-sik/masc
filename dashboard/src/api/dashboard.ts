@@ -422,6 +422,7 @@ export {
   fetchKeeperTurnRecords,
   fetchKeeperTurnTranscript,
   parseMemoryOsFactCategory,
+  memoryOsFactCategoryToken,
   isMemoryOsMemoryId,
 } from './dashboard-turn-records'
 

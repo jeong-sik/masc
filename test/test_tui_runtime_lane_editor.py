@@ -11,7 +11,10 @@ import os
 import sys
 import threading
 import time
-import test_tui_keyboard_input as h
+from datetime import datetime
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_runtime as _keyboard_runtime
 
 
 
@@ -106,14 +109,14 @@ class LaneStore:
     reaches the screen as the server wrote it."""
 
     def __init__(self) -> None:
-        _status, body = h.runtime_resolved_response()
+        _status, body = _keyboard_runtime.runtime_resolved_response()
         self.body = body
         self.lanes = [dict(lane) for lane in body["lanes"]]
         self.revision = 1
         self.lock = threading.Lock()
         self.held: tuple[threading.Event, threading.Event] | None = None
         self.fail_next_resolved = False
-        _status, standalone = h.standalone_lanes_response()
+        _status, standalone = _keyboard_keepers.standalone_lanes_response()
         self.standalone = standalone
         self.standalone_held: tuple[threading.Event, threading.Event] | None = None
         exact = self.exact_lane(EXACT_LANE)
@@ -127,7 +130,7 @@ class LaneStore:
     def exact_lane(self, name: str) -> dict:
         return next(lane for lane in self.standalone["lanes"] if lane["lane_id"] == name)
 
-    def resolved(self) -> h.HttpResponse:
+    def resolved(self) -> _keyboard_harness.HttpResponse:
         with self.lock:
             if self.fail_next_resolved:
                 self.fail_next_resolved = False
@@ -144,7 +147,7 @@ class LaneStore:
             ]
         return 200, {**self.body, "lanes": lanes}
 
-    def raw(self) -> h.HttpResponse:
+    def raw(self) -> _keyboard_harness.HttpResponse:
         with self.lock:
             source = "\n".join(
                 f'[runtime.lanes.{lane["id"]}]\n'
@@ -154,7 +157,7 @@ class LaneStore:
             return 200, {"source_revision": f"{self.revision:064x}",
                          "source_text": source}
 
-    def standalone_lanes(self) -> h.HttpResponse:
+    def standalone_lanes(self) -> _keyboard_harness.HttpResponse:
         """The standalone lanes as they stand when the read arrives. A held
         read answers with that, after the release: a load that left before a
         write and lands after it."""
@@ -196,7 +199,7 @@ class LaneStore:
             lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
             return list(lane["runtime_ids"])
 
-    def route(self, raw: bytes) -> h.HttpResponse:
+    def route(self, raw: bytes) -> _keyboard_harness.HttpResponse:
         with self.lock:
             held, self.held = self.held, None
         if held is not None:
@@ -295,7 +298,7 @@ class LaneStore:
 def mark_output(fd, output) -> int:
     """Where the next press's output begins, so a wait does not match a row
     an earlier frame drew."""
-    h.read_available(fd, output)
+    _keyboard_harness.read_available(fd, output)
     return len(output)
 
 
@@ -314,64 +317,70 @@ def without_checked_revision(posted: list[dict]) -> list[dict]:
 def press(process, fd, output, key: bytes) -> None:
     """A key whose effect is a cursor move: nothing on screen names it, so it
     is judged by the next key that acts on the row it lands on."""
-    h.read_available(fd, output)
+    _keyboard_harness.read_available(fd, output)
     start = len(output)
     os.write(fd, key)
-    h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3.0)
-    h.drain_until_quiet(process, fd, output)
+    _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3.0)
+    _keyboard_harness.drain_until_quiet(process, fd, output)
 
 
 def run(executable: str) -> None:
     store = LaneStore()
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
-    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    recorded_at = datetime.fromisoformat(
+        store.body["generated_at_iso"].replace("Z", "+00:00")
+    )
+    reading_time = f"reading {recorded_at.astimezone().strftime('%H:%M:%S')}".encode()
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
         # 131 columns, as the Runtime scenario in test_tui_keyboard_input.py
         # uses: wide enough for the prompt rows, narrow enough to keep the
         # acting pane off the screen.
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process, fd, output, rows=30, columns=131,
-            needle=b"MASC System", controls=(h.FULL_REDRAW,),
+            needle=b"MASC System", controls=(_keyboard_harness.FULL_REDRAW,),
         )
-        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        frame = _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        if reading_time not in _keyboard_harness.screen_text(frame):
+            raise AssertionError("Runtime header did not use the resolved reading time")
 
         # [a] opens the name field; the letters typed after it are the name's.
-        h.send_and_wait(process, fd, output, b"a", b"new lane name: _")
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"new lane name: _")
+        _keyboard_harness.send_and_wait(
             process, fd, output, NEW_LANE.encode(),
             f"new lane name: {NEW_LANE}_".encode(),
         )
         mark = mark_output(fd, output)
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"\r",
             f"first runtime of new lane {NEW_LANE}".encode(),
         )
         # A lane with no candidates yet ranks the catalog by id. The catalog
         # is read when [a] opens the field, so its rows can trail the header.
-        h.wait_for_output(process, fd, output, b"> runtime-a", start=mark, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"\r", b"Runtime lanes (4 lanes, 5 slots)")
+        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-a", start=mark, timeout=5.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Runtime lanes (4 lanes, 5 slots)")
 
         # The new lane's row is the fifth. [e] there names the lane it adds
         # to, which is what shows the cursor stands on it.
         for _ in range(4):
             press(process, fd, output, b"j")
         mark = mark_output(fd, output)
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"e",
             f"adding a candidate to the candidate order of {NEW_LANE}".encode(),
         )
         # The lane's own runtime ranks last; the other four come by id.
-        h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
         for needle in (b"> runtime-c", b"> runtime-d", b"> runtime-e"):
-            h.send_and_wait(process, fd, output, b"j", needle)
-        h.send_and_wait(process, fd, output, b"\r", b"2/2 runtime-e")
+            _keyboard_harness.send_and_wait(process, fd, output, b"j", needle)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"2/2 runtime-e")
 
         # [J] moves runtime-a below runtime-e, and the cursor goes with it.
         # The post is held: an [x] pressed before the move is read back would
@@ -380,26 +389,36 @@ def run(executable: str) -> None:
         # will leave on runtime-a.
         arrived, release = store.hold_next_post()
         os.write(fd, b"J")
-        if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
+        if not _keyboard_harness.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
             raise AssertionError("J posted nothing")
-        h.send_and_wait(
+        frame = _keyboard_harness.send_and_wait(
+            process, fd, output, b"R",
+            b"lane write refused: " + BUSY,
+        )
+        if f"rename lane {NEW_LANE} to:".encode() in _keyboard_harness.screen_text(frame):
+            raise AssertionError("R opened a rename field while a write was pending")
+        # Moving away and back clears the prior notice, so x must draw its
+        # own refusal rather than satisfying the wait with R's old frame.
+        press(process, fd, output, b"k")
+        press(process, fd, output, b"j")
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"x",
             b"lane write refused: " + BUSY,
         )
         mark = mark_output(fd, output)
         release.set()
-        h.wait_for_output(process, fd, output, b"1/2 runtime-e", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"1/2 runtime-e", start=mark, timeout=5.0)
         # [x] drops the row the cursor followed: runtime-a, not runtime-e.
-        h.send_and_wait(process, fd, output, b"x", b"1/1 runtime-e")
+        _keyboard_harness.send_and_wait(process, fd, output, b"x", b"1/1 runtime-e")
 
         # [D] asks first; the second press removes the lane.
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"D",
             f"press D again to remove lane {NEW_LANE}".encode(),
         )
-        h.send_and_wait(process, fd, output, b"D", b"Runtime lanes (3 lanes, 4 slots)")
-        h.read_available(fd, output)
-        if NEW_LANE.encode() in h.screen_text(bytes(output)):
+        _keyboard_harness.send_and_wait(process, fd, output, b"D", b"Runtime lanes (3 lanes, 4 slots)")
+        _keyboard_harness.read_available(fd, output)
+        if NEW_LANE.encode() in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError(f"{NEW_LANE} is still on screen after its removal")
 
         # A lane a keeper is assigned to and a Fusion seat names is refused by
@@ -407,10 +426,10 @@ def run(executable: str) -> None:
         # at its end included.
         for _ in range(3):
             press(process, fd, output, b"k")
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"D", b"press D again to remove lane primary",
         )
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"D",
             b"lane write refused: HTTP 400: " + in_use_refusal("primary", ["sangsu"]).encode(),
         )
@@ -424,16 +443,23 @@ def run(executable: str) -> None:
         # ends it too, with a line saying the list may be stale -- the screen
         # still shows the order from before J.
         store.fail_next_resolved = True
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"J", b"the lane list could not be re-read",
         )
+        # A failed reread repaints only changed rows; the unchanged header
+        # stays in terminal state even when it is absent from this frame.
+        current_screen = _keyboard_harness.screen_text(bytes(output))
+        if reading_time not in current_screen:
+            raise AssertionError(
+                f"failed refresh changed the Runtime reading time: expected {reading_time!r}; screen={current_screen[:1200]!r}"
+            )
         # Another client now removes runtime-a. The TUI still shows the old
         # [runtime-a; runtime-b] order, where runtime-b is second. K used to
         # post that whole stale order and restore runtime-a. The unread list
         # now refuses the key without posting, so the authoritative removal
         # stays in place.
         store.replace_lane_from_another_client("primary", ["runtime-b"])
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"K",
             b"lane write refused: the lane list may be stale",
         )
@@ -441,9 +467,9 @@ def run(executable: str) -> None:
         # adds a candidate. Opening it refreshes only the catalog. Enter must
         # refuse locally too, without restoring runtime-a beside the new id.
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"e", b"adding a candidate to the candidate order of primary")
-        h.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(process, fd, output, b"e", b"adding a candidate to the candidate order of primary")
+        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"\r",
             b"lane write refused: the lane list may be stale",
         )
@@ -475,7 +501,7 @@ def run(executable: str) -> None:
             )
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Runtime lanes reading edits lanes",
         interact=interact,
@@ -494,8 +520,8 @@ def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
     """Wait until [needle] is gone from the screen the pane last painted."""
     deadline = time.monotonic() + timeout
     while True:
-        h.drain_until_quiet(process, fd, output)
-        if needle not in h.screen_text(bytes(output)):
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        if needle not in _keyboard_harness.screen_text(bytes(output)):
             return
         if time.monotonic() > deadline:
             raise AssertionError(f"{needle!r} stayed on screen")
@@ -508,14 +534,14 @@ def run_exact(executable: str) -> None:
     what the queued read returns. Each pick posts only the slot it adds, so
     the declared slot the registry dropped survives both."""
     store = LaneStore()
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
-    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
     picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
 
     def exact_posts() -> list[object]:
@@ -530,17 +556,17 @@ def run_exact(executable: str) -> None:
         return exact_posts()
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
         # [r] sends a load of the list and the fixture holds it: it has left
         # before the write below.
         arrived, release = store.hold_next_standalone_read()
         os.write(fd, b"r")
-        if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
+        if not _keyboard_harness.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
             raise AssertionError("r read no standalone lanes")
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"a", picker)
-        h.wait_for_output(process, fd, output, b"> model-a default", start=mark, timeout=5.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-a default", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         wait_for_posts(1)
         # The write answered once the picker closes. Only then is the held
@@ -551,12 +577,12 @@ def run_exact(executable: str) -> None:
         # The queued read-back is what draws the new slot. The held load
         # lands first, with slots that do not name runtime-a, and the picker
         # that did is closed.
-        h.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
         # The second picker is built from that list, so runtime-a is no
         # longer offered and the cursor opens on runtime-b.
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"a", picker)
-        h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
         # A pick sends only the slot it adds. A whole order built from the
@@ -573,7 +599,7 @@ def run_exact(executable: str) -> None:
         screen_lacks(process, fd, output, picker, timeout=5.0)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Standalone lane picks wait for the standalone list",
         interact=interact,
@@ -587,7 +613,7 @@ def run_cli_editor(executable: str) -> None:
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
     store.body["runtimes"].append({
-        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
     librarian = store.exact_lane("librarian_exact")
@@ -598,12 +624,12 @@ def run_cli_editor(executable: str) -> None:
     librarian["cli_slots"] = list(cli)
     store.exact_declared["librarian_exact"] = list(librarian["declared_slots"])
     store.exact_declared_cli["librarian_exact"] = list(cli)
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
 
     def exact_posts() -> list[dict]:
         return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
@@ -617,22 +643,22 @@ def run_cli_editor(executable: str) -> None:
         return exact_posts()
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"j", b"HITL")
-        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"s", b"Model order")
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
+        _keyboard_harness.wait_for_output(process, fd, output,
                           b"[CLI] codex_subscription.gpt-6-luna", start=mark, timeout=5.0)
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.wait_for_output(process, fd, output,
                           b"[CLI] claude_code.claude-sonnet-5", start=mark, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"j", b"[CLI] codex_subscription.gpt-6-luna")
-        h.send_and_wait(process, fd, output, b"K", b"HTTP slots run first")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"[CLI] codex_subscription.gpt-6-luna")
+        _keyboard_harness.send_and_wait(process, fd, output, b"K", b"HTTP slots run first")
         if exact_posts():
             raise AssertionError(f"a cross-boundary move posted: {exact_posts()!r}")
-        h.send_and_wait(process, fd, output, b"j", b"[CLI] claude_code.claude-sonnet-5")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"[CLI] claude_code.claude-sonnet-5")
         mark = mark_output(fd, output)
         os.write(fd, b"K")
         posted = wait_for_posts(1)
@@ -640,22 +666,22 @@ def run_cli_editor(executable: str) -> None:
                      "runtime_id": "claude_code.claude-sonnet-5", "direction": "up"}]
         if posted != expected:
             raise AssertionError(f"CLI reorder posted {posted!r}, expected {expected!r}")
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.wait_for_output(process, fd, output,
                           b"> 2/11  [CLI] claude_code.claude-sonnet-5", start=mark, timeout=5.0)
         if store.exact_declared_cli["librarian_exact"] != [cli[1], cli[0], *cli[2:]]:
             raise AssertionError("the server fixture did not reorder the CLI declaration")
-        h.resize_and_wait(process, fd, output, rows=15, columns=100,
-                          needle=b"Model order", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"j" * 9,
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=15, columns=100,
+                          needle=b"Model order", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"j" * 9,
                         b"> 11/11  [CLI] codex_subscription.extra-7")
-        h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
-        h.send_and_wait(process, fd, output, b"\x1b",
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b",
                         b"> 11/11  [CLI] codex_subscription.extra-7")
-        h.send_and_wait(process, fd, output, b"k" * 10,
+        _keyboard_harness.send_and_wait(process, fd, output, b"k" * 10,
                         b"> 1/11  [HTTP]")
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"a", b"[CLI tail] model default")
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"[CLI tail] model default")
+        _keyboard_harness.wait_for_output(process, fd, output,
                           b"[HTTP tail] model-a default", start=mark, timeout=5.0)
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
@@ -663,15 +689,15 @@ def run_cli_editor(executable: str) -> None:
         if posted[1] != {"lane": "exact/librarian_exact", "action": "append",
                          "runtime_id": new_cli}:
             raise AssertionError(f"CLI append posted {posted[1]!r}")
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.wait_for_output(process, fd, output,
                           b"> 1/12  [HTTP]", start=mark, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"j" * 11,
+        _keyboard_harness.send_and_wait(process, fd, output, b"j" * 11,
                         b"> 12/12  [CLI] model default")
         if store.exact_declared_cli["librarian_exact"][-1] != new_cli:
             raise AssertionError("new official client did not append to CLI tail")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Librarian provider editor includes CLI fallback slots",
         interact=interact,
@@ -688,28 +714,28 @@ def run_empty_cli_group(executable: str) -> None:
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
     store.body["runtimes"].append({
-        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
 
     def exact_posts() -> list[dict]:
         return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"j", b"HITL")
-        h.send_and_wait(process, fd, output, b"j", b"Librarian")
-        h.send_and_wait(process, fd, output, b"s",
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
+        _keyboard_harness.send_and_wait(process, fd, output, b"s",
                         "CLI slots · tried after every HTTP slot (0) · a adds one".encode())
-        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
         deadline = time.monotonic() + 5.0
@@ -721,13 +747,13 @@ def run_empty_cli_group(executable: str) -> None:
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
             raise AssertionError(f"Librarian posts {exact_posts()!r}, expected {expected!r}")
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.wait_for_output(process, fd, output,
                           "CLI slots · tried after every HTTP slot (1)".encode(),
                           start=mark, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] model default")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] model default")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="An empty CLI group says a fills it, and a CLI pick lands there",
         interact=interact,
@@ -746,47 +772,47 @@ def run_curator_takes_cli(executable: str) -> None:
     new_cli = "aaa_cli.fixture"
     schema_less = "aaa_muse.fixture"
     store.body["runtimes"].append({
-        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
     store.body["runtimes"].append({
-        **h.runtime_resolved_runtime(schema_less, "Schema-less client", "model"),
+        **_keyboard_runtime.runtime_resolved_runtime(schema_less, "Schema-less client", "model"),
         "exact_slot_group": None,
     })
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
 
     def exact_posts() -> list[dict]:
         return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"j", b"HITL")
-        h.send_and_wait(process, fd, output, b"j", b"Librarian")
-        h.send_and_wait(process, fd, output, b"j", b"Workspace Curator")
-        h.send_and_wait(process, fd, output, b"s",
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Workspace Curator")
+        _keyboard_harness.send_and_wait(process, fd, output, b"s",
                         "CLI slots · tried after every HTTP slot (0) · a adds one".encode())
         # aaa_muse sorts before runtime-a by id; having no output-schema
         # channel is what puts it after every candidate that lands.
-        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
-        h.send_and_wait(process, fd, output, b"aaa_muse",
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
+        _keyboard_harness.send_and_wait(process, fd, output, b"aaa_muse",
                         b"> [no output schema] model default")
-        h.send_and_wait(process, fd, output, b"\r",
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r",
                         b"aaa_muse.fixture has no output-schema channel")
         # The refusal is drawn from the state alone; give a stray write the
         # time a real one takes to reach the fixture before judging.
         time.sleep(0.5)
         if exact_posts():
             raise AssertionError(f"a schema-less pick posted: {exact_posts()!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
-        h.send_and_wait(process, fd, output, b"/", b"filter:")
-        h.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] model default")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        _keyboard_harness.send_and_wait(process, fd, output, b"/", b"filter:")
+        _keyboard_harness.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
         deadline = time.monotonic() + 5.0
@@ -798,12 +824,12 @@ def run_curator_takes_cli(executable: str) -> None:
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
             raise AssertionError(f"curator posts {exact_posts()!r}, expected {expected!r}")
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.wait_for_output(process, fd, output,
                           "CLI slots · tried after every HTTP slot (1)".encode(),
                           start=mark, timeout=5.0)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Workspace curator takes CLI slots; schema-less clients sink and refuse",
         interact=interact,
@@ -820,16 +846,16 @@ def run_provider_jump(executable: str) -> None:
     store = LaneStore()
     slot = "glm-coding.glm-5-turbo"
     store.body["runtimes"].append(
-        h.runtime_resolved_runtime(slot, "GLM Coding", "glm-5-turbo",
+        _keyboard_runtime.runtime_resolved_runtime(slot, "GLM Coding", "glm-5-turbo",
                                    provider_id="glm-coding")
     )
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    status, config = h.standalone_lane_runtime_config_response()
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
         status,
         {
             **config,
@@ -838,23 +864,23 @@ def run_provider_jump(executable: str) -> None:
             + "exact-body-timeout-s = 1200\n",
         },
     )
-    requests: h.HttpRequests = []
+    requests: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"j", b"HITL")
-        h.send_and_wait(process, fd, output, b"j", b"Librarian")
-        h.send_and_wait(process, fd, output, b"s", b"Model order")
-        h.wait_for_output(process, fd, output,
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
+        _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
+        _keyboard_harness.wait_for_output(process, fd, output,
                           b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         # The picker owns focus: [d] neither jumps nor closes it, so the
         # [e] after it lands on the picker and returns to the slot rows.
         os.write(fd, b"d")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
-        h.send_and_wait(process, fd, output, b"\x1b",
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b",
                         b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
         os.write(fd, b"d")
         # Config colours a header's pieces apart, so the drawn screen, not
@@ -863,8 +889,8 @@ def run_provider_jump(executable: str) -> None:
                   b"exact-body-timeout-s = 1200")
         deadline = time.monotonic() + 5.0
         while True:
-            h.read_available(fd, output)
-            screen = h.screen_text(bytes(output))
+            _keyboard_harness.read_available(fd, output)
+            screen = _keyboard_harness.screen_text(bytes(output))
             if all(needle in screen for needle in wanted):
                 break
             if time.monotonic() > deadline:
@@ -874,7 +900,7 @@ def run_provider_jump(executable: str) -> None:
             raise AssertionError("the provider jump posted a routing write")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Slot editor opens an HTTP slot's provider table",
         interact=interact,
@@ -891,42 +917,42 @@ def run_cli_binding_jump(executable: str) -> None:
     librarian["declared_cli_slots"] = [slot]
     librarian["cli_slots"] = []
     store.exact_declared_cli["librarian_exact"] = [slot]
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
-    status, config = h.standalone_lane_runtime_config_response()
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
         status,
         {**config, "source_text": config["source_text"]
          + '\n[codex_subscription."luna"] # CLI binding\n'},
     )
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"j", b"HITL")
-        h.send_and_wait(process, fd, output, b"j", b"Librarian")
-        h.send_and_wait(process, fd, output, b"s", b"Model order")
-        h.resize_and_wait(process, fd, output, rows=30, columns=132,
-                          needle=b"CLI slots", controls=(h.FULL_REDRAW,),
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
+        _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=132,
+                          needle=b"CLI slots", controls=(_keyboard_harness.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
-        screen = h.screen_text(bytes(output))
+        screen = _keyboard_harness.screen_text(bytes(output))
         if b"HTTP slots" not in screen or b"CLI slots" not in screen:
             raise AssertionError(f"The slot groups are unclear: {screen!r}")
-        h.send_and_wait(process, fd, output, b"j",
+        _keyboard_harness.send_and_wait(process, fd, output, b"j",
                         b"> 2/2  [CLI] " + slot.encode() + b"  (not admitted)")
         os.write(fd, b"\r")
         wanted = b'[codex_subscription."luna"] # CLI binding'
-        h.wait_for_output(process, fd, output, wanted, start=0, timeout=5.0)
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=wanted, controls=(h.FULL_REDRAW,),
+        _keyboard_harness.wait_for_output(process, fd, output, wanted, start=0, timeout=5.0)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=wanted, controls=(_keyboard_harness.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
-        if wanted not in h.screen_text(bytes(output)):
+        if wanted not in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError("Enter did not open the CLI binding table")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Rejected Librarian CLI slot opens its binding configuration",
         interact=interact,
@@ -944,25 +970,25 @@ FILTER_CURSOR = "▏".encode()
 def run_concurrent_edit(executable: str) -> None:
     """A successful screen read must not license a later whole-order overwrite."""
     store = LaneStore()
-    fixtures = h.overview_event_http_fixtures()
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
     # Keep the in-process resolved projection at R1 after the file moves to
     # R2. The writer must compare with raw source_text, not this stale read.
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved()
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    requests: h.HttpRequests = []
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved()
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    requests: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                              needle=b"MASC System", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                              needle=b"MASC System", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
         # The screen has just read primary as [a, b]; another client writes
         # [b] before the operator presses Enter in the candidate picker.
         store.replace_lane_from_another_client("primary", ["runtime-b"])
-        h.send_and_wait(process, fd, output, b"e",
+        _keyboard_harness.send_and_wait(process, fd, output, b"e",
                         b"adding a candidate to the candidate order of primary")
-        h.send_and_wait(process, fd, output, b"\r",
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r",
                         b"differs from the displayed order")
         if store.lane_candidates("primary") != ["runtime-b"]:
             raise AssertionError("the TUI overwrote another client's lane edit")
@@ -970,7 +996,7 @@ def run_concurrent_edit(executable: str) -> None:
             raise AssertionError("the TUI posted a stale whole-order edit")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
                             description="Runtime lane concurrent edit is refused",
                             interact=interact, http_fixtures=fixtures,
                             http_requests=requests)
@@ -979,33 +1005,33 @@ def run_concurrent_edit(executable: str) -> None:
 def run_invalid_runtime_config(executable: str) -> None:
     """A malformed file explains its path and never licenses a routing POST."""
     store = LaneStore()
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {"source_revision": "a" * 64,
          "source_text": "[runtime.lanes.primary]\ncandidates = 42\n"},
     )
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    requests: h.HttpRequests = []
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    requests: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                              needle=b"MASC System", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
-        h.send_and_wait(process, fd, output, b"e",
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                              needle=b"MASC System", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"e",
                         b"adding a candidate to the candidate order of primary")
-        h.send_and_wait(process, fd, output, b"\r",
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r",
                         b"runtime.toml parse error at runtime.lanes.primary.candidates")
-        h.drain_until_quiet(process, fd, output)
-        if b"lane candidates must be an array" not in h.screen_text(bytes(output)):
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        if b"lane candidates must be an array" not in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError("runtime TOML parse reason was hidden from the operator")
         if any(path == ROUTING_PATH for path, _ in requests):
             raise AssertionError("a malformed runtime config authorized a lane write")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
                             description="Malformed runtime config explains lane refusal",
                             interact=interact, http_fixtures=fixtures,
                             http_requests=requests)
@@ -1017,59 +1043,59 @@ def run_filter(executable: str) -> None:
     filter before it closes the picker. Letters typed into the filter are the
     filter's, and Enter over an empty result posts nothing."""
     store = LaneStore()
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
-    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
     picker = b"adding a candidate to the candidate order of primary"
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
-        h.resize_and_wait(
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.resize_and_wait(
             process, fd, output, rows=30, columns=131,
-            needle=b"MASC System", controls=(h.FULL_REDRAW,),
+            needle=b"MASC System", controls=(_keyboard_harness.FULL_REDRAW,),
         )
-        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
         # primary holds runtime-a and runtime-b, so the other three rank
         # first: c, d, e, then a, b.
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"e", picker)
-        h.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
-        h.wait_for_output(process, fd, output, "5 of 5 · / filter".encode(), start=mark, timeout=5.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"e", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, "5 of 5 · / filter".encode(), start=mark, timeout=5.0)
         # The wheel moves the picker, not the lane list under it: primary's
         # rows are 0 and 1 there and degraded is 2, so two notches that
         # leaked would leave the list on degraded (checked at the end).
-        h.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-d")
-        h.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-e")
-        h.send_and_wait(process, fd, output, WHEEL_UP, b"> runtime-d")
-        h.send_and_wait(process, fd, output, b"\x1b[F", b"> runtime-b")
-        h.send_and_wait(process, fd, output, b"\x1b[H", b"> runtime-c")
-        h.send_and_wait(process, fd, output, b"\x1b[6~", b"> runtime-a")
+        _keyboard_harness.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-d")
+        _keyboard_harness.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-e")
+        _keyboard_harness.send_and_wait(process, fd, output, WHEEL_UP, b"> runtime-d")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", b"> runtime-b")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"> runtime-c")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[6~", b"> runtime-a")
 
-        h.send_and_wait(process, fd, output, b"/", b"filter: " + FILTER_CURSOR + b" 5 of 5")
+        _keyboard_harness.send_and_wait(process, fd, output, b"/", b"filter: " + FILTER_CURSOR + b" 5 of 5")
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"-d", b"filter: -d" + FILTER_CURSOR + b" 1 of 5")
-        h.wait_for_output(process, fd, output, b"> runtime-d", start=mark, timeout=3.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"-d", b"filter: -d" + FILTER_CURSOR + b" 1 of 5")
+        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-d", start=mark, timeout=3.0)
         # [j] moves the picker outside a filter; inside one it is a letter.
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, fd, output, b"j", b"(no runtime among 5 matches the filter)",
         )
         # Enter over no match changes nothing, so nothing repaints; the posts
         # compared at the end are what show it sent nothing.
         os.write(fd, b"\r")
-        h.send_and_wait(process, fd, output, b"\x7f", b"filter: -d" + FILTER_CURSOR + b" 1 of 5")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x7f", b"filter: -d" + FILTER_CURSOR + b" 1 of 5")
         # Esc drops the filter and keeps runtime-d under the cursor.
         # runtime-d opens the window again, on the row it was drawn on under
         # the filter, so the frame does not redraw that row: read the screen.
-        h.send_and_wait(process, fd, output, b"\x1b", "5 of 5 · / filter".encode())
-        h.drain_until_quiet(process, fd, output)
-        if b"> runtime-d   Resolved D / model-d" not in h.screen_text(bytes(output)):
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", "5 of 5 · / filter".encode())
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        if b"> runtime-d   Resolved D / model-d" not in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError("Esc did not keep runtime-d under the cursor")
 
-        h.send_and_wait(process, fd, output, b"/model-e", b"filter: model-e" + FILTER_CURSOR + b" 1 of 5")
+        _keyboard_harness.send_and_wait(process, fd, output, b"/model-e", b"filter: model-e" + FILTER_CURSOR + b" 1 of 5")
         os.write(fd, b"\r")
         screen_lacks(process, fd, output, picker, timeout=5.0)
 
@@ -1084,13 +1110,13 @@ def run_filter(executable: str) -> None:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         # [e] opens the picker for the lane under the list's cursor: still
         # primary, so no wheel notch moved it while the picker was open.
-        h.send_and_wait(process, fd, output, b"e", picker)
+        _keyboard_harness.send_and_wait(process, fd, output, b"e", picker)
         # Esc and q apart: written together they read as Alt-q.
         os.write(fd, b"\x1b")
         screen_lacks(process, fd, output, picker, timeout=5.0)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Runtime candidate picker filters and pages",
         interact=interact,
@@ -1143,7 +1169,7 @@ def run_replace_and_promote(executable: str) -> None:
         (replacement, "gpt-6-luna", "medium"),
     ):
         runtimes.append({
-            **h.runtime_resolved_runtime(runtime_id, "Selected account", model,
+            **_keyboard_runtime.runtime_resolved_runtime(runtime_id, "Selected account", model,
                                          provider_id="account"),
             "exact_slot_group": "cli_slots",
             "declared_reasoning_effort": effort,
@@ -1154,60 +1180,60 @@ def run_replace_and_promote(executable: str) -> None:
                 declared_cli_slots=[backup, current], cli_slots=[backup, current])
     store.exact_declared["librarian_exact"] = []
     store.exact_declared_cli["librarian_exact"] = [backup, current]
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"j", b"HITL")
-        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
         arrived, release = store.hold_next_standalone_read()
         try:
             os.write(fd, b"r")
-            if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
                 raise AssertionError("the old lane read did not start")
-            h.send_and_wait(process, fd, output, b"s", b"Model order")
-            h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
-            h.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
-            h.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
-            h.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
+            _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
+            _keyboard_harness.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
+            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
+            _keyboard_harness.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
         finally:
             release.set()
-        h.wait_for_output(process, fd, output, b"> 2/2  [CLI] gpt-6-luna medium",
+        _keyboard_harness.wait_for_output(process, fd, output, b"> 2/2  [CLI] gpt-6-luna medium",
                           start=0, timeout=5.0)
-        h.wait_for_output(process, fd, output, b"current candidate order reloaded",
+        _keyboard_harness.wait_for_output(process, fd, output, b"current candidate order reloaded",
                           start=0, timeout=5.0)
         posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
         expected = [{"lane": "exact/librarian_exact", "action": "replace",
                      "runtime_id": current, "replacement_runtime_id": replacement}]
         if posted != expected or store.exact_declared_cli["librarian_exact"] != [backup, replacement]:
             raise AssertionError(f"replacement did not preserve position: {posted!r}")
-        h.send_and_wait(process, fd, output, b"1", b"> 1/2  [CLI] gpt-6-luna medium")
+        _keyboard_harness.send_and_wait(process, fd, output, b"1", b"> 1/2  [CLI] gpt-6-luna medium")
         posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
         if posted[-1] != {"lane": "exact/librarian_exact", "action": "move",
                           "runtime_id": replacement, "direction": "first"}:
             raise AssertionError(f"promotion posted {posted[-1]!r}")
         if store.exact_declared_cli["librarian_exact"] != [replacement, backup]:
             raise AssertionError("promotion lost or reordered other candidates")
-        h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
-        h.resize_and_wait(process, fd, output, rows=40, columns=131,
-                          needle=b"Account", controls=(h.FULL_REDRAW,))
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=131,
+                          needle=b"Account", controls=(_keyboard_harness.FULL_REDRAW,))
+        screen = _keyboard_harness.screen_text(bytes(output))
         if screen.count(b"context") <= 3:
             raise AssertionError("a tall terminal still shows only three model choices")
         if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
             raise AssertionError("expanded model choices are not visible")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Model order")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Model order")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable, description="Librarian replaces model and effort and promotes within its group",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
     )

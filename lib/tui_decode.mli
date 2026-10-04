@@ -1642,6 +1642,23 @@ type lane_run_answer_source =
     from [lrd_selected_slot]: Vendor System One answers before a slot runs and
     therefore has no exact-flow receipt or selected slot. *)
 
+type librarian_preflight_status =
+  | Preflight_awaiting
+  | Preflight_not_called of string
+  | Preflight_failed of string
+  | Preflight_invalid of string
+  | Preflight_judged of
+      Typesafeai_librarian_preflight.decision Typesafeai_types.decoded_choice
+type librarian_generation_path = Generation_not_entered | Generation_full_lane | Generation_jev_no_change
+type librarian_preflight_reading =
+  { lp_status : librarian_preflight_status
+  ; lp_generation_path : librarian_generation_path
+  ; lp_full_llm_skipped : bool
+  ; lp_elapsed_s : float option
+  ; lp_model : string option
+  ; lp_domain_rejection : string option
+  }
+
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
@@ -1658,6 +1675,7 @@ type lane_run_detail =
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
+  ; lrd_librarian_preflight : librarian_preflight_reading option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment

@@ -552,7 +552,11 @@ describe('RuntimeMonitor', () => {
     expect(parameterValue(container, 'effective · max context')).toBe('131,072')
   })
 
-  it('shows per-turn cache read/write tokens in recent model entries', async () => {
+  it.each([
+    { totalInput: 256, paired: { input_tokens: 256, cache_read_tokens: 128, sample_count: 1 } },
+    { totalInput: 1024, paired: { input_tokens: 256, cache_read_tokens: 128, sample_count: 1 } },
+    { totalInput: 1024, paired: null },
+  ])('shows paired cache usage separately from total input $totalInput', async ({ totalInput, paired }) => {
     apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce({
       window_minutes: 30,
       bucket_minutes: 5,
@@ -570,7 +574,8 @@ describe('RuntimeMonitor', () => {
           p95_tok_per_sec: 20,
           avg_latency_ms: 500,
           p95_latency_ms: 500,
-          total_input_tokens: 256,
+          total_input_tokens: totalInput,
+          cached_input: paired,
           total_output_tokens: 64,
           total_cache_read_tokens: 128,
           total_cache_creation_tokens: 16,
@@ -614,6 +619,12 @@ describe('RuntimeMonitor', () => {
       'recent entry cache column',
     )
     expect(container.textContent).toContain('128/16')
+    if (paired) {
+      expect(container.textContent).toContain('cached input 50.0% (128 / 256 tokens) · 1 reported samples')
+    } else {
+      expect(container.textContent).not.toContain('cached input 12.5%')
+      expect(container.textContent).not.toContain('reported samples')
+    }
   })
 
   it('shows one missing-data reason when recent cache tokens are absent', async () => {

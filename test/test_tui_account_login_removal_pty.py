@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 from test_tui_account_login_pty import leave_login_and_arm_quit
 
 

@@ -2183,7 +2183,7 @@ describe('SettingsSurface', () => {
       await waitFor(() => expect(container.textContent).toContain('browser-commit-visible-model'))
       expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreaterThan(counts[0]!)
       expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGreaterThan(counts[1]!)
-      expect(session.state.peek().phase).toBe('saving')
+      expect(session.state.peek().phase).toBe('followup')
       expect(resume).not.toHaveBeenCalled()
       expect(coreApi.post).not.toHaveBeenCalled()
       finishRefresh()

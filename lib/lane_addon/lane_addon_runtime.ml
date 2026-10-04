@@ -1847,6 +1847,14 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Ok _ -> ());
     let nullable_string = function None -> `Null | Some s -> `String s in
     let exports = entries m |> List.filter_map (fun e ->
+      let configured_off = snapshot.complete && match e.configuration with
+        | None -> false
+        | Some owner -> List.exists (fun (d : Lane_addon_config.declaration) ->
+            d.id = owner.id && not d.enabled) snapshot.declarations in
+      (* Cleanup failures retain their worker and evidence for retry, but a
+         retiring owner cannot supply a usable Skill. An incomplete reading
+         does not authorize inferring desired activity for a running owner. *)
+      if e.stopping || configured_off then None else
       match e.package.skills_directory, e.phase with
       | None, _ | Some _, Detached -> None
       | Some _, (Attached | Observing | Failed _ | Detaching) ->

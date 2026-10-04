@@ -97,6 +97,9 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
+  ; retryable_runtimes : string list
+        (** Actual candidates that reported a typed retryable error, in attempt
+            order. The final diagnostic runtime does not own their retry time. *)
   ; evaluator_error_retryable : bool option
         (** [Some true] when a verdict-less exhausted lane observed at least
             one typed retryable {!Agent_core.Error.t}; a later non-retryable

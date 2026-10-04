@@ -998,6 +998,16 @@ type pending_completion_rejection =
   }
 [@@deriving show]
 
+(** Approval delivery is committed with the completed Task. *)
+type pending_completion_approval =
+  { task_id : string
+  ; verification_id : string
+  ; producer : string
+  ; authority : completion_authority
+  ; committed_at : string
+  }
+[@@deriving show]
+
 type task_deletion_phase = Cleanup_required of string list | Cleanup_verified
 [@@deriving show]
 
@@ -1012,6 +1022,7 @@ type task_deletion_receipt =
 type backlog = {
   tasks: task list;
   pending_completion_rejections: pending_completion_rejection list;
+  pending_completion_approvals: pending_completion_approval list;
   task_deletion_receipts: task_deletion_receipt list;
   last_updated: string;
   version: int;
@@ -1077,6 +1088,64 @@ let pending_completion_rejections_of_yojson = function
     decode [] values
   | _ -> Error "backlog.pending_completion_rejections must be a list"
 
+let pending_completion_approval_to_yojson (pending : pending_completion_approval) =
+  `Assoc
+    [ "task_id", `String pending.task_id
+    ; "verification_id", `String pending.verification_id
+    ; "producer", `String pending.producer
+    ; "authority", `Assoc
+        [ "kind", `String (completion_authority_kind pending.authority)
+        ; "actor", `String (completion_authority_actor pending.authority)
+        ]
+    ; "committed_at", `String pending.committed_at
+    ]
+
+let pending_completion_approval_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+     | [ "authority", `Assoc authority_fields
+       ; "committed_at", `String committed_at
+       ; "producer", `String producer
+       ; "task_id", `String task_id
+       ; "verification_id", `String verification_id
+       ] when List.for_all
+           (fun value -> not (String.equal (String.trim value) ""))
+           [ committed_at; producer; task_id; verification_id ] ->
+       let authority =
+         match List.sort (fun (a, _) (b, _) -> String.compare a b) authority_fields with
+         | [ "actor", `String actor; "kind", `String kind ]
+           when not (String.equal (String.trim actor) "") ->
+           (match kind with
+            | "human_operator" -> Ok (Human_operator { operator_id = actor })
+            | "system_llm_agent" -> Ok (System_llm_agent { agent_run_id = actor })
+            | _ -> Error "pending approval has unknown authority kind")
+         | _ -> Error "pending approval has malformed authority"
+       in
+       Result.map
+         (fun authority ->
+           { task_id; verification_id; producer; authority; committed_at })
+         authority
+     | _ -> Error "pending approval requires exact non-blank identity fields")
+  | _ -> Error "pending approval must be an object"
+
+let pending_completion_approvals_of_yojson = function
+  | `List values ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        (match pending_completion_approval_of_yojson value with
+         | Error _ as error -> error
+         | Ok pending ->
+           if List.exists
+                (fun (other : pending_completion_approval) ->
+                  String.equal other.task_id pending.task_id)
+                acc
+           then Error "duplicate pending approval task identity"
+           else decode (pending :: acc) rest)
+    in
+    decode [] values
+  | _ -> Error "backlog.pending_completion_approvals must be a list"
+
 let task_deletion_receipt_to_yojson (receipt : task_deletion_receipt) =
   `Assoc ["deletion_id", `String receipt.deletion_id;
     "task_id", `String receipt.deleted_task_id;
@@ -1120,6 +1189,8 @@ let backlog_to_yojson b =
     ("tasks", `List (List.map task_to_yojson b.tasks));
     ("pending_completion_rejections",
       `List (List.map pending_completion_rejection_to_yojson b.pending_completion_rejections));
+    ("pending_completion_approvals",
+      `List (List.map pending_completion_approval_to_yojson b.pending_completion_approvals));
     ("task_deletion_receipts", `List (List.map task_deletion_receipt_to_yojson b.task_deletion_receipts));
     ("last_updated", `String b.last_updated);
     ("version", `Int b.version);
@@ -1146,6 +1217,13 @@ let backlog_of_yojson_with_diagnostics = function
       | [ _, value ] -> pending_completion_rejections_of_yojson value
       | _ -> Error "duplicate backlog.pending_completion_rejections field"
     in
+    let approval_fields, fields =
+      List.partition (fun (name, _) -> String.equal name "pending_completion_approvals") fields
+    in
+    let approval_result = match approval_fields with
+      | [] -> Ok []
+      | [ _, value ] -> pending_completion_approvals_of_yojson value
+      | _ -> Error "duplicate backlog.pending_completion_approvals field" in
     let receipt_fields, fields = List.partition (fun (name,_) -> String.equal name "task_deletion_receipts") fields in
     let receipt_result = match receipt_fields with
       | [] -> Ok []
@@ -1196,17 +1274,18 @@ let backlog_of_yojson_with_diagnostics = function
                 "backlog.version corrupt: %s"
                 (Yojson.Safe.to_string other))
        in
-       (match decode_tasks 0 [] [] task_values, version_result, pending_result, receipt_result with
-        | Ok (tasks, diagnostics), Ok version, Ok pending_completion_rejections, Ok task_deletion_receipts ->
+       (match decode_tasks 0 [] [] task_values, version_result, pending_result, approval_result, receipt_result with
+        | Ok (tasks, diagnostics), Ok version, Ok pending_completion_rejections, Ok pending_completion_approvals, Ok task_deletion_receipts ->
           Ok
-            ( { tasks; pending_completion_rejections; task_deletion_receipts; last_updated; version }
+            ( { tasks; pending_completion_rejections; pending_completion_approvals; task_deletion_receipts; last_updated; version }
             , diagnostics )
-        | Error error, _, _, _ | _, Error error, _, _ | _, _, Error error, _ | _, _, _, Error error -> Error error)
+        | Error error, _, _, _, _ | _, Error error, _, _, _ | _, _, Error error, _, _
+        | _, _, _, Error error, _ | _, _, _, _, Error error -> Error error)
      | [ "last_updated", `String _; "tasks", `List _; "version", _ ] ->
        Error "backlog.last_updated must be a non-blank string"
      | _ ->
        Error
-         "backlog requires tasks, last_updated, positive version and optional pending_completion_rejections")
+         "backlog requires tasks, last_updated, positive version and optional completion delivery lists")
   | other ->
     Error
       (Printf.sprintf

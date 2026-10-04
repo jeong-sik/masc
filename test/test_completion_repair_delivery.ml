@@ -15,9 +15,8 @@ let workspace_ok = function
   | Error error -> Alcotest.fail (D.masc_error_to_string error)
 
 let with_workspace_runtime f =
-  (* The verdict hook is part of the contract under test: the approval twin
-     wake reaches the producer queue through the installed runtime adapter
-     (Workspace_metric_hooks), not through any test-local stub. *)
+  (* Install the production notification adapter. Neither verdict depends on
+     this best-effort projection for its durable delivery obligation. *)
   Masc.Workspace_metric_hooks.install ();
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -62,6 +61,7 @@ let commit config ~authority ~verification_id verdict =
                          ~task_id ~verification_id ()))
 
 let pending config = ok (Outbox.pending config)
+let approvals config = ok (Workspace_task_approval_outbox.pending config)
 let queue config =
   ok (Queue.load_result ~base_path:config.W.base_path ~keeper_name:producer)
   |> Keeper_event_queue.to_list
@@ -426,7 +426,10 @@ let test_approval_has_no_repair_obligation () =
     prepare_submission config verification_id;
     commit config ~authority:human ~verification_id D.Verdict_approved;
     check_pending config 0;
-    reconcile config ~delivered:0 ~retained:0;
+    Alcotest.(check int) "approval committed a delivery obligation" 1
+      (List.length (approvals config));
+    reconcile config ~delivered:1 ~retained:0;
+    Alcotest.(check int) "approval delivery acknowledged" 0 (List.length (approvals config));
     Alcotest.(check int) "approval has no rejection stimulus" 0
       (List.length
          (List.filter
@@ -436,7 +439,7 @@ let test_approval_has_no_repair_obligation () =
                | _ -> true)
             (queue config)));
     (* The approval still reaches the producer in its own right: the twin wake
-       carries the typed outcome, with no repair obligation behind it. *)
+       carries the typed outcome, with no rejection/repair obligation. *)
     Alcotest.(check (list string)) "approval wake carries the exact verification"
       [ verification_id ]
       (List.filter_map
@@ -450,6 +453,110 @@ let test_approval_has_no_repair_obligation () =
               Some outcome.to_verification_id
             | _ -> None)
          (queue config)))
+
+let check_approved config ~verification_ids ~authority =
+  let identities = List.map (fun stimulus ->
+    match stimulus.Keeper_event_queue.payload with
+    | Keeper_event_queue.Task_outcome outcome ->
+      Alcotest.(check string) "approval task" task_id outcome.to_task_id;
+      Alcotest.(check string) "approval producer" producer outcome.to_producer;
+      Alcotest.(check bool) "approval authority" true (authority = outcome.to_authority);
+      outcome.to_verification_id
+    | _ -> Alcotest.fail "approval delivered a non-outcome stimulus") (queue config) in
+  Alcotest.(check (list string)) "exact approved verification identities"
+    (List.sort String.compare verification_ids) (List.sort String.compare identities)
+
+let check_done config =
+  match (only_task config).task_status with
+  | D.Done _ -> ()
+  | _ -> Alcotest.fail "approval delivery must leave the Task completed"
+
+let test_approval_projection_failure_recovers_after_restart () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let verification_id = "vrf-approved-projection-failed" in
+    prepare_submission config verification_id;
+    let saved = Atomic.get Workspace_hooks.verification_notify_verdict_fn in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.verification_notify_verdict_fn saved)
+      (fun () ->
+        Atomic.set Workspace_hooks.verification_notify_verdict_fn
+          (fun _ ~task_id:_ ~producer:_ ~authority:_ ~verification_id:_ ~decision:_ ->
+            failwith "fixture: Board/SSE projection unavailable");
+        commit config ~authority:human ~verification_id D.Verdict_approved);
+    let recovered = W.default_config config.W.base_path in
+    check_done recovered;
+    Alcotest.(check int) "no notification hook was needed" 0 (List.length (queue recovered));
+    Alcotest.(check int) "fresh read owns approval delivery" 1 (List.length (approvals recovered));
+    reconcile recovered ~delivered:1 ~retained:0;
+    check_done recovered;
+    check_approved recovered ~verification_ids:[verification_id] ~authority:human;
+    reconcile recovered ~delivered:0 ~retained:0)
+
+let test_approval_queue_failure_retains_obligation () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let verification_id = "vrf-approved-queue-failed" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id D.Verdict_approved;
+    let path = snapshot_path config in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Out_channel.with_open_text path (fun out -> output_string out "{corrupt queue");
+    reconcile config ~delivered:0 ~retained:1;
+    Alcotest.(check int) "failed enqueue retains approval" 1 (List.length (approvals config));
+    check_done config;
+    Sys.remove path;
+    reconcile (W.default_config config.W.base_path) ~delivered:1 ~retained:0;
+    check_approved config ~verification_ids:[verification_id] ~authority:system;
+    Alcotest.(check int) "recovered approval acknowledged" 0 (List.length (approvals config)))
+
+let test_approval_enqueue_before_ack_is_idempotent () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let verification_id = "vrf-approved-before-ack" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id D.Verdict_approved;
+    (match Masc.Keeper_task_outcome_wake.wake_approved_producer
+             ~config ~producer ~task_id ~verification_id ~authority:system with
+     | Signaled _ | Durable_deferred _ | Durable_wake_failed _ -> ()
+     | _ -> Alcotest.fail "fixture could not enqueue approval");
+    (* The persisted source remains after the queue write: replay the same
+       crash window in a fresh configuration, without a second model verdict. *)
+    Alcotest.(check int) "source not yet acknowledged" 1 (List.length (approvals config));
+    ok (Workspace_task_approval_outbox.acknowledge config ~task_id ~verification_id:"vrf-stale");
+    Alcotest.(check int) "stale acknowledgement cannot lose current approval" 1
+      (List.length (approvals config));
+    reconcile (W.default_config config.W.base_path) ~delivered:1 ~retained:0;
+    check_approved config ~verification_ids:[verification_id] ~authority:system;
+    check_done config;
+    reconcile config ~delivered:0 ~retained:0)
+
+let test_unroutable_approval_stays_completed () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-approved-no-keeper" in
+    prepare_submission config verification_id;
+    commit config ~authority:human ~verification_id D.Verdict_approved;
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_done config;
+    Alcotest.(check int) "unroutable terminal outcome acknowledged" 0 (List.length (approvals config)))
+
+let test_approval_codec_fails_closed () =
+  with_workspace (fun config ->
+    prepare_submission config "vrf-approved-codec";
+    commit config ~authority:system ~verification_id:"vrf-approved-codec" D.Verdict_approved;
+    let fields = W.read_backlog config |> D.backlog_to_yojson |> Yojson.Safe.Util.to_assoc in
+    let entries = List.assoc "pending_completion_approvals" fields in
+    let row = match entries with `List [row] -> row | _ -> Alcotest.fail "missing approval" in
+    let row_fields = Yojson.Safe.Util.to_assoc row in
+    let corrupt values = `Assoc (("pending_completion_approvals", values)
+      :: List.remove_assoc "pending_completion_approvals" fields) in
+    List.iter (fun json ->
+      Alcotest.(check bool) "malformed approval obligation is never silently dropped" true
+        (Result.is_error (D.backlog_of_yojson json)))
+      [ corrupt (`String "invalid")
+      ; corrupt (`List [row; row])
+      ; corrupt (`List [`Assoc (("unexpected", `Bool true) :: row_fields)])
+      ; corrupt (`List [`Assoc (("producer", `String "") :: List.remove_assoc "producer" row_fields)])
+      ; `Assoc (("pending_completion_approvals", entries) :: fields) ])
 
 let test_resubmit_supersedes_and_stale_ack_preserves_new_rejection () =
   with_workspace (fun config ->
@@ -501,10 +608,12 @@ let test_corrupt_explicit_outbox_is_not_empty () =
     Alcotest.(check bool) "corrupt backlog preserved" true
       (Yojson.Safe.from_file path = corrupt))
 
-let test_daemon_delivery ~start_before_commit () =
+let test_daemon_delivery ?(approve=false) ~start_before_commit () =
   with_workspace_runtime (fun ~sw ~clock config ->
     persist_producer config;
     let verification_id = "vrf-native-daemon-repair" in
+    let verdict = if approve then D.Verdict_approved else D.Verdict_rejected { reason } in
+    let check_delivered = if approve then check_approved else check_rejections in
     let reviewer_calls = ref 0 in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn in
@@ -521,7 +630,7 @@ let test_daemon_delivery ~start_before_commit () =
     let await_delivery expected_count =
       Eio.Time.with_timeout_exn clock 5.0 (fun () ->
         let rec await () =
-          if pending config = [] && List.length (queue config) = expected_count then ()
+          if pending config = [] && approvals config = [] && List.length (queue config) = expected_count then ()
           else (Eio.Time.sleep clock 0.01; await ())
         in
         await ())
@@ -529,25 +638,36 @@ let test_daemon_delivery ~start_before_commit () =
     let boot_id = "vrf-native-daemon-boot-sentinel" in
     if start_before_commit then (
       prepare_submission config boot_id;
-      commit config ~authority:system ~verification_id:boot_id
-        (D.Verdict_rejected { reason });
+      commit config ~authority:system ~verification_id:boot_id (D.Verdict_rejected { reason });
       Masc.Completion_authority_agent.start ~sw ~clock ~config;
       await_delivery 1;
       check_rejection config ~verification_id:boot_id ~authority:system;
       (* The daemon scans boot review scopes before delivering this sentinel.
          Its queue row and acknowledged outbox prove that startup recovery has
          finished before the second commit. Only a fresh hook wake can now
-         deliver the second rejection. Leave the first row intact and verify
+         deliver the second verdict. Leave the first row intact and verify
          both exact identities, so no test-side queue mutation drives delivery. *)
       check_pending config 0);
     prepare_submission config verification_id;
-    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    commit config ~authority:system ~verification_id verdict;
     if not start_before_commit then
       Masc.Completion_authority_agent.start ~sw ~clock ~config;
     let verification_ids =
       if start_before_commit then [boot_id; verification_id] else [verification_id] in
     await_delivery (List.length verification_ids);
-    check_rejections config ~verification_ids ~authority:system;
+    if approve && start_before_commit then (
+      (* The sentinel is a rejection: the fixture may resubmit rejected work,
+         but must not approve a completed Task twice (outcome ids are task-keyed). *)
+      let actual = List.map (fun stimulus ->
+        match stimulus.Keeper_event_queue.payload with
+        | Keeper_event_queue.Completion_authority_rejected rejection ->
+          "rejected", rejection.car_verification_id
+        | Keeper_event_queue.Task_outcome outcome -> "approved", outcome.to_verification_id
+        | _ -> Alcotest.fail "unexpected daemon stimulus") (queue config) in
+      Alcotest.(check (list (pair string string))) "boot sentinel and committed approval"
+        (List.sort Stdlib.compare ["rejected", boot_id; "approved", verification_id])
+        (List.sort Stdlib.compare actual))
+    else check_delivered config ~verification_ids ~authority:system;
     check_pending config 0;
     Alcotest.(check int) "repair delivery uses no model" 0 !reviewer_calls)
 
@@ -584,6 +704,15 @@ let () =
           (test_daemon_delivery ~start_before_commit:true)
       ; Alcotest.test_case "queue failure retains and retries" `Quick test_queue_failure_retains_obligation
       ; Alcotest.test_case "enqueue before acknowledgement deduplicates" `Quick test_enqueue_before_ack_is_idempotent
+      ; Alcotest.test_case "approval boot recovery" `Quick
+          (test_daemon_delivery ~approve:true ~start_before_commit:false)
+      ; Alcotest.test_case "approval live commit wake" `Quick
+          (test_daemon_delivery ~approve:true ~start_before_commit:true)
+      ; Alcotest.test_case "approval survives projection failure and restart" `Quick test_approval_projection_failure_recovers_after_restart
+      ; Alcotest.test_case "approval queue failure retains delivery" `Quick test_approval_queue_failure_retains_obligation
+      ; Alcotest.test_case "approval enqueue before ack deduplicates" `Quick test_approval_enqueue_before_ack_is_idempotent
+      ; Alcotest.test_case "unroutable approval remains Done" `Quick test_unroutable_approval_stays_completed
+      ; Alcotest.test_case "approval codec fails closed" `Quick test_approval_codec_fails_closed
       ; Alcotest.test_case "approval creates no repair" `Quick test_approval_has_no_repair_obligation
       ; Alcotest.test_case "resubmission and stale acknowledgement" `Quick test_resubmit_supersedes_and_stale_ack_preserves_new_rejection
       ; Alcotest.test_case "corrupt outbox fails closed" `Quick test_corrupt_explicit_outbox_is_not_empty

@@ -18,6 +18,7 @@ let target =
       | Some Tui_types.Text_preset_name -> "preset-name"
       | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"
+      | Some Tui_types.Text_runtime_model_form -> "runtime-model-form"
       | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
@@ -36,6 +37,41 @@ let target =
 
 let fresh_state () =
   Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+;;
+
+let test_model_form_requires_current_workspace_reading () =
+  let state = fresh_state () in
+  let row : Masc_tui_model_runtime_table.row =
+    { model="shared-name"; provider="shared-provider"; api_name=Some "api-model";
+      reasoning_effort=None; temperature=None; context=Some ("binding",8192);
+      model_context=None; max_tokens=None } in
+  state.config_models_rows <- [row];
+  check bool "retained rows cannot open without a current reading" true
+    (Result.is_error (Tui_types.selected_config_model state));
+  let metadata : Masc_tui_runtime_config_view.metadata =
+    { source_revision="current"; validation=Checked {valid=true;schema_version=1;
+        current_schema_version=1;forward_schema=false;issues=[]};
+      routing=Routing_active; routing_requires_restart=false; keeper=Not_configured;
+      keeper_requires_restart=false; configured_count=0; pending_keys=[];
+      applied_keys=[]; preempted_keys=[] } in
+  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_rows=[];rcv_metadata=metadata};
+  check bool "current successful reading permits the selected model" true
+    (Tui_types.selected_config_model state=Ok row);
+  state.runtime_config_view_error <- Some "read failed";
+  check bool "failed raw reading cannot reuse retained rows" true
+    (Result.is_error (Tui_types.selected_config_model state));
+  state.runtime_config_view_error <- None;
+  state.config_models_error <- Some "typed projection failed";
+  check bool "failed model projection cannot open an editor" true
+    (Result.is_error (Tui_types.selected_config_model state));
+  state.runtime_model_form <- Some (Masc_tui_model_form.create Edit row);
+  state.config_models_cursor <- 4;
+  Tui_types.withdraw_config_models state;
+  check int "withdrawal clears former workspace rows" 0 (List.length state.config_models_rows);
+  check int "withdrawal resets model selection" 0 state.config_models_cursor;
+  check bool "withdrawal discards the former workspace form" true (state.runtime_model_form=None);
+  check bool "matching IDs in another workspace require a new reading" true
+    (Result.is_error (Tui_types.selected_config_model state))
 ;;
 
 let resolved ?(compact_viewport = false) state =
@@ -549,7 +585,8 @@ let () =
   Alcotest.run
     "tui text input target"
     [ ( "which field takes text",
-        [ test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
+        [ test_case "model forms require current workspace config" `Quick test_model_form_requires_current_workspace_reading;
+          test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
           test_case "workspace withdrawal discards queued voice" `Quick test_workspace_withdrawal_discards_queued_voice;
           test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;

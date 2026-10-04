@@ -178,6 +178,8 @@ let test_exhaustion_preserves_any_retryable_attempt () =
          "a transient slot is not masked by a later non-retryable fallback"
          (Some true)
          result.evaluator_error_retryable;
+       Alcotest.(check (list string)) "retry follows the transient candidate, not the final diagnostic"
+         ["slot-a"] result.retryable_runtimes;
        Alcotest.(check bool) "no fabricated verdict" true (Option.is_none result.verdict))
 ;;
 
@@ -202,12 +204,32 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
          "a nested transient candidate is not masked by its terminal fallback"
          (Some true)
          result.evaluator_error_retryable;
+       Alcotest.(check (list string)) "nested candidate retains its own rest identity"
+         ["glm.test-model"] result.retryable_runtimes;
        Alcotest.(check string)
          "terminal fallback remains the reported reason"
          (match budget_refusal with
           | Error error -> Agent_core.Error.to_string error
           | Ok _ -> Alcotest.fail "budget refusal fixture must be an error")
          (Option.value result.fallback_reason ~default:""))
+;;
+
+let test_nested_retry_does_not_invent_a_serving_outer_slot () =
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok ["outer-slot"])
+    ~reviewer:(fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~on_runtime_attempt_error () ->
+      let failure = Agent_core.Error.Api
+          (Agent_core.Error.Retry.RateLimited
+             {retry_after=Some 300.0; message="nested rate limit"}) in
+      on_runtime_attempt_error ~runtime_id:"nested-provider" ~attempt:1
+        ~dispatch:Masc.Keeper_attempt_dispatch.Dispatched failure;
+      Error failure)
+    (fun () ->
+      let result = review () in
+      Alcotest.(check (list string)) "only dispatched retryable candidates own the retry"
+        ["nested-provider"] result.retryable_runtimes)
 ;;
 
 let test_exhaustion_reports_all_nonretryable_attempts () =
@@ -224,7 +246,8 @@ let test_exhaustion_reports_all_nonretryable_attempts () =
        Alcotest.(check (option bool))
          "all typed evaluator errors are non-retryable"
          (Some false)
-       result.evaluator_error_retryable)
+       result.evaluator_error_retryable;
+       Alcotest.(check (list string)) "no retryable candidate invented" [] result.retryable_runtimes)
 ;;
 
 (* RFC-0436 §4.3: recorded images ride to the reviewer as attached blocks
@@ -965,6 +988,10 @@ let () =
             "exhaustion preserves any retryable attempt"
             `Quick
             test_exhaustion_preserves_any_retryable_attempt
+        ; Alcotest.test_case
+            "nested retry does not invent a serving outer slot"
+            `Quick
+            test_nested_retry_does_not_invent_a_serving_outer_slot
         ; Alcotest.test_case
             "exhaustion reports all non-retryable attempts"
             `Quick

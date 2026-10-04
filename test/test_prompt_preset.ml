@@ -534,7 +534,8 @@ let test_restore_preserves_lane_activity_and_autosave () =
   List.iter (fun saved_enabled ->
     with_base (fun ~base_path ~keepers:_ ~config ->
       let path = Filename.concat config "runtime.toml" in
-      let fixture = Toml_line_editor.edit_table_multiline_array runtime_fixture
+      let fixture = Toml_line_editor.edit_table_multiline_array
+        (runtime_fixture ^ "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n")
         ~path:"runtime.exact_output_lanes.librarian_exact" ~key:"slots"
         ~values:["openai.gpt"; "runpod_mtp.qwen"] in
       let rec add_note = function

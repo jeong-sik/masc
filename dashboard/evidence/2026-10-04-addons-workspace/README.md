@@ -27,3 +27,15 @@ The initial browser attempt used an exact label query that did not match the
 select's browser accessible name, which also includes option text. That fixture
 failure is saved separately. The corrected harness selects the combobox by role.
 See `checks.json` for measured results and checked source hashes.
+
+
+## Parent integration validation (2026-10-04)
+
+Integrated published parent `1270dc3d2de2705db4388705d4c130ea0a0100f4`
+(#41145) without conflicts. The workspace-isolation implementation remains
+byte-identical to original head `23dad1927b8de74259dc3389f390ef1643319219`;
+the component tests also retain the parent's unsafe-integer reading regression.
+The Add-ons panel, workspace-isolation, and declaration-editor suites passed
+58 tests. `tsc --noEmit --pretty false` and scoped ESLint passed. No new browser,
+native backend/TUI, CI, deployment, or production execution is claimed.
+The screenshots and browser logs above remain historical synthetic evidence.

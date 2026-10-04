@@ -214,7 +214,8 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
   const setError = (value: string | null) => session.edit('error', value)
   const setNotice = (value: string | null) => session.edit('notice', value)
   const setSection = (value: RuntimeSectionId) => session.edit('section', value)
-  const ready = session.ready(authority)
+  const ready = session.writable(authority)
+  const canAdopt = session.ready(authority)
   const [projection, setProjection] = useState<{
     authority: ExecutionWorkspaceAuthority; config: typeof config; revision: number;
     lanes: StandaloneLaneSnapshotRow[] | null; runtimes: RuntimeResolution[] | null; error: string | null;
@@ -733,8 +734,8 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
                 </div>
                 <p>초안을 유지하고 현재 revision을 채택하면, 다음 저장 시 현재 파일을 아래 초안으로 교체합니다. 필요한 변경을 먼저 합치세요.</p>
                 <div class="flex flex-wrap gap-2">
-                  <${ActionButton} disabled=${!ready || saving || readingCurrent} onClick=${() => useCurrentSource(false)} testId="runtime-toml-adopt-revision">현재 revision 채택 · 초안 유지<//>
-                  <${ActionButton} disabled=${!ready || saving || readingCurrent} onClick=${() => useCurrentSource(true)} testId="runtime-toml-replace-draft">현재 원문으로 초안 교체<//>
+                  <${ActionButton} disabled=${!canAdopt || saving || readingCurrent} onClick=${() => useCurrentSource(false)} testId="runtime-toml-adopt-revision">현재 revision 채택 · 초안 유지<//>
+                  <${ActionButton} disabled=${!canAdopt || saving || readingCurrent} onClick=${() => useCurrentSource(true)} testId="runtime-toml-replace-draft">현재 원문으로 초안 교체<//>
                 </div>
               </section>
             ` : null}

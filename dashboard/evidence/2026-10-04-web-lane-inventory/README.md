@@ -25,3 +25,14 @@ Two independent source-review findings were addressed: null workspace authority
 must not admit rows across connection changes, and inconsistent exact/configured
 or package-ownership data must be rejected. Tests exercise those boundaries.
 See `checks.json` and saved text output for checked source hashes and results.
+
+
+## Parent integration validation (2026-10-04)
+
+Integrated published parent `cedab0d0e55ab5a0e928ef555cec5d637d8202eb`
+(#41135) without conflicts. Own production and test files remain byte-identical
+to original head `9f4e168231a20f0024602fb10740d38ae101c30c`.
+The focused API inventory, inventory component, and navigation suites passed
+62 tests; `tsc --noEmit --pretty false` and scoped ESLint passed. No new browser,
+native TUI, backend, CI, deployment, or production execution is claimed.
+The screenshots and earlier logs above remain historical evidence.

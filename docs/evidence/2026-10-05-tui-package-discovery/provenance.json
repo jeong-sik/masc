@@ -186,5 +186,13 @@
     }
   ],
   "scratch": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-package-discovery-nu1rxfoc",
-  "scope": "Actual catalog filesystem discovery and browser state machine. Masc is only a namespace alias to the complete actual catalog. Installer is separately typechecked against actual source interfaces without linking or executing its form/declaration dependencies. Manifest callback is controlled; real manifest parser, server, schema installer, native PTY and deployment are not executed."
+  "scope": "Actual catalog filesystem discovery and browser state machine. Masc is only a namespace alias to the complete actual catalog. Installer is separately typechecked against actual source interfaces without linking or executing its form/declaration dependencies. Manifest callback is controlled; real manifest parser, server, schema installer, native PTY and deployment are not executed.",
+  "documentation_only_deltas": [
+    {
+      "path": "lib/lane_addon/lane_addon_catalog.mli",
+      "executed_sha256": "3c4cdc6273922882040241148c8dde17af5c75e87f953911afb310ec717d537c",
+      "current_sha256": "ea3b5144109b32b69d8bde4e3faa9004c68632ed2eb975b8659872df900c7213",
+      "change": "Interface documentation clarifies the check/open race. Signatures and all executed implementations/tests are unchanged; original run and hashes are retained."
+    }
+  ]
 }

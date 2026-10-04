@@ -23,6 +23,10 @@ Left는 상위 폴더, Right는 선택한 패키지의 폴더, `g`는 폴더 경
 탐색과 미리보기는 image를 pull/build하거나 worker를 시작하지 않는다. image 검사 실패는
 unverified로 표시한다. binding schema가 없는 패키지는 `n`의 원문 TOML 편집을 사용한다.
 
+탐색은 읽는 시점의 경로와 symlink가 workspace 안에 있는지 확인한다. 기존 미리보기와
+같이 경로 확인 후 manifest를 여는 방식이므로, 동시에 파일·상위 폴더를 교체하는 writer를
+격리하는 원자적 filesystem sandbox는 아니다.
+
 ## 설정을 남기고 켜기/끄기
 
 선언 TOML 초안을 연 뒤 `Space`로 활성화 값을 바꾸고 `s`로 저장한다.

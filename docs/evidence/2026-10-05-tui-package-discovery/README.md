@@ -17,7 +17,7 @@ Workspace replacement and request generations reject stale catalog responses.
 - Actual complete catalog and package-browser modules compile/link with warnings
   32 and 69 enabled and warnings treated as errors.
 - Four journeys execute filesystem discovery, bounded traversal by directory,
-  invalid loader outcomes, symlink escape refusal, navigation, fresh-preview
+  invalid loader outcomes, existing symlink escape refusal, navigation, fresh-preview
   handoff, refresh identity and selection at the end of a long list.
 - The installer separately typechecks against its exact source interfaces for
   the schema form and declaration owner. This is not a link/execution check.
@@ -29,6 +29,15 @@ execute the real manifest parser, route, schema form, main TUI, terminal rendere
 worker, Docker, backend persistence, deployment or CI. The `Masc` file in its
 scratch directory only aliases the complete actual catalog module; it contains
 no behavior replacement.
+
+The symlink scenario keeps the filesystem stable during the read. Catalog and
+the existing preview both check paths before the manifest loader reopens them.
+They do not atomically bind that read to the checked inode/ancestor: a concurrent
+filesystem writer can replace a checked file or directory. Isolating a lower-trust
+concurrent writer requires a shared descriptor-bound manifest read and remains a
+follow-up; this unit does not claim an atomic filesystem sandbox or a completed
+security repair. The final interface comment documents this limitation; its
+documentation-only delta is recorded separately from the executed source hashes.
 
 ## Authored, not executed
 

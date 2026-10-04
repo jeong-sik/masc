@@ -12,7 +12,10 @@ val discover :
   load_package:(path:string -> (metadata, string) result) -> (t, string) result
 (** [None] starts at the workspace root; relative directories are workspace
     relative. Loads only lane.toml in this directory and its immediate children.
-    The loader receives canonical paths inside the canonical workspace.
+    Paths are canonicalized and checked inside the workspace before calling
+    the loader. This is a path check, not an atomic filesystem sandbox: the
+    loader opens independently, so a concurrent writer can replace a checked
+    manifest or ancestor before that open, as in the existing preview path.
     Unreadable/invalid entries remain issues, not empty-success placeholders.
     A package directory remains navigable by its manifest's parent directory. *)
 val to_json : t -> Yojson.Safe.t

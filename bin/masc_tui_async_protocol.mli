@@ -303,7 +303,8 @@ type async_msg =
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
-        * Masc.Tui_decode.runtime_assignment list,
+        * Masc.Tui_decode.runtime_assignment list
+        * string option,
         string )
       result
   | Runtime_assignment_set of

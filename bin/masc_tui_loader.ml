@@ -1273,12 +1273,17 @@ let load_approvals ~(host : string) ~(port : int) :
 let load_runtime_resolved ~(host : string) ~(port : int) :
     ( Tui_decode.runtime_option list
       * Tui_decode.runtime_resolved_lane list
-      * Tui_decode.runtime_assignment list,
+      * Tui_decode.runtime_assignment list
+      * string option,
       string )
     result =
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_runtime_resolved_full json
+  | Ok json ->
+      let ( let* ) = Result.bind in
+      let* runtimes, lanes, assignments = Tui_decode.decode_runtime_resolved_full json in
+      let* snapshot = Tui_decode.decode_runtime_resolved_snapshot json in
+      Ok (runtimes, lanes, assignments, snapshot.rrs_default_route)
 
 (** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
     and the provider usage windows. The two decode apart, and a failed fetch

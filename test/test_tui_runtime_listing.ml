@@ -1123,7 +1123,8 @@ let test_default_route_picker_keeps_the_lane_name () =
   (match state.runtime_surface with
    | None -> Alcotest.fail "resolved routes are unread"
    | Some snapshot ->
-       state.runtime_lanes <- snapshot.rss_resolved.rrs_lanes;
+       apply_runtime_catalog state
+         (state.runtime_catalog, snapshot.rss_resolved.rrs_lanes, [], Some "primary");
        state.runtime_surface <- Some { snapshot with
          rss_resolved = { snapshot.rss_resolved with rrs_default_route = Some "primary" } });
   open_runtime_lane_pick state Pick_route_default;
@@ -1131,6 +1132,16 @@ let test_default_route_picker_keeps_the_lane_name () =
   Alcotest.(check (list string)) "the configured route stays a lane"
     ["primary"] already;
   Alcotest.(check (list string)) "declared lanes and runtimes share the picker"
+    ["primary"; "solo"; "a"; "b"; "c"]
+    (List.map runtime_picker_choice_id choices);
+  (* A second client changes the route before the picker catalog refresh.
+     The Runtime surface still holds primary, but the fresh picker must not. *)
+  apply_runtime_catalog state
+    (state.runtime_catalog, state.runtime_lanes, [], Some "solo");
+  let already, _, choices = runtime_picker_rows state Pick_route_default in
+  Alcotest.(check (list string)) "fresh picker route supersedes the older surface"
+    ["solo"] already;
+  Alcotest.(check (list string)) "fresh route shares its catalog choices"
     ["primary"; "solo"; "a"; "b"; "c"]
     (List.map runtime_picker_choice_id choices);
   press state ["/"; "p"; "r"; "i"];

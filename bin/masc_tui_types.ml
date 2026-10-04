@@ -5422,6 +5422,8 @@ type state = {
   mutable runtime_pick_keeper: string option;
   mutable runtime_pick_list: Masc_tui_pick_list.t;
   mutable runtime_catalog: Tui_decode.runtime_option list;
+  (* Read with the picker catalog, never from the independently refreshed surface. *)
+  mutable runtime_catalog_default_route: string option;
   (* The Overview's own read of the same catalogue, kept apart from the
      picker's [runtime_catalog] so a refresh behind the Overview never moves
      the rows under an open picker's cursor. *)
@@ -8245,6 +8247,7 @@ let create_state
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
+  runtime_catalog_default_route = None;
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
   keeper_usage = Keeper_usage_unread;
@@ -10030,6 +10033,13 @@ let swap_candidates order i j =
    last, and picking one is refused before anything is sent. The pick itself
    is an append the server applies to the declared order, never a write of
    this list. A lane being created has no candidates yet. *)
+let apply_runtime_catalog state (runtimes, lanes, assignments, default_route) =
+  state.runtime_catalog <- runtimes;
+  state.runtime_lanes <- lanes;
+  state.runtime_assignments <- assignments;
+  state.runtime_catalog_default_route <- default_route;
+  state.runtime_catalog_error <- None
+
 let lane_picker_existing_slots (state : state) = function
   | Pick_exact_lane lane | Pick_exact_lane_replacement (lane, _, _) ->
     (match state.standalone_lanes with
@@ -10054,12 +10064,7 @@ let lane_picker_existing_slots (state : state) = function
     (* One entry, and a pick replaces it rather than joining it. Listing it
        here is what marks it "(already a candidate)" in the choices, which is
        the one thing the reader wants to know before replacing it. *)
-    (match state.runtime_surface with
-     | None -> []
-     | Some snapshot ->
-       (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_default_route with
-        | Some id -> [ id ]
-        | None -> []))
+    Option.to_list state.runtime_catalog_default_route
 
 (* Why a pick cannot land on its target. A client with no output-schema
    channel fits no exact lane: every exact-output call hands its client a JSON

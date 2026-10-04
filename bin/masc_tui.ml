@@ -10153,6 +10153,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
   state.runtime_catalog <- [];
+  state.runtime_catalog_default_route <- None;
   state.runtime_catalog_error <- None;
   state.runtime_assignments <- [];
   state.runtime_lanes <- [];
@@ -15441,11 +15442,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Error _ -> ())
   | Runtime_catalog_loaded result -> (
       match result with
-      | Ok (runtimes, lanes, assignments) ->
-          state.runtime_catalog <- runtimes;
-          state.runtime_lanes <- lanes;
-          state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None
+      | Ok catalog -> apply_runtime_catalog state catalog
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with

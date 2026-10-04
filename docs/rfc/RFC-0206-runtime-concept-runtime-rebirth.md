@@ -45,7 +45,7 @@ Runtime은 하나의 완전히 materialize된 (Provider × Model × Binding) tri
 | `thinking_control_format` | agent_core `Llm_provider.Capabilities.thinking_control_format` re-export (`No_thinking_control`, `Thinking_object`, `Thinking_object_adaptive`, `Thinking_object_only`, `Chat_template_kwargs`, `Chat_template_token of string`, `Ollama_think`, `Reasoning_effort`) | `runtime_thinking_control_format` |
 | `capabilities` | 10-field provider 행동 record + `capabilities_default` | `runtime_capabilities` |
 | `model_capabilities` | 24-field record (`Llm_provider.Capabilities` 미러) + default | `runtime_model_capabilities` |
-| `provider` | Layer 1 record (id/display_name/protocol/api_format/transport/is_non_interactive/credentials/capabilities/headers). log·healthcheck sub-record는 v1에서 parse-and-ignore | `runtime_provider` |
+| `provider` | Layer 1 record (id/display_name/protocol/api_format/transport/is_non_interactive/credentials/capabilities/headers). 선언된 provider 필드만 허용한다. `healthcheck.path`는 install/setup probe용 metadata로 보존하며 runtime startup admission에는 쓰지 않는다 | `runtime_provider` |
 | `model_spec` | Layer 2 record (id/api_name/tools_support/max_context/thinking_support/streaming/capabilities). `match_prefixes` 는 R4 가 matcher 포팅을 금지했으므로 필드도 두지 않는다 | `runtime_model_spec` |
 | `binding` | Layer 3 record (provider_id/model_id/is_default/optional max_concurrent/price_*/keep_alive/num_ctx) + `binding_key` | `runtime_binding` |
 | `config` | `{ providers; models; bindings; default_runtime_id }` — **routes/system_targets/profiles/aliases DROP** | `runtime_config` minus routing |

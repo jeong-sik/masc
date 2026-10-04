@@ -117,6 +117,18 @@ let configuration_and_ports () =
   check (option string) "decode retains the worker's applied configuration owner" (Some "custom")
     (List.hd snapshot.instances).installation_id;
   let overview = {UI.initial with snapshot=Some snapshot} in
+  let worker = List.hd snapshot.instances in
+  check bool "known revision mismatch blocks removal before dispatch" true
+    (Option.is_some (UI.removal_block_reason overview worker));
+  let current = {snapshot with configuration=Option.map (fun (c:UI.configuration) ->
+    {c with declarations=List.map (fun (d:UI.declaration) -> {d with desired=d.applied}) c.declarations}) snapshot.configuration} in
+  check (option string) "matching current owner may be removed" None
+    (UI.removal_block_reason {overview with snapshot=Some current} worker);
+  check (option string) "unknown configuration does not invent a revision mismatch" None
+    (UI.removal_block_reason {overview with snapshot=Some {snapshot with configuration=None}} worker);
+  check (option string) "manual cleanup remains available" None
+    (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
+
   let empty = {snapshot with instances=[];
     configuration=Some {directory="/config/lane-addons";complete=true;declarations=[]}} in
   let first = {snapshot with instances=[];

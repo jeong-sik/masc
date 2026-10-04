@@ -1,5 +1,7 @@
 # Partial-roster Item account withdrawal
 
+Scope note: this PR retains historical reproduction evidence; it adds no current implementation change. The published v0.49.0 notes already cover partial-roster Item retention under #40313 and #41069. The artifact and measurements below retain their original candidate identities.
+
 Release blocker: [40313 review4173955107](https://github.com/jeong-sik/masc/pull/40313#discussion_r4173955107). The release permits a local Keeper omitted from a capped roster to read its authoritative Item account, but subsequent successful roster application withdrew that account. The automatic refresh launcher also cleared it, so fixing the roster match alone would not fix the visible defect.
 
 ## Reproduction

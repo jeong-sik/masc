@@ -1,0 +1,10 @@
+sweep_zero=rejected
+sweep_above_max=rejected
+zero_backups=rejected
+valid_bounds=accepted
+sweep_env_0=10
+sweep_env_121=120
+sweep_env_nan=30
+sweep_env_infinity=30
+backup_env_zero=1
+strict_boot_rejections=16/16

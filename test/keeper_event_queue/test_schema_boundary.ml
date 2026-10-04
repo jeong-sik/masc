@@ -26,7 +26,7 @@ let test_event_queue_state_rejects_foreign_schema () =
       `Assoc
         (List.map
            (function
-             | "schema", `String _ -> ("schema", `String "unsupported-test-schema")
+             | "schema", `String _ -> ("schema", `String (Keeper_event_queue_state.schema ^ ".foreign"))
              | kv -> kv)
            fields)
     | _ -> assert false
@@ -36,4 +36,6 @@ let test_event_queue_state_rejects_foreign_schema () =
    | Error message ->
      if not (String.length message > 0) then fail "rejection message must not be empty")
 
-let () = test_event_queue_state_rejects_foreign_schema ()
+let () =
+  test_event_queue_state_rejects_foreign_schema ();
+  print_endline "test_schema_boundary: pass"

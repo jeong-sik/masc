@@ -631,6 +631,10 @@ let highwater t instance_id = protect (fun () ->
    sequence for every retained reader; reads still verify the exact record. *)
 let bindings t =
   let* values = read_directory t "bindings" in
+  (* This reading also authorizes reconciliation. On a cold process, confirm
+     the publication of terminal records/absence before admitting replacement. *)
+  let* () = protect (fun () ->
+    sync_existing_parent ~sync_parent:sync_parent_directory (Filename.concat t.root "bindings"); Ok ()) in
   let rec reconcile = function
     | [] -> Ok []
     | `Assoc fields :: rest ->

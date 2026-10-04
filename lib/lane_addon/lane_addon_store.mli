@@ -65,6 +65,8 @@ val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Saf
 (** Retain the exact published evidence before sending its idempotent Broadcast.
     Repeated sends read that original artifact, not a changing live binding. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
+(** Confirms containing-directory durability after capturing records/absence,
+    including cold reads used to authorize reconciliation. *)
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads
     still require their own durability and payload verification. *)

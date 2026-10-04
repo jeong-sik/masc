@@ -279,7 +279,7 @@ let test_refused_transport_waits_for_an_event () =
     if !accept then make_runner calls ~identity request
     else Error (A.Invalid_response "provider refused the unchanged request") in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    Candle_payout_worker.start ~sw ~config ~appraise:runner ();
     await env "provider refusal" (fun () -> !attempts > 0);
     idle env;
     let refused_attempts = !attempts in

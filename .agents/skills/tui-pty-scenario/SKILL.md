@@ -5,9 +5,11 @@ description: "masc TUI 를 진짜 터미널(PTY)에 띄워 확인하는 파이�
 
 # TUI PTY 시나리오
 
-`test/test_tui_keyboard_input.py` 가 하네스다. `run_terminal_scenario` 가 PTY 를 열고, 가짜 HTTP
-서버를 붙이고, TUI 를 띄우고, 키를 보내고, 화면 바이트를 기다린다. 다른 `test/test_tui_*.py` 초점
-스위트들도 이 모듈을 `import test_tui_keyboard_input as h` 로 가져다 쓴다.
+`test/test_tui_keyboard_input.py` 는 가족 선택 CLI 진입점이다. 공통 하네스는
+`test/tui_keyboard_harness.py` 이며, `run_terminal_scenario` 가 PTY 를 열고 가짜 HTTP
+서버를 붙여 TUI 와 상호작용한다. 새 초점 스위트는 `import tui_keyboard_harness as h` 로
+공통 기능을 가져오고, 화면별 fixture 는 `tui_keyboard_chat`, `tui_keyboard_board` 등 실제 소유 모듈에서 가져온다.
+기존 진입점의 호환 export 는 새 테스트의 기본 import 로 사용하지 않는다.
 
 ## 바이너리
 
@@ -84,43 +86,46 @@ AssertionError: timed out waiting for b'MASC Overview': b'...'
 
 ## 4. CI 에서 돌리기
 
-### PR CI
+### 실행 경로
 
-`scripts/ci/run-edited-tests.sh` 가 PR 이 바꾼 파일로 스위트를 고른다.
+PR 생성·push 는 CI 를 시작하지 않는다. 일반 개발 검사는 리더가 승인된 PR head 와 검사 범위를
+명시적으로 고른 뒤 실행한다. [CI 선택 절차](../../../scripts/review/APPROVED-CI-SELECTION.md)에
+따라 조합 후보와 `SELECTION.json` 영수증을 준비하고 후보 브랜치를 게시한다.
+현재 준비 도구가 받는 PR 범위와 승인 조건도 이 절차를 따른다.
 
-- 편집한 `test/test_*.py` 중 `test/dune` 에 `runtest-<stem>` 규칙이 있는 것은
-  `dune build @test/runtest-<stem>` 으로 돈다. 로그에 `== test/<stem> (dune rule)` 이 찍힌다.
-- 소스 경로를 문자열로 적어 둔 스위트는 그 소스가 바뀐 PR 에서도 돈다(아래 `SOURCE_MODULES`).
-- 기본 키보드 산책은 지금 그 파일을 고친 PR 에서만 돈다. 렌더 파일만 고친 PR 의 초록은 산책의 증거가
-  아니다. 그런 PR 은 바뀐 문구가 `test/*.py` 에 needle 로 남아 있는지 직접 찾는다.
-- 스위트 하나의 상한은 300초이고 키보드 산책만 600초다. `timeout` 이 끊으면 출력이 남지 않는다.
-  로그의 `== test/<stem>` 줄과 `ran N, skipped M` 줄의 시각 차가 상한과 같고 PASS 도
-  `AssertionError` 도 없으면 시간 초과다.
+`test.yml` 은 `workflow_call` 전용이다. 최소 PTY 검사는 `leader-ci.yml` 을 `main` 에서
+dispatch 해 요청한다. Release/Tag 전체 검증은
+[Release Candidate Verification](../../../.github/workflows/release-candidate.yml)에서 실행한다.
 
 ### 가족 하나를 Linux 에서
 
 ```sh
-gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input-<family>
-gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기본 산책
+gh workflow run leader-ci.yml --ref main \
+  -f candidate="$(jq -r .candidate SELECTION.json)" \
+  -F selection=@SELECTION.json \
+  -F tests=true \
+  -f suites='test_tui_keyboard_input-<family>'
 ```
 
-`suite` 는 `test/<이름>.py` 파일 이름이나 `test/dune` 에 선언된 `runtest-<이름>` alias 이름을 받는다.
-시나리오 하나만 고르는 입력은 없다.
+`<family>` 를 실제 가족 이름으로 바꾼다. 기본 산책은 `suites=test_tui_keyboard_input` 이다.
+여러 스위트는 쉼표로 구분한다. `suites` 는 `test.yml` 의 `suite` 입력으로 전달되며,
+`test/<이름>.py` 파일 이름이나 `test/dune` 에 선언된 `runtest-<이름>` alias 이름을 받는다.
+시나리오 하나만 고르는 CI 입력은 없다.
+
+결과는 조합 후보 SHA 와 실제 실행한 스위트의 증거다. 개별 PR 검사나 전체 TUI 검증으로
+확대하지 않는다. 변경한 화면의 동작을 검증하는 스위트를 직접 고른다. 다른 검사만 통과했다면
+그 화면은 미검증이다. 시간 초과는 targeted runner 의 `TIMEOUT` 결과와 해당 스위트 로그로
+확인한다. CI 를 watch 하거나 반복 조회하지 않고 작업 경계에서 결과를 읽는다.
 
 ## 5. 새 시나리오 만들기
 
-기본 산책에 시나리오를 더 넣지 않는다. 산책은 이미 CI 상한 가까이 걸린다(이슈 #36343).
+기본 산책에 시나리오를 더 넣지 않는다.
 초점 스위트 파일을 따로 만든다. `test/test_tui_tab_strip_pty.py` 가 예다.
 
-1. `test/test_tui_<무엇을 확인하나>.py` 를 만들고 `import test_tui_keyboard_input as h` 로 하네스를 쓴다.
-2. 파일 위쪽에 이 시나리오가 지키는 소스를 적는다. PR CI 는 바뀐 경로를 따옴표째 적은 스위트를 고른다.
-
-   ```python
-   SOURCE_MODULES = (
-       "bin/masc_tui_render.ml",
-   )
-   ```
-
+1. `test/test_tui_<무엇을 확인하나>.py` 를 만들고 `import tui_keyboard_harness as h` 로 하네스를 쓴다.
+   필요한 fixture 는 그 정의가 있는 소유 모듈에서 명시적으로 import 한다.
+2. 시나리오 docstring에 검증하는 사용자 동작과 입력·출력 경계를 적는다.
+   실행 여부를 보장하지 않는 `SOURCE_MODULES` 선언은 추가하지 않는다.
 3. `h.run_terminal_scenario(executable, description=..., interact=..., http_fixtures=...)` 를 부른다.
    끝에 `print("<무엇>: PASS")` 를 찍는다.
 4. `test/dune` 에 규칙과 `runtest` 연결을 둘 다 넣는다. 연결이 없으면 전체 테스트에서 안 돈다.
@@ -128,7 +133,7 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기
    ```text
    (rule
     (alias runtest-test_tui_<stem>)
-    (deps test_tui_<stem>.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+    (deps test_tui_<stem>.py tui_keyboard_harness.py ../bin/masc_tui.exe)
     (action
      (run python3 %{dep:test_tui_<stem>.py} %{dep:../bin/masc_tui.exe})))
 
@@ -136,6 +141,11 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기
     (name runtest)
     (deps (alias runtest-test_tui_<stem>)))
    ```
+
+위 규칙은 공통 하네스만 사용하는 최소 예다. 화면별 소유 모듈을 import 하면 그 파일과
+그 모듈이 다시 import 하는 모든 `tui_keyboard_*.py` 파일도 `deps` 에 넣는다.
+기존 CLI 진입점을 import 하는 소비자는 전체 진입점 import closure 를 선언해야 한다.
+소스 트리에서 import 가 성공해도 Dune sandbox 의 의존성이 충분하다는 증거는 아니다.
 
 ## Gotchas
 

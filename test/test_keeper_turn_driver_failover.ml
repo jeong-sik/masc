@@ -1037,7 +1037,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
     let agent_ref = ref None in
     let current_goal = "current goal" in
     (match
-       Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+       Driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
          ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"primary.test_model"
          ~keeper_name:"prior-checkpoint-current-goal"
@@ -1176,7 +1176,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
         ()
     in
     ignore
-      (Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      (Driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
          ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"resilient"
          ~keeper_name:"media-degrade-keeper"
@@ -1658,7 +1658,7 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
         ~failure:(retryable_network_error "previous cycle failed")
     in
     let result =
-      Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      Driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-per-candidate"
@@ -1790,7 +1790,7 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
       }
     in
     match
-      Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      Driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
@@ -4337,7 +4337,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
          Masc_test_deps.init_eio_clock ~sw env;
          let transformed_urls = ref [] in
          let result =
-           Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+           Driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
              ~system_prompt:"You are the runtime failover test Keeper."
              ~runtime_id:"quota_lane"
              ~keeper_name:"deferred-frozen-quota-order"
@@ -4553,7 +4553,7 @@ let first_dispatch ~walk_owner ?goal_blocks runtime_id =
   Masc_test_deps.init_eio_clock ~sw env;
   let attempts = ref [] in
   let (_ : (Driver.named_run_result, Agent_core.Error.t) result) =
-    Driver.run_named ~walk_owner
+    Driver.run_named ~raw_trace:None ~walk_owner
       ~system_prompt:"You are the runtime failover test Keeper."
       ~runtime_id
       ~keeper_name:"keeper-a"
@@ -6121,7 +6121,7 @@ let test_deferred_head_removed_by_reload_rotates () =
     in
     let attempts = ref [] in
     let result =
-      Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      Driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-head-removed"

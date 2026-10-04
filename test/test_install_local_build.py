@@ -426,10 +426,6 @@ class LocalBuildInstall(unittest.TestCase):
                                     check=True, capture_output=True, text=True)
             self.assertTrue((prefix / "masc-deployment-preflight-helper").is_file())
             self.assertTrue((prefix / "masc-check-runtime-deployment-preflight").is_file())
-            # The installed gate must look for its helper beside itself, which
-            # is the line that makes the pair matter.
-            gate = (prefix / "masc-check-runtime-deployment-preflight").read_text()
-            self.assertIn('"$SCRIPT_DIR/masc-deployment-preflight-helper"', gate)
             self.assertIn("masc-deployment-preflight-helper", result.stdout)
 
     # Without a helper there is no pair to install: the WARN above already

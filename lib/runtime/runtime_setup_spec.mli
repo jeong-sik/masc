@@ -17,7 +17,8 @@ val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result
     Codex and Muse accept an absolute [account_home]. Muse requires this
     selection. Account paths retain their exact spelling in the connection
     identity and rendered provider. Omission keeps ambient selection for Claude
-    Code and Codex. No files are read. *)
+    Code and Codex. Optional [supports_image_input] is an explicit boolean
+    model declaration; omission leaves image support undeclared. No files are read. *)
 type rendered = { runtime_id:string; runtime_toml:string }
 val setup_exact_body_timeout_s : float
 (** The [exact-body-timeout-s] setup writes on an HTTP provider it points the

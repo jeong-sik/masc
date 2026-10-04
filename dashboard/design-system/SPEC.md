@@ -370,8 +370,6 @@ active named variant 테마는 **dark-fantasy + paper** 두 종이며 source.ts 
 - ARIA pattern catalog 상세: `dashboard/design-system/patterns/a11y/<pattern>.md`
 - Token SSOT: `dashboard/design-system/tokens/source.ts`
 - Codegen driver: `dashboard/design-system/tokens/build.ts`
-- Equivalence checker: `dashboard/design-system/tokens/scripts/check-equivalence.mjs`
-- CI workflow: `.github/workflows/tokens-drift.yml`
 - 2026-04 SSOT 이행 PR 시리즈: §12 audit
 
 ---

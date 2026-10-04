@@ -3,7 +3,7 @@ module Login = Masc_tui_account_login
 let session = String.make 64 'a'
 let account = String.make 64 'b'
 let other = String.make 64 'c'
-let provider : Login.provider = {id="codex";label="Codex";client=Login.Codex;origin=Login.Configured}
+let provider : Login.provider = {id="codex";label="Codex";client=Login.Codex;origin=Login.Configured;enabled=true;setup_supported=true}
 let ok = function Ok value -> value | Error message -> fail message
 let model i : Login.model = {id=string_of_int i;label="model " ^ string_of_int i;context=Some 32768;tools=Some true}
 let frame name data = "event: " ^ name ^ "\r\ndata: " ^ Yojson.Safe.to_string data ^ "\r\n\r\n"
@@ -789,7 +789,7 @@ let a_later_read_keeps_its_view () =
     (t.phase = Login.Providers (Login.Accounts Login.Codex))
 (* A pending login is offered back only for what /login asked for. *)
 let a_pending_login_belongs_to_the_request () =
-  let provider id origin : Login.provider = {id; label=id; client=Login.Codex; origin} in
+  let provider id origin : Login.provider = {id; label=id; client=Login.Codex; origin;enabled=true;setup_supported=true} in
   let one = provider "codex_one" Login.Configured and two = provider "codex_two" Login.Configured
   and catalog = provider "codex" Login.Catalog in
   let asked requested = let t = Login.create requested in t.providers <- [catalog; one; two]; t in
@@ -931,7 +931,33 @@ let grouped_existing_accounts () =
     | `Assoc fields -> `Assoc (("account_groups", `List [group "bad" ["missing"] []]) :: List.remove_assoc "account_groups" fields)
     | _ -> assert false in
   check bool "unknown grouping member cannot redirect account selection" true
-    (Result.is_error (Login.inventory t invalid))
+    (Result.is_error (Login.inventory t invalid));
+  let update name value = match inventory with
+    | `Assoc fields -> `Assoc ((name,value) :: List.remove_assoc name fields)
+    | _ -> assert false in
+  let availability id enabled supported = match provider id with
+    | `Assoc fields -> `Assoc (("enabled",`Bool enabled) ::
+        ("setup_support",`String (if supported then "new_connection" else "unsupported")) :: fields)
+    | _ -> assert false in
+  List.iter (fun unavailable ->
+    let changed = update "integrations" (`List [unavailable;availability "a2" true true;provider "b"]) in
+    ok (Login.inventory t changed);
+    check bool "usable member represents the account despite disabled or unsupported first member" true
+      (match Login.key t "enter" with Login.Select_existing provider -> provider.id="a2" | _ -> false))
+    [availability "a1" false true;availability "a1" true false];
+  let disabled = update "integrations" (`List [availability "a1" false true;availability "a2" false true;provider "b"]) in
+  ok (Login.inventory t disabled);
+  check bool "an entirely disabled account cannot start model discovery" true (Login.key t "enter"=Login.Nothing);
+  ok (Login.inventory t inventory);
+  ignore (Login.key t "D");
+  let changed = update "account_groups" (`List [group "rejoined" ["a1";"b"] [];
+    group "separated" ["a2"] []]) in
+  ok (Login.inventory ~view:(Login.Account_providers (Codex,["a1";"a2"])) t changed);
+  check bool "refresh returns to fresh account membership instead of stale deletion IDs" true
+    (t.phase=Login.Providers (Login.Accounts Codex));
+  ignore (Login.key t "down"); ignore (Login.key t "D");
+  check bool "reopening removal uses newly joined and excludes departed members" true
+    (t.phase=Login.Providers (Login.Account_providers (Codex,["a1";"b"])))
 
 let () = run "TUI account login" ["workflow",[
   test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;

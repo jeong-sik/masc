@@ -3,7 +3,8 @@ type client = Codex | Claude | Antigravity | Muse
    configuration declares one per account, and a catalog entry is the client's
    own way to add one. *)
 type origin = Configured | Catalog
-type provider = { id : string; label : string; client : client; origin : origin }
+type provider = { id : string; label : string; client : client; origin : origin;
+  enabled : bool; setup_supported : bool }
 type model = { id : string; label : string; context : int option; tools : bool option }
 (* What removing an account changes, as the setup API's removal preview lists it. *)
 type removal_change =
@@ -102,9 +103,15 @@ let account_group t (provider:provider) =
 let account_members t provider = match account_group t provider with
   | None -> [provider]
   | Some group -> List.filter (fun (p:provider) -> List.mem p.id group.provider_ids) t.providers
+let provider_selectable (provider:provider) = provider.enabled && provider.setup_supported
+let account_representative t provider =
+  let members = account_members t provider in
+  match List.find_opt provider_selectable members with
+  | Some provider -> Some provider
+  | None -> List.nth_opt members 0
 let accounts t client = List.filter (fun (p:provider) ->
   p.client = client && p.origin = Configured
-  && match account_members t p with first :: _ -> first.id=p.id | [] -> false) t.providers
+  && match account_representative t p with Some first -> first.id=p.id | None -> false) t.providers
 let member_rows t ids = List.filter_map (fun id ->
   List.find_opt (fun (p:provider) -> p.id=id) t.providers) ids
 (* A login without an account reference adds a new account through any of the
@@ -294,7 +301,9 @@ let inventory ?view t json =
       match string (field "id" row), string (field "display_name" row), string (field "protocol" row),
             origin_of_json (field "origin" row) with
       | Some id, Some label, Some protocol, Some origin ->
-        Option.map (fun client -> {id;label;client;origin}) (client_of_protocol protocol)
+        let enabled = match field "enabled" row with `Bool value -> value | `Null -> true | _ -> false in
+        let setup_supported = field "setup_support" row <> `String "unsupported" in
+        Option.map (fun client -> {id;label;client;origin;enabled;setup_supported}) (client_of_protocol protocol)
       | _ -> None) rows in
     let ( let* ) = Result.bind in
     let* account_groups = groups_of_inventory providers json in
@@ -315,7 +324,9 @@ let inventory ?view t json =
       (match view, requested with
        | Some Clients, _ | None, None -> show_clients t
        | Some (Accounts client), _ -> show_accounts t client
-       | Some (Account_providers (client, ids)), _ -> show_account_providers t client ids
+       | Some (Account_providers (client, _)), _ ->
+           show_accounts t client;
+           t.notice <- "계정 구성이 갱신되었습니다. 계정을 다시 고른 뒤 삭제할 연결을 확인하세요."
        | None, Some (client, on) -> show_accounts ?on t client);
       Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
@@ -711,7 +722,9 @@ let key t key =
        | Providers (Accounts _) ->
          (match focused_row t with
           | Some (New_account provider) -> Start {provider; existing = false}
-          | Some (Account provider) -> Select_existing provider
+          | Some (Account provider) when provider_selectable provider -> Select_existing provider
+          | Some (Account _) ->
+              t.notice <- "이 계정에 사용 가능한 연결이 없습니다. 공급자 설정에서 활성화한 뒤 새로고침하세요."; Nothing
           | None -> Nothing)
        | Providers (Account_providers (_, ids)) ->
          (match List.nth_opt (member_rows t ids) t.cursor with
@@ -771,6 +784,7 @@ let account_label t (p:provider) =
           (List.length group.provider_ids) (List.length group.runtime_ids)
     | Some group -> p.label ^ " · " ^ String.sub group.group_id 0 (min 8 (String.length group.group_id))
     | None -> p.label in
+  let label = label ^ (if not p.enabled then " · 비활성" else if not p.setup_supported then " · 설정 미지원" else "") in
   match email_state t p with
   | Some state -> state ^ "  (" ^ label ^ ")"
   | None -> label

@@ -335,15 +335,15 @@ let muse_catalog ~binary template =
   Ok ("muse_" ^ source,models)
 
 let bound_model_names (config : Runtime_schema.config) template id choice =
-  let selected_home = match choice with
-    | Runtime_setup_spec.Codex ->
-      Runtime_codex_app_server.effective_account_home
-        (match value "account_home" template with `String home -> Some home | _ -> None)
-    | Claude_code ->
-      Runtime_claude_code.effective_account_home
-        (match value "account_home" template with `String home -> Some home | _ -> None)
-    | Muse -> (match value "account_home" template with `String home -> Some home | _ -> None)
+  (* Resolve both sides with the same native-home rules used by inventory
+     grouping; an omitted home can name the same account as an explicit one. *)
+  let effective_home home = match choice with
+    | Runtime_setup_spec.Codex -> Runtime_codex_app_server.effective_account_home home
+    | Claude_code -> Runtime_claude_code.effective_account_home home
+    | Muse -> home
     | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> None in
+  let selected_home = effective_home
+      (match value "account_home" template with `String home -> Some home | _ -> None) in
   let selected_credential = match choice, value "credential_file" template with
     | Runtime_setup_spec.Antigravity, `String path -> Some path
     | _ -> None in
@@ -351,14 +351,12 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
     provider.enabled
     && (match choice_of_api_format provider.api_format with
         | Ok candidate -> candidate = choice | Error _ -> false)
-    && (String.equal provider.id id
-        || (match choice, selected_home, provider.account_home with
-            | (Runtime_setup_spec.Codex | Claude_code | Muse), Some selected, Some home ->
-              String.equal selected home
-            | _ -> false)
-        || (match selected_credential, provider.credentials with
-            | Some selected, Some (Runtime_schema.File path) -> String.equal selected path
-            | _ -> false)) in
+    && (match selected_home, selected_credential with
+        | Some selected, _ -> Option.equal String.equal (Some selected)
+            (effective_home provider.account_home)
+        | None, Some selected -> (match provider.credentials with
+            | Some (Runtime_schema.File path) -> String.equal selected path | _ -> false)
+        | None, None -> String.equal provider.id id) in
   List.filter_map (fun (binding : Runtime_schema.binding) ->
     if binding.enabled
        && List.exists (fun (provider : Runtime_schema.provider) ->

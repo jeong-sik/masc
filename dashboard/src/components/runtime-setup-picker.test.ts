@@ -43,6 +43,43 @@ it('groups legacy providers by account while preserving both context variants in
     revision: 'paired-revision', connections: [], selection: [{ runtime_id: 'first.luna' }, { runtime_id: 'first-wide.luna' }],
   }))
 })
+it.each([{ enabled: false, setup_support: 'new_connection' }, { enabled: true, setup_support: 'unsupported' }])('uses an enabled supported member when the first account connection is unavailable: %j', async unavailable => {
+  const grouped = {
+    ...inventory,
+    integrations: [
+      { id: 'unavailable', display_name: 'Codex', protocol: 'codex-app-server', ...unavailable },
+      { id: 'available', display_name: 'Codex', protocol: 'codex-app-server', enabled: true, setup_support: 'new_connection' },
+    ],
+    account_groups: [{ id: 'a'.repeat(64), integration_ids: ['unavailable', 'available'], runtime_ids: [] }],
+  }
+  vi.mocked(post).mockImplementation(async path => path.endsWith('/accounts/select')
+    ? { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref: 'b'.repeat(64) }
+    : { models: [] })
+  render(html`<${RuntimeSetupPicker} inventory=${grouped} onSaved=${vi.fn()} />`)
+  const options = screen.getAllByRole('option') as HTMLOptionElement[]
+  expect(options.map(option => option.value)).toEqual(['', 'available'])
+  expect(options[1]?.disabled).toBe(false)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'available' } })
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/accounts/select', { integration_id: 'available' }))
+})
+
+it('requires a new selection after refresh disables the selected account connection', () => {
+  const grouped = {
+    ...inventory,
+    integrations: ['first', 'second'].map(id => ({ id, display_name: 'Codex', protocol: 'codex-app-server', enabled: true, setup_support: 'new_connection' })),
+    account_groups: [{ id: 'a'.repeat(64), integration_ids: ['first', 'second'], runtime_ids: [] }],
+  }
+  const view = render(html`<${RuntimeSetupPicker} inventory=${grouped} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'first' } })
+  const refreshed = { ...grouped, integrations: grouped.integrations.map(row => ({ ...row, enabled: row.id === 'second' })) }
+  view.rerender(html`<${RuntimeSetupPicker} inventory=${refreshed} onSaved=${vi.fn()} />`)
+  expect((screen.getByLabelText('공급자') as HTMLSelectElement).value).toBe('')
+  expect((screen.getAllByRole('option') as HTMLOptionElement[]).map(option => option.value)).toEqual(['', 'second'])
+  expect(screen.queryByText('서버 계정 선택 후 모델 목록 확인')).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
 it('selects multiple models and default by clicking, hides key, resumes only after verified save', async () => {
   vi.mocked(post).mockImplementation(async path => {
     if (path.endsWith('/models')) return { models: [

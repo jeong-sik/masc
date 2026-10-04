@@ -2,7 +2,8 @@ type client = Codex | Claude | Antigravity | Muse
 type origin = Configured | Catalog
 (** [Configured]: an account the runtime configuration declares.
     [Catalog]: the client's own entry for adding a new account. *)
-type provider = { id : string; label : string; client : client; origin : origin }
+type provider = { id : string; label : string; client : client; origin : origin;
+  enabled : bool; setup_supported : bool }
 type model = { id : string; label : string; context : int option; tools : bool option }
 
 (** What removing an account changes, as the setup API's removal preview

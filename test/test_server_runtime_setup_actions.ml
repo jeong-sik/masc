@@ -546,6 +546,37 @@ let test_bound_models_follow_account_home () = fixture (fun base runtime binary 
       "second provider sees every model on its account" shared (flags second);
     Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.bool))
       "another account keeps its own model" isolated (flags other)))
+let test_bound_models_follow_effective_ambient_home () = fixture (fun base runtime binary net ->
+  let ambient = match Runtime_codex_app_server.effective_account_home None with
+    | Some home -> home | None -> Alcotest.fail "fixture needs an effective native home" in
+  let other = Filename.concat base "different-native-account" in
+  Unix.mkdir other 0o700;
+  let add id model home = Printf.sprintf
+    "\n[providers.%s]\nprotocol=\"codex-app-server\"\ncommand=\"codex\"\nis-non-interactive=true\n%s\n[models.%s]\napi-name=%S\nmax-context=272000\ntools-support=true\n[%s.%s]\n"
+    id (match home with None -> "" | Some home -> "account-home=" ^ Printf.sprintf "%S" home)
+    id model id id in
+  Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
+    output_string channel (add "ambient_first" "fresh-model" None
+      ^ add "ambient_hidden" "second-model" None
+      ^ add "ambient_explicit" "fresh-model" (Some ambient)
+      ^ add "other_account" "other-model" (Some other)));
+  Eio.Switch.run (fun sw ->
+    let flags source = get (Actions.discover ~binary ~sw ~net ~base_path:base source)
+      |> Yojson.Safe.Util.member "models" |> Yojson.Safe.Util.to_list
+      |> List.map (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string,
+          row |> member "bound" |> to_bool)) in
+    let shared = ["fresh-model",true;"second-model",true;"other-model",false] in
+    List.iter (fun id -> Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.bool))
+      "implicit and explicit homes expose the same existing models" shared
+      (flags (`Assoc ["integration_id",`String id]))) ["ambient_first";"ambient_explicit"];
+    let reference = Runtime_setup_accounts.register_home ~workspace:base
+      ~integration_id:"ambient_first" ~cli_path:"codex" ~account_home:other
+      |> Result.get_ok |> Runtime_setup_accounts.reference_to_string in
+    Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.bool))
+      "a newly selected account does not inherit models from the provider's old home"
+      ["fresh-model",false;"second-model",false;"other-model",true]
+      (flags (`Assoc ["integration_id",`String "ambient_first";"account_ref",`String reference]))))
+
 let test_status_of_error () =
   let check name expected error =
     Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
@@ -562,6 +593,7 @@ let test_status_of_error () =
 let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "disabled provider is preserved and refused" `Quick test_disabled_provider_refused;
   Alcotest.test_case "catalog Responses paths survive account setup and reuse" `Quick test_catalog_responses_save;
+  Alcotest.test_case "bound models use the same effective home as account grouping" `Quick test_bound_models_follow_effective_ambient_home;
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
   Alcotest.test_case "configured HTTP account accepts another context variant" `Quick test_existing_http_context_variant;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;

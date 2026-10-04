@@ -9330,3 +9330,5 @@
  (name test_tui_lane_declaration_path)
  (modules test_tui_lane_declaration_path)
  (libraries alcotest masc_tui_lane_declaration))
+
+(include stanzas/test_tui_lane_inventory_pty.inc)

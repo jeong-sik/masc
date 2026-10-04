@@ -1,4 +1,4 @@
-import { effect, signal } from '@preact/signals'
+import { effect, signal, type Signal } from '@preact/signals'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 import { fetchLaneDeclaration, saveLaneDeclaration, LaneDeclarationError,
   type LaneDeclarationDocument, type LaneDeclarationReceipt } from '../api/lane-declarations'
@@ -9,6 +9,15 @@ type Draft = { base: File; enabled: boolean }
 type State = { draft: Draft | null; current: File | null; phase: 'idle' | 'reading' | 'saving';
   uncertain: boolean; error: string | null; notice: string | null; receipt: LaneDeclarationReceipt | null }
 const sessions = new Map<string, LanePackageActivitySession>()
+const observations = new Map<string, Signal<number>>()
+function observationFor(workspaceRoot: string) {
+  let revision = observations.get(workspaceRoot)
+  if (!revision) { revision = signal(0); observations.set(workspaceRoot, revision) }
+  return revision
+}
+export function lanePackageActivityObservationRevision(authority: ExecutionWorkspaceAuthority | null) {
+  return authority === null ? 0 : observationFor(authority.workspaceRoot).value
+}
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const warnUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
 let guarding = false
@@ -97,6 +106,10 @@ export class LanePackageActivitySession {
       this.update({ receipt, current: durable ? saved : null, draft: durable ? { base: saved, enabled: draft.enabled } : draft,
         uncertain: !durable, notice: durable ? 'Activity configuration saved. Worker application or cleanup is still pending reconciliation.'
           : 'A save response was received, but durability is unconfirmed. Read the current file before continuing.' })
+      // Notify whichever inventory is mounted now, including a new mount that
+      // appeared while this owner was saving. No component callback owns it.
+      const revision = observationFor(this.workspaceRoot)
+      revision.value = revision.peek() + 1
       return true
     } catch (error) {
       if (!this.owns(authority, version)) return false
@@ -120,4 +133,4 @@ export function lanePackageActivityFor(authority: ExecutionWorkspaceAuthority, s
   return owner
 }
 effect(() => { const authority = executionWorkspaceAuthority.value; for (const owner of sessions.values()) owner.invalidate(authority) })
-export function resetLanePackageActivitiesForTesting() { for (const owner of sessions.values()) owner.invalidate(null); sessions.clear(); syncGuard() }
+export function resetLanePackageActivitiesForTesting() { for (const owner of sessions.values()) owner.invalidate(null); sessions.clear(); observations.clear(); syncGuard() }

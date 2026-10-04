@@ -17,7 +17,7 @@ const reads=[],mutations=[],errors=[],unexpected=[],checks=[]
 page.on('pageerror',error=>errors.push(error.message))
 const original='# retained package comment\nid = "pkg"\nrun_id = "run"\nmanifest_path = "../pkg/lane.toml"\n[binding]\nsources = []\n'
 const path='/workspace/.masc/config/lane-addons/pkg.toml',directory=path.slice(0,path.lastIndexOf('/'))
-let source=original,revision='r1',loseNextSave=false,valid=true
+let source=original,revision='r1',loseNextSave=false,valid=true,pauseSave=false,finishSave,pauseReached
 const document=()=>({file_name:'pkg.toml',source_path:path,source_text:source,source_revision:revision,desired_revision:'semantic',validation:{valid,messages:valid?[]:['Fixture invalid binding']}})
 const enabled=()=>getStaticTOMLValue(parseTOML(source)).enabled!==false
 const snapshot=()=>({configuration:{directory,complete:true,issues:[],declarations:[{id:'pkg',source_path:path,enabled:enabled(),desired_revision:'semantic',applied_revision:'semantic',instance_id:'worker'}]},
@@ -32,6 +32,7 @@ await page.route('**/api/**',async route=>{
  if(p==='/api/v1/lane-addons/declaration'&&request.method()==='POST'){
   const body=request.postDataJSON();mutations.push(body)
   if(body.mode!=='save'||body.expected_source_revision!==revision)return send({code:'revision_conflict',error:'Fixture CAS conflict',current:document()},409)
+  if(pauseSave){pauseSave=false;await new Promise(resolve=>{finishSave=resolve;pauseReached()})}
   source=body.source_text;revision='saved-'+mutations.length
   if(loseNextSave){loseNextSave=false;return route.abort('failed')}
   return send({document:document(),write:{state:'saved',durability:'durable',detail:null},application:'pending_reconciliation'})
@@ -69,18 +70,24 @@ try {
  await switcher().click();await click('Save activity');await labelText('File activity (last read): On')
  assert.equal(mutations.length,3);assert.equal(enabled(),true);assert.equal(await raw.inputValue(),'# independent raw edit\n'+original)
  checks.push('Off can be saved back On with the same declaration and binding, without detach or remove requests')
+ const paused=new Promise(resolve=>{pauseReached=resolve});pauseSave=true;await switcher().click();await click('Save activity');await activity.getByRole('button',{name:'Saving activity…',exact:true}).waitFor();await paused
+ await click('Fixture hide/show');await page.getByText('Other fixture page',{exact:true}).waitFor();await click('Fixture hide/show')
+ await activity.getByRole('button',{name:'Saving activity…',exact:true}).waitFor();finishSave()
+ await activity.getByText('Observed configuration: Off requested · worker cleanup not yet confirmed',{exact:true}).waitFor()
+ assert.equal(mutations.length,4);checks.push('a retained pending save refreshes the new inventory mount when its receipt arrives')
+ await switcher().click();await click('Save activity');await labelText('File activity (last read): On');assert.equal(mutations.length,5)
  loseNextSave=true;await switcher().click();await click('Save activity')
  await activity.getByText('The previous save outcome is uncertain. Read the current file before another save.',{exact:true}).waitFor()
- assert.equal(mutations.length,4);assert.equal(await activity.getByRole('button',{name:'Save activity',exact:true}).isDisabled(),true)
+ assert.equal(mutations.length,6);assert.equal(await activity.getByRole('button',{name:'Save activity',exact:true}).isDisabled(),true)
  await click('Read current activity');await labelText('File activity (last read): Off')
  await click('Reapply activity only');assert.equal(await activity.getByRole('button',{name:'Save activity',exact:true}).isDisabled(),true)
- assert.equal(mutations.length,4);checks.push('lost save response forces reread; matching observed Off is resolved without a duplicate save')
+ assert.equal(mutations.length,6);checks.push('lost save response forces reread; matching observed Off is resolved without a duplicate save')
  await page.setViewportSize({width:390,height:900});await activity.scrollIntoViewIfNeeded()
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
  await page.screenshot({path:out+'activity-mobile.png',fullPage:true});checks.push('actual styled mobile activity controls render without page horizontal overflow')
  valid=false;await click('Read current activity');await activity.getByText(/The declaration is invalid/).waitFor()
  assert.equal(await switcher().isDisabled(),true);assert.equal(await activity.getByRole('button',{name:'Save activity',exact:true}).isDisabled(),true)
- assert.equal(mutations.length,4);checks.push('invalid current declaration disables activity mutation and exposes original TOML repair')
+ assert.equal(mutations.length,6);checks.push('invalid current declaration disables activity mutation and exposes original TOML repair')
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])
  const result={passed:true,scope:'Actual styled Add-ons panel/activity owner/declaration API with synthetic HTTP; not real backend/worker or full SPA.',browser:browser.version(),checks,reads,mutations,errors,unexpected}
  await writeFile(out+'browser-result.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({passed:true,checks,reads:reads.length,writes:mutations.length,errors,unexpected}))

@@ -3,10 +3,10 @@
 
 
  Test Files  6 passed (6)
-      Tests  110 passed (110)
-   Start at  05:59:01
-   Duration  7.36s (tests 38%, import 33%, environment 11%, transform 10%, setup 8%)
+      Tests  111 passed (111)
+   Start at  06:12:17
+   Duration  7.11s (tests 38%, import 32%, environment 11%, transform 10%, setup 8%)
 
-     Import  152 modules were evaluated 649 times · 2.21s total, 33% of tracked time
-             ~1.69s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+     Import  152 modules were evaluated 649 times · 2.06s total, 32% of tracked time
+             ~1.58s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
              learn more: https://vitest.dev/guide/improving-performance#test-isolation

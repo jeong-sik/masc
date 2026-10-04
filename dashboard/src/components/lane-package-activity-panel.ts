@@ -39,7 +39,7 @@ export function LanePackageActivityPanel({ documents, authority, snapshot, onRef
     ${state.uncertain && html`<p role="alert">The previous save outcome is uncertain. Read the current file before another save.</p>`}
     <div class="flex flex-wrap gap-2">
       <${ActionButton} variant="primary" disabled=${!ready || !owner.modified() || !!conflict || state.uncertain}
-        onClick=${async () => { if (await owner.save(authority)) onRefresh() }}>${state.phase === 'saving' ? 'Saving activity…' : 'Save activity'}</${ActionButton}>
+        onClick=${() => owner.save(authority)}>${state.phase === 'saving' ? 'Saving activity…' : 'Save activity'}</${ActionButton}>
       <${ActionButton} disabled=${busy} onClick=${async () => { await owner.read(authority); onRefresh() }}>Read current activity</${ActionButton}>
       ${conflict && html`<${ActionButton} disabled=${!ready} onClick=${() => owner.reapply(authority)}>Reapply activity only</${ActionButton}>`}
       <${ActionButton} disabled=${busy || !state.draft} onClick=${() => owner.discard(authority)}>Discard activity draft</${ActionButton}>

@@ -10,19 +10,24 @@ the backend contract. A changed ID or invalid declaration cannot be toggled.
 
 ## Executed evidence
 
-- `tests.txt`: 110 tests / 6 files, including existing installer, declaration
+- `tests.txt`: 111 tests / 6 files, including existing installer, declaration
   editor and workspace consumers. Cases cover comments/quoted keys/prototype
   keys, implicit On, explicit Off/On, CAS conflict/reapply, retained raw drafts,
   navigation, workspace isolation, uncertain transport/durability and combined
   file/inventory refresh. TypeScript and scoped ESLint exit 0.
 - `browser-result.json`: actual styled components, owner and API in Chromium
-  with synthetic HTTP. Eight scenarios; 14 recorded Lane API reads and four
-  explicit save requests (one rejected conflict, two acknowledged saves, one
+  with synthetic HTTP. Nine scenarios; 17 recorded Lane API reads and six
+  explicit save requests (one rejected conflict, four acknowledged saves, one
   simulated commit with a lost response). No detach/remove or automatic repeat
   request; no page errors or unexpected API routes. Desktop/mobile screenshots.
 - `checks.json`: commands and actual exit codes. Text logs trim only trailing
   EOF whitespace; gzip copies and raw SHA256 retain exact output.
 - `manifest.json`: source/artifact hashes.
+- `pending-remount-before.json/txt/gz`: the same new regression failed against
+  the initial product head when a pending save completed after remount. The
+  owner now publishes a workspace observation change; the new mount refreshes
+  without clearing its selections or form inputs. The regression and an actual
+  paused-HTTP browser scenario pass. This remains a single refresh, not F8.
 
 One early test attempted a synchronous region lookup immediately after an
 asynchronous workspace return. Waiting for the actual remount fixed the test

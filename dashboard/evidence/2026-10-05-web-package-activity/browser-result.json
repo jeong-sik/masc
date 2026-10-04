@@ -8,6 +8,7 @@
     "CAS conflict retains intent; explicit reapply preserves newer binding; save stays distinct from worker cleanup",
     "workspace return rereads the current file and keeps Off state isolated",
     "Off can be saved back On with the same declaration and binding, without detach or remove requests",
+    "a retained pending save refreshes the new inventory mount when its receipt arrives",
     "lost save response forces reread; matching observed Off is resolved without a duplicate save",
     "actual styled mobile activity controls render without page horizontal overflow",
     "invalid current declaration disables activity mutation and exposes original TOML repair"
@@ -43,6 +44,15 @@
     {
       "p": "/api/v1/lane-addons/declaration",
       "source_path": "/workspace/.masc/config/lane-addons/pkg.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons"
     },
     {
       "p": "/api/v1/lane-addons"
@@ -86,6 +96,18 @@
       "file_name": "pkg.toml",
       "source_text": "enabled = false\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
       "expected_source_revision": "saved-3"
+    },
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = true\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
+      "expected_source_revision": "saved-4"
+    },
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = false\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
+      "expected_source_revision": "saved-5"
     }
   ],
   "errors": [],

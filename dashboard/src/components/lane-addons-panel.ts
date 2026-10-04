@@ -14,6 +14,7 @@ import { LaneDeclarationEditor } from './lane-declaration-editor'
 import { LanePackageInstaller } from './lane-package-installer'
 import { LanePackageActivityPanel } from './lane-package-activity-panel'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
+import { lanePackageActivityObservationRevision } from '../lib/lane-package-activity-session'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
@@ -87,6 +88,7 @@ function LaneAddonActions({ instances, authority }: {
   const submitting = useRef(new Set<ExecutionWorkspaceAuthority>())
   const statusReads = useRef(new Map<string, AbortController>())
   const mounted = useRef(true)
+
   useEffect(() => {
     mounted.current = true
     const reads = statusReads.current
@@ -101,6 +103,7 @@ function LaneAddonActions({ instances, authority }: {
       ? { ...item, checking: false } : item))
     setBinding(''); setInput('{}'); setError(null)
   }, [authority])
+
   const visibleRequests = authority === null ? [] : requests.filter(item => sameWorkspace(item.authority, authority))
   const capable = instances.filter(item => item.action_schema !== null)
   const draftCurrent = inputAuthority.current === authority
@@ -238,6 +241,8 @@ export function LaneAddonsPanel() {
   }, [authority])
   const reads = useRef<AbortController | null>(null)
   const mounted = useRef(true)
+  const activityRevision = lanePackageActivityObservationRevision(authority)
+  const lastActivityRead = useRef({ authority, revision: activityRevision })
 
   async function refresh() {
     if (!mounted.current || !currentAuthority(authority)) return
@@ -266,6 +271,14 @@ export function LaneAddonsPanel() {
     void refresh()
     return () => { mounted.current = false; reads.current?.abort() }
   }, [authority])
+
+  useEffect(() => {
+    const before = lastActivityRead.current
+    lastActivityRead.current = { authority, revision: activityRevision }
+    // Authority changes already trigger the mount read above. A completed
+    // activity save only refreshes observations; selections and forms survive.
+    if (before.authority === authority && before.revision !== activityRevision) void refresh()
+  }, [authority, activityRevision])
 
   async function recoverAuthority() {
     if (recoveringAuthority) return

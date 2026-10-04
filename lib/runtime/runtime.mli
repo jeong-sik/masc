@@ -1074,14 +1074,6 @@ val replace_exact_output_lane_slot :
     lock. The replacement must belong to the same HTTP/CLI group and must
     not already occur in the lane. Other candidates are preserved. *)
 
-val replace_exact_output_lane_slot :
-  ?runtime_config_path:string ->
-  lane:exact_lane -> slot:string -> replacement:string -> unit ->
-  (config_commit_receipt, string) result
-(** Replace one declared candidate at its current position under the write
-    lock. The replacement must belong to the same HTTP/CLI group and must
-    not already occur in the lane. Other candidates are preserved. *)
-
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and
     workspace readiness are managed independently by server bootstrap. *)

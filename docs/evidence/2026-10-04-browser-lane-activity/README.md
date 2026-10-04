@@ -13,6 +13,9 @@ performed by this change. No live runtime configuration was edited.
 
 ## Executed
 
+Captured text logs have trailing whitespace and trailing blank lines normalized;
+command output content and result values are unchanged.
+
 - `check-browser.py .`: copies complete actual Browser configuration/admission
   and leaf dependencies, compiles/links with OCaml 5.5.1, and executes the actual
   authored test: **13 pass**. Sources and commands are in `leaf-provenance.json`;

@@ -28,7 +28,8 @@ type activation = Activating | Activation_failed of string
   | Active of { exact_output_available : bool }
 (* The list opens on the clients; choosing one lists its accounts under a row
    that adds a new one. *)
-type list_view = Clients | Accounts of client
+type account_group = { group_id : string; provider_ids : string list; runtime_ids : string list }
+type list_view = Clients | Accounts of client | Account_providers of client * string list
 type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
   | Finished of { saved : saved; activation : activation; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
@@ -52,6 +53,7 @@ type t = {
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
   mutable account_emails : account_emails;
+  mutable account_groups : account_group list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
@@ -65,7 +67,7 @@ type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Ref
   | Refresh_removed of { client : client; notice : string }
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
-  selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
+  selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0}; account_groups=[];
   cursor=0; saved_scroll_max=0; saved_runtime_ids=[]; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
@@ -95,7 +97,16 @@ let client_label = function
 let client_order = [Codex; Claude; Antigravity; Muse]
 let clients t = List.filter (fun client -> List.exists (fun (p:provider) -> p.client = client) t.providers) client_order
 type account_row = New_account of provider | Account of provider
-let accounts t client = List.filter (fun (p:provider) -> p.client = client && p.origin = Configured) t.providers
+let account_group t (provider:provider) =
+  List.find_opt (fun group -> List.mem provider.id group.provider_ids) t.account_groups
+let account_members t provider = match account_group t provider with
+  | None -> [provider]
+  | Some group -> List.filter (fun (p:provider) -> List.mem p.id group.provider_ids) t.providers
+let accounts t client = List.filter (fun (p:provider) ->
+  p.client = client && p.origin = Configured
+  && match account_members t p with first :: _ -> first.id=p.id | [] -> false) t.providers
+let member_rows t ids = List.filter_map (fun id ->
+  List.find_opt (fun (p:provider) -> p.id=id) t.providers) ids
 (* A login without an account reference adds a new account through any of the
    client's rows. The catalog entry is the usual one; the server leaves it out
    when runtime.toml declares a provider with the same id, and then one of the
@@ -185,17 +196,23 @@ let show_accounts ?on t client =
   let rows = account_rows t client in
   t.cursor <- (match on with
     | Some (target:provider) ->
-      (match List.find_index (function Account p -> p.id = target.id | New_account _ -> false) rows with
+      (match List.find_index (function Account p -> List.exists (fun (member:provider) -> member.id=target.id) (account_members t p) | New_account _ -> false) rows with
        | Some index -> index
        | None -> index_of (function New_account p -> p.id = target.id | Account _ -> false) rows)
     | None -> 0);
   t.notice <- accounts_notice ^ email_notice t.account_emails
+let show_account_providers t client ids =
+  t.phase <- Providers (Account_providers (client, ids));
+  t.cursor <- 0;
+  t.notice <- "이 계정의 공급자 연결을 고르세요. Enter/D로 선택한 연결만 지우는 내용을 확인합니다. 다른 연결과 로그인은 남습니다."
 let focused_row t = match t.phase with
   | Providers (Accounts client) -> List.nth_opt (account_rows t client) t.cursor
+  | Providers (Account_providers (_, ids)) -> Option.map (fun provider -> Account provider) (List.nth_opt (member_rows t ids) t.cursor)
   | Providers Clients | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> None
 let focused_client t = match t.phase with
   | Providers Clients -> List.nth_opt (clients t) t.cursor
   | Providers (Accounts client) -> Some client
+  | Providers (Account_providers (client, _)) -> Some client
   | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ ->
     Option.map (fun (p:provider) -> p.client) t.provider
 let requested_client = function
@@ -230,6 +247,35 @@ let take_saved ~requested retained =
   match List.find_map (reopen_saved ~requested) retained with
   | None -> None, retained
   | Some view -> Some view, List.filter (fun held -> held != view) retained
+let groups_of_inventory providers json =
+  let ( let* ) = Result.bind in
+  let invalid = Error "계정 그룹 목록을 확인하지 못했습니다. 새로고침하세요." in
+  let strings = function
+    | `List rows ->
+      let values = List.filter_map string rows in
+      if List.length values=List.length rows
+         && List.length values=List.length (List.sort_uniq String.compare values)
+      then Ok values else invalid
+    | _ -> invalid in
+  let rec parse seen = function
+    | [] -> Ok []
+    | row :: rest ->
+      let* group_id = match string (field "id" row) with Some id -> Ok id | None -> invalid in
+      let* provider_ids = strings (field "integration_ids" row) in
+      let* runtime_ids = strings (field "runtime_ids" row) in
+      let members = List.filter (fun (p:provider) -> List.mem p.id provider_ids) providers in
+      let* () = match members with
+        | first :: _ when List.length members=List.length provider_ids
+          && List.for_all (fun (p:provider) -> p.origin=Configured && p.client=first.client) members
+          && not (List.exists (fun id -> List.mem id seen) provider_ids) -> Ok ()
+        | _ -> invalid in
+      let* rest = parse (provider_ids @ seen) rest in
+      if List.exists (fun group -> group.group_id=group_id) rest then invalid
+      else Ok ({group_id;provider_ids;runtime_ids} :: rest) in
+  match field "account_groups" json with
+  | `Null -> Ok []
+  | `List rows -> parse [] rows
+  | _ -> invalid
 let inventory ?view t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
         field "default_runtime_selection" json with
@@ -250,6 +296,8 @@ let inventory ?view t json =
       | Some id, Some label, Some protocol, Some origin ->
         Option.map (fun client -> {id;label;client;origin}) (client_of_protocol protocol)
       | _ -> None) rows in
+    let ( let* ) = Result.bind in
+    let* account_groups = groups_of_inventory providers json in
     (* [/login <client>] opens that client's accounts; [/login <id>] opens its
        client's accounts on that row. *)
     let requested = match List.find_opt (fun (p:provider) -> p.id=t.requested) providers, requested_client t.requested with
@@ -262,10 +310,12 @@ let inventory ?view t json =
       Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
       t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
+      t.account_groups <- account_groups;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       (match view, requested with
        | Some Clients, _ | None, None -> show_clients t
        | Some (Accounts client), _ -> show_accounts t client
+       | Some (Account_providers (client, ids)), _ -> show_account_providers t client ids
        | None, Some (client, on) -> show_accounts ?on t client);
       Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
@@ -556,6 +606,8 @@ let key t key =
     | Removal {provider; _} -> show_accounts ~on:provider t provider.client; Nothing
     (* Esc from a client's accounts goes back to the clients. *)
     | Providers (Accounts client) -> show_clients ~on:client t; Nothing
+    | Providers (Account_providers (client, ids)) ->
+        show_accounts ?on:(List.nth_opt (member_rows t ids) 0) t client; Nothing
     | Documented_context _ -> t.phase <- Models; t.draft <- ""; Nothing
     | Loading | Providers Clients | Logging | Models | Saving | Finished _ | Failed -> Close) else
   match t.phase with
@@ -612,6 +664,7 @@ let key t key =
       let count = match t.phase with
         | Providers Clients -> List.length (clients t)
         | Providers (Accounts client) -> List.length (account_rows t client)
+        | Providers (Account_providers (_, ids)) -> List.length (member_rows t ids)
         | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ -> List.length t.models in
       t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
     else if key="r" then (match t.phase with
@@ -623,7 +676,11 @@ let key t key =
         if Option.is_some t.login_id then Recover else Inventory)
     else if key="D" then
       (match focused_row t with
-       | Some (Account provider) -> Preview_removal {provider; refused = None}
+       | Some (Account provider) ->
+         (match t.phase, account_members t provider with
+          | Providers (Accounts client), (_ :: _ :: _ as members) ->
+              show_account_providers t client (List.map (fun (p:provider) -> p.id) members); Nothing
+          | _ -> Preview_removal {provider; refused = None})
        | Some (New_account _) | None -> Nothing)
     else if key="n" then
       (match t.phase with
@@ -656,6 +713,10 @@ let key t key =
           | Some (New_account provider) -> Start {provider; existing = false}
           | Some (Account provider) -> Select_existing provider
           | None -> Nothing)
+       | Providers (Account_providers (_, ids)) ->
+         (match List.nth_opt (member_rows t ids) t.cursor with
+          | Some provider -> Preview_removal {provider; refused=None}
+          | None -> Nothing)
        | Models ->
          (match selected_models t with
           | [] -> t.notice <- (if List.for_all (is_connected t) t.models && t.connected_models <> [] then
@@ -677,6 +738,7 @@ let hints t = match t.phase with
   | Documented_context _ -> "확인한 context 한도(tokens)  Enter:선택  Esc:모델 목록"
   | Providers Clients -> "↑↓:공급자  Enter:계정 보기  n:새 계정  Esc:닫기"
   | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:지우기  Esc:공급자 목록"
+  | Providers (Account_providers _) -> "↑↓:공급자 연결  Enter/D:선택한 연결 삭제 미리보기  Esc:계정 목록"
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
@@ -702,9 +764,16 @@ let account_suffix t p = match email_state t p with Some state -> " · " ^ state
 (* The email says which account a row is, so it leads; the label says which
    provider entry holds it. *)
 let account_label t (p:provider) =
+  let label = match account_group t p with
+    | Some group when List.length group.provider_ids > 1 ->
+        Printf.sprintf "%s · %s · 연결 %d개 · 모델 설정 %d개"
+          (client_label p.client) (String.sub group.group_id 0 (min 8 (String.length group.group_id)))
+          (List.length group.provider_ids) (List.length group.runtime_ids)
+    | Some group -> p.label ^ " · " ^ String.sub group.group_id 0 (min 8 (String.length group.group_id))
+    | None -> p.label in
   match email_state t p with
-  | Some state -> state ^ "  (" ^ p.label ^ ")"
-  | None -> p.label
+  | Some state -> state ^ "  (" ^ label ^ ")"
+  | None -> label
 let describe_change = function
   | Removed_table path -> "[" ^ path ^ "]"
   | Left_lane {lane; runtime} -> "lane " ^ lane ^ " 후보에서 " ^ runtime ^ " 를 뺍니다"
@@ -721,6 +790,8 @@ let body_rows t =
   | Providers (Accounts client) -> List.mapi (fun i row ->
       Text ((if i=t.cursor then "> " else "  ")
             ^ (match row with New_account _ -> "+ 새 계정" | Account p -> account_label t p))) (account_rows t client)
+  | Providers (Account_providers (_, ids)) -> List.mapi (fun i (p:provider) ->
+      Text ((if i=t.cursor then "> " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
   | Models -> List.mapi (fun i (m:model) ->
       let connected = is_connected t m in
       let mark = if connected then "[연결됨] " else if List.mem m.id t.selected_models then "[x] " else "[ ] " in

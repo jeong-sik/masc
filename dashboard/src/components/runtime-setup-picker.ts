@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import type { Inventory } from '../api/onboarding'
+import type { Inventory, RuntimeRow } from '../api/onboarding'
 import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source, type SaveOutcome } from '../api/runtime-setup'
 import { SetupAccountLogin } from './setup-account-login'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
@@ -46,6 +46,19 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     return () => onBusyChange?.(false)
   }, [busy, loginBusy, onBusyChange])
   const integrations = inventory.integrations ?? []
+  const groupFor = (id: string) => inventory.account_groups?.find(group => group.integration_ids.includes(id))
+  const visibleIntegrations = integrations.filter(row => {
+    const group = groupFor(row.id)
+    return !group || row.id === (group.integration_ids.includes(provider) ? provider : group.integration_ids[0])
+  })
+  const accountLabel = (id: string, fallback: string, protocol: string | null) => {
+    const group = groupFor(id)
+    if (!group) return fallback
+    const client = protocol === 'codex-app-server' ? 'Codex' : protocol === 'claude-code' ? 'Claude Code'
+      : protocol === 'muse-serve' ? 'Muse Code' : protocol === 'antigravity-cli' ? 'Antigravity' : fallback
+    return `${client} · ${group.id.slice(0, 8)} · 모델 설정 ${group.runtime_ids.length}개`
+  }
+  const runtimeLabel = (row: RuntimeRow) => `${accountLabel(row.provider_id, row.display_name, row.protocol)} · ${row.model}${row.max_context == null ? '' : ` · ${row.max_context.toLocaleString()} context`}`
   const integration = integrations.find(row => row.id === provider)
   const officialClient = integration && ['codex-app-server', 'claude-code', 'muse-serve', 'antigravity-cli'].includes(integration.protocol ?? '')
   const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http'].includes(integration.protocol ?? '')
@@ -173,9 +186,9 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   return html`<section class="runtime-setup-picker" aria-label="모델 연결 선택">
     <h4>모델 연결 선택</h4><p class="set-hint">여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.</p>
     <fieldset disabled=${disabled || busy || loginBusy}><legend>기존 연결</legend>${inventory.runtimes.map(row => html`<label key=${row.id} class="v2-mobile-operator-target"><input type="checkbox"
-      checked=${choices.some(choice => choice.kind === 'existing' && choice.id === row.id)} onChange=${() => toggleExisting(row.id, `${row.display_name} · ${row.model}`)} />${row.display_name} · ${row.model}</label>`)}</fieldset>
+      checked=${choices.some(choice => choice.kind === 'existing' && choice.id === row.id)} onChange=${() => toggleExisting(row.id, runtimeLabel(row))} />${runtimeLabel(row)}</label>`)}</fieldset>
     <fieldset disabled=${disabled || busy || loginBusy}><legend>새 모델 추가</legend><label>공급자 <select value=${provider} onChange=${(event: Event) => chooseProvider((event.currentTarget as HTMLSelectElement).value)}>
-      <option value="">공급자 선택</option>${integrations.map(row => html`<option key=${row.id} value=${row.id} disabled=${row.setup_support === 'unsupported'}>${row.display_name}${row.setup_support === 'unsupported' ? ' · 준비 중' : ''}</option>`)}</select></label>
+      <option value="">공급자 선택</option>${visibleIntegrations.map(row => html`<option key=${row.id} value=${row.id} disabled=${row.setup_support === 'unsupported'}>${accountLabel(row.id, row.display_name, row.protocol)}${row.setup_support === 'unsupported' ? ' · 준비 중' : ''}</option>`)}</select></label>
       ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => editEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
         <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => editKey((event.currentTarget as HTMLInputElement).value)} /></label>
         <p class="set-hint">기존 인증을 사용하려면 키를 비워 두세요.</p><button type="button" class="btn" onClick=${discover} disabled=${!integration?.endpoint && !endpoint}>모델 목록 확인</button>`

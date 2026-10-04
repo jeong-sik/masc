@@ -897,7 +897,44 @@ let already_bound_model_is_not_offered () =
        | _ -> fail "expected Save"))
     [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
+let grouped_existing_accounts () =
+  let provider id = `Assoc ["id", `String id; "display_name", `String ("Model provider " ^ id);
+    "protocol", `String "codex-app-server"; "origin", `String "runtime_config"] in
+  let ids ids = `List (List.map (fun id -> `String id) ids) in
+  let group id providers runtimes = `Assoc ["id", `String id;
+    "integration_ids", ids providers; "runtime_ids", ids runtimes] in
+  let inventory = `Assoc ["setup_revision", `String "grouped"; "default_runtime_selection", `List [];
+    "runtimes", `List (List.map (fun id -> `Assoc ["id", `String id]) ["a1.luna";"a2.luna-wide";"b.luna"]);
+    "integrations", `List [provider "a1"; provider "a2"; provider "b"];
+    "account_emails", `List [];
+    "account_groups", `List [group "first-account" ["a1";"a2"] ["a1.luna";"a2.luna-wide"];
+      group "second-account" ["b"] ["b.luna"]]] in
+  let t=Login.create "" in
+  ok (Login.inventory t inventory);
+  check bool "two homes display as two accounts" true
+    (List.exists (fun row -> contains (Login.row_text row) "계정 2") (Login.lines t));
+  let t=Login.create "a2" in
+  ok (Login.inventory t inventory);
+  check int "requested nonrepresentative provider selects its account group" 1 t.cursor;
+  check bool "group selects an actual provider for model discovery" true
+    (match Login.key t "enter" with Login.Select_existing provider -> provider.id="a1" | _ -> false);
+  check bool "D opens a member chooser, never a partial account deletion" true (Login.key t "D"=Login.Nothing);
+  check bool "member chooser lists both original providers" true
+    (match t.phase with Login.Providers (Login.Account_providers (Codex, ["a1";"a2"])) -> true | _ -> false);
+  ignore (Login.key t "down");
+  check bool "removal preview targets the explicitly selected provider only" true
+    (match Login.key t "enter" with Login.Preview_removal {provider;_} -> provider.id="a2" | _ -> false);
+  ignore (Login.key t "esc");
+  check bool "Esc returns to grouped account list" true
+    (t.phase=Login.Providers (Login.Accounts Codex));
+  let invalid = match inventory with
+    | `Assoc fields -> `Assoc (("account_groups", `List [group "bad" ["missing"] []]) :: List.remove_assoc "account_groups" fields)
+    | _ -> assert false in
+  check bool "unknown grouping member cannot redirect account selection" true
+    (Result.is_error (Login.inventory t invalid))
+
 let () = run "TUI account login" ["workflow",[
+  test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;
   test_case "multi-model selection submits ordered models" `Quick multi_model_selection;
   test_case "reopening shows connected models without adding them" `Quick already_bound_model_is_not_offered;
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;

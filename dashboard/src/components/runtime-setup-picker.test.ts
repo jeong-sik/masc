@@ -9,6 +9,40 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); modelSetupResumeState.value = {
 const inventory = { source_revision: 'source', setup_revision: 'paired-revision', runtimes: [], integrations: [
   { id: 'openrouter', display_name: 'OpenRouter', protocol: 'openai-compatible-http', setup_support: 'new_connection', endpoint: 'https://openrouter.ai/api/v1' },
 ] }
+it('groups legacy providers by account while preserving both context variants in selection', async () => {
+  const grouped = {
+    ...inventory,
+    integrations: ['first', 'first-wide', 'second'].map(id => ({ id, display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'existing_connection' })),
+    account_groups: [
+      { id: '1'.repeat(64), integration_ids: ['first', 'first-wide'], runtime_ids: ['first.luna', 'first-wide.luna'] },
+      { id: '2'.repeat(64), integration_ids: ['second'], runtime_ids: ['second.luna'] },
+    ],
+    runtimes: [
+      { id: 'first.luna', provider_id: 'first', display_name: 'Codex', protocol: 'codex-app-server', model: 'gpt-6-luna', endpoint: null, max_context: 272000 },
+      { id: 'first-wide.luna', provider_id: 'first-wide', display_name: 'Codex', protocol: 'codex-app-server', model: 'gpt-6-luna', endpoint: null, max_context: 500000 },
+      { id: 'second.luna', provider_id: 'second', display_name: 'Codex', protocol: 'codex-app-server', model: 'gpt-6-luna', endpoint: null, max_context: 272000 },
+    ],
+  }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref: 'b'.repeat(64) }
+    if (path.endsWith('/models')) return { models: [] }
+    throw new Error('save unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${grouped} onSaved=${vi.fn()} />`)
+  expect(screen.getAllByRole('option')).toHaveLength(3) // prompt and two accounts
+  expect(screen.getAllByRole('checkbox')).toHaveLength(3) // every runtime remains selectable
+  fireEvent.click(screen.getByLabelText(/11111111.*272,000 context/))
+  fireEvent.click(screen.getByLabelText(/500,000 context/))
+  expect(screen.getAllByText(/500,000 context/).length).toBeGreaterThan(1)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'first' } })
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/accounts/select', { integration_id: 'first' }))
+  await waitFor(() => expect((screen.getByText('검증 후 선택 저장') as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
+    revision: 'paired-revision', connections: [], selection: [{ runtime_id: 'first.luna' }, { runtime_id: 'first-wide.luna' }],
+  }))
+})
 it('selects multiple models and default by clicking, hides key, resumes only after verified save', async () => {
   vi.mocked(post).mockImplementation(async path => {
     if (path.endsWith('/models')) return { models: [

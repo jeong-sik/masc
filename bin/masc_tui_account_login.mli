@@ -33,7 +33,8 @@ type saved =
     means the server left selected runtimes it did not call again:
     [not_rechecked] names them and [unverified] lists any that were called and
     declined for usage. Neither is reported as verified. *)
-type list_view = Clients | Accounts of client
+type account_group = { group_id : string; provider_ids : string list; runtime_ids : string list }
+type list_view = Clients | Accounts of client | Account_providers of client * string list
 (** The list opens on [Clients]; choosing one shows [Accounts] of that client:
     a row that adds a new account, then its configured accounts. *)
 type activation = Activating | Activation_failed of string
@@ -67,6 +68,7 @@ type t = {
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
   mutable account_emails : account_emails;
+  mutable account_groups : account_group list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready

@@ -1614,9 +1614,52 @@ let test_sampling_broker_reply_minimum () = with_fixture (fun _ _ dir _ ->
        (String.length (Yojson.Safe.to_string (`String detail))));
   check int "admission and refusal never invoke a provider" 0 !calls)
 
+let test_sampling_blob_read_preserves_canonical_failure () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "canonical-read") in
+  let bytes = "retained sampling outcome" in
+  let reference = require (Store.write_blob store bytes) in
+  let canonical = Filename.concat (Store.root store)
+    (Filename.concat "evidence" (Store.digest bytes ^ ".json")) in
+  Unix.unlink canonical;
+  Unix.mkdir canonical 0o700;
+  ignore (require (Store.write_sampling_blob store bytes));
+  check string "directory obstruction permits recovery" bytes (require (Store.read_blob store reference));
+  Unix.rmdir canonical;
+  check string "missing canonical permits recovery" bytes (require (Store.read_blob store reference));
+  write canonical (String.make (String.length bytes) 'x');
+  check (result string string) "present corrupt canonical is not hidden" (Error "evidence digest mismatch")
+    (Store.read_blob store reference);
+  let budget = Store.read_budget ~max_bytes:(String.length bytes) in
+  (match Store.read_blob_bounded ~budget store reference with
+   | Error (Store.Read_failed "evidence digest mismatch") -> ()
+   | _ -> fail "bounded read must report the canonical digest failure");
+  Unix.unlink canonical;
+  check bool "failed canonical bytes remain charged" true
+    (Store.read_blob_bounded ~budget store reference = Error Store.Read_limit_exceeded);
+  let recovery = Filename.concat (Store.root store)
+    (Filename.concat "sampling-evidence" (Store.digest bytes ^ ".json")) in
+  Unix.symlink recovery canonical;
+  check bool "symlink cannot authorize recovery" true (Result.is_error (Store.read_blob store reference));
+  Unix.unlink canonical;
+  Unix.mkfifo canonical 0o600;
+  check bool "FIFO cannot authorize recovery" true (Result.is_error (Store.read_blob store reference));
+  Unix.unlink canonical;
+  write canonical bytes;
+  check string "valid canonical remains readable" bytes (require (Store.read_blob store reference));
+  let directory = Filename.dirname canonical in
+  let saved = directory ^ ".saved" in
+  Unix.rename directory saved;
+  Unix.symlink directory directory;
+  Fun.protect ~finally:(fun () -> Unix.unlink directory; Unix.rename saved directory) (fun () ->
+    check bool "unreadable canonical parent returns an error without recovery" true
+      (Result.is_error (Store.read_blob store reference))))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling manifest reply minimum" `Quick test_sampling_manifest_reply_minimum;
   test_case "sampling broker reply minimum" `Quick test_sampling_broker_reply_minimum;
+  test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
   test_case "sampling retention error uses encoded wire bound" `Quick test_sampling_retention_error_uses_encoded_reply_bound;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
   test_case "sampling recovery reports unreadable terminal journal" `Quick test_sampling_recovery_reports_unreadable_terminal_journal;

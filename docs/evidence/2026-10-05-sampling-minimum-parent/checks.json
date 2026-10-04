@@ -1,0 +1,15 @@
+{
+  "parent": "9c0485ac94fe542c519c2450e047e75d27026406",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_sampling.mli": "e0e1355c4d66572d61453ae298ba47905545348b422d21dd70f7820303d0b31e",
+    "lib/lane_addon/lane_addon_sampling.ml": "c47c4a6d89f2d89712c3e37110110d8efa3bccf98e1fa752cad7c4b27b80e2e0",
+    "lib/lane_addon/lane_addon_store.ml": "9848996d3b1205d0de7c1819b20bbf47da0109023cd0b4c4a3eeb00b04c7b936",
+    "test/test_lane_addon_worker.ml": "319d5e59753f0d3c3ab1c5102b58d02c751ff7d5b369bdd29f17177dfe936329"
+  },
+  "binary_sha256": "a2ae2d063b9a2bb9f7ef9c051a6f28c8f0854c41da543752eccb305f6e76e7fa",
+  "artifacts": {
+    "README.md": "9666890bc84e5640c719d48d5fc4d94cd357195e7edc3e69eb2aa7a73bf3c83d",
+    "tests.log": "a6baf4be338dd8adf2daa0590df8c49f1fda739fcbf0044b2fd8b3327e851fc8",
+    "build.log": "6171db0155622fbf031b2d4427d9ed654c77a665359c3dfdb382eca387e1afd8"
+  }
+}

@@ -2548,7 +2548,7 @@ describe('SettingsSurface', () => {
         ...resolved.default_runtime!, model: 'late-save-visible-model',
       } }))
       apiMock.fetchRuntimeTomlConfig.mockResolvedValue({ ...config, source_text: draft, source_revision: 'b'.repeat(64) })
-      if (providerFailure) apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider snapshot unavailable'))
+      if (providerFailure) apiMock.fetchRuntimeProviders.mockRejectedValue(new Error('provider snapshot unavailable'))
       const saved = committedRuntimeTomlConfigFixture({ ...config, source_text: draft })
       saved.source_revision = 'b'.repeat(64)
       saved.commit.source_revision = saved.source_revision
@@ -2633,7 +2633,7 @@ describe('SettingsSurface', () => {
       await waitFor(() => expect(container.textContent).toContain('browser-commit-visible-model'))
       expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreaterThan(counts[0]!)
       expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGreaterThan(counts[1]!)
-      expect(session.state.peek().phase).toBe('saving')
+      expect(session.state.peek().phase).toBe('followup')
       expect(resume).not.toHaveBeenCalled()
       expect(coreApi.post).not.toHaveBeenCalled()
       finishRefresh()

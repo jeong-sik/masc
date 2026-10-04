@@ -26,12 +26,14 @@ let scene = `Assoc [
 let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema () =
   let base = Filename.temp_dir "browser-composition-observation-" "" in
   Fun.protect ~finally:(fun () ->
+    Browser_lane.install_activity_observer None;
     Browser_lane.install_automation_executor None;
     Log.reset_for_testing (); Time_compat.clear_clock (); Fs_compat.remove_tree base)
     (fun () -> Eio_main.run (fun env ->
       Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Log.reset_for_testing (); Log.init ~base_path:base ();
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_scene {tab_id=7;view=Content;scope=None;_} ->
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",scene])

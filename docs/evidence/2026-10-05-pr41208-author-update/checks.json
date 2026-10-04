@@ -1,0 +1,56 @@
+{
+  "base_checkpoint": "49c6e710337a60f4f85f0e7f5bbad84e5c614e21",
+  "author_parent": "a39ef966c018186e86f9d8b039465f879efc5640",
+  "qualified_scope": "actual combined integrated leaf",
+  "web": {
+    "files": 7,
+    "passed": 126
+  },
+  "tsc_errors": 0,
+  "eslint_errors": 0,
+  "browsers": {
+    "41206": {
+      "passed": true,
+      "scenarios": 7,
+      "reads": 9,
+      "writes": 1,
+      "errors": [],
+      "unexpected": []
+    },
+    "41208": {
+      "passed": true,
+      "scenarios": 9,
+      "reads": 17,
+      "writes": 6,
+      "errors": [],
+      "unexpected": []
+    }
+  },
+  "source_sha256": {
+    "dashboard/src/components/lane-addons-panel.ts": "2f6f4f5f733a468570456d53a159c8a025ed62c18543f9420cbd3c5754b16b71",
+    "dashboard/src/components/lane-package-activity-panel.test.ts": "9812497aebfcf21c11725c58b07dd67f55c9877f684daea299de33b6096e48ee",
+    "dashboard/src/components/lane-package-activity-panel.ts": "0da71001197ab740bdfea92eef916acbc22f4fe53c02aa2551e47ae6a8a6d8c0",
+    "dashboard/src/lib/lane-declaration-sessions.ts": "f4acc20f6194daf7e9b8e8c94407ce5679b3d1426636a8e0b89f946ad103cff8",
+    "dashboard/src/lib/lane-package-activity-session.ts": "b96d77e8015c7e33fd244a87bb8891cfd5e95655519bd8756c61e1dd006fe412",
+    "dashboard/src/lib/lane-package-activity.test.ts": "7b5ba9a3332446096cc95296c5504fe196bcf0cb9a300876dbd54d39ce056536",
+    "dashboard/src/lib/lane-package-activity.ts": "e48beccfe028747f9aef38b99a6087d42dd0671fbbf078b0772c6a1b356c5511"
+  },
+  "raw_sha256": {
+    "pr41208-author-update-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41208-author-update-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41206-author-update-browser.log": "fe3971d47a7275d0d071d94c3751777f11ce9a325239810af37be441326b0714",
+    "pr41208-author-update-browser.log": "4d09c130b22892ecb04a1ceba90a70c0553979dd61dc831908fb5354b5d8df9d",
+    "pr41208-author-update-web.log": "f7c5ecdcd76e0246c32a981b2228915941c6199676b976b4b19085d4c7d5d0f6"
+  },
+  "browser_artifacts_sha256": {
+    "dashboard/evidence/2026-10-05-pr41206-author-update-browser/form-mobile.png": "f1f745369606a339696898ecfcf3b8721036626e012f917edc8640e287d774ef",
+    "dashboard/evidence/2026-10-05-pr41206-author-update-browser/form-desktop.png": "e1601e494191b5e4c44d2d8ae32358908c106a4f312bf9002e7e13421f41bdc5",
+    "dashboard/evidence/2026-10-05-pr41206-author-update-browser/browser.mjs": "c84ce152b5a8368a44eb4cbd2ef56b48fefaf91250a982abec786549efdc3e10",
+    "dashboard/evidence/2026-10-05-pr41206-author-update-browser/draft-saved-desktop.png": "b2cfe7df1050aa1fc886762b5019a7ae604b303e066032764de50fd9375097c2",
+    "dashboard/evidence/2026-10-05-pr41206-author-update-browser/browser-result.json": "3b38b7b40a026605dd3ea45b17b4c7765840a72e103fb2d05e40807007387008",
+    "dashboard/evidence/2026-10-05-pr41208-author-update-browser/activity-mobile.png": "6ab0925c8f165ee94d748b93db210d00c7ccbd6d107a688b97f0109cd5e74472",
+    "dashboard/evidence/2026-10-05-pr41208-author-update-browser/browser.mjs": "f630a224a16b1a16b0ac5bb4be4bba949ac56af4abc4b9ef700c64888003f239",
+    "dashboard/evidence/2026-10-05-pr41208-author-update-browser/off-desktop.png": "e00601f5a6e62342446ef259b002a454ab7a954899a02fb4f03adb4501ab1a42",
+    "dashboard/evidence/2026-10-05-pr41208-author-update-browser/browser-result.json": "597fe7c1ad03f8cf16ad96a811f3ef78c93f87794a8d63e6cd708a181c23f97e"
+  }
+}

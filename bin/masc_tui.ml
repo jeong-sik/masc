@@ -5069,20 +5069,21 @@ let launch_machine_activity_read state ~mailbox owner =
        let host = server_peer_host and port = state.port in
        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
          ~deliver:(fun result -> Machine_activity_read (request,result)) (fun () ->
-           Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
-             let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
-               (fun snapshot ->
-                 match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
-                   row.selection = Machine owner.Masc_tui_machine_activity.machine) snapshot.rows with
-                 | Some {state=Machine_state (activity,_);_} ->
-                     Ok (match activity with
-                       | Machine_enabled -> Machine_configuration.Enabled
-                       | Machine_disabled -> Machine_configuration.Disabled
-                       | Machine_unobserved -> Machine_configuration.Unobserved)
-                 | None | Some _ -> Error "The selected machine is absent from the server reading.") in
-             {Masc_tui_machine_activity.document={Masc_tui_runtime_config_edit.path=reading.path;
-               source_text=reading.source_text;source_revision=reading.metadata.source_revision};activity})
-             (Masc_tui_loader.load_runtime_config_view ~host ~port)))
+           let document = Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
+             {Masc_tui_runtime_config_edit.path=reading.path;
+              source_text=reading.source_text;source_revision=reading.metadata.source_revision})
+             (Masc_tui_loader.load_runtime_config_view ~host ~port) in
+           let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
+             (fun snapshot ->
+               match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
+                 row.selection = Machine owner.Masc_tui_machine_activity.machine) snapshot.rows with
+               | Some {state=Machine_state (activity,_);_} ->
+                   Ok (match activity with
+                     | Machine_enabled -> Machine_configuration.Enabled
+                     | Machine_disabled -> Machine_configuration.Disabled
+                     | Machine_unobserved -> Machine_configuration.Unobserved)
+               | None | Some _ -> Error "The selected machine is absent from the server reading.") in
+           Ok Masc_tui_machine_activity.{document;activity}))
 
 let launch_machine_activity_save state ~mailbox session =
   let module Activity = Masc_tui_machine_activity in
@@ -20084,9 +20085,11 @@ and is loaded on demand through keeper_skill.
                 (match view.installer with
                  | Some installer ->
                      if key="pageup" || key="pagedown" then (
-                       let _, cols = get_terminal_size () in
-                       let last = List.length (Addons.lines ~height:(surface_rows state) ~width:(framed_inner_width cols) view)-1 in
-                       update {view with scroll=max 0 (min last (view.scroll + (if key="pagedown" then 1 else -1)))})
+                       let terminal_rows, cols = get_terminal_size () in
+                       let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                       let count = List.length (Addons.lines ~height ~width:(framed_inner_width cols) view) in
+                       let move = if key="pagedown" then Masc_tui_scroll.down else Masc_tui_scroll.up in
+                       update {view with scroll=move ~count ~height view.scroll})
                      else if view.loading then (
                        if key="esc" then invalidate {view with installer=None;loading=false;error=None;scroll=0})
                      else (match Masc_tui_lane_installer.handle ~key installer with

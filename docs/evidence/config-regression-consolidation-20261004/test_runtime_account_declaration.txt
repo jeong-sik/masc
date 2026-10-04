@@ -1,0 +1,19 @@
+Testing `runtime_account_declaration'.
+This run has ID `QSBW2TWH'.
+
+  [OK]          declare          0   bases are the signed-in clients.
+  [OK]          declare          1   codex copy signs in at the new home.
+  [OK]          declare          2   claude copy keeps the command.
+  [OK]          declare          3   muse copy signs in at the new home.
+  [OK]          declare          4   antigravity copy reads the new oauth file.
+  [OK]          declare          5   refusals.
+  [OK]          declare          6   one directory by any spelling.
+  [OK]          declare          7   a home that does not exist yet.
+  [OK]          declare          8   an oauth file by any name.
+  [OK]          declare          9   copied numbers keep their value.
+  [OK]          declare         10   shared model set account copy.
+  [OK]          declare         11   layouts the append cannot carry.
+  [OK]          declare         12   every seed client takes a second account.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-config-consolidation-dkwd9r1p/_build/_tests/runtime_account_declaration'.
+Test Successful in 0.669s. 13 tests run.

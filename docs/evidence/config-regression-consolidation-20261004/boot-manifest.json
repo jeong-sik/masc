@@ -1,0 +1,8 @@
+{
+  "mode": "boot",
+  "scope": "complete registered suites; provider mode compiles candidate Runtime_toml against its unchanged cached public interface; boot mode uses cached product modules with matching owner/consumer source; no full server or production",
+  "cache": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004",
+  "sources": {
+    "test/test_runtime_toml_overrides.ml": "c043e5a3d901a19e01c1f62dc4850f56021a783b16137b68d47dd63bc86d47c7"
+  }
+}

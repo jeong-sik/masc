@@ -1,0 +1,32 @@
+[
+  {
+    "target": "test/test_lane_addon_worker.exe",
+    "exit": 0,
+    "log": "/tmp/stack40961-green-test_lane_addon_worker.log"
+  },
+  {
+    "target": "test/test_server_lane_addon_sampling.exe",
+    "exit": 0,
+    "log": "/tmp/stack40961-green-test_server_lane_addon_sampling.log"
+  },
+  {
+    "target": "test/test_lane_sampling_receipt_recovery.exe",
+    "exit": 0,
+    "log": "/tmp/stack40961-green-test_lane_sampling_receipt_recovery.log"
+  },
+  {
+    "target": "test/test_lane_addon.exe",
+    "exit": 0,
+    "log": "/tmp/stack40961-green-test_lane_addon.log"
+  },
+  {
+    "target": "test/test_lane_addon_sources.exe",
+    "exit": 0,
+    "log": "/tmp/stack40961-green-test_lane_addon_sources.log"
+  },
+  {
+    "target": "packages/agent_core/test/test_mcp_integration.exe",
+    "exit": 0,
+    "log": "/tmp/stack40961-green-test_mcp_integration.log"
+  }
+]

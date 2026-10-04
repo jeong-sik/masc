@@ -1,0 +1,11 @@
+✓ Pulled branch fix/sampling-finite-main-20261003
+✓ Pulled branch fix/sampling-recovery-receipt-20261003
+✓ Pulled branch fix/sampling-host-diagnostics-20261003
+✓ Pulled branch fix/sampling-store-duplicate-20261003
+✓ Pulled branch fix/sampling-terminal-contract-20261003
+✓ Pulled branch fix/audit-sampling-cold-recovery-20261004
+✓ Pulled branch fix/sampling-inline-budget-20261004
+✓ Imported stack with 7 branches from GitHub (stack #40961)
+✓ Switched to fix/sampling-inline-budget-20261004
+Stack: (main) <- fix/sampling-finite-main-20261003 <- fix/sampling-recovery-receipt-20261003 <- fix/sampling-host-diagnostics-20261003 <- fix/sampling-store-duplicate-20261003 <- fix/sampling-terminal-contract-20261003 <- fix/audit-sampling-cold-recovery-20261004 <- fix/sampling-inline-budget-20261004
+Run `gh stack view` to see the full stack

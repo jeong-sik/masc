@@ -1,0 +1,138 @@
+{
+  "mapping_at_execution": [
+    {
+      "pr": 40943,
+      "draft": false,
+      "original": "b8b812023e937ced41307369c13a6699cf163cd1",
+      "original_base": "6fc062feee7e33a271e09dc155d9feffee923704",
+      "branch": "fix/sampling-finite-main-20261003",
+      "parent": "87123f7df94a27ded447b5b05d01c2f5178de029",
+      "head": "2d568103f3392c46a53e02ae2a09bb96cc3053a5",
+      "tree": "e2cc3a249159c9860870d4cecb31920afe8c0a1b"
+    },
+    {
+      "pr": 40960,
+      "draft": false,
+      "original": "9c0485ac94fe542c519c2450e047e75d27026406",
+      "original_base": "b8b812023e937ced41307369c13a6699cf163cd1",
+      "branch": "fix/sampling-recovery-receipt-20261003",
+      "parent": "2d568103f3392c46a53e02ae2a09bb96cc3053a5",
+      "head": "2e34863666dde7dd334adb47dee397b81358f928",
+      "tree": "9cc771326b6211bfc94bb4407a792be0f12a2527"
+    },
+    {
+      "pr": 40966,
+      "draft": false,
+      "original": "8d4ec51e9d498c2e2a4aec5306ddf873f725257d",
+      "original_base": "bccd31b2e30186dfdd6f0429db40ed03d72f6572",
+      "branch": "fix/sampling-host-diagnostics-20261003",
+      "parent": "2e34863666dde7dd334adb47dee397b81358f928",
+      "head": "023dcec7e8f95b9405d85074f1e09a38019f480f",
+      "tree": "4602e5abd080960427e97ea79bddb613137135e4"
+    },
+    {
+      "pr": 40981,
+      "draft": true,
+      "original": "7df8cb08f64bdb2d6ebd690ece37acfd06c5cb54",
+      "original_base": "8d4ec51e9d498c2e2a4aec5306ddf873f725257d",
+      "branch": "fix/sampling-store-duplicate-20261003",
+      "parent": "023dcec7e8f95b9405d85074f1e09a38019f480f",
+      "head": "6b4b882ea5b77bc562e503801c60ebcf15f713f9",
+      "tree": "68bd58f6439c868ac72b3f6ca9981c8738432ba5"
+    },
+    {
+      "pr": 40991,
+      "draft": false,
+      "original": "3b783a3328a1690cd98f9cfde6dca06f1ef8fd2e",
+      "original_base": "7df8cb08f64bdb2d6ebd690ece37acfd06c5cb54",
+      "branch": "fix/sampling-terminal-contract-20261003",
+      "parent": "6b4b882ea5b77bc562e503801c60ebcf15f713f9",
+      "head": "267f9b9ceee1cf1ea905f62ef332c93e4914fa92",
+      "tree": "5443fe251d129d554307abf4b6604288a0ee082a"
+    },
+    {
+      "pr": 41033,
+      "draft": false,
+      "original": "0c984e316874d6af6ffe22430bd6b11b3e61ba2c",
+      "original_base": "3b783a3328a1690cd98f9cfde6dca06f1ef8fd2e",
+      "branch": "fix/audit-sampling-cold-recovery-20261004",
+      "parent": "267f9b9ceee1cf1ea905f62ef332c93e4914fa92",
+      "head": "448e0e059941105bdcd055ab9a21002e0378cf8e",
+      "tree": "0ec6a6e2a6241d7eab05717fccd2325b7d42e7e0"
+    },
+    {
+      "pr": 41126,
+      "draft": false,
+      "original": "aa758c2cb1babb2b6a974398aa766fb2f49a5516",
+      "original_base": "0c984e316874d6af6ffe22430bd6b11b3e61ba2c",
+      "branch": "fix/sampling-inline-budget-20261004",
+      "parent": "448e0e059941105bdcd055ab9a21002e0378cf8e",
+      "head": "0e283f3929c1c31d176d784e6fc65315ef14bda8",
+      "tree": "16e2cc1e0d09fbcd467dc76bd78fac741418a5a7"
+    }
+  ],
+  "source_sha256": {
+    "addons/tests/test_fusion_compute.py": "b11000dabec85838eb211ba1a63a97f8c832c7b7eda7096bb8b8ed29a2826ac2",
+    "lib/lane_addon/lane_addon_runtime.ml": "e6abebd509e13966939310b5f025b66014c3b37f362a8918e35d4b93ec5ab8b6",
+    "lib/lane_addon/lane_addon_runtime.mli": "d2b4f4ee7be9998d4931f83781236eacb13341f0420db9510056f1b933aca082",
+    "lib/lane_addon/lane_addon_sampling.ml": "3ed19cc3411602828a368d42cf16deb12e09594edf5fe45652735a4233dd0880",
+    "lib/lane_addon/lane_addon_sampling.mli": "22e350118dc93fe2e798f48f05da7e90b1c1ba202494f64916fe4c860cd01424",
+    "lib/lane_addon/lane_addon_store.ml": "27747106f237ac37157a4d2cf4c63864b1917547ad670ab7cd7cee8d19aaf050",
+    "lib/lane_addon/lane_addon_store.mli": "5794a4c3a396bc35d9509be9afebb522c2a93dfb5f91684798bf2e96815b2394",
+    "lib/server/server_lane_addon_sampling.ml": "a491e8b84dd52f336075f706e71ff0de915a4112747062763717ae1b8d611905",
+    "lib/server/server_runtime_bootstrap.ml": "9ae4cc7c4286c5dddb93245fc13c8a54e2fbba5af72516fe60bb2b0cbeab2731",
+    "packages/agent_core/lib/protocol/mcp.ml": "995317a1d61814288262235da0fbac5b89968e6fe709489a15e120da5c87e55d",
+    "packages/agent_core/lib/protocol/mcp.mli": "2e96dc2061e657b85bf0b04cdd1a55958075b620e830dc60a519151cd2641d22",
+    "packages/agent_core/test/test_mcp_integration.ml": "c8db73cce6287ef348931478fe37ad2b5801164b57d2bbac95a999892441c592",
+    "test/dune": "34ad210b604d3db107a698d9a758b0dc78f55e9c4f2c8f61d7e3d730782e0be3",
+    "test/test_lane_addon.ml": "fc1278df8745202d2a9e581bd1b306b5a75c466802c505b349762c267bee251f",
+    "test/test_lane_addon_sources.ml": "a3bef7f17c978efc09d33bb466ee2c6bf3785a7fa3c64eeca1ecd520ac9783e2",
+    "test/test_lane_addon_worker.ml": "eaeaf01b0ba7672eac5f26b9b2114ceac9ec20c75f55b4b66662832d6b90851e",
+    "test/test_lane_sampling_receipt_recovery.ml": "c8d2164466973e1849a41c77db9e179c16be5d04f5a537d861df7c1a51d054ad",
+    "test/test_server_lane_addon_sampling.ml": "ab6b696c049f915025892df0e057b10ed21c0f7d0b47cd3c473fdc1500cb0608"
+  },
+  "artifact_sha256": {
+    "checkout.log": "b83c0ed3dfe90779241c623ca989932e350e591737913d1b7d472f144c561abc",
+    "red-build.log": "9e1bb348dec5152fb9057703b21010e7c7ae21858c63f65a09c61db01afc5ab6",
+    "cold-recovery-red.log": "70dcd4c1057b93bf0da6eceb4d579ac0411e1c509f6cccb86211cd1db756d604",
+    "red-identities.json": "ed7524c587a606e6246b866c4d6a361fc1efcb3622413b295f505e430ff623f1",
+    "green-build.log": "00aadb0047b5e0531be05ca242046274e7522705413de9c85e1c16bc3f99c65d",
+    "green-native-results.json": "f1ec908c47724b415c08dfa8f1849b428e0031904a039dcd98c30e514d46cf0b",
+    "compute-tests.log": "05b921b88e88177e1806cface9b422f8b0ec244cc40ef456ec0e1d5bcc005b2c",
+    "worker-cases.txt": "e74199599b89516ae146aba98f009dc9293e3dc3a3016ee0f2016c39e7e3ddb0",
+    "merge-40943.log": "96bb6a194a796153cbd0c640642866371219451832063763d544b942a8d97c4e",
+    "merge-40960.log": "96bb6a194a796153cbd0c640642866371219451832063763d544b942a8d97c4e",
+    "merge-40966.log": "96bb6a194a796153cbd0c640642866371219451832063763d544b942a8d97c4e",
+    "merge-40981.log": "96bb6a194a796153cbd0c640642866371219451832063763d544b942a8d97c4e",
+    "merge-40991.log": "3cdae482838cadee7262c151ac086bbe2a5d4cb11530ab6eb3c2b344e21ba3b0",
+    "merge-41033.log": "49eea69683173c3bb65c6818bd9c1556a5680cd782ff336a5262b01b1fde9ab5",
+    "merge-41126.log": "56ebd6d0de61b6af3e583f2479f506ed9f08c674f384243e80d13b6cbae0f927",
+    "green-test_lane_addon_worker.log": "960a8414e326fbbada8d3b26e8a1d5e6532cde0cfa1afbdb572e6f4e8b38f9eb",
+    "green-test_server_lane_addon_sampling.log": "defa1e077d5d19d1a5defbe8777cfe45cec51b02759bc75fad7a18b4227bd55f",
+    "green-test_lane_sampling_receipt_recovery.log": "716a24389cb162d7783183b3086e134eb8cd3c1060676ad1b442cd59579e47e2",
+    "green-test_lane_addon.log": "ad7b2269d7ec7047850adfb3b89de03a9455619a594c4e61edcddb8b58f53a42",
+    "green-test_lane_addon_sources.log": "e8dc67c18e46ae71f594e5a864be2021b218f824aebd5d0e6c4641a95aa745c8",
+    "green-test_mcp_integration.log": "521b4d246eae4312f5fa4ef02b72477519a8b5cb8880cdd5ea37babc0a0ab88c"
+  },
+  "binary_sha256": {
+    "test/test_lane_addon_worker.exe": "352f46e027e16e60827eecf6134d500fe5fe88a26376adb95ee17c53976bca9c",
+    "test/test_server_lane_addon_sampling.exe": "8d93db2dfc852879f03a0c268eb25657e364126c9e9fe75698ff443087dbdc65",
+    "test/test_lane_sampling_receipt_recovery.exe": "45ed22dcf7d58d912ab227f217370bbae4e6084b33269a1339c4c0ec6b9b1af8",
+    "test/test_lane_addon.exe": "1b1c2eb6ae11c009ea99cf39224c5f2c81b2f0a84bab1dabe5d33e72d6fbf5c4",
+    "test/test_lane_addon_sources.exe": "199da5d519be092e2e11959b66517ad7a69b43e9f3fc0eab9a4942c8565ca75f",
+    "packages/agent_core/test/test_mcp_integration.exe": "ad9659c52e762dcd3d3daa5c0b2f4e5464d5554905c31b793348244a856e89b6"
+  },
+  "results": {
+    "native": 122,
+    "native_suites": 6,
+    "python_mcp_fixture": 38
+  },
+  "test_env": {
+    "MASC_BASE_PATH": "",
+    "ZAI_API_KEY": "",
+    "TYPESAFEAI_API_KEY": "",
+    "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED": "false",
+    "MASC_KEEPER_DOCKER_PLAYGROUND": "false",
+    "DUNE_SOURCEROOT": "checkout root"
+  }
+}

@@ -1,0 +1,5 @@
+Auto-merging lib/lane_addon/lane_addon_sampling.ml
+Auto-merging lib/lane_addon/lane_addon_store.ml
+Auto-merging test/test_lane_addon_worker.ml
+CONFLICT (content): Merge conflict in test/test_lane_addon_worker.ml
+Automatic merge failed; fix conflicts and then commit the result.

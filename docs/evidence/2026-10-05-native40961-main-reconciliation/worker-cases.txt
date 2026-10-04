@@ -1,0 +1,30 @@
+lifecycle          0   sampling reads preserve canonical failures.
+lifecycle          1   sampling retention error uses encoded wire bound.
+lifecycle          2   sampling blob failure keeps request evidence.
+lifecycle          3   sampling recovery reports unreadable terminal journal.
+lifecycle          4   sampling receipt requires durable journal.
+lifecycle          5   receipt projection reads shared outcome once.
+lifecycle          6   sampling terminal recovery and host redaction.
+lifecycle          7   sampling reply bound and ancestor durability.
+lifecycle          8   sampling bounds actual wire frames.
+lifecycle          9   sampling refuses nonfinite retained evidence.
+lifecycle         10   sampling recovery reports unreadable pending index.
+lifecycle         11   pending sampling recovery syncs reopened root.
+lifecycle         12   sampling recovery rejects replaced root and parent.
+lifecycle         13   sampling recovery streams bounded records.
+lifecycle         14   known sampling outcomes survive cancellation.
+lifecycle         15   declared sampling requires the exact host callback.
+lifecycle         16   image preview is read only and preserves engine failures.
+lifecycle         17   world action and binary artifact ingress.
+lifecycle         18   structured observation and exact removal.
+lifecycle         19   blocked observation preserves other owner.
+lifecycle         20   blocked initialization can detach.
+lifecycle         21   resource refusal and bounded response.
+lifecycle         22   cleanup failure remains retryable.
+lifecycle         23   restart cleanup verifies exact owner.
+lifecycle         24   restart recovers without a create receipt.
+lifecycle         25   deterministic name cannot authorize foreign cleanup.
+lifecycle         26   absence requires a successful Docker query.
+lifecycle         27   recovery bounds an unresponsive Docker control command.
+lifecycle         28   lost create response preserves unrelated containers.
+lifecycle         29   created identity precedes blocked inspect.

@@ -1,0 +1,17 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-2183435336.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40965-parent-sync-20261004/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40965-parent-sync-20261004 --sandbox=copy @test/runtest-test_tui_surface_studio_pty
+Warning: option "-j-std" is deprecated.
+File "lib/keeper/keeper_official_client_host.ml", line 1797, characters 12-59:
+1797 |             Agent_core.Agent_tool_pre_execution_gate.settle
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The module Agent_core.Agent_tool_pre_execution_gate is an alias for module Agent_core__Agent_tool_pre_execution_gate, which is missing
+File "bin/masc_tui_observer.ml", line 398, characters 15-49:
+398 |   | _ -> Some (Agent_core.Execution_tool_schedule.of_yojson (`Assoc fields))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The module Agent_core.Execution_tool_schedule is an alias for module Agent_core__Execution_tool_schedule, which is missing
+File "lib/server/server_skill_editor.ml", line 715, characters 8-51:
+715 |         Keeper_fs_durable_directory.fsync_directory parent)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The module Keeper_fs_durable_directory is an alias for module Masc__Keeper_fs_durable_directory, which is missing

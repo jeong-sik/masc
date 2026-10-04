@@ -1037,7 +1037,8 @@ let render_planning_list (state : state) =
        in
        let add_summary_if_fits summary =
          if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
-         then Buffer.add_buffer buf summary
+         then (Buffer.add_buffer buf summary; true)
+         else false
        in
        let summary_width = framed_inner_width cols in
        let wrap_summary summary ~style text =
@@ -1061,14 +1062,14 @@ let render_planning_list (state : state) =
        else begin
          let rollup_summary = Buffer.create 256 in
          wrap_summary rollup_summary ~style:"" rollup;
-         add_summary_if_fits rollup_summary
+         ignore (add_summary_if_fits rollup_summary)
        end;
        let backlog_summary = Buffer.create 256 in
        wrap_summary backlog_summary ~style:""
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
        (* Preserve the current counts before spending optional rows on change
           since the baseline. Wrapped physical rows share the list budget. *)
-       if not cards_fit then add_summary_if_fits backlog_summary;
+       let backlog_visible = cards_fit || add_summary_if_fits backlog_summary in
        let trend = Buffer.create 256 in
        (match state.planning_baseline with
         | None ->
@@ -1087,7 +1088,7 @@ let render_planning_list (state : state) =
                  (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                  (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
                  (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)));
-       add_summary_if_fits trend;
+       if backlog_visible then ignore (add_summary_if_fits trend);
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;

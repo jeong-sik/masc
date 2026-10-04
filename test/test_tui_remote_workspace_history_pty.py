@@ -441,7 +441,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, admission.held_received,
                 timeout=WAIT_SECONDS), "first admission was not held"
             _keyboard_harness.send_and_wait(process, fd, output, queued, _keyboard_harness.composer_showing(queued))
-            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"NEXT 1")
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"[workspace mismatch]" in text,
                          "B authority did not become visible")
@@ -454,7 +454,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                          "A authority was not restored")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-            await_screen(lambda text: b"Queue (1 waiting" in text and queued in text,
+            await_screen(lambda text: b"NEXT 1" in text and queued in text,
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
             _keyboard_harness.send_and_wait(process, fd, output, b"/queue resume", _keyboard_harness.composer_showing(b"/queue resume"))

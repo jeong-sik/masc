@@ -3028,6 +3028,8 @@ let turn_log_holds_the_turn turn_log =
 ;;
 
 type inflight_phase =
+  | Turn_preflight of Masc_tui_keeper_chat_queue.item
+      (** Retained local input; no HTTP POST has been attempted. *)
   | Turn_streaming
   | Turn_reconciling
 
@@ -7314,7 +7316,7 @@ let working_chat_for_keeper state keeper_name =
     let streaming =
       match entry.phase with
       | Turn_streaming -> true
-      | Turn_reconciling -> false
+      | Turn_preflight _ | Turn_reconciling -> false
     in
     String.equal entry.sent_request.keeper_name keeper_name
     && streaming
@@ -7337,6 +7339,37 @@ let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name 
     if explicit || newer_input then Masc_tui_esc_interrupt.Launch_interrupt
     else Masc_tui_esc_interrupt.action ~now_ns
       (Masc_tui_keeper_chat_transcript.interrupt entry.log.tl_transcript)
+
+(* Called before withdrawing request owners. Only a preflight owner proves
+   that its request is still local; a silent stream may already be accepted. *)
+let retain_preflight_inputs (state : state) entries =
+  List.iter (fun (entry : inflight) ->
+    match entry.phase with
+    | Turn_streaming | Turn_reconciling -> ()
+    | Turn_preflight item ->
+      let request = item.Masc_tui_keeper_chat_queue.request in
+      state.msg_history <- List.filter (fun row ->
+        not (String.equal row.me_keeper_name request.keeper_name
+             && String.equal row.me_request_id request.request_id
+             && match row.me_role with Message_user _ -> true | _ -> false))
+        state.msg_history;
+      if state.msg_target_keeper_name = Some request.keeper_name
+         && Buffer.length state.msg_input = 0
+         && state.msg_attachments = [] && state.msg_references = []
+         && Option.is_none state.msg_recall_replaces
+      then begin
+        Buffer.add_string state.msg_input request.message;
+        state.msg_attachments <- request.attachments;
+        state.msg_references <- request.references;
+        state.msg_attachments_since <- None
+      end else begin
+        state.msg_queued <- Masc_tui_keeper_chat_queue.restore_unsent state.msg_queued item;
+        state.keeper_interactive_waiting <-
+          (request.keeper_name, request.request_id, Retained_after_stop)
+          :: List.filter (fun (_, id, _) -> id <> request.request_id)
+            state.keeper_interactive_waiting
+      end) (List.rev entries)
+;;
 
 (* Authority withdrawal drops local request owners, not submitted server work. *)
 let withdraw_keeper_chat_requests (state : state) =
@@ -11565,6 +11598,8 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             (match entry.phase, entry.origin with
+             | Turn_preflight _, (Promoted_queue _ | Direct_submission) ->
+                 Some (entry.sent_request, Local_pending)
              | Turn_reconciling, (Promoted_queue _ | Direct_submission) ->
                  Some (entry.sent_request, Rechecking_delivery)
              | Turn_streaming, Promoted_queue _ ->
@@ -11573,6 +11608,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
         | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             let delivery = match entry.phase with
+              | Turn_preflight _ -> Local_pending
               | Turn_streaming -> Keeper_queued
               | Turn_reconciling -> Rechecking_delivery in
             Some (entry.sent_request, delivery)
@@ -11705,7 +11741,7 @@ let keeper_message_activity_rows (state : state) =
                   delivery = Rechecking_delivery
                   && Masc_tui_keeper_chat_projection.same_request_identity
                     request entry.sent_request) waiting)
-          | Turn_streaming -> false) own then
+          | Turn_preflight _ | Turn_streaming -> false) own then
         attention "메시지 전달 재확인 중";
       if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
         add "이어서 처리하기를 기다리는 중";
@@ -11786,7 +11822,7 @@ let keeper_message_activity_needs_attention (state : state) =
           | Keeper_turn_unavailable _ -> true
           | Keeper_turn_running _ | Keeper_turn_idle -> false) state.keeper_turns
       || List.exists (fun entry -> String.equal entry.sent_request.keeper_name name
-          && (match entry.phase with Turn_reconciling -> true | Turn_streaming -> false
+          && (match entry.phase with Turn_reconciling -> true | Turn_preflight _ | Turn_streaming -> false
               || match Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript with
                  | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false)) state.msg_inflight
       || List.exists (fun (request, result) ->
@@ -11841,7 +11877,7 @@ let keeper_message_inflight_drawn (state : state) =
       let reconciling =
         match entry.phase with
         | Turn_reconciling -> 1
-        | Turn_streaming -> 0
+        | Turn_preflight _ | Turn_streaming -> 0
       in
       if List.exists same_execution groups then
         List.map

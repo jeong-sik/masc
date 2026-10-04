@@ -465,12 +465,30 @@ let keeper_lane_warning application =
   | (Keeper_not_configured | Keeper_pending_restart | Keeper_applied), [] -> None
 ;;
 
+let skill_lane_warning = function
+  | Skill_published { config_state = Configured; _ }
+  | Skill_unchanged { config_state = Configured; _ } -> None
+  | Skill_published { config_state = Rejected; _ }
+  | Skill_unchanged { config_state = Rejected; _ } ->
+      Some "Skill configuration rejected; catalog not applied"
+  | Skill_published { config_state = Unreadable; _ }
+  | Skill_unchanged { config_state = Unreadable; _ } ->
+      Some "Skill configuration unreadable; catalog not applied"
+  | Skill_superseded { applied_order; _ } ->
+      Some ("Skill catalog superseded by commit " ^ applied_order)
+  | Skill_workspace_retired _ ->
+      Some "Skill catalog not applied; workspace retired"
+  | Skill_invalid_workspace ->
+      Some "Skill catalog not applied; invalid workspace"
+;;
+
 let lane_needs_attention receipt =
   receipt.durability = Durability_unconfirmed
   || receipt.lock_warnings <> []
   || receipt.application.routing_requires_restart
   || receipt.application.keeper_requires_restart
   || Option.is_some (keeper_lane_warning receipt.application)
+  || Option.is_some (skill_lane_warning receipt.application.skills)
   || (match receipt.application.exact_output_registry with
       | Exact_output_registry_applied _ -> false
       | Exact_output_registry_unpublished | Exact_output_registry_kept _ -> true)
@@ -495,6 +513,7 @@ let lane_summary receipt =
           ["Keeper settings await restart: " ^ String.concat ", " receipt.application.keeper_pending_keys]
         else [])
      @ Option.to_list (keeper_lane_warning receipt.application)
+     @ Option.to_list (skill_lane_warning receipt.application.skills)
      @ List.map (fun warning -> warning.detail) receipt.lock_warnings)
 ;;
 

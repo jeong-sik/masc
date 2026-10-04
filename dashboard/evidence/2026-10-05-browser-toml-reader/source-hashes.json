@@ -1,0 +1,60 @@
+{
+  "base": "a48463a674d43ac4658488eb44f234baa9399756",
+  "recorded_at": "2026-10-04T19:02:38.024886+00:00",
+  "sources": {
+    "dashboard/src/lib/browser-lane-activity.ts": "f32266723e15e1642ac64a976869d6be8fec15f7167edf663a9f1f7601d4e377",
+    "dashboard/src/lib/browser-lane-activity.test.ts": "ee8a253e03711c339419c6e7b66eee8001074ebde4983cbfaaa92a74b6b1c791",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "728d2a8e6497ad865aa9d99c2dbffd44fd474521fda135b209b261e80b54b4c2",
+    "dashboard/src/components/browser-lane-activity-panel.ts": "cf931eff69013c5ce9e9070be2d8e6af76a5011140d02693afd6671844e23e94",
+    "dashboard/src/lib/runtime-toml-config.ts": "f598cf1497a9c87617aaea1e1778bc9bb1fb206769f4422dfd7fa8323a773ad9",
+    "lib/browser_configuration/browser_configuration.ml": "4c971d4ec539fb8ec66ae0fce46c70bd3fa489d348b8508e637a2ae29e6450cd",
+    "dashboard/src/api/dashboard-runtime.ts": "32501b022e54a826281bcc4c36b480950178ab3df3884228ae18035a697875f3",
+    "dashboard/src/components/lane-inventory-panel.ts": "cb6ed92e9abc95c969d12b175c4f3153938c1a16d74560ff0c3e01b20337b29a",
+    "docs/guides/tui-browser-lanes.md": "cdf560510f094919c3e6e8f0d98ccc07de63297d1f318061a1a287b8d0431199",
+    "dashboard/evidence/2026-10-05-web-browser-activity/fixture.ts": "7fae550945acc26e2e9c14909ba37aac9a381fd62618f523ed1220288410bcf1",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser-fixture.mjs": "0365d62c5fd277aad00191dbf3cd172b0b285045477b5f97954ca67710a6d55d",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/fixture.html": "30c635e07dcf20310c1fb57e88dfeade3937eed3b2beb4916338a1fe1ffec921"
+  },
+  "artifacts": {
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser-off-saved.png": "a7c057b10484ff9a2b25fe08a3e81f120cf0726bab04cd2346da39866248f5e6",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/before.txt": "77c4b682f9c03efcc8e5503ad3a7eac521ba67be8a962d8e038d6608a2e48c91",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/after.txt": "4c7084154dec9fdf9373c77f13767b6ff77e3907d4f1dd57079408f677f8c947",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/README.md": "f3e02181385f88b3fa5e5af9a07ac925e4f85a564b29f6ac5f1685850c6e59b2",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser.txt": "f38060623970aee058c7bfdf5bc0bc0f2a967e89074ad25607bcd73bb3418648",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/before-source.txt": "9b740d939379f9da7aa91e586786bbf85665f5ffdce5f2225f9c9377f5b2ceb8",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser-mobile.png": "2d611a74d586c5e582421a60fa69d97c0c2c56dce075bee8e1028893bed97d90",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser-initial-entry-race.json": "f076ec578758be6d00e1c533b2cd73dd40afdc9818fe2daf9c1bdf55eb0b838d",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser-result.json": "c1dc67098f2b8e906d097b5aa9edeb73ba83a07131f225d2dc8ab0d4b1eb4575",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser-initial-entry-race.txt": "aa51cd71250e95905bb3d4ad395fc1c18de9c0bcade036e66d7c02a787918cb9"
+  },
+  "raw_log_hashes": {
+    "dashboard/evidence/2026-10-05-browser-toml-reader/before.txt": "d5434eeb33b00997594338c83b8b189dc84f91290b343eb460e1fc53737bf748",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/after.txt": "0904992f4d257d28765a60ebc8ed8a21283f5a48fca9065d1d705dab8d958a95",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser.txt": "f38060623970aee058c7bfdf5bc0bc0f2a967e89074ad25607bcd73bb3418648",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-browser-toml-reader/browser-initial-entry-race.txt": "aa51cd71250e95905bb3d4ad395fc1c18de9c0bcade036e66d7c02a787918cb9"
+  },
+  "normalization": "Only trailing whitespace and surplus final blank lines stripped in committed text logs; before-source.txt unchanged.",
+  "checks": {
+    "before_tests": 39,
+    "before_failures": 15,
+    "after_tests": 132,
+    "after_test_files": 4,
+    "typecheck_exit_code": 0,
+    "lint_exit_code": 0,
+    "chromium_synthetic_scenarios": 9,
+    "inventory_reads": 5,
+    "preview_requests": 3,
+    "save_requests": 3,
+    "synthetic_commits": 2,
+    "page_errors": 0,
+    "unexpected_api_routes": 0
+  },
+  "limits": [
+    "No actual backend validation/publication or Browser executor",
+    "No native TUI/PTY, CI, main integration, changed downstack composition or deployment"
+  ]
+}

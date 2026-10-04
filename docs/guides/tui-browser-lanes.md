@@ -100,6 +100,12 @@ file path requires discarding the old draft. Enabling an unconfigured backend
 does not install its executor. See the linked backend settings guide for Web
 TOML editing and path migration limits.
 
+The Web activity editor reads decoded Browser TOML paths directly. Unrelated
+provider names are preserved as data, including names such as `__proto__`.
+Unknown Browser backend/field names and non-boolean activity values are shown
+as errors. Full path and backend-installation validation remains part of the
+server preview before saving.
+
 ## Verification
 
 `test/test_browser_surface.ml` covers page selection, empty browsers and failures.

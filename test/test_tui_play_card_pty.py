@@ -19,7 +19,8 @@ import sys
 import zlib
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+from tui_keyboard_chat import PASTE_START, PASTE_END
 
 
 
@@ -263,7 +264,7 @@ def issued_card(binary: str) -> None:
         # the next Enter would send it to the Keeper: [y] puts the link on the
         # clipboard, so a paste is what an operator does next. It is dropped,
         # and [y] straight after it shows the card still owns the keys.
-        h.write_all(fd, output, h.PASTE_START + PASTED + h.PASTE_END)
+        h.write_all(fd, output, PASTE_START + PASTED + PASTE_END)
         copied = press_y(process, fd, output)
         assert copied == LINK.encode(), f"the clipboard got {copied!r}"
         h.wait_for_output(

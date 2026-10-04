@@ -22,7 +22,7 @@ import time
 import unicodedata
 import zlib
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 TERMINAL_ROWS = 30
 
@@ -277,3 +277,8 @@ def print_measured(measured: dict[tuple[str, int], dict[str, object]]) -> None:
     for key, value in measured.items():
         print(f"    {key!r}: {value!r},")
     print("}")
+
+# Exact helper inputs consumed by the PR test selector.
+SOURCE_MODULES = (
+    "test/tui_keyboard_harness.py",
+)

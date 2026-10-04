@@ -188,6 +188,8 @@ let test_a_lane_edit_waits_for_the_previous_write () =
     expect_plan (phase ^ ": J") state down busy;
     expect_plan (phase ^ ": K on the head is pending, not 'already first'") state up busy;
     expect_plan (phase ^ ": x") state drop busy;
+    expect_plan (phase ^ ": R cannot open a rename field") state
+      (Row_edit Rename_lane) busy;
     expect_plan (phase ^ ": the first D still arms") state remove "arm primary";
     state.runtime_lane_remove_armed <- Some "primary";
     expect_plan (phase ^ ": the second D") state remove busy;

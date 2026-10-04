@@ -9,17 +9,7 @@
 open Alcotest
 module C = Masc.Mcp_error_code
 
-let string_contains haystack needle =
-  let nlen = String.length needle in
-  let hlen = String.length haystack in
-  if nlen > hlen then false
-  else
-    let found = ref false in
-    for i = 0 to hlen - nlen do
-      if not !found && String.sub haystack i nlen = needle then found := true
-    done;
-    !found
-
+(* JSON-RPC 2.0 defines standard error codes and a server-error range. *)
 let in_jsonrpc_range code =
   let well_known = [ -32700; -32600; -32601; -32602; -32603 ] in
   List.mem code well_known || (code >= -32099 && code <= -32000)

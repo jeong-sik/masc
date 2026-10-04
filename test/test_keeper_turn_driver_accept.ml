@@ -94,7 +94,7 @@ let write_file path content =
 
 let test_admitted_continuation_requires_checkpoint () =
   match
-    Masc.Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+    Masc.Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~runtime_id:"unused" ~base_path:"." ~goal:"continue"
       ~system_prompt:"" ~agent_core_tools:[] ~continue_from_checkpoint:true ()
   with

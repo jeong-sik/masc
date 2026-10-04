@@ -50,6 +50,15 @@ status: reference
   → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
   [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
 
+**Official Client Failure Observation (공식 클라이언트 전송 후 실패 관찰)**
+: 공식 클라이언트 Lane에서 관찰하는 runtime 관측값의 실패 쪽 규칙
+  (`Keeper_turn_driver.official_client_observation`). 성공 관측값은 그대로
+  통과하고, 실패는 공식 클라이언트가 프롬프트 전송을 보고한 뒤에만 관찰값이
+  된다. 전송 보고가 없는 실패는 이 관찰값으로 잡히지 않으므로, 실패 관찰값이
+  없다는 것은 성공을 뜻하지 않는다. 관찰값은 `runtime_id`와 `model_id`를
+  이름 짓고, `prompt_sent_at`을 기준 시각으로 둔다.
+  → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli)
+
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
   모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
@@ -69,6 +78,26 @@ status: reference
 : Model Context Protocol의 약어. MASC는 양쪽으로 쓴다. 자기 도구와 협업 상태를
   MCP 서버로 내보내고(`masc_*` 도구), Agent는 `mcp_clients`로 바깥 MCP 서버에
   붙어 그쪽 도구를 가져온다.
+
+**MCP Sampling (MCP 샘플링)**
+: MCP 서버가 연결된 MCP 클라이언트에 언어 모델 생성을 요청하는 MCP 기능
+  (`sampling/createMessage`). 2025-06-18 사양은 클라이언트가 모델 접근·선택·권한을
+  통제하고 서버에 provider 자격 증명이 필요 없도록 정의했다.
+  **현재 사양 상태**: 2026-07-28 사양에서 deprecated로 표시됐다. 새 구현은 이를
+  채택하지 말아야 한다(SHOULD NOT). 기존 구현은 provider API 직접 호출로 옮겨야 한다(SHOULD).
+  해당 개정의 릴리스 후 최소 12개월간 사양에 남고 그 뒤에야 제거 대상이 될 수 있으므로,
+  deprecated 표시는 제거 완료를 뜻하지 않는다.
+  MASC의 `Agent_core.Mcp.connect`는 선택적 `sampling_handler`가 설정된 연결에서만
+  `sampling/createMessage`를 알리고 처리한다. 이 연결 primitive만으로 Lane Add-on의 모델
+  접근이나 Fusion 계산이 활성화되지는 않는다. 현재 Add-on 경로는 manifest의
+  `model_access = "host_sampling"` 선언과 설치 binding의 `model_route`를 확인하고, server
+  factory가 해당 worker에 callback을 제공해 연결한다. 선언만으로 route나 provider 자격
+  증명이 생기지는 않는다. 사양은 사람이 요청을 검토·거절할 수 있어야 한다고 권고하므로
+  callback 존재만으로 그 상호작용이 구현됐다고 보지 않는다.
+  → [MCP Sampling specification (2026-07-28)](https://modelcontextprotocol.io/specification/2026-07-28/client/sampling),
+  [MCP Sampling specification (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling),
+  [Mcp.connect](../../packages/agent_core/lib/protocol/mcp.mli),
+  [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
 
 **HITL**
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
@@ -161,11 +190,14 @@ status: reference
   [Pause_status_backend](../../lib/pause_status_backend.mli)
 
 **Usage**
-: provider quota 창·보고 이력은 scope별로, Keeper 토큰·비용은 기록 여부와 함께
-  보여주는 TUI 화면. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
+: provider quota 창·보고 이력은 scope별로, 워크스페이스 Candle 공급 상태는
+  워크스페이스 단위로, Keeper 토큰·비용은 기록 여부와 함께 보여주는 TUI 화면.
+  워크스페이스 공급과 선택한 Keeper의 개인 잔액은 서로 다른 값이며, 개인 잔액은
+  Keeper Info에서 본다. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
   Keeper의 비용을 0으로 추정하지 않는다. Keeper 상태와 작업 목록은 각각 Keepers와
   Work에서 본다.
-  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md)
+  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md) ·
+  [Masc_tui_render](../../bin/masc_tui_render.ml)
 
 **Attention (Dashboard)**
 : 운영자가 처리해야 하는 사건을 요약한다. 자세한 Keeper 상태는 Keepers에서,
@@ -354,14 +386,18 @@ status: reference
   소유한 장신구의 실제 착용은 `keeper_candle_equip` 도구를 통해 슬롯별로 반영되며, `default`는
   이름 기반 시작 장비로 복원한다. 서버와 원격 TUI, 대시보드는 `Keeper_portrait_equipment` 스냅숏을
   공유해 일관된 착용 모습을 렌더한다.
-  TUI에서는 Keeper 상세 화면 맨 위, 대화 화면의 Keeper 목록 아래, 아이템 미리보기, `/about`에
-  그려진다. 터미널이 알려 준 능력에 따라 실제 픽셀, 반블록 모자이크, 그림 없음 중 하나로 나온다.
-  `/about`의 마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  TUI Keeper Info와 대화 머리글에는 얼굴 중심의 작은 식별 아이콘을 표시한다. 대화 화면의 아이콘과
+  이름은 현재 대화 소유자를 나타내며, `현재 대화` 표식과 초상화는 선택 가능한 Keeper 목록 위에 놓인다.
+  목록 커서가 움직여도 현재 대화 소유자는 바뀌지 않는다. Items에서는 착용 장비 전체를 보여주는 큰
+  미리보기를 쓴다. 터미널 능력에 따라 아이콘은 실제 픽셀, 반블록 모자이크로 그리거나 생략한다.
+  `/about`에는 마스코트를 표시하며 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted` 스타일을 쓴다.
   → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
   [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
   [Keeper_portrait_solid](../../lib/keeper_portrait/keeper_portrait_solid.mli) ·
+  [Masc_tui_keeper_portrait](../../bin/masc_tui_keeper_portrait.mli) ·
+  [Masc_tui_chat_portrait](../../bin/masc_tui_chat_portrait.mli) ·
   [TUI candle styles](../TUI-GUIDE.md)
 
 **Ask (질문)**
@@ -1042,6 +1078,19 @@ status: reference
   불변식; #39077).
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
+**Exact Lane Slot 교체·이동 (Exact lane slot replacement and move)**
+: Dashboard 런타임 편집기가 exact-output lane의 선언된 후보 하나를 자리
+  그대로 다른 후보로 바꾸거나(`Runtime_route_exact_slot_replaced`,
+  `Runtime.replace_exact_output_lane_slot`) 자리를 옮기는 편집
+  (`Runtime_route_exact_slot_moved`의 위로·아래로·맨 처음으로). 교체는
+  쓰기 잠금 아래 제자리에서 일어난다. 새 후보는 같은 HTTP/CLI 그룹에
+  속하고 이 lane 어디에도 선언되지 않은 runtime id여야 하며, 나머지
+  후보의 순서는 보존된다. 그룹을 넘는 교체와 없는 id는 거절되고, lane에
+  후보를 더하는 것은 별개 편집이다. 이 편집은 **Runtime Candidate Order**
+  선언을 바꾸는 것이지, 그 순서로 이미 도는 turn을 바꾸는 게 아니다.
+  → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
+  [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
+
 **Max Prompt Bytes (최대 프롬프트 바이트)**
 : MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한
   (`[models.<이름>].max-prompt-bytes`, `Runtime_schema.model.max_prompt_bytes`).
@@ -1617,6 +1666,10 @@ status: reference
   (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
   (`lib/masc_log/log.ml`).
 
+**Board audience**
+: 게시글 생성·수정 시 계산해 함께 저장하는 typed 수신 범위. 저장된 값이 없으면
+  수신자를 확인할 수 없는 상태다. 읽기에서 본문의 멘션을 다시 해석해 권한을 만들지 않는다.
+
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
@@ -1627,6 +1680,20 @@ status: reference
   `AwaitingVerification`인 Task에 claim하면 `Held_pending_verdict`로 거절되므로
   판정 전에는 Keeper가 다시 맡을 수 없다. 완료 판정은 Keeper가 내리지 못하고,
   서버 안의 판정 에이전트나 인증된 운영자만 내린다(**Completion Authority**).
+
+**Pre-Pagination Backlog Task Selection Query (페이징 전 백로그 태스크 선별 쿼리)**
+: `keeper_tasks_list`는 기본 상태 조건과 함께 전달된 `task_ids`, `assignee`, `goal_id`,
+  `query` 필터를 AND로 적용한 뒤 정렬·페이징한다. `query`는 제목과 설명에 대한
+  대소문자 무시 리터럴 부분 문자열이다. `matching_count`는 이 조건을 통과한 전체 행 수다.
+  다음 페이지 커서는 같은 필터를 담으며 호출 필터가 달라지면 거절한다.
+  → [Keeper_tasks_list_query](../../lib/keeper/keeper_tasks_list_query.mli) ·
+  [Keeper_tasks_list_cursor](../../lib/keeper/keeper_tasks_list_cursor.mli)
+
+**First-Page-Only Discovery Window (첫 페이지 한정 신규 태스크 발견 창)**
+: 커서 없는 첫 `keeper_tasks_list` 응답은 현재 조회의 모든 조건을 통과하고 현재 페이지에는 없는
+  최신 Task를 최대 10행 `new_tasks`에 함께 싣는다. 후속 페이지는 이 발견 목록을 반복하지 않고
+  정렬된 페이지 흐름만 이어 간다. 첫 페이지를 새로 요청하면 그 시점의 발견 목록을 다시 계산한다.
+  → [keeper_tool_task_runtime](../../lib/keeper/keeper_tool_task_runtime.ml)
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
@@ -1666,10 +1733,15 @@ status: reference
     잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
-  - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
-    `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
-    선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
-    일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
+  - 지급 의무 보존(Payout Obligation Preservation)·평가 후 채무 지속성(Post-Appraisal Debt Retention):
+    기록 설정이 활성화되고 통과한 검증 결과의 `Snapshot`이 있으며
+    같은 지급 의무가 이미 없으면, 사람의 확정 기록을 저장한 뒤 `Completed` phase를 쓰기 전에
+    `Payout_owed` 행을 원장에 추가한다. 이 행이 지급 의무를 만들므로 phase 저장이 실패해도 의무는
+    남는다. 평가자 레인이 없거나 평가가 미뤄져도 의무 행은 유지된다. 평가 뒤 정산 시점에
+    Candle이 비활성화되면 지급을 미루되 의무를 취소하지 않고 원장에 보존한다.
+  - 정산: 백그라운드 지급 일꾼이 기여 Task와 Keeper를 후보(`Candidates`)로 선별해 모델 평가를
+    거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로 일부
+    Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
@@ -1690,13 +1762,14 @@ status: reference
   [Candle_equipment](../../lib/candle_runtime/candle_equipment.mli) ·
   [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
+  [Candle_payout_owed](../../lib/candle_runtime/candle_payout_owed.mli) ·
   [Candle_time](../../lib/candle/candle_time.mli) ·
   [keeper_candle_equip](../../config/tools/keeper_candle_equip.toml) ·
   [docs/constitution.xml](../constitution.xml) ·
   [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
 
 **Keeper Item & Candle Ledger Supply (키퍼 아이템과 원장 공급량 체계)**
-: 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039).
+: 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039). 지갑 잔액은 Keeper별 지급·구매 기록과 그 지갑의 감쇠 구간을 원장 순서로 재생해 계산한다. `issued`·`burned`·`circulating`은 작업공간 전체 합계이므로 한 Keeper의 잔액을 총공급량에서 나누어 구하지 않는다.
   - 대시보드 Item 탭([`keeper-items-panel.ts`](../../dashboard/src/components/keeper-items-panel.ts)): 개별 Keeper의 권위 있는 Candle 잔액, 장신구 카탈로그 가격, 소유한 아이템 목록, 착용 중인 초상화 미리보기를 단일 읽기 표면으로 제공한다. 장신구 구매는 무료 구매 및 가격 변동 시에도 원장 관측 갱신과 함께 최신 소유권·잔액을 게시하여 동기화를 유지한다.
   - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Purchased`·`HalfLifeSet` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
   - 권위 철회와 캐시 무효화(Authority Withdrawal): 서버 부팅 중, 알 수 없는 작업공간 전환, 연결 해제/재접속, 에포크 무효화(epoch invalidation), 런타임 웜업(warm-up) 시 오래된 잔액·소유권·가격·공급량 관측을 즉시 철회(`withdraw`)한다. 과거 웜업이나 실패 응답이 복구된 정상 상태를 덮어쓰지 못하도록 차단한다.
@@ -1753,7 +1826,17 @@ status: reference
   검증을 통과한 `Validated_preset`만 게이트와 orchestrator로 흐른다. 패널 정체성은
   `panelist_id` — 라벨이 있으면 `label (model)`, 없으면 `model`이고, 같은 model이라도
   라벨이 다르면 다른 패널이다. JOJ(judge-of-judges)는 1차 심판 여럿과 meta 심판을 둔다.
+  여기서 Fusion은 MASC의 Board-backed 실행을 뜻하며, Lane Add-on의 조립형 계산과는 다르다.
   → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli)
+
+**Assembled Fusion Computation (조립형 Fusion 계산)**
+: `fusion-compute` Lane Add-on이 패널과 심판을 각각 격리 worker로 실행해 보존 입력과
+  이름 지정 Lane 출력을 계산한다. `fusion/computation` 출력을 내고 `fusion-report`가
+  이를 에이전트가 읽을 보고서로 렌더한다. MASC의 Board-backed Fusion 실행과는 다르다.
+  계산 완료는 보고서 전달·게시를 뜻하지 않는다. 보고서 읽기나 Broadcast에는 명시적
+  evidence action이 필요하다.
+  → [fusion-compute](../../addons/fusion-compute/README.md),
+  [model access boundary](../design/lane-addon-model-boundary.md)
 
 **Fusion Seat (자리)**
 : Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
@@ -2740,10 +2823,10 @@ status: reference
   **Cluster** 항목에 적었다.
 
 **Memory OS Recall (기억 회상 / 전송 투영)**
-: 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
+: Keeper Memory OS의 저장 사실을 턴별 모델 문맥으로 전달하는 투영 경계. 저장된 사실과 프롬프트에 들어가는 내용은 같은 범위가 아니다.
   `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
-  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 사실 전량을 프롬프트에 직접 주입하지 않고 온디맨드 회상(Demand Recall, #40473)으로 전송한다. 일반 사실과 검증된 소스 바인딩 사실 전량은 불변 아티팩트(`tool_blob_store`)로 출판되며, 프롬프트에는 사실 건수, 스토어 가용성, 타입화된 무효화(`typed invalidation`), 보류된 소스 안내, 아티팩트 핸들(`_blob` sha256)만 전달된다. 모델은 `keeper_memory_search`나 아티팩트 페이징(`keeper_artifact_read`)을 통해 필요한 사실을 선별 조회한다. 아티팩트 조회 도구가 없거나 아티팩트 출판·핀 쓰기가 실패하면, `memory_search_available`에 따라 폴백이 달라진다. 메모리 검색이 가능하면 스토어 가용성·실패 사유·검색 안내와 소스 무효화·보류 식별자를 전달하며, 사실 본문 전체를 인라인으로 넣지 않는다. 이 폴백에서 메모리 검색도 불가능하면 읽기 가능한 일반 사실과 검증된 소스 사실을 절단 없이 인라인으로 넣는다. 읽지 못한 소스의 주장 본문은 어느 경우에도 보류한다.
-  소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 인라인으로 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 표면이 가진 조회 기능에 따라 투영을 나눈다. `keeper_memory_search`를 쓸 수 있는 표면에는 저장소 가용성·건수와 현재 조회 안내만 전달하며, 주장 본문을 싣거나 소스 파일을 재검증하거나 아티팩트를 발행하지 않는다. 아티팩트 전용 표면은 전체 투영을 재검증해 보존되는 페이지형 아티팩트로 발행하고, 프롬프트에는 상태·건수·타입화된 무효화·읽지 못한 소스 식별자와 아티팩트 핸들만 보낸다. 이때도 주장 본문은 프롬프트에 복사하지 않는다. 조회 기능이 없거나 아티팩트 발행이 실패하면 가용성과 과거 참조 철회 안내를 보내며 사실 전량을 폴백 주입하지 않는다. Recall 경로의 선택은 저장 기억을 삭제하지 않는다.
+  소스 바인딩 사실은 반환되기 전에 저장된 SHA-256과 대상 파일의 정확한 바이트를 대조한다. 검색 표면은 쿼리에 맞는 소스 후보만 재검증하고, 아티팩트 전용 표면은 전체 투영을 확인한다. 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)가 된다. 읽기 실패·접근 불능이면 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
   유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 정의하는 아키텍처다:
   - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
   - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
@@ -2752,6 +2835,14 @@ status: reference
   - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
   - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
   → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
+
+**Keeper Demand Recall (요구 기반 회상)**
+: 저장된 기억과 현재 턴의 문맥을 분리해, 필요한 사실을 쓸 때 현재 검색 결과를 다시 얻도록 하는 방식. 저장소 상태·건수 안내는 사실을 회상했다는 증거가 아니며, 이전 검색 결과도 이번 턴의 사실 확인을 대신하지 않는다. 회상 경로의 제한이나 실패는 저장 사실을 삭제하지 않고, 사실 전량을 대신 프롬프트에 싣지도 않는다.
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli)
+
+**Selective Source Candidate Validation (질의 매칭 소스 후보 선별 검증)**
+: `keeper_memory_search`는 먼저 쿼리에 맞는 소스 결속 주장과 그 경로·다이제스트를 고른 뒤, 그 후보만 잠금 아래에서 재검증한다. 쿼리에 맞지 않는 소스는 읽거나 무효화하지 않고 저장된 채 미검증으로 둔다. 매칭 후보의 읽기가 끝나지 않으면 본문을 보류하고 `source_verification.status="incomplete"`와 재조회 안내를 돌려준다. 검증된 현재 결과를 가린 뒤가 아니라 후보 검증·제외 후 `limit`을 적용하므로 오래되거나 확인할 수 없는 후보가 유효한 뒤쪽 결과를 밀어내지 않는다.
+  → [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli) · [keeper_tool_memory_runtime](../../lib/keeper/keeper_tool_memory_runtime.ml)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.
@@ -2920,6 +3011,13 @@ status: reference
   다시 쓰인 Fact는 최초의 `first_seen`을 보존하고 `last_seen`만 전진한다(#38056).
   → [Keeper_memory_os_current.insert_or_reobserve](../../lib/keeper/keeper_memory_os_current.ml)
 
+**Memory Category (기억 분류)**
+: Memory Fact의 내용을 찾고 묶는 데 쓰는 이름(`category`). 기본 이름은 흔한 주제의
+  제안값이며 고정 열거형이 아니다. 새 주제 이름도 소문자 `snake_case`로 쓸 수 있다.
+  이 이름은 내용만 분류하며 기억의 보존·만료·승격·수정 권한을 바꾸지 않는다.
+  → [category_of_string](../../lib/keeper/keeper_memory_os_types.mli),
+  [Librarian Category](../../config/prompts/librarian.md)
+
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은
@@ -3002,7 +3100,8 @@ status: reference
       `Carries_new_statement`로 정상 적용한다. 역방향 판정만 실패하거나 입력이 커서
       `Not_judged`(`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)이면
       claim을 적용한다. 흡수 판정이 실패해 `Gate_judgment_failed`가 되면 Memory 회차의
-      스냅숏 커밋을 보류하므로 새 claim과 원본 모두 그대로 남는다.
+      스냅숏 커밋을 보류한다. 원본을 유지하고 제안된 새 claim도 저장하지 않으며, 같은 입력
+      범위를 다시 처리할 수 있도록 남긴다.
   - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
     실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
   → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)
@@ -3137,8 +3236,10 @@ status: reference
   Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
   Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
   `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
-  `failed`는 검사 실패다. 모든 문장이 전달된다고 확인된 원문만 흡수하고,
-  확인하지 못한 원문은 현재 Memory에 남긴다. 새 claim 저장은 계속한다.
+  `failed`는 검사 실패다. 필요한 흡수 판정이 실패하면 해당 Memory 입력 범위의 저장을
+  보류하고 원본을 유지한다. 제안된 새 claim도 저장하지 않는다. 판정을 끝낸 `judged`에서는
+  모든 문장이 전달된다고 확인된 원문만 흡수하고, 전달되지 않은 원문은 현재 Memory에 남긴다.
+  이때 새 claim은 역방향 사본 판정과 저장 검사를 거쳐 적용한다.
   `judged`는 검사를 마친 결과다. 검사 비활성화 등 `skipped`일 때는 Librarian의 결정을 그대로 적용한다.
   취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
   반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면

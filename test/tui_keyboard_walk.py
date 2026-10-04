@@ -75,6 +75,7 @@ from tui_keyboard_clients import (
 from tui_keyboard_context import (
     context_inspector_interaction,
     run_context_inspector_transport_error_regression,
+    run_context_catalog_read_scope,
 )
 from tui_keyboard_dashboard import (
     attention_drawn_once_interaction,
@@ -400,6 +401,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             http_fixtures=context_inspector_fixtures(),
         )
         run_context_inspector_transport_error_regression(executable)
+        run_context_catalog_read_scope(executable)
         run_terminal_scenario(
             executable,
             description="Ctrl-V is not swallowed by the terminal",

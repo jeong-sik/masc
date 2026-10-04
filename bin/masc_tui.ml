@@ -5978,7 +5978,6 @@ let launch_runtime_catalog_load state ~mailbox =
     (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
-  launch_runtime_catalog_load state ~mailbox;
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
@@ -6023,6 +6022,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
                "Eio switch is unavailable" ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
+  launch_runtime_catalog_load state ~mailbox;
   state.context_inspector_open <- true;
   state.context_inspector_keeper <- Some keeper_name;
   (* A fresh Keeper target starts unread. Showing the previous Keeper's
@@ -20333,6 +20333,9 @@ and is loaded on demand through keeper_skill.
             | "r" ->
                 Option.iter
                   (fun keeper_name ->
+                     (* The current catalogue changes independently of captured
+                        turns. Refresh it here, never for each history step. *)
+                     launch_runtime_catalog_load state ~mailbox:async_messages;
                      launch_context_inspector_load state
                        ~mailbox:async_messages ~keeper_name)
                   state.context_inspector_keeper

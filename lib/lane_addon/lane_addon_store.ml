@@ -380,8 +380,10 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
                               | Fs_compat.Exact_missing ->
                                   (match Fs_compat.exact_path_kind ~follow:false
                                            (Filename.concat t.root (recovery_blob_path (digest bytes))) with
-                                   | Fs_compat.Exact_missing -> retain canonical
-                                   | _ -> retain (recovery_blob_path (digest bytes)))
+                                   | Fs_compat.Exact_kind Unix.S_REG ->
+                                       retain (recovery_blob_path (digest bytes))
+                                   | Fs_compat.Exact_missing | Fs_compat.Exact_kind _
+                                   | Fs_compat.Exact_unknown -> retain canonical)
                               | Fs_compat.Exact_kind Unix.S_DIR ->
                                   retain (recovery_blob_path (digest bytes))
                               | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->

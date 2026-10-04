@@ -31,6 +31,12 @@ export function LaneDeclarationEditor({ session, authority, onSaved }: {
       <h3 class="font-semibold">${sourcePath === null ? 'New TOML' : 'Edit TOML'}</h3>
       <${ActionButton} variant="ghost" onClick=${onClose}>Close editor</${ActionButton}>
     </header>
+    ${Object.keys(state.drafts).length > 1 && html`<label class="block">Open drafts
+      <select aria-label="Open drafts" class="block border rounded p-2 bg-[var(--bg)]" value=${key}
+        onChange=${(event: Event) => session.selectDraft((event.target as HTMLSelectElement).value, authority)}>
+        ${Object.entries(state.drafts).map(([draftKey, entry]) => html`<option key=${draftKey} value=${draftKey}>${entry.fileName || 'Unnamed TOML draft'}</option>`)}
+      </select>
+    </label>`}
     <p>Save a declaration file in the configured Lane directory. Installation and observation status are shown separately in the Lane tables.</p>
     ${sourcePath !== null && html`<p class="break-all">File: <code>${sourcePath}</code></p>`}
     <label class="block">File name

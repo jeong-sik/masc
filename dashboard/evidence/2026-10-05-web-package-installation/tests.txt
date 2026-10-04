@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-package-installation-20261005/dashboard
+
+
+ Test Files  5 passed (5)
+      Tests  101 passed (101)
+   Start at  05:23:44
+   Duration  5.92s (tests 36%, import 31%, environment 12%, transform 11%, setup 9%)
+
+    Isolate  5 workers spawned · ~225ms startup each (spawn + environment, per file)
+             at least ~901ms faster with isolate: false — reuses workers across files instead of one per file
+

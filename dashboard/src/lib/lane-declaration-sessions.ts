@@ -81,6 +81,26 @@ export class LaneDeclarationSession {
   }
   close() { this.state.value = { ...this.state.peek(), target: null } }
 
+  prepare(fileName: string, text: string, authority: ExecutionWorkspaceAuthority): string {
+    if (!this.admits(authority)) throw new Error('Workspace changed. Review this package in the current workspace before preparing a draft.')
+    if (this.pathFor(fileName) === null) throw new Error('Installation ID must produce a file name without path separators or NUL characters.')
+    const state = this.state.peek()
+    if (Object.values(state.drafts).some(draft => draft.fileName === fileName)) {
+      throw new Error('A draft with this file name is already open. Open that draft or choose another installation ID.')
+    }
+    const key = crypto.randomUUID()
+    this.state.value = { ...state, target: { key, sourcePath: null }, drafts: { ...state.drafts,
+      [key]: { fileName, sourcePath: null, text, document: null, current: null, phase: 'idle',
+        error: null, notice: 'Local package draft only. Review the TOML, then Save TOML explicitly.', needsRead: false, retainedCreateDrafts: [] } } }
+    syncUnloadGuard()
+    return key
+  }
+  selectDraft(key: string, authority: ExecutionWorkspaceAuthority) {
+    if (!this.admits(authority)) return
+    const state = this.state.peek(), draft = state.drafts[key]
+    if (draft) this.state.value = { ...state, target: { key, sourcePath: draft.document?.source_path ?? draft.sourcePath } }
+  }
+
   async read(key: string, sourcePath: string, authority: ExecutionWorkspaceAuthority, initial = false) {
     const draft = this.state.peek().drafts[key]
     if (!this.admits(authority) || draft === undefined || draft.phase !== 'idle') return

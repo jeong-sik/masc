@@ -1,0 +1,27 @@
+{
+  "base_head": "99e3716b9a0482620da7c1cd5929a4b25258abf6",
+  "tested_code_tree": "6f92827797ab2850fabbc2b6c5c660b719c83d63",
+  "results": {
+    "valid_red_new_failed": 5,
+    "valid_red_existing_passed": 32,
+    "green_tests": 181,
+    "green_suites": 3,
+    "tsc": 0,
+    "eslint": 0
+  },
+  "source_sha256": {
+    "dashboard/src/lib/runtime-toml-session.ts": "9f7b7ed4a2c5af92d0962a1ce3c9de24cc5ece625cd8c6dbdd8940fe33a4a6f5",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "a8ff2fcf606485b192428bb99491c3100e2567b1584dd0043871035ac8decaef",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "226665aeb62c066f4b0218fe44c33f39f790968d2a9cb2efe082dfb817663f18"
+  },
+  "logs_sha256": {
+    "valid-red.log": "7b67e4534af5bdd16336d9feef028726e4356625da79cec1c10f86b3d654145b",
+    "green.log": "6700bc56d1e0271dd155ec70219caadc0dfc8191008cc2d97b39ae61b1558c1b",
+    "typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "excluded-fixture-red.log": "60c7c851bcf17dbc0bec00846558393f75b501bb4702a3bde305557b40c22e31",
+    "excluded-working-directory-install.log": "1eddce55f1f41ae20c6853bae43ec708d4f7ad92d524d8c081db30a9ef9e894a",
+    "excluded-working-directory-test.log": "7d9d67b6d8ecf8bdb3af4fcade4dc3f4149254805ad73cc4013453bf67cfedec",
+    "install.log": "4e2384c603627ee2f384207a9ae11f22d3972f0e1ecf7f740c1eca79711606fa"
+  }
+}

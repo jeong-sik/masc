@@ -6,7 +6,7 @@ import { parseLaneInventory } from '../api/lane-inventory'
 import inventory from '../api/fixtures/lane-inventory.json'
 import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
-import { RuntimeTomlRevisionConflict, type RuntimeTomlConfig } from '../api/dashboard-runtime'
+import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
 import { readBrowserActivity, writeBrowserActivity } from '../lib/browser-lane-activity'
 import { browserLaneActivitySessionFor, resetBrowserLaneActivitySessionsForTesting } from '../lib/browser-lane-activity-session'
 import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
@@ -186,6 +186,36 @@ describe('Browser activity operator flow', () => {
     response.resolve(receipt(off)); expect(await saving).toBe(false)
     expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current?.source_text).toBe(source)
     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+  })
+  it('keeps the current Browser basis retryable after a typed pre-write rejection', async () => {
+    const { session, authority } = await draft(), before = session.state.value.current
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlSaveRejected('HTTP 400: fixture admission refused'))
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.current).toBe(before)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.draft?.enabled).toBe(false)
+    expect(session.state.value.error).toContain('저장 전에 거절')
+    expect(session.state.value.error).not.toContain('불확실')
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(await session.save(authority)).toBe(true)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(2)
+  })
+  it('does not resurrect Browser current source after an external write and late known rejection', async () => {
+    const { session, authority } = await draft(), response = deferred<void>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async () => {
+      await response.promise
+      throw new RuntimeTomlSaveRejected('HTTP 400: fixture admission refused')
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    announceRuntimeTomlWritten()
+    expect(session.state.value.current).toBeNull()
+    response.resolve()
+    expect(await saving).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.ready(authority)).toBe(false)
   })
   it('requires a read after an unanswered write and does not blindly repeat it', async () => {
     const { session, authority } = await draft()

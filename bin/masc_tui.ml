@@ -7051,16 +7051,7 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
       state.msg_inflight in
     if not admission_pending then
       let generation = keeper_chat_control_generation state keeper_name in
-      let ready = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
-        |> List.find_map (fun (item : Chat_queue.item) ->
-          List.find_map (fun (name, id, intervention) ->
-            match intervention with
-            | Awaiting_control held
-              when String.equal name keeper_name
-                && String.equal id item.request.request_id
-                && held.generation = generation -> Some (item, held.target)
-            | Awaiting_control _ | Retained_after_stop -> None)
-            state.keeper_interactive_waiting) in
+      let ready = next_authorized_keeper_input state keeper_name in
       match ready with
       | None -> ()
       | Some (item, target) ->
@@ -7079,8 +7070,11 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
            (* Both admission intents enter the durable FIFO queue. Automatic
               priority is a separate request, sent only if admission reports
               Queued; a message that started or settled needs no reordering. *)
-           if state.user_input_priority_next then
-             queue_run_next_on_admission ~automatic:true state item.request;
+           (match item.intent with
+            | Chat_queue.Steer_after_interrupt -> queue_run_next_on_admission state item.request
+            | Chat_queue.Next when state.user_input_priority_next ->
+                queue_run_next_on_admission ~automatic:true state item.request
+            | Chat_queue.Next -> ());
            launch_keeper_request ~promoted:item ~admission_intent
              state ~mailbox item.request;
            let next_generation = keeper_chat_control_generation state keeper_name in
@@ -7089,7 +7083,7 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
                | Awaiting_control held
                  when String.equal name keeper_name && held.generation = generation ->
                  Awaiting_control {held with generation = next_generation}
-               | Awaiting_control _ | Retained_after_stop -> intervention in
+               | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
              name, id, intervention) state.keeper_interactive_waiting)
   end
 ;;
@@ -7335,6 +7329,8 @@ let drain_queued_message state ~base_path ~mailbox =
              when the operator pressed Enter, so dispatch neither re-reads the
              staged attachments nor mints a second identity for a line the
              conversation already shows. *)
+          if item.intent = Chat_queue.Steer_after_interrupt then
+            queue_run_next_on_admission state request;
           launch_keeper_request ~promoted:item state ~mailbox request;
           next ())
         else (
@@ -7524,7 +7520,14 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   if List.mem keeper_name state.keeper_queue_inflight then
     chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
       "A queue request is pending; wait for its result before the next change"
-  else begin
+  else if action = Inbox.Resume
+          && state.workspace_identity = Workspace_identity_match
+          && keeper_available_for_new_message state keeper_name
+          && resume_preflight_keeper_input state keeper_name then begin
+    launch_waiting_keeper_input state ~mailbox ~keeper_name;
+    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
+      "Resumed locally retained input"
+  end else begin
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
   let control_generation = match action with
     | Inbox.Pause | Inbox.Resume -> Some (begin_keeper_chat_control state keeper_name)
@@ -10445,8 +10448,11 @@ let apply_server_identity_reading state reading =
        state.suspended_keeper_inputs <- List.remove_assoc input_workspace
          state.suspended_keeper_inputs;
        state.msg_queued <- queue;
+       List.iter (fun (item : Chat_queue.item) ->
+         append_user_history_once ~submitted_at:item.submitted_at state item.request)
+         (Chat_queue.waiting queue);
        state.keeper_interactive_waiting <- List.map (fun (item : Chat_queue.item) ->
-         item.request.keeper_name, item.request.request_id, Retained_after_stop)
+         item.request.keeper_name, item.request.request_id, Retained_before_dispatch)
          (Chat_queue.waiting queue);
        report_action state "system"
          "Retained inputs restored for this workspace; resume a Keeper to send them")

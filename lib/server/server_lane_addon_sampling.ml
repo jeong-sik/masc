@@ -181,13 +181,15 @@ let invoke ~sw ~net ~store ~route ~request params =
                   ["provider_stop_reason", `String (L.stop_reason_to_string stop_reason)]
               | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _ | Invalid_response _
               | Provider_error _ -> [] in
-            let* diagnostic = Eio_unix.run_in_systhread (fun () ->
+            let diagnostic = Eio_unix.run_in_systhread (fun () ->
               Lane_addon_store.write_blob store (Yojson.Safe.to_string (`Assoc (
                 ["kind",`String "model_attempt_failure";"runtime_id",`String runtime_id;
                  "request",Lane_addon_types.evidence_to_json request;
                  "error",`String (failure_detail failure)] @ stop)))) in
-            walk (`Assoc (["runtime_id",`String runtime_id;
-              "error_evidence",Lane_addon_types.evidence_to_json diagnostic] @ stop) :: failures) rest
+            let retained = match diagnostic with
+              | Ok reference -> ["error_evidence",Lane_addon_types.evidence_to_json reference]
+              | Error detail -> ["diagnostic_retention_error",`String detail] in
+            walk (`Assoc (["runtime_id",`String runtime_id] @ retained @ stop) :: failures) rest
         | Ok answer ->
             note_answered runtime;
             let metadata = match answer.S._meta with

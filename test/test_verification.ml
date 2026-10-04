@@ -517,7 +517,7 @@ let test_returning_to_an_earlier_disposition_posts_again () =
 let test_goal_stalled_projection_names_its_forward_path () =
   let content =
     VP.For_testing.stalled_board_content
-      ~subject:(VP.Goal_review { goal_id = "goal-201"; request_id = "req-201" })
+      ~subject:(VP.Goal_review { goal_id = "goal-201"; request_id = "req-201" ; disposition = VP.No_retry_armed })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
   in
@@ -536,7 +536,7 @@ let test_goal_stalled_metadata_names_its_subject () =
   let metadata =
     VP.For_testing.stalled_metadata
       ~authority:stall_authority_for_decoding
-      ~subject:(VP.Goal_review { goal_id = "goal-202"; request_id = "req-202" })
+      ~subject:(VP.Goal_review { goal_id = "goal-202"; request_id = "req-202" ; disposition = VP.No_retry_armed })
       ~gate:"Commit_refused"
       ~detail:"verdict does not match the pending request"
   in
@@ -580,7 +580,7 @@ let test_the_same_goal_stall_is_posted_once () =
   Masc.Board_dispatch.reset_for_test ();
   let notify ~request_id =
     VP.notify_stalled_verification ~authority:stall_authority
-      ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id })
+      ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id ; disposition = VP.No_retry_armed })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
   in
@@ -603,7 +603,7 @@ let test_a_task_stall_does_not_silence_a_goal_stall () =
     ~gate:"evaluator_unavailable"
     ~detail:"requested runtime or lane not found";
   VP.notify_stalled_verification ~authority:stall_authority
-    ~subject:(VP.Goal_review { goal_id = "shared-301"; request_id = "shared-req-301" })
+    ~subject:(VP.Goal_review { goal_id = "shared-301"; request_id = "shared-req-301" ; disposition = VP.No_retry_armed })
     ~gate:"evaluator_unavailable"
     ~detail:"requested runtime or lane not found";
   Alcotest.(check int) "the Task stall posted" 1

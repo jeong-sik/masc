@@ -26,7 +26,7 @@ let fake ?(verify=verified_report) base binary action =
     ["python3";"-c";"import sys;print(sys.executable)"] with
     | Ok (Unix.WEXITED 0,s,_) -> String.trim s | _ -> Alcotest.fail "Python fixture unavailable" in
   save binary (Printf.sprintf {|#!%s
-import json,os,pathlib,sys
+import json,os,pathlib,sys,tomllib
 base=pathlib.Path(%s)
 def report(runtime_id,status='verified',failure=None,model='fixture-model'):
     ok=failure is None
@@ -39,6 +39,7 @@ assert os.environ['MASC_BASE_PATH']==str(stage)
 assert os.environ['MASC_CONFIG_DIR']==str(config)
 assert stage!=base
 if a[0]=='runtime-default-set':
+    tomllib.loads((config/'runtime.toml').read_text())
     if len(a)>4: assert a[4:6]==['--setup-lanes','--setup-imp']
     (base/'selected.json').write_text(json.dumps([a[3]]+a[7::2]))
     (base/'stage-path').write_text(str(stage))
@@ -72,9 +73,154 @@ let test_batch () = fixture (fun base runtime binary spec original ->
   ignore (get (apply base binary specs ids next false));
   (* Existing identities must not append the provider/model definitions again. *)
   Alcotest.check Alcotest.string "idempotent connection definitions" (after ^ "\n# native lane writer fixture\n") (text runtime))
+let test_account_model_variants () = fixture (fun base runtime binary _spec _original ->
+  fake base binary "pass";
+  let spec home model context = Runtime_setup_spec.of_json (`Assoc [
+    "choice", `String "codex"; "command", `String "codex";
+    "account_home", `String home; "model", `String model;
+    "max_context", `Int context; "tools", `Bool true; "streaming", `Bool true])
+    |> function Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let first = spec "/fixture/account-a" "luna" 272000 in
+  let wider = spec "/fixture/account-a" "luna" 500000 in
+  let other_model = spec "/fixture/account-a" "astra" 272000 in
+  let other_account = spec "/fixture/account-b" "luna" 272000 in
+  let specs = [first; wider; other_model; other_account] in
+  let ids = List.map (fun spec -> (Runtime_setup_spec.render spec).runtime_id) specs in
+  ignore (get (apply base binary specs ids (get (Batch.observe ~base_path:base)) true));
+  let read () = match Runtime_toml.parse_file runtime with
+    | Ok config -> config | Error _ -> Alcotest.fail "saved account models must parse" in
+  let config = read () in
+  let provider = Runtime_setup_spec.provider_id first in
+  let bindings = List.filter (fun (binding:Runtime_schema.binding) -> binding.provider_id=provider) config.bindings in
+  Alcotest.check Alcotest.int "one provider holds both context variants and the other model" 3 (List.length bindings);
+  Alcotest.check Alcotest.int "one wizard default for the grouped account" 1
+    (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.wizard_default) bindings));
+  let windows = List.filter_map (fun (binding:Runtime_schema.binding) ->
+    let model = List.find (fun (model:Runtime_schema.model_spec) -> model.id=binding.model_id) config.models in
+    if model.api_name="luna" then model.max_context else None) bindings |> List.sort Int.compare in
+  Alcotest.check (Alcotest.list Alcotest.int) "same API model retains separate context windows" [272000;500000] windows;
+  Alcotest.check Alcotest.bool "another account has its own provider" true
+    (provider <> Runtime_setup_spec.provider_id other_account);
+  let inventory = Runtime_wizard_inventory.to_json config in
+  let open Yojson.Safe.Util in
+  let row = inventory |> member "integrations" |> to_list
+    |> List.find (fun row -> row |> member "id" |> to_string = provider) in
+  Alcotest.check Alcotest.int "account inventory offers all three runtime variants" 3
+    (row |> member "configured_runtime_ids" |> to_list |> List.length);
+  let before = text runtime in
+  let next = spec "/fixture/account-a" "luna" 750000 in
+  let next_id = (Runtime_setup_spec.render next).runtime_id in
+  ignore (get (apply base binary [next] (ids @ [next_id]) (get (Batch.observe ~base_path:base)) true));
+  Alcotest.check Alcotest.bool "later additions preserve all existing provider settings" true
+    (String.starts_with ~prefix:before (text runtime));
+  let after = read () in
+  Alcotest.check Alcotest.int "later save keeps exactly one provider for the account" 1
+    (List.length (List.filter (fun (row:Runtime_schema.provider) -> row.id=provider) after.providers));
+  Alcotest.check Alcotest.int "later save adds a fourth variant under that account" 4
+    (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.provider_id=provider) after.bindings)))
+let test_custom_account_new_model () = fixture (fun base runtime binary spec _original ->
+  let configured = {|
+[runtime]
+default = "operator_account.old"
+[providers.operator_account]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models.old]
+api-name = "old-model"
+max-context = 1024
+tools-support = true
+[operator_account.old]
+wizard-default = true
+|} in
+  save runtime configured;
+  fake base binary "pass";
+  let parsed = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let raw = spec "new-model" in
+  let prepared = Runtime_setup_spec.resolve_provider raw parsed.providers |> Result.get_ok in
+  let id = (Runtime_setup_spec.render prepared).runtime_id in
+  let receipt = get (apply base binary [raw] [id] (get (Batch.observe ~base_path:base)) true) in
+  Alcotest.(check (list string)) "prepared native ID is the committed selection" [id] receipt.runtime_ids;
+  let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+  Alcotest.(check int) "batch adds a binding without duplicating account" 1 (List.length after.providers);
+  Alcotest.(check bool) "operator provider source is retained" true
+    (String.starts_with ~prefix:configured (text runtime));
+  Alcotest.(check bool) "new binding names the original provider" true
+    (List.exists (fun (binding:Runtime_schema.binding) ->
+       Runtime_schema.binding_key binding=id && binding.provider_id="operator_account") after.bindings))
+let test_existing_provider_wizard_default_survives_expansion () =
+  List.iter (fun (name, provider_fields, declaration, expected_model, expected_context) ->
+    fixture (fun base runtime binary spec _original ->
+      let configured = {|
+[runtime]
+default = "primary.main"
+[providers.primary]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+[providers.operator_account]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+|} ^ provider_fields ^ {|
+[models.main]
+api-name = "primary-model"
+max-context = 1024
+tools-support = true
+[models.old]
+api-name = "old-model"
+max-context = 1024
+tools-support = true
+[primary.main]
+wizard-default = true
+|} ^ declaration in
+      save runtime configured;
+      fake base binary "pass";
+      let parsed = Runtime_toml.parse_file runtime |> Result.get_ok in
+      let raw = spec "added-fallback" in
+      let prepared = Runtime_setup_spec.resolve_provider raw parsed.providers |> Result.get_ok in
+      let added = Runtime_setup_spec.render prepared in
+      let selected = ["primary.main"; added.runtime_id] in
+      ignore (get (apply base binary [raw] selected (get (Batch.observe ~base_path:base)) false));
+      let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+      let provider = List.find (fun (p:Runtime_schema.provider) -> p.id="operator_account") after.providers in
+      let chosen = match Runtime_wizard_inventory.binding_for_provider after provider with
+        | Ok binding -> binding | Error reason -> Alcotest.fail (name ^ ": " ^ reason) in
+      let expected = match expected_model with
+        | Some model -> "operator_account." ^ model
+        | None -> added.runtime_id in
+      Alcotest.(check string) (name ^ ": wizard keeps the prior unambiguous choice")
+        expected (Runtime_schema.binding_key chosen);
+      Alcotest.(check (option int)) (name ^ ": binding context stays unchanged")
+        expected_context chosen.max_context;
+      let bindings = List.filter (fun (binding:Runtime_schema.binding) ->
+        binding.enabled && binding.provider_id=provider.id) after.bindings in
+      Alcotest.(check int) (name ^ ": exactly one enabled wizard default") 1
+        (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.wizard_default) bindings));
+      Alcotest.(check (option string)) (name ^ ": workspace primary remains another provider")
+        (Some "primary.main") after.default_runtime_id;
+      Alcotest.(check bool) (name ^ ": prior binding comment survives") true
+        (List.mem "# retain this binding's operator settings"
+          (String.split_on_char '\n' (text runtime)))))
+    ["sole implicit", "", "[operator_account.old]\n# retain this binding's operator settings\n", Some "old", None;
+     "explicit other model", "", {|
+[operator_account.old]
+# retain this binding's operator settings
+[models.preferred]
+api-name = "preferred-model"
+max-context = 1024
+tools-support = true
+[operator_account.preferred]
+wizard-default = true
+|}, Some "preferred", None;
+     "disabled-only prior binding", "", "[operator_account.old]\n# retain this binding's operator settings\nenabled = false\n", None, Some 1024;
+     "inline binding", "", "[operator_account]\n# retain this binding's operator settings\nold = { max-context = 8192, price-input = 0.075 }\n", Some "old", Some 8192;
+     "dotted binding", "", "[operator_account]\n# retain this binding's operator settings\nold.max-context = 8192\n", Some "old", Some 8192;
+     "implicit model set", "model-set = \"single\"\n", "# retain this binding's operator settings\n[model_sets.single]\nmodels = [\"old\"]\n", Some "old", None]
+
 let test_named_default_lane () = fixture (fun base runtime binary spec original ->
   let first = (Runtime_setup_spec.render (spec "old-model")).runtime_id in
-  let second = Runtime_setup_spec.render (spec "old-fallback") in
+  let second = Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "old-fallback") in
   let added = spec "new-account-model" in
   let added_id = (Runtime_setup_spec.render added).runtime_id in
   let lane_id = "conversation.priority" in
@@ -139,7 +285,7 @@ let test_probes_only_what_changes () = fixture (fun base _runtime binary spec _o
   Alcotest.check (Alcotest.list Alcotest.string) "the receipt lists it" [old_id]
     Yojson.Safe.Util.(Batch.receipt_json receipt |> member "not_rechecked" |> to_list |> List.map to_string);
   Sys.remove (Filename.concat base "verified.jsonl");
-  let promoted = Runtime_setup_spec.render (spec "promoted") in
+  let promoted = Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "promoted") in
   let saved = text (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") in
   save (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") (saved ^ "\n" ^ promoted.runtime_toml);
   let revision = get (Batch.observe ~base_path:base) in
@@ -243,7 +389,7 @@ let test_usage_limit_publishes () = fixture (fun base runtime binary spec origin
           |> List.map (fun row -> (row |> member "runtime_id" |> to_string), (row |> member "code" |> to_string)));
       Alcotest.check Alcotest.string (code ^ ": the report's code is kept") code reported;
       Alcotest.check Alcotest.bool (code ^ ": the limited runtime is published") true
-        (contains (text runtime) (Runtime_setup_spec.render (spec "limited")).runtime_toml)
+        (contains (text runtime) (Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "limited")).runtime_toml)
     | Ok _ -> Alcotest.fail (code ^ ": the usage limit was not reported")
     | Error error -> Alcotest.fail (code ^ ": " ^ Batch.error_message error))
     ["quota_exhausted"; "rate_limited"];
@@ -401,9 +547,12 @@ let test_save_publishes_the_registry () = fixture (fun base _runtime binary spec
     ignore (get (apply base binary [added] [id] revision false));
     Alcotest.check Alcotest.bool "the saved account is live in the published registry" true (List.mem id (ids (Runtime.get_runtimes ())))))
 let () = Alcotest.run "runtime setup batch" ["workspace",[
+  Alcotest.test_case "extending a provider preserves its wizard choice" `Quick test_existing_provider_wizard_default_survives_expansion;
+  Alcotest.test_case "native batch reuses custom account" `Quick test_custom_account_new_model;
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
   Alcotest.test_case "the saved account is live in the registry without a restart" `Quick test_save_publishes_the_registry;
+  Alcotest.test_case "account model variants survive save and inventory" `Quick test_account_model_variants;
   Alcotest.test_case "preserve named default lane and candidate order" `Quick test_named_default_lane;
   Alcotest.test_case "runtime compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;

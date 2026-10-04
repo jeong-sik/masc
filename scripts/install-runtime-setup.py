@@ -207,7 +207,7 @@ def table(path, fields, array=False):
         toml(key) + ' = ' + toml(value) + '\n' for key, value in fields.items())
 
 
-def render(spec, binary=None):
+def render(spec, binary=None, base_path=None):
     if not isinstance(spec, dict):
         raise SetupError('spec must be a JSON object')
     named = 'provider_id' in spec
@@ -262,7 +262,8 @@ def render(spec, binary=None):
 
     if not binary:
         raise SetupError('Runtime setup requires the installed MASC executable')
-    rendered = native_setup_command(binary, 'runtime-setup-render', spec)
+    rendered = native_setup_command(binary, 'runtime-setup-render', spec,
+        arguments=['--base-path', str(base_path)] if base_path is not None else ())
     if (not model_text(rendered.get('runtime_id'))
             or not isinstance(rendered.get('runtime_toml'), str)):
         raise SetupError('MASC returned an invalid runtime specification')
@@ -314,7 +315,7 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
         expected_revision = configured_inventory(binary, base_path)['setup_revision']
     if not setup_revision(expected_revision):
         raise SetupError('Refresh the connection list before saving')
-    rendered = [render(spec, binary) for spec in specs]
+    rendered = [render(spec, binary, base_path=base_path) for spec in specs]
     selected = list(dict.fromkeys(selected_ids if selected_ids is not None else [row[0] for row in rendered]))
     if not selected:
         raise SetupError('select at least one runtime')
@@ -725,7 +726,9 @@ def connection_sources(binary, inventory):
                           choice=PROTOCOL_CHOICES.get(row['protocol']), endpoint=row.get('endpoint') or '',
                           command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
                           credential_kind=row.get('credential_kind', 'unknown'),
-                          credential_file=row.get('credential_file'), account_home=row.get('account_home'), provider_kind=row.get('provider_kind'),
+                          credential_file=row.get('credential_file'), provider_timeout_s=row.get('provider_timeout_s'),
+                          account_home=row.get('account_home'), provider_kind=row.get('provider_kind'),
+                          request_path=row.get('request_path'),
                           rows=[])
             sources.append(source)
         source['rows'].append(row)
@@ -739,8 +742,9 @@ def connection_sources(binary, inventory):
                       endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
                       api_key_env=integration.get('api_key_env') or '',
                       credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
-                      credential_file=integration.get('credential_file'), account_home=integration.get('account_home'),
-                      provider_kind=integration.get('provider_kind'),
+                      credential_file=integration.get('credential_file'), provider_timeout_s=integration.get('provider_timeout_s'),
+                      account_home=integration.get('account_home'),
+                      provider_kind=integration.get('provider_kind'), request_path=integration.get('request_path'),
                       origin=integration['origin'], setup_support=integration['setup_support'], rows=[])
         # A catalog-advertised new connection carries the provider's own name,
         # so the wizard renders a named provider instead of an anonymous one.
@@ -881,10 +885,21 @@ def prepare_antigravity_account(source, credentials):
         credential = receipt['credential_file']
         models = antigravity_catalog_rows(receipt['catalog'])
         credentials.register_account_reference(credential)
+        if selected == 'saved':
+            # Native discovery returns an isolated copy even for saved accounts.
+            # Keep that copy pending for cleanup; the configured connection
+            # still owns its original reference and timeout.
+            credential = source['credential_file']
+            credentials.register_account_reference(credential)
+            if not source.get('credential_replaced'):
+                credentials.retain([dict(credential_file=credential)])
     except (KeyError, TypeError, ValueError):
         raise SetupError('Antigravity account selection did not return a readable result')
-    source.update(credential_file=credential, credential_kind='file', credential_replaced=True,
-                  account_catalog=models, provider_timeout_s=receipt['provider_timeout_s'])
+    if selected != 'saved':
+        source['credential_replaced'] = True
+    timeout = (source.get('provider_timeout_s') if selected == 'saved' else None)
+    source.update(credential_file=credential, credential_kind='file', account_catalog=models,
+                  provider_timeout_s=receipt['provider_timeout_s'] if timeout is None else timeout)
     if receipt.get('catalog_error'):
         print(terminal_text(receipt['catalog_error']) + ' Choose Refresh model list to try again.', file=sys.stderr)
     return source
@@ -1273,7 +1288,8 @@ def prepare_connection(binary, source, credentials):
             if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
                 raise SetupError('Install the selected client, then return to connection setup')
             path = official_client_path(binary, source['choice'], command)
-        source['command'] = path
+        # Keep a configured command's spelling; runtime owns executable resolution.
+        source['command'] = command if source.get('origin') == 'runtime_config' else path
         if source['choice'] == 'antigravity':
             return prepare_antigravity_account(source, credentials)
         return select_native_account(source)
@@ -1534,7 +1550,7 @@ def source_models(binary, source, timeout, refresh=False):
     return rows, origin
 
 
-def resolve_model_spec(source, model, timeout, binary=None):
+def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
     existing = model.get('existing')
     choice = source['choice']
     # Preserve every setting on an operator's existing connection. Its actual
@@ -1570,7 +1586,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
                     provider_declared=source['catalog_provider'].get('declared') is True)
         if catalog.get('default_reasoning_effort'):
             spec['reasoning_effort'] = catalog['default_reasoning_effort']
-        return render(spec, binary)[0], spec
+        return render(spec, binary, base_path=base_path)[0], spec
     context = model.get('context')
     if choice == 'antigravity' and binary:
         context = antigravity_context(binary, source, model['id'])
@@ -1615,14 +1631,16 @@ def resolve_model_spec(source, model, timeout, binary=None):
             spec['supports_image_input'] = catalog['supports_image_input']
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
-        spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind') if source.get(key)})
+        spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
     if source.get('account_home'):
         spec['account_home'] = source['account_home']
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
-    return render(spec, binary)[0], spec
+    if source.get('origin') == 'runtime_config' and not source.get('credential_replaced'):
+        spec['existing_provider_id'] = source['provider_id']
+    return render(spec, binary, base_path=base_path)[0], spec
 
 
 def pick_connection_sources(sources):
@@ -1649,7 +1667,7 @@ def pick_connection_sources(sources):
         return shown, chosen
 
 
-def select_connections(binary, inventory, timeout, credentials=None):
+def select_connections(binary, inventory, timeout, credentials=None, base_path=None):
     sources, chosen = pick_connection_sources(connection_sources(binary, inventory))
     if len(sources) + 1 in chosen:
         if len(chosen) != 1:
@@ -1711,7 +1729,7 @@ def select_connections(binary, inventory, timeout, credentials=None):
                 indexes = [len(models) - 1]
             for model_index in indexes:
                 model = models[model_index]
-                runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary)
+                runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary, base_path=base_path)
                 if runtime_id not in selected:
                     selected.append(runtime_id)
                     names[runtime_id] = source['label'] + ' / ' + model['id']
@@ -1732,8 +1750,8 @@ def account_login_command(binary, client, command, account_home):
             '--account-home', account_home]
 
 
-def login_command(binary, runtime_id, specs, inventory):
-    spec = next((spec for spec in specs if render(spec, binary)[0] == runtime_id), None)
+def login_command(binary, runtime_id, specs, inventory, base_path=None):
+    spec = next((spec for spec in specs if render(spec, binary, base_path=base_path)[0] == runtime_id), None)
     if spec:
         row = spec
         choice, command = spec['choice'], spec.get('command') or CHOICES[spec['choice']][1]
@@ -1758,7 +1776,7 @@ def wizard(binary, base_path, timeout, quick_model=None):
         return wizard_with_credentials(binary, base_path, timeout, credentials, quick_model=quick_model)
 
 
-def quick_connection(binary, inventory, timeout, credentials, model_id):
+def quick_connection(binary, inventory, timeout, credentials, model_id, base_path=None):
     """Claude Code with `model_id`, built the way the model screen builds it.
 
     None hands the step back to the screens: this computer has no Claude Code,
@@ -1775,7 +1793,7 @@ def quick_connection(binary, inventory, timeout, credentials, model_id):
     if model is None:
         print('The installed model catalog does not list ' + model_id + '. Choose a model.', file=sys.stderr)
         return None
-    runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary)
+    runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary, base_path=base_path)
     return [runtime_id], ([spec] if spec else []), {runtime_id: source['label'] + ' / ' + model['id']}
 
 
@@ -1783,7 +1801,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
     while True:
         try:
             inventory = configured_inventory(binary, base_path)
-            quick = quick_connection(binary, inventory, timeout, credentials, quick_model) if quick_model else None
+            quick = quick_connection(binary, inventory, timeout, credentials, quick_model, base_path=base_path) if quick_model else None
             # Asked once. Choosing connections again after a failed check is the
             # ordinary screen, not another silent pick of the same model.
             quick_model = None
@@ -1791,7 +1809,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                 selected, specs, names = quick
                 ordered = list(selected)
             else:
-                selected, specs, names = select_connections(binary, inventory, timeout, credentials)
+                selected, specs, names = select_connections(binary, inventory, timeout, credentials, base_path=base_path)
                 if not selected:
                     return dict(configured=False, readiness='deferred', base_path=str(base_path))
                 primary = pick('Which connection should imp use first?', [names[value] for value in selected])[0]
@@ -1811,7 +1829,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                 try:
                     # Excluding a failed connection must also exclude its new
                     # declaration from the transaction, not just from the lane.
-                    active_specs = [spec for spec in specs if render(spec, binary)[0] in ordered]
+                    active_specs = [spec for spec in specs if render(spec, binary, base_path=base_path)[0] in ordered]
                     # Once the effectful native child starts, loss of its receipt
                     # cannot prove that it did not commit. Keep selected private
                     # credentials before crossing that process boundary.
@@ -1825,7 +1843,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                           file=sys.stderr)
                     print_verification_reason(error.failure)
                     print_verification_next_step(error.failure)
-                    login = login_command(binary, error.runtime_id, specs, inventory)
+                    login = login_command(binary, error.runtime_id, specs, inventory, base_path=base_path)
                     actions = ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later']
                     if login:
                         actions.append('Sign in with the official CLI, then retry these choices')

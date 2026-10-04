@@ -31,10 +31,19 @@ let read_json path =
   try Ok (Yojson.Safe.from_file path)
   with Sys_error _ | Yojson.Json_error _ -> Error Batch.Invalid_selection
 
-let render ~spec_path =
+let render ~base_path ~spec_path =
   report (let* json = read_json spec_path in
     let* spec = Runtime_setup_spec.of_json json
       |> Result.map_error (fun _ -> Batch.Invalid_selection) in
+    let* spec = match base_path with
+      | None -> Ok spec
+      | Some base_path ->
+        Eio_main.run (fun _ -> Eio.Switch.run (fun _ ->
+          let* _, observation = Batch.observe_inventory ~base_path in
+          let* config = Runtime_toml.parse_string observation.source_text
+            |> Result.map_error (fun _ -> Batch.Invalid_configuration) in
+          Runtime_setup_spec.resolve_provider spec config.providers
+          |> Result.map_error (fun _ -> Batch.Invalid_selection))) in
     Ok (Runtime_setup_spec.render_json (Runtime_setup_spec.render spec)))
 
 let inventory ~base_path =

@@ -215,6 +215,24 @@ let test_cron_step_admission_and_actual_next_due () =
       Printf.sprintf "5-59/%d * * * *" max_int, 0.0, 300.0 ]
 ;;
 
+let test_cron_day_wildcards_preserve_selected_values () =
+  List.iter
+    (fun (expression, now, expected) ->
+      let req = request ~recurrence:(Cron { expression; timezone = "UTC" }) () in
+      match next_due_after ~now:(timestamp now) req with
+      | None -> failf "expected next occurrence for %s" expression
+      | Some due -> check (float 0.001) expression (timestamp expected) due)
+    [ "0 9 */1 * 1", "2026-10-06T00:00:00Z", "2026-10-12T09:00:00Z"
+    ; "0 9 */2 * 1", "2026-10-06T00:00:00Z", "2026-10-19T09:00:00Z"
+    ; "0 9 13 * */2", "2026-10-01T00:00:00Z", "2026-10-13T09:00:00Z"
+    ; "0 9 */2 * */2", "2026-10-04T00:00:00Z", "2026-10-11T09:00:00Z"
+    ; "0 9 *,13 * 1", "2026-10-06T00:00:00Z", "2026-10-12T09:00:00Z"
+    ; "0 9 13,* * 1", "2026-10-06T00:00:00Z", "2026-10-06T09:00:00Z"
+    ; "0 9 13 * 1", "2026-10-06T00:00:00Z", "2026-10-12T09:00:00Z"
+    ; "0 9 1-31 * 1", "2026-10-06T00:00:00Z", "2026-10-06T09:00:00Z"
+    ]
+;;
+
 let test_cron_recurrence_finds_occurrence_beyond_five_years () =
   let req =
     request
@@ -230,16 +248,19 @@ let test_cron_recurrence_finds_occurrence_beyond_five_years () =
 ;;
 
 let test_cron_recurrence_rejects_impossible_calendar_date () =
-  match
-    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
-      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ~payload:(payload_json ()) ~source:Operator_request
-      ~recurrence:(Cron { expression = "0 9 31 2 *"; timezone = "UTC" })
-      ()
-  with
-  | Ok _ -> fail "expected impossible cron date rejection"
-  | Error msg ->
-    check string "cron error" "recurrence.cron has no possible calendar date" msg
+  List.iter
+    (fun dow ->
+      let expression = "0 9 31 2 " ^ dow in
+      match
+        create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+          ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+          ~payload:(payload_json ()) ~source:Operator_request
+          ~recurrence:(Cron { expression; timezone = "UTC" }) ()
+      with
+      | Ok _ -> failf "expected impossible cron date rejection: %s" expression
+      | Error msg ->
+        check string "cron error" "recurrence.cron has no possible calendar date" msg)
+    [ "*"; "*/1"; "*/2"; "*,1" ]
 ;;
 
 let test_schedule_roundtrip () =
@@ -445,6 +466,8 @@ let () =
             test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
           test_case "cron step admission and next due" `Quick
             test_cron_step_admission_and_actual_next_due;
+          test_case "cron day wildcards preserve selected values" `Quick
+            test_cron_day_wildcards_preserve_selected_values;
           test_case "cron recurrence rejects invalid expression" `Quick
             test_cron_recurrence_rejects_invalid_expression;
           test_case "cron recurrence finds occurrence beyond five years" `Quick

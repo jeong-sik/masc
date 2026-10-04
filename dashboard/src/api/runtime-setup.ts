@@ -1,6 +1,6 @@
 import { postControlPlane } from './core'
 import { isRecord } from '../lib/type-guards'
-export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string; credential_kind?: string }
+export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string; credential_kind?: string; enabled?: boolean }
 export interface Source { integration_id: string; endpoint?: string; api_key?: string; account_ref?: string }
 export interface Model { id: string; label: string; context: number | null; tools: boolean | null; source?: string
   supported_reasoning_efforts?: string[]; default_reasoning_effort?: string }

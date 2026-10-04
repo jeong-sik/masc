@@ -4,122 +4,37 @@ type row =
   ; api_name : string option
   ; reasoning_effort : string option
   ; temperature : string option
+  ; context : (string * int) option
+  ; model_context : int option
   ; max_tokens : int option
   }
 
 let models_table = Runtime_toml_namespace.(key Models)
 
-(* Section headers are [a.b] or [a."b with dots"]. The quoted form exists
-   because model names carry dots (glm-5.2), which would otherwise split the
-   path. Strip the quotes here so the two tables key on the same string. *)
-let unquote s =
-  let n = String.length s in
-  if n >= 2 && s.[0] = '"' && s.[n - 1] = '"' then String.sub s 1 (n - 2) else s
-
-let section_of_line line =
-  let trimmed = String.trim line in
-  let n = String.length trimmed in
-  if n < 2 || trimmed.[0] <> '[' || trimmed.[n - 1] <> ']'
-  then None
-  else (
-    let inner = String.sub trimmed 1 (n - 2) in
-    (* A double-bracket [[x]] leaves a stray bracket after the strip. Those
-       are array-of-table entries and never name a binding. *)
-    if String.length inner > 0 && (inner.[0] = '[' || inner.[String.length inner - 1] = ']')
-    then None
-    else (
-      match String.index_opt inner '.' with
-      | None -> None
-      | Some i ->
-        let head = String.sub inner 0 i in
-        let tail = String.sub inner (i + 1) (String.length inner - i - 1) in
-        (* Only the first dot separates the table from the name: a quoted
-           name may hold more. Reject a tail that opens a sub-table
-           ([models.x.capabilities]) by checking for an unquoted dot. *)
-        if (not (String.length tail > 0 && tail.[0] = '"')) && String.contains tail '.'
-        then None
-        else Some (head, unquote tail)))
-
-let key_value line =
-  match String.index_opt line '=' with
-  | None -> None
-  | Some i ->
-    let k = String.trim (String.sub line 0 i) in
-    let v = String.trim (String.sub line (i + 1) (String.length line - i - 1)) in
-    if String.length k = 0 || String.length v = 0 then None else Some (k, unquote v)
-
-let is_comment line =
-  let t = String.trim line in
-  String.length t > 0 && t.[0] = '#'
-
-(* Two passes over the same lines rather than one pass with a pending state:
-   [models.X] can appear after [ollama_cloud.X], and a single pass would have
-   to buffer either way. *)
-let collect lines ~table_is_models =
-  let acc = Hashtbl.create 64 in
-  let current = ref None in
-  List.iter
-    (fun line ->
-      match section_of_line line with
-      | Some (head, name) ->
-        let matches =
-          if table_is_models
-          then String.equal head models_table
-          else not (String.equal head models_table)
-        in
-        if matches
-        then (
-          current := Some (head, name);
-          (* Register on the header, not on the first key. A section with no
-             keys still exists -- [ollama_cloud.minimax-m3] shipped as a bare
-             header -- and waiting for a key would drop its binding from the
-             table entirely. *)
-          if not (Hashtbl.mem acc name) then Hashtbl.replace acc name (head, []))
-        else current := None
-      | None ->
-        if not (is_comment line)
-        then (
-          match !current, key_value line with
-          | Some (_, name), Some (k, v) ->
-            let head, fields = try Hashtbl.find acc name with Not_found -> ("", []) in
-            Hashtbl.replace acc name (head, (k, v) :: fields)
-          | _ -> ()))
-    lines;
-  acc
-
-let int_of_value v = int_of_string_opt (String.trim v)
-
 let parse lines =
-  let models = collect lines ~table_is_models:true in
-  let bindings = collect lines ~table_is_models:false in
-  (* A [PROVIDER.NAME] section is a model binding only when [models.NAME]
-     declares the model too. Sections like [providers.ollama] and
-     [voice.tts] share the two-part shape and would otherwise land in the
-     table. Pairing on the model table is structural, so a provider added
-     later needs no edit here -- a hardcoded name list would. *)
-  let rows =
-    Hashtbl.fold
-      (fun name (provider, fields) acc ->
-        match Hashtbl.find_opt models name with
-        | None -> acc
-        | Some (_, model_fields) ->
-          { model = name
-          ; provider
-          ; api_name = List.assoc_opt "api-name" model_fields
-          ; reasoning_effort = List.assoc_opt "reasoning-effort" model_fields
-          ; temperature = List.assoc_opt "temperature" model_fields
-          ; max_tokens = Option.bind (List.assoc_opt "max-tokens" fields) int_of_value
-          }
-          :: acc)
-      bindings
-      []
-  in
-  List.sort
-    (fun a b ->
-      match String.compare a.provider b.provider with
-      | 0 -> String.compare a.model b.model
-      | c -> c)
-    rows
+  let text = String.concat "\n" lines in
+  let ( let* ) = Result.bind in
+  let* config = Runtime_toml.parse_string text
+    |> Result.map_error (fun errors -> String.concat "; "
+      (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)) in
+  let rows = List.filter_map (fun (binding : Runtime_schema.binding) ->
+    match List.find_opt (fun (model : Runtime_schema.model_spec) ->
+      String.equal model.id binding.model_id) config.models,
+      Runtime_schema.provider_of_id config binding.provider_id with
+    | Some model, Some provider ->
+      let context = match binding.max_context, provider.max_context, model.max_context with
+        | Some n, _, _ -> Some ("binding", n)
+        | None, Some n, _ -> Some ("provider", n)
+        | None, None, Some n -> Some ("model", n)
+        | None, None, None -> None in
+      Some { model = model.id; provider = provider.id;
+        api_name = Some model.api_name;
+        reasoning_effort = Option.map Llm_provider.Reasoning_effort.to_string model.reasoning_effort;
+        temperature = Option.map (Printf.sprintf "%.17g") model.temperature;
+        max_tokens = binding.max_tokens; context; model_context = model.max_context }
+    | None, _ | _, None -> None) config.bindings in
+  Ok (List.sort (fun a b -> match String.compare a.provider b.provider with
+    | 0 -> String.compare a.model b.model | c -> c) rows)
 
 (* ASCII, not an em dash: padding counts bytes, and a multi-byte dash makes
    every column after it hang one cell short of where the header sits. *)
@@ -175,6 +90,8 @@ let detail_lines row =
       "%s  max-tokens=%s"
       (section row.provider row.model)
       (tokens_text row.max_tokens)
+  ; (match row.context with None -> "Context: undeclared; Runtime shows the resolved catalog value"
+     | Some (source, n) -> Printf.sprintf "Context: %d tokens (%s); model specification: %s" n source (tokens_text row.model_context))
   ; "- means that key is absent; add or edit it in the section shown above."
   ]
 
@@ -211,9 +128,10 @@ let provider_width_of rows =
    it in runtime.toml. Measuring from the same text the row draws keeps the
    fit decision and the drawing honest with each other. *)
 let model_text r =
-  match r.api_name with
+  let name = match r.api_name with
   | Some api when not (String.equal api r.model) -> r.model ^ " (" ^ api ^ ")"
-  | Some _ | None -> r.model
+  | Some _ | None -> r.model in
+  name ^ (match r.context with None -> "" | Some (_, n) -> Printf.sprintf " [%d ctx]" n)
 
 (* The cells one complete row spends: every mandatory reading at its own
    measured width plus the gutters between. The header reserves fixed widths
@@ -332,3 +250,8 @@ let render ~width ?pane rows =
     (match pane with
      | Some pane when not (fits ~width:pane rows) -> stacked_lines ~pane rows
      | _ -> header :: List.map line rows)
+
+let find_runtime ~runtime_id rows =
+  List.find_mapi (fun index (row : row) ->
+    if String.equal (row.provider ^ "." ^ row.model) runtime_id
+    then Some (index, row) else None) rows

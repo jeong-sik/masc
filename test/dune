@@ -1,4 +1,5 @@
 (include stanzas/test_tui_usage_studio_pty.inc)
+(include stanzas/test_tui_runtime_status_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
 
 (test
@@ -472,6 +473,7 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_metrics_rotation
+  test_keeper_metrics_storage
   test_tool_error
   test_tool_token
   test_keeper_unified_claim_progress
@@ -831,6 +833,7 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_metrics_rotation
+  test_keeper_metrics_storage
   test_tool_error
   test_tool_token
   test_keeper_unified_claim_progress
@@ -2774,6 +2777,9 @@
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)
+
+(include stanzas/test_provider_usage_history_snapshots.inc)
+(include stanzas/test_provider_usage_snapshots.inc)
 
 (include stanzas/test_runtime_resolved_fleet.inc)
 
@@ -7020,7 +7026,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries astring yojson masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)
@@ -8060,7 +8066,7 @@
  (name test_runtime_setup_spec)
  (modules test_runtime_setup_spec)
  (libraries alcotest yojson masc.runtime)
- (deps fixtures/runtime-setup-spec-parity.json))
+ (deps fixtures/runtime-setup-specs.json))
 (test
  (name test_runtime_setup_batch)
  (modules test_runtime_setup_batch)
@@ -8137,7 +8143,9 @@
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
  (deps ../addons/fusion_judge.py ../addons/fusion_sampling.py ../addons/protocol.py ../addons/output-statistics/server.py
-       ../addons/msx-observer/server.py ../addons/tests/test_packages.py
+       ../addons/msx-observer/server.py ../addons/wkbl-score-runs/server.py
+       ../addons/wkbl-score-runs/fixtures/046-01-48-X2.json
+       ../addons/tests/test_packages.py
        ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
        ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)
@@ -8467,6 +8475,18 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_account_login_pty)))
+
+(rule
+ (alias runtest-test_tui_account_activation_pty)
+ (deps
+  test_tui_account_activation_pty.py
+  tui_keyboard_harness.py
+  tui_keyboard_runtime.py
+  ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_account_activation_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_account_activation_pty)))
 
 (rule
  (alias runtest-test_tui_emblem_screen_pty)
@@ -9312,7 +9332,7 @@
 (test
  (name test_tui_runtime_config_edit)
  (modules test_tui_runtime_config_edit)
- (libraries masc_tui_runtime_config_edit alcotest))
+ (libraries masc_tui_runtime_config_edit masc_tui_types alcotest))
 
 (rule
  (alias runtest-test_tui_runtime_config_draft_pty)
@@ -9323,3 +9343,27 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_runtime_config_draft_pty)))
+
+(test
+ (name test_tui_model_form)
+ (modules test_tui_model_form)
+ (libraries alcotest masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
+
+(include stanzas/test_tui_context_catalog_scope.inc)
+
+(test
+ (name test_tui_runtime_evidence)
+ (modules test_tui_runtime_evidence)
+ (libraries alcotest masc_tui_runtime_evidence))
+
+(rule
+ (alias runtest-test_tui_runtime_evidence_pty)
+ (deps test_tui_runtime_evidence_pty.py tui_keyboard_harness.py tui_keyboard_runtime.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_runtime_evidence_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_runtime_evidence_pty)))
+
+(include stanzas/test_goal_drop_delivery.inc)
+
+(include stanzas/test_goal_notification_contract.inc)

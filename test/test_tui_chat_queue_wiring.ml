@@ -908,9 +908,15 @@ let test_new_input_preserves_running_output () =
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 4) Live.Run_finished;
     Tui_types.settle_turn_log state old;
     state.msg_inflight <- [queued];
-    assert_old ();
+    (* RFC-0412 §2.1: settling is a replace, not an append. The live view
+       with its running output is replaced by the settled turn's reply row,
+       so the text the operator reads changes here by contract. *)
+    let settled_screen = screen () in
+    check bool "settling replaces the running output with the reply" true
+      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen
+       && not (Astring.String.is_infix ~affix:"OLD_RUNNING_TEXT" settled_screen));
     check bool "complete older batch log stays authoritative" true
-      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" (screen ()));
+      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen);
     state.keeper_turns <-
       [{Tui_decode.ktr_chat_control_token=None; ktr_keeper_name="alpha";
         ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=1.;
@@ -1884,15 +1890,22 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         let frame, _ = Masc_tui_render_chat.render_keeper_message state in
         String.concat "\n" frame.Masc_tui_frame_presenter.lines
       in
-      let check_output stage =
+      let start_clock = Masc_tui_render_chat.keeper_message_clock 42. in
+      let running_span = start_clock ^ "→" in
+      let settled_span =
+        running_span ^ Masc_tui_render_chat.keeper_message_clock 49.
+      in
+      let check_output stage span =
         let screen = frame () in
         List.iter (fun marker -> check int (stage ^ ": " ^ marker) 1
           (count marker screen))
           ["PROMOTED_QUESTION"; "EARLY_ANSWER"; "LATER_ANSWER"];
         check bool (stage ^ ": tool remains visible") true
-          (count "read_file" screen > 0)
+          (count "read_file" screen > 0);
+        check int (stage ^ ": one request span") 1 (count running_span screen);
+        check int (stage ^ ": transcript timing") 1 (count span screen)
       in
-      check_output "still running";
+      check_output "still running" running_span;
       (* A run that finished records its reply first (KEEPER_REPLY_DETAILS),
          and the record is the last stretch of the attempt -- here the text
          after the tool round. A finish with no reply is how a cancelled
@@ -1907,7 +1920,7 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         terminal;
       Tui_types.settle_turn_log state entry;
       state.msg_inflight <- [];
-      check_output "settled";
+      check_output "settled" settled_span;
       (* A durable page overlaps already streamed text. The frame must keep
          each source once, including after cancellation or a failed run. *)
       let replay : Masc.Keeper_chat_event_log.journaled_event list =
@@ -1916,7 +1929,16 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
-      check_output "overlapping replay")
+      check_output "overlapping replay" settled_span;
+      (* A fresh history-only view has no transcript timing authority. *)
+      state.msg_live <- None;
+      state.msg_settled_logs <- [];
+      state.msg_history <-
+        state.msg_history @
+        [chat_entry ~request_id:entry.sent_request.request_id
+           ~role:Tui_types.Message_keeper ~text:"DURABLE_REPLY" ~at:49. ()];
+      check int "durable history does not invent a running span" 0
+        (count running_span (frame ())))
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
 
@@ -2816,7 +2838,7 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
     let state = Tui_types.create_state ~workspace:"test" ~port:8935
         ~refresh_interval:2. () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_loaded_keeper <- Some "alpha";
     let occurrence : Live.tool_occurrence =
@@ -3988,7 +4010,7 @@ let test_fusion_workspace_withdrawal () =
   state.fusion_historical_inflight <- Some (generation, reference);
   Tui_types.withdraw_fusion_workspace state;
   check bool "B has no retained A snapshot" true
-    (Tui_types.fusion_snapshot state = None);
+    (Option.is_none (Masc_tui_fetched.current state.fusion_runs));
   check bool "both detail owners are released" true
     (state.fusion_detail_inflight = None && state.fusion_historical_inflight = None);
   check bool "held detail answers lose their generation" true
@@ -3999,7 +4021,7 @@ let test_fusion_workspace_withdrawal () =
     (F.is_current ~equal:Unit.equal state.fusion_runs b);
   state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs b (Error "B failed");
   check bool "failed B refresh cannot retain A data" true
-    (Tui_types.fusion_runs_view state = F.Failed "B failed");
+    (Masc_tui_fusion_model.fusion_runs_view state = F.Failed "B failed");
   Tui_types.withdraw_fusion_workspace state;
   state.fusion_mode <- Tui_types.Fusion_detail "same-run";
   check bool "returning to the same A run does not revive old detail generation" true
@@ -4010,7 +4032,9 @@ let test_fusion_workspace_withdrawal () =
     (F.is_current ~equal:Unit.equal state.fusion_runs current);
   state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs current (Ok snapshot);
   check bool "a new authoritative A read is accepted" true
-    (Tui_types.fusion_snapshot state = Some snapshot)
+    (match Masc_tui_fetched.current state.fusion_runs with
+     | Some (_, F.Ready data) -> data = snapshot
+     | _ -> false)
 
 let test_status_details_and_fold_counts_reach_the_frame () =
   let cache = Masc_tui_ansi.terminal_size_cache in

@@ -94,8 +94,7 @@ def denied_tools(spec: dict) -> list[str]:
     return denied
 
 # The endpoint's remote_root: a directory per keeper, owned by the task image's
-# user whose commands run there (driver/endpoint_account.sh BENCH_REMOTE_ROOT,
-# compared in tests/test_endpoint_account.py).
+# user whose commands run there (driver/endpoint_account.sh BENCH_REMOTE_ROOT).
 REMOTE_ROOT = "/opt/masc-bench/remote"
 
 # Canonical bench keeper instructions. Rendered into every keeper profile TOML

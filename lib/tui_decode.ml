@@ -5498,6 +5498,159 @@ type lane_run_answer_source =
       ; endpoint : string
       }
 
+type librarian_preflight_status =
+  | Preflight_awaiting
+  | Preflight_not_called of string
+  | Preflight_failed of string
+  | Preflight_invalid of string
+  | Preflight_judged of
+      Typesafeai_librarian_preflight.decision Typesafeai_types.decoded_choice
+type librarian_generation_path = Generation_not_entered | Generation_full_lane | Generation_jev_no_change
+type librarian_preflight_reading =
+  { lp_status : librarian_preflight_status
+  ; lp_generation_path : librarian_generation_path
+  ; lp_full_llm_skipped : bool
+  ; lp_elapsed_s : float option
+  ; lp_model : string option
+  ; lp_domain_rejection : string option
+  }
+
+(* Decode the retained observation with the same alternatives emitted by
+   [Typesafeai_client] and [Typesafeai_librarian_preflight.to_yojson]. A received
+   answer is evidence only when its destination, request and failed predecessors
+   are present as well. *)
+let decode_librarian_preflight_attempt json =
+  let* destination = decode_standalone_lane_jev_destination json in
+  let* refusal = required_member json "refusal" in
+  let* kind = required_string_field refusal "kind" in
+  let* detail = required_string_field refusal "detail" in
+  let* refusal = match kind with
+    | "transport" -> Ok (Typesafeai_client.Transport_failure detail)
+    | "http_response" ->
+      let* status = required_int_field refusal "status" in
+      let* destination_uri = required_string_field refusal "destination_uri" in
+      let* () = if String.equal destination_uri destination.sljd_destination_uri
+        then Ok () else Error "preflight HTTP refusal destination differs from attempted destination" in
+      let* body = required_member refusal "body" in
+      let* body = match body with
+        | `String body -> Ok body
+        | `Assoc _ ->
+          let* encoding = required_string_field body "encoding" in
+          let* content = required_string_field body "content" in
+          let* total_bytes = required_int_field body "total_bytes" in
+          (match encoding, Base64.decode content with
+           | "base64", Ok decoded when String.length decoded = total_bytes -> Ok decoded
+           | _ -> Error "invalid encoded preflight refusal body")
+        | _ -> Error "preflight refusal body must be text or encoded bytes" in
+      Ok (Typesafeai_client.Http_response_failure {status; destination_uri; body; detail})
+    | _ -> Error ("unknown preflight refusal kind " ^ kind) in
+  Ok {Typesafeai_client.destination_uri = destination.sljd_destination_uri;
+      model = destination.sljd_model; refusal}
+
+let decode_librarian_preflight_failure json =
+  let* kind = required_string_field json "kind" in
+  let* attempts = required_list_field json "attempts" in
+  let* attempts = decode_list "attempts" decode_librarian_preflight_attempt attempts in
+  match kind, attempts with
+  | "every_destination_refused", first_attempt :: later_attempts ->
+    Ok {Typesafeai_client.first_attempt; later_attempts}
+  | _ -> Error "preflight failure requires the nonempty refused destination history"
+
+let preflight_fields_absent json fields =
+  match List.find_opt (fun field -> Option.is_some (Json_util.assoc_member_opt field json)) fields with
+  | None -> Ok ()
+  | Some field -> Error ("preflight status must not report " ^ field)
+
+let decode_librarian_preflight output =
+  let ( let+ ) result f = Result.map f result in
+  match Json_util.assoc_member_opt "jev_preflight" output with
+  | None ->
+    let* () = preflight_fields_absent output
+      ["generation_path"; "full_llm_skipped"; "preflight_domain_rejection"] in
+    Ok None
+  | Some preflight ->
+    let* status = required_string_field preflight "status" in
+    let* lp_status = match status with
+      | "awaiting_answer" -> Ok Preflight_awaiting
+      | "skipped" | "ineligible" | "question_unavailable" ->
+        let+ reason = required_string_field preflight "reason" in Preflight_not_called reason
+      | "failed" ->
+        let* failure = required_member preflight "failure" in
+        let+ decoded = decode_librarian_preflight_failure failure in
+        Preflight_failed (Yojson.Safe.to_string (Typesafeai_client.failure_to_yojson decoded))
+      | "invalid_answer" ->
+        let+ reason = required_string_field preflight "reason" in Preflight_invalid reason
+      | "judged" ->
+        let* decision = required_member preflight "decision" in
+        let* confidence = required_member preflight "confidence" in
+        let* probabilities = required_member preflight "probabilities" in
+        let+ judgment = Typesafeai_librarian_preflight.decode_judgment
+          (`Assoc ["type", `String "choice"; "choice", decision;
+                   "confidence", confidence; "probabilities", probabilities]) in
+        Preflight_judged judgment
+      | _ -> Error ("unknown Librarian preflight status " ^ status)
+    in
+    let* path = required_string_field output "generation_path" in
+    let* lp_generation_path = match path with
+      | "not_entered" -> Ok Generation_not_entered
+      | "full_lane" -> Ok Generation_full_lane
+      | "jev_no_change" -> Ok Generation_jev_no_change
+      | _ -> Error ("unknown Librarian generation path " ^ path)
+    in
+    let* lp_full_llm_skipped = required_bool_field output "full_llm_skipped" in
+    let* () = match lp_generation_path, lp_full_llm_skipped, lp_status with
+      | Generation_jev_no_change, true,
+        Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _} -> Ok ()
+      | Generation_not_entered, false, Preflight_awaiting -> Ok ()
+      | Generation_full_lane, false, Preflight_awaiting -> Error "awaiting preflight cannot enter generation"
+      | Generation_full_lane, false, _ -> Ok ()
+      | _ -> Error "Librarian preflight decision and generation path disagree"
+    in
+    let* lp_elapsed_s = required_nullable_float_field preflight "elapsed_s" in
+    let* () = match lp_status, lp_elapsed_s with
+      | (Preflight_awaiting | Preflight_not_called _), None -> Ok ()
+      | (Preflight_failed _ | Preflight_invalid _ | Preflight_judged _), Some elapsed
+        when Float.is_finite elapsed && elapsed >= 0. -> Ok ()
+      | _ -> Error "preflight elapsed time must match the observation status and be finite and nonnegative" in
+    let* lp_model = match lp_status with
+      | Preflight_judged _ | Preflight_invalid _ ->
+        let* model = required_string_field preflight "model" in
+        let* destination = required_member preflight "destination" in
+        let* _ = decode_standalone_lane_jev_destination destination in
+        let* hash = required_string_field preflight "request_body_sha256" in
+        let* () =
+          if String.length hash = 64
+             && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) hash
+          then Ok () else Error "preflight request hash must be a SHA-256 hex digest" in
+        let* passed_over = required_list_field preflight "passed_over" in
+        let* _ = decode_list "passed_over" decode_librarian_preflight_attempt passed_over in
+        let* () = preflight_fields_absent preflight
+          (match lp_status with
+           | Preflight_invalid _ -> ["failure"; "decision"; "confidence"; "probabilities"]
+           | _ -> ["failure"; "reason"]) in
+        Ok (Some model)
+      | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ ->
+        let* () = preflight_fields_absent preflight
+          (["model"; "destination"; "request_body_sha256"; "passed_over";
+            "decision"; "confidence"; "probabilities"]
+           @ (match lp_status with
+              | Preflight_awaiting -> ["reason"; "failure"]
+              | Preflight_not_called _ -> ["failure"]
+              | _ -> ["reason"])) in
+        Ok None in
+    let* lp_domain_rejection = required_nullable_nonblank_string_field output "preflight_domain_rejection" in
+    let* () = match lp_status, lp_generation_path, lp_domain_rejection with
+      | Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _},
+        Generation_full_lane, Some _ -> Ok ()
+      | Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _},
+        Generation_full_lane, None ->
+        Error "fallback to full lane on Keep_current requires domain rejection"
+      | _, _, Some _ ->
+        Error "domain rejection is only valid when Keep_current falls back to full lane"
+      | _ -> Ok ()
+    in
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection})
+
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
@@ -5514,6 +5667,7 @@ type lane_run_detail =
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
+  ; lrd_librarian_preflight : librarian_preflight_reading option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment
@@ -5624,6 +5778,39 @@ let decode_lane_run_detail json =
     | None | Some (Exact_lane_run_registry.Not_loaded
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
+  let* answer_succeeded =
+    match summary.lrs_status with
+    | Lane_run_succeeded -> Ok true
+    | (Lane_run_completion_persistence_failed
+      | Lane_run_completion_durability_unknown)
+      when summary.lrs_lane = Standalone_lane.Board_attention
+           || summary.lrs_lane = Standalone_lane.Librarian ->
+      (* The run's intended outcome, read with the same decoder as its
+         status. Only a run that meant to succeed, fail or be cancelled
+         reaches this record; any other word is a producer the reader does
+         not know, and says so. *)
+      let* intended = required_string_field run "intended_status" in
+      (match lane_run_status_of_string intended with
+       | Lane_run_succeeded -> Ok true
+       | Lane_run_cancelled | Lane_run_failed -> Ok false
+       | Lane_run_running | Lane_run_completion_persistence_failed
+       | Lane_run_completion_durability_unknown | Lane_run_approved
+       | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+       | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+       | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+       | Lane_run_commit_failed | Lane_run_raised
+       | Lane_run_other _ ->
+         Error (Printf.sprintf "unknown intended lane run status %S" intended))
+    | Lane_run_completion_persistence_failed
+    | Lane_run_completion_durability_unknown
+    | Lane_run_running | Lane_run_cancelled | Lane_run_failed
+    | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
+    | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
+    | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
+    | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
+    | Lane_run_other _ ->
+      Ok false
+  in
   let* lrd_answer_source =
     (* The answer-source rule below is about the Board-attention lane. *)
     let is_board_attention =
@@ -5636,38 +5823,6 @@ let decode_lane_run_detail json =
       | Standalone_lane.Verifier
       | Standalone_lane.Browser_stagehand ->
         false
-    in
-    let* answer_succeeded =
-      match summary.lrs_status with
-      | Lane_run_succeeded -> Ok true
-      | (Lane_run_completion_persistence_failed
-        | Lane_run_completion_durability_unknown)
-        when is_board_attention ->
-        (* The run's intended outcome, read with the same decoder as its
-           status. Only a run that meant to succeed, fail or be cancelled
-           reaches this record; any other word is a producer the reader does
-           not know, and says so. *)
-        let* intended = required_string_field run "intended_status" in
-        (match lane_run_status_of_string intended with
-         | Lane_run_succeeded -> Ok true
-         | Lane_run_cancelled | Lane_run_failed -> Ok false
-         | Lane_run_running | Lane_run_completion_persistence_failed
-         | Lane_run_completion_durability_unknown | Lane_run_approved
-         | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
-         | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
-         | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
-         | Lane_run_commit_failed | Lane_run_raised
-         | Lane_run_other _ ->
-           Error (Printf.sprintf "unknown intended lane run status %S" intended))
-      | Lane_run_completion_persistence_failed
-      | Lane_run_completion_durability_unknown
-      | Lane_run_running | Lane_run_cancelled | Lane_run_failed
-      | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
-      | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
-      | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
-      | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
-      | Lane_run_other _ ->
-        Ok false
     in
     match is_board_attention, answer_succeeded, lrd_output with
     | true, true, Some output ->
@@ -5700,6 +5855,22 @@ let decode_lane_run_detail json =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
   in
+  let* lrd_librarian_preflight = match summary.lrs_lane, lrd_output with
+    | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
+    | _, _ -> Ok None
+  in
+  let* () = match lrd_librarian_preflight, answer_succeeded with
+    | Some {lp_generation_path = Generation_not_entered; _}, true ->
+      Error "successful Librarian run cannot await preflight without entering generation"
+    | _, _ -> Ok () in
+  let* () = match lrd_librarian_preflight, answer_succeeded, summary.lrs_selected_slot with
+    | Some {lp_generation_path = Generation_full_lane; _}, true, None ->
+      Error "successful Librarian generation requires its selected slot"
+    | _, _, _ -> Ok () in
+  let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
+    | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
+      Error "run without generation must not have a selected generation slot"
+    | _, _ -> Ok () in
   let* lrd_decision =
     match summary.lrs_run_kind, summary.lrs_status, lrd_output with
     | Lane_run_goal_verification, Lane_run_running, _ -> Ok Lane_run_decision_pending
@@ -5752,6 +5923,7 @@ let decode_lane_run_detail json =
     ; lrd_input_availability
     ; lrd_output_availability
     ; lrd_output
+    ; lrd_librarian_preflight
     ; lrd_tool_evidence
     ; lrd_skill_evidence
     ; lrd_gate_judgment

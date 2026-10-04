@@ -200,6 +200,7 @@ type post = {
   post_kind: post_kind;
   meta_json: Yojson.Safe.t option;
   visibility: visibility;
+  audience: audience option; (* None means no recorded audience; never infer it on read. *)
   created_at: float;
   content_updated_at: float; (* Last title, body or author change. *)
   updated_at: float;   (* Last activity: vote, comment, edit *)

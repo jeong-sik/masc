@@ -803,7 +803,7 @@ describe('keeper tool telemetry fetchers', () => {
 })
 
 describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => {
-  it('accepts only the exact tokens emitted by the closed backend sum', () => {
+  it('accepts familiar categories and new canonical names', () => {
     const known = [
       'code_change',
       'fact',
@@ -819,8 +819,12 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
     }
     expect(parseMemoryOsFactCategory('  FACT ')).toBeNull()
     expect(parseMemoryOsFactCategory('Speculation')).toBeNull()
-    expect(parseMemoryOsFactCategory('ephemeral')).toBeNull()
+    expect(parseMemoryOsFactCategory('architecture_decision')).toEqual({ tag: 'custom', name: 'architecture_decision' })
+    expect(parseMemoryOsFactCategory('ephemeral')).toEqual({ tag: 'custom', name: 'ephemeral' })
     expect(parseMemoryOsFactCategory('')).toBeNull()
+    for (const malformed of ['_topic', 'topic_', 'two__words', 'topic-name', 'topic\n', '1topic']) {
+      expect(parseMemoryOsFactCategory(malformed)).toBeNull()
+    }
   })
 })
 
@@ -908,6 +912,30 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
     expect(first?.category).toEqual({ tag: 'constraint' })
 
     expect(second?.category).toEqual({ tag: 'fact' })
+  })
+
+  it('keeps distinct dynamic names including custom through the API', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.facts.items[0]!.category = 'custom'
+    payload.memory_os.facts.items[1]!.category = 'architecture_decision'
+    stubTurnRecords(payload)
+    const result = await fetchKeeperTurnRecords('keeper-alpha')
+    expect(result.memory_os.facts.items.map(fact => fact.category)).toEqual([
+      { tag: 'custom', name: 'custom' },
+      { tag: 'custom', name: 'architecture_decision' },
+    ])
+  })
+
+  it('rejects a delta whose dynamic category differs from its current fact', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.facts.items[0]!.category = 'architecture_decision'
+    payload.memory_os.change.added[0] = {
+      ...payload.memory_os.change.added[0]!, category: 'deployment_recovery',
+    }
+    stubTurnRecords(payload)
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
   })
 
   it('closes a reverse-ordered derived chain with the worklist projection', async () => {
@@ -1047,7 +1075,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
     )
   })
 
-  it.each(['Speculation', '  FACT '])(
+  it.each(['Speculation', '  FACT ', 'topic\n', 'two__words'])(
     'rejects non-canonical category token %s',
     async (category) => {
       const payload = turnRecordsPayload()
@@ -5129,6 +5157,21 @@ describe('fetchRuntimeProviders', () => {
 })
 
 describe('fetchRuntimeModelMetrics', () => {
+  it.each([
+    { input_tokens: 1000, cache_read_tokens: 900, sample_count: 1 },
+    null,
+    { input_tokens: 0, cache_read_tokens: 0, sample_count: 1 },
+    { input_tokens: 1000, cache_read_tokens: 1001, sample_count: 1 },
+  ])('decodes paired cache evidence independently of totals: %j', async (paired) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      models: [{ model_id: 'paired', total_input_tokens: 2000, total_cache_read_tokens: 950, cached_input: paired }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const result = await fetchRuntimeModelMetrics()
+    expect(result.models[0]?.total_input_tokens).toBe(2000)
+    expect(result.models[0]?.total_cache_read_tokens).toBe(950)
+    expect(result.models[0]?.cached_input).toEqual(paired?.input_tokens === 1000 && paired.cache_read_tokens === 900 ? paired : null)
+  })
+
   it('preserves null telemetry fields instead of coercing them to zero', async () => {
     const rawResponse = {
       window_minutes: 30,

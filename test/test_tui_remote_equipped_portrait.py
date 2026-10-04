@@ -15,26 +15,16 @@ import threading
 import time
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
 from test_tui_emblem_screen_pty import rgba_png
 
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_metrics_tail.ml",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render.ml",
-    "lib/keeper_portrait/keeper_portrait_equipment.ml",
-    "lib/tui_decode.ml",
-    "lib/server/server_dashboard_http_keeper_portrait.ml",
-    "test/test_keeper_portrait_http.ml",
-)
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 KITTY_CHUNK = re.compile(rb"\x1b_G([^;]*);([^\x1b]*)\x1b\\")
 PORTRAIT_ID = b"42"
-KITTY_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
+KITTY_REPLIES = b"\x1b[6;20;10t" + _keyboard_chat.GRAPHICS_SUPPORTED_REPLY
 INFO_TAB = "▸Info".encode()
 WAIT_SECONDS = 10.0  # Test failure deadline, not a product refresh interval.
 REFRESH_APPLIED = b"fresh-roster-applied"
@@ -64,7 +54,7 @@ def wait_for_picture(process, fd, output, *, start: int, expected: bytes) -> byt
     wanted = rgba_png(expected)
     deadline = time.monotonic() + WAIT_SECONDS
     while True:
-        h.read_available(fd, output)
+        _keyboard_harness.read_available(fd, output)
         images = portrait_pngs(bytes(output[start:]))
         for image in images:
             if rgba_png(image) == wanted:
@@ -109,7 +99,7 @@ class Roster:
             self.refresh_started.set()
             if not self.release_refresh.wait(timeout=30):
                 raise AssertionError("fresh roster fixture was never released")
-        return h.RawHttpResponse(status, body, content_type="application/json")
+        return _keyboard_harness.RawHttpResponse(status, body, content_type="application/json")
 
     def publish(self, phase):
         with self.lock:
@@ -145,10 +135,10 @@ class RemoteIdentity:
     def __call__(self):
         with self.lock:
             base = self.base
-        _, health = h.fleet_safety_fixture()
+        _, health = _keyboard_harness.fleet_safety_fixture()
         health["paths"] = {"effective_base_path": base,
                            "effective_masc_root": str(Path(base) / ".masc")}
-        return h.RawHttpResponse(200, json.dumps(health).encode(),
+        return _keyboard_harness.RawHttpResponse(200, json.dumps(health).encode(),
                                  content_type="application/json")
 
 
@@ -162,11 +152,11 @@ def remote_portrait(binary: str, evidence: Path) -> None:
     assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
     roster = Roster((evidence / "before-roster.json").read_bytes(),
                     (evidence / "equipped-roster.json").read_bytes())
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[ROSTER_PATH] = roster
-    requests: h.HttpRequests = []
+    requests: _keyboard_harness.HttpRequests = []
     boot_path = f"/api/v1/keepers/{keeper}/boot"
-    held_boot = h.GatedHttpResponse((409, {"error": "paused owner"}), hold_seconds=30.0)
+    held_boot = _keyboard_harness.GatedHttpResponse((409, {"error": "paused owner"}), hold_seconds=30.0)
     boot_armed = threading.Event()
     fixtures[boot_path] = lambda: held_boot() if boot_armed.is_set() else (200, {"ok": True})
     directive_path = f"/api/v1/keepers/{keeper}/directive"
@@ -177,7 +167,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
     remote_base = str(evidence / "remote-server-workspace")
     remote_identity = RemoteIdentity(remote_base)
     for path in ("/health", "/health?full=1"):
-        _, health = h.fleet_safety_fixture()
+        _, health = _keyboard_harness.fleet_safety_fixture()
         health["paths"] = {
             "effective_base_path": remote_base,
             "effective_masc_root": str(Path(remote_base) / ".masc"),
@@ -188,8 +178,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
 
     def interact(process, fd, _slave, output, local_base):
         def screen_is(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
-                lambda: predicate(h.screen_text(bytes(output))), timeout=WAIT_SECONDS), label
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(_keyboard_harness.screen_text(bytes(output))), timeout=WAIT_SECONDS), label
 
         try:
             assert Path(local_base).resolve() != Path(remote_base).resolve()
@@ -198,14 +188,14 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # The footer reserves its conflict notice; require the running
             # TUI's typed mismatch and its canonical local workspace there.
             mismatch = b"MISMATCH local " + str(Path(local_base).resolve()).encode()
-            h.wait_for_output(process, fd, output, mismatch, start=0,
+            _keyboard_harness.wait_for_output(process, fd, output, mismatch, start=0,
                               timeout=WAIT_SECONDS)
-            mismatch_footer = next(line for line in h.screen_text(bytes(output)).splitlines()
+            mismatch_footer = next(line for line in _keyboard_harness.screen_text(bytes(output)).splitlines()
                                    if mismatch in line).decode(errors="replace")
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, keeper.encode())
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, keeper.encode())
             start = len(output)
-            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
             first = wait_for_picture(process, fd, output, start=start, expected=before)
             (evidence / "tui-before.png").write_bytes(first)
 
@@ -223,22 +213,22 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             marked_receipt = roster.hold_refresh(keeper)
             (evidence / "refreshed-roster-fixture.json").write_bytes(marked_receipt)
             os.write(fd, b"r")
-            assert h.wait_for_fixture_event(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output,
                 roster.refresh_started, timeout=WAIT_SECONDS), "fresh roster request missing"
-            assert REFRESH_APPLIED not in h.screen_text(bytes(output)), \
+            assert REFRESH_APPLIED not in _keyboard_harness.screen_text(bytes(output)), \
                 "held fresh roster was applied before release"
             roster.release_refresh.set()
 
             def fresh_roster_visible():
-                end = output.rfind(h.FRAME_END)
-                return end >= 0 and REFRESH_APPLIED in h.screen_text(
-                    bytes(output[:end + len(h.FRAME_END)]))
+                end = output.rfind(_keyboard_harness.FRAME_END)
+                return end >= 0 and REFRESH_APPLIED in _keyboard_harness.screen_text(
+                    bytes(output[:end + len(_keyboard_harness.FRAME_END)]))
 
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 fresh_roster_visible, timeout=WAIT_SECONDS), \
                 "fresh roster was not applied to the client-visible Current failure field"
             start = len(output)
-            h.resize_and_wait(process, fd, output, rows=30, columns=99, needle=b"Identity")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=99, needle=b"Identity")
             stable = wait_for_picture(process, fd, output, start=start, expected=equipped)
             (evidence / "tui-refreshed.png").write_bytes(stable)
             assert all(rgba_png(image) == rgba_png(equipped)
@@ -249,13 +239,13 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             roster.publish("missing-identity")
             calls = roster.count()
             os.write(fd, b"r")
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: roster.count() > calls, timeout=WAIT_SECONDS)
-            h.resize_and_wait(process, fd, output, rows=70, columns=99, needle=b"Metadata:")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=99, needle=b"Metadata:")
             screen_is(lambda text: b"Metadata:" in text and b"trace_id" in text
                       and b"metrics not read for the remote workspace" in text,
                       "unavailable identity and remote metrics were not visible")
-            h.send_and_wait(process, fd, output, b"p", f"{keeper} boot accepted".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"p", f"{keeper} boot accepted".encode())
             assert [json.loads(body) for path, body in requests if path == boot_path] == [{}]
             assert not (Path(local_base) / ".masc/keepers" / f"{keeper}.json").exists()
 
@@ -265,11 +255,11 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             os.write(fd, b"r")
             screen_is(lambda text: b"invalid-remote-keeper-metadata" in text,
                       "invalid remote Keeper was dropped from navigation")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, keeper.encode())
-            h.send_and_wait(process, fd, output, b"x", f"press x again to delete {keeper}".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, keeper.encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"x", f"press x again to delete {keeper}".encode())
             assert not any(path == "/api/v1/dashboard/agents/purge" for path, _ in requests)
-            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
 
             roster.publish("failed")
             os.write(fd, b"r")
@@ -281,22 +271,22 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                       and b"not loaded" not in text, "empty remote roster was not observed")
             roster.publish("equipped")
             os.write(fd, b"r")
-            h.select_keeper_row(process, fd, output, keeper.encode())
+            _keyboard_harness.select_keeper_row(process, fd, output, keeper.encode())
             start = len(output)
-            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
             recovered = wait_for_picture(process, fd, output, start=start, expected=equipped)
             (evidence / "tui-recovered.png").write_bytes(recovered)
-            h.send_and_wait(process, fd, output, b"c", b"Chat requires a matching workspace")
+            _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Chat requires a matching workspace")
 
             # Hold an already-dispatched Boot's paused-owner response across
             # the boundary. The remaining Resume/Boot plan belongs to its
             # original workspace, even though C names the same Keeper.
             # Keep the exact authority path in the footer for this boundary
             # proof; the earlier 99-column portrait pixel checks stay intact.
-            h.resize_and_wait(process, fd, output, rows=70, columns=300, needle=b"Identity")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=300, needle=b"Identity")
             boot_armed.set()
             os.write(fd, b"p")
-            assert h.wait_for_fixture_event(process, fd, output, held_boot.requested,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held_boot.requested,
                 timeout=WAIT_SECONDS), "the lifecycle response was not held"
             c_payload = json.loads(roster.snapshots["equipped"][1])
             c_payload["keepers"][0]["runtime_blocker_summary"] = "authority-c-current-roster"
@@ -310,8 +300,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                       "C authority did not withdraw B's detail selection")
             # Row withdrawal returns the old detail to the list. Select C's
             # actual row and reopen Info, where Current failure is rendered.
-            h.select_keeper_row(process, fd, output, keeper.encode())
-            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            _keyboard_harness.select_keeper_row(process, fd, output, keeper.encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
             screen_is(lambda text: b"authority-c-current-roster" in text,
                       "C roster was not applied while B Boot was held")
             lifecycle_offset = len(requests)
@@ -329,13 +319,13 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # The automatic refresh (no cancelling input) changes authority
             # while Delete is armed. The same name in the new workspace
             # requires a fresh first press, never the old confirmation.
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             armed = f"press x again to delete {keeper}".encode()
-            h.send_and_wait(process, fd, output, b"x", armed)
+            _keyboard_harness.send_and_wait(process, fd, output, b"x", armed)
             remote_identity.publish(str(evidence / "third-remote-workspace"))
             screen_is(lambda text: armed not in text, "delete arm crossed remote workspace identity")
-            h.select_keeper_row(process, fd, output, keeper.encode())
-            h.send_and_wait(process, fd, output, b"x", armed)
+            _keyboard_harness.select_keeper_row(process, fd, output, keeper.encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"x", armed)
             assert not any(path == "/api/v1/dashboard/agents/purge" for path, _ in requests), requests
             proof = {
                 "scope": "native purchase/equip HTTP receipts replayed through a remote-identity real TUI PTY",
@@ -368,7 +358,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             roster.release_refresh.set()
             (evidence / "tui.pty").write_bytes(output)
 
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="remote Keeper equipment changes actual terminal PNG pixels",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
         refresh=0.5, preload_input=KITTY_REPLIES)

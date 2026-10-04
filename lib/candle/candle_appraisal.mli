@@ -18,8 +18,12 @@ type error =
   | Invalid_response of string
   | Execution_rejected of string
       (** A typed request, authentication or configuration refusal prevents
-          the declared executions from serving this request. Keep the obligation pending and await a
-          change event instead of replaying the same appraisal on a pulse. *)
+          the declared executions from serving this request -- whether the
+          refusal came from the declared execution itself (an HTTP refusal
+          of the request) or from local admission. Keep the obligation
+          pending and await a change event instead of replaying the same
+          appraisal on a pulse. An unusable model *output* is
+          [Invalid_response], not this variant. *)
 type runner = identity:identity -> request -> (answer, error) result
 val stage : request -> string
 val input : request -> Yojson.Safe.t

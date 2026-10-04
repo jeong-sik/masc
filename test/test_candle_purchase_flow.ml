@@ -379,9 +379,11 @@ let test_explicit_prices_and_unpriced_items () =
       ; "\n[shop.prices_milli]\nunknown_item = 100\n"
       ; "\n[shop.prices_milli]\nbare_face = 100\n"
       ];
+    (* An empty [shop] table carries no price and breaks no rule: the policy
+       stays enabled and the purchase is refused as unpriced, not disabled. *)
     write_config config "\n[shop]\n";
     rejected "unpriced_item" (buy config "keeper-a" "glasses");
-    check string "empty optional shop leaves the ledger unchanged" original (bytes config);
+    check string "an empty shop table cannot mutate the ledger" original (bytes config);
     write_config config "\n[shop.prices_milli]\nglasses = 0\n";
     ignore (buy config "keeper-a" "glasses" |> succeeded);
     check

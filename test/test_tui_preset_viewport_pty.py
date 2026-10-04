@@ -7,7 +7,7 @@ import threading
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_types.ml")
+
 DESCRIPTION = "DESCHEAD " + "한 preset description " * 14 + " DESCEND"
 DIRECTORY = "/fixture/presets/" + "deep-directory/" * 12 + "DIRECTORYEND"
 KEY = "prompt." + "long-key-" * 16 + "KEYEND"

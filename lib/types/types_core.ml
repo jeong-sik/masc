@@ -227,14 +227,33 @@ type task_status =
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
 
-(* Simple string representation for dashboard *)
-let task_status_to_string = function
-  | Todo -> "todo"
-  | Claimed _ -> "claimed"
-  | InProgress _ -> "in_progress"
-  | AwaitingVerification _ -> "awaiting_verification"
-  | Done _ -> "done"
-  | Cancelled _ -> "cancelled"
+(* The schema and parser share one generated vocabulary. Payload-bearing
+   statuses map to it exhaustively; neither boundary needs placeholder tasks. *)
+module Task_status_tag = struct
+  type t = Todo | Claimed | In_progress | Awaiting_verification | Done | Cancelled
+  [@@deriving enumerate]
+
+  let to_string = function
+    | Todo -> "todo"
+    | Claimed -> "claimed"
+    | In_progress -> "in_progress"
+    | Awaiting_verification -> "awaiting_verification"
+    | Done -> "done"
+    | Cancelled -> "cancelled"
+
+  let of_string value =
+    List.find_opt (fun tag -> String.equal (to_string tag) value) all
+end
+
+let task_status_tag = function
+  | Todo -> Task_status_tag.Todo
+  | Claimed _ -> Task_status_tag.Claimed
+  | InProgress _ -> Task_status_tag.In_progress
+  | AwaitingVerification _ -> Task_status_tag.Awaiting_verification
+  | Done _ -> Task_status_tag.Done
+  | Cancelled _ -> Task_status_tag.Cancelled
+
+let task_status_to_string status = Task_status_tag.to_string (task_status_tag status)
 
 let string_of_task_status = task_status_to_string
 
@@ -314,107 +333,58 @@ let task_status_is_done = function
   | Done _ -> true
   | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false
 
-(** Issue #8354 + 2026-05-27 follow-up: schema enums for [task_status]
-    used to be hand-rolled in [tool_shard.ml] and [mcp_server.ml],
-    dropping [awaiting_verification].  The first fix introduced a
-    [witness] [function] inside [all_task_status_names] whose
-    exhaustiveness pinned *constructor coverage* but whose return
-    [string list] was a separate literal — renaming an arm in
-    [task_status_to_string] (e.g. "in_progress" -> "running") would
-    not propagate to the published schema, leaving a silent
-    string-identity drift.
-
-    This version closes that gap by deriving the schema enum directly
-    from [task_status_to_string] over a witness list with placeholder
-    payloads.  [task_status] carries record payloads but the schema
-    cares only about the constructor tag, so zero-valued placeholder
-    fields are safe — only [task_status_to_string]'s constructor arm
-    is consulted.  Now both axes are guarded:
-
-    - Constructor coverage: adding a constructor breaks
-      [task_status_to_string]'s exhaustive [match] at compile time.
-    - String identity: schema enum is the actual function image, so
-      renames cannot desync.
-
-    The remaining hand-coded axis is the witness list itself.
-    [test_task_status_vocabulary] compares it against the arms of
-    [task_status_of_yojson], so a status one side knows and the other does
-    not fails there.
-
-    Order matches the FSM lifecycle (Todo -> Claimed -> InProgress ->
-    AwaitingVerification -> Done | Cancelled) for readable schema docs. *)
-let task_status_schema_witnesses : task_status list =
-  let placeholder = "" in
-  [ Todo
-  ; Claimed { assignee = placeholder; claimed_at = placeholder }
-  ; InProgress { assignee = placeholder; started_at = placeholder }
-  ; AwaitingVerification
-      { assignee = placeholder
-      ; started_at = placeholder
-      ; submitted_at = placeholder
-      ; verification_id = placeholder
-      }
-  ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
-  ; Cancelled
-      { cancelled_by = placeholder; cancelled_at = placeholder; reason = None }
-  ]
-
-let all_task_status_names : string list =
-  List.map task_status_to_string task_status_schema_witnesses
-
-let valid_task_status_strings = all_task_status_names
+let valid_task_status_strings =
+  List.map Task_status_tag.to_string Task_status_tag.all
 
 (* Manual yojson conversion for task_status (sum type with records) *)
-let task_status_to_yojson = function
-  | Todo -> `Assoc [("status", `String "todo")]
+let task_status_to_yojson status =
+  let fields = match status with
+  | Todo -> []
   | Claimed { assignee; claimed_at } ->
-      `Assoc [
-        ("status", `String "claimed");
+      [
         ("assignee", `String assignee);
         ("claimed_at", `String claimed_at);
       ]
   | InProgress { assignee; started_at } ->
-      `Assoc [
-        ("status", `String "in_progress");
+      [
         ("assignee", `String assignee);
         ("started_at", `String started_at);
       ]
   | Done { assignee; completed_at; notes } ->
-      `Assoc [
-        ("status", `String "done");
+      [
         ("assignee", `String assignee);
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
   | AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
-      `Assoc [
-        ("status", `String "awaiting_verification");
+      [
         ("assignee", `String assignee);
         ("started_at", `String started_at);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
       ]
   | Cancelled { cancelled_by; cancelled_at; reason } ->
-      `Assoc [
-        ("status", `String "cancelled");
+      [
         ("cancelled_by", `String cancelled_by);
         ("cancelled_at", `String cancelled_at);
         ("reason", Json_util.string_opt_to_json reason);
       ]
+  in
+  `Assoc (("status", `String (task_status_to_string status)) :: fields)
 
 let task_status_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
   try
-    match req "status" with
-    | "todo" -> Ok Todo
-    | "claimed" ->
+    match Task_status_tag.of_string (req "status") with
+    | Some Task_status_tag.Todo -> Ok Todo
+    | Some Task_status_tag.Claimed ->
         Ok (Claimed { assignee = req "assignee"; claimed_at = req "claimed_at" })
-    | "in_progress" ->
+    | Some Task_status_tag.In_progress ->
         Ok (InProgress { assignee = req "assignee"; started_at = req "started_at" })
-    | "done" ->
+    | Some Task_status_tag.Done ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
-    | "awaiting_verification" ->
+    | Some Task_status_tag.Awaiting_verification ->
         (* A submission has one meaning: completion. A row carrying another
            intent must not be silently reinterpreted on a direct server start
            that did not run the shell deployment preflight. *)
@@ -446,13 +416,13 @@ let task_status_of_yojson json =
                 (Printf.sprintf
                    "awaiting_verification started_at must be RFC 3339, got %S"
                    started_at)))
-    | "cancelled" ->
+    | Some Task_status_tag.Cancelled ->
         Ok (Cancelled
               { cancelled_by = req "cancelled_by"
               ; cancelled_at = req "cancelled_at"
               ; reason = opt "reason"
               })
-    | s -> Error ("Unknown task status: " ^ s)
+    | None -> Error ("Unknown task status: " ^ req "status")
   with e -> Error (Printexc.to_string e)
 
 (** Task execution links - tie task state to runtime evidence producers *)

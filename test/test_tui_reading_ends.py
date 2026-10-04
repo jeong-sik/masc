@@ -10,15 +10,10 @@ reach the dispatcher: nothing links the TUI executable.
 """
 import os
 import sys
-import test_tui_keyboard_input as h
 
-# Source inputs for the PR test selector. This scenario drives the real
-# dispatcher and rendered reading viewport through a PTY.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_scroll.ml",
-)
+import tui_keyboard_harness as h
+
+
 
 COMMENTS = 300
 

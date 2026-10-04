@@ -7,13 +7,15 @@ import os
 import sys
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+from tui_keyboard_context import context_inspector_fixtures
+import tui_keyboard_harness as h
+from tui_keyboard_memory import memory_facts_http_fixtures
 
 
 def fixtures():
-    result = h.memory_facts_http_fixtures()
+    result = memory_facts_http_fixtures()
     path = "/api/v1/keepers/alpha/turn-records?limit=50"
-    template = h.context_inspector_fixtures()[path][1]["entries"][0]["record"]
+    template = context_inspector_fixtures()[path][1]["entries"][0]["record"]
     entries = []
     for turn, (tokens, body, scope) in enumerate(
         [(10000, 1024, "per_request"), (0, 2048, "per_request"),

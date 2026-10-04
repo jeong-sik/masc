@@ -15,7 +15,7 @@ import time
 
 import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 STAMP = "2026-09-29T00:00:00Z"

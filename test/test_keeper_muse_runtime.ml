@@ -1161,7 +1161,7 @@ default = "reloaded.reloaded"
             system_prompt_override = Some "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT" }
       | _ -> fail "expected before_turn_params hook event") } in
   let run () = Eio.Switch.run (fun sw ->
-    match Keeper_turn_driver.run_named ~walk_owner:Keeper_turn_driver.One_shot_walk
+    match Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
       ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"
       ~system_prompt:"" ~hooks
       ~tools:[tool] ~agent_core_tools:[tool]

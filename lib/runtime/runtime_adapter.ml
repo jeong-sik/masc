@@ -410,6 +410,18 @@ let same_provider_kind left right =
   | (Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> false
 ;;
 
+let normalize_http_request_path ~kind ~base_url ~request_path =
+  match kind with
+  | Llm_provider.Provider_config.OpenAI_compat ->
+    normalize_openai_compat_request_path ~base_url ~request_path
+  | _ -> request_path
+
+let default_http_request_path ~kind ~base_url =
+  let request_path = match kind with
+    | Llm_provider.Provider_config.OpenAI_compat -> Masc_network_defaults.chat_completions_path
+    | _ -> Llm_provider.Provider_config.request_path_default_for_kind kind in
+  normalize_http_request_path ~kind ~base_url ~request_path
+
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
     ~base_url =
   (* The registry carries the catalog [providers] rows verbatim — including
@@ -433,8 +445,9 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
 
      Providers absent from the catalog keep the protocol default exactly as
      before: no catalog row means no separate surface to name. *)
-  let request_path =
-    match registry_entry with
+  let request_path = match provider.request_path with
+    | Some path -> path
+    | None -> match registry_entry with
     | Some entry
       when same_provider_kind
              entry.Llm_provider.Provider_registry.defaults.kind
@@ -453,10 +466,7 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
           | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
           | None -> Llm_provider.Provider_config.request_path_default_for_kind kind))
   in
-  match kind with
-  | Llm_provider.Provider_config.OpenAI_compat ->
-    normalize_openai_compat_request_path ~base_url ~request_path
-  | _ -> request_path
+  normalize_http_request_path ~kind ~base_url ~request_path
 ;;
 
 (* --- Model capability projection --- *)

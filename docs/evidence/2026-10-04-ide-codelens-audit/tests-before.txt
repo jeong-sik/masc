@@ -1,0 +1,31 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/audit-ide-codelens-label-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/ide/ide-lsp-client.test.ts -t 'renders CodeLens commands'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/audit-ide-codelens-label-20261004/dashboard
+
+ ❯ src/components/ide/ide-lsp-client.test.ts (44 tests | 1 failed | 43 skipped) 37ms
+   × renders CodeLens commands as information without an execution affordance 36ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 43 skipped (44)
+   Start at  03:22:48
+   Duration  964ms (transform 37%, environment 26%, setup 23%, import 9%, tests 4%, worker 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ide/ide-lsp-client.test.ts > renders CodeLens commands as information without an execution affordance
+AssertionError: expected 'pointer' not to be 'pointer' // Object.is equality
+ ❯ src/components/ide/ide-lsp-client.test.ts:617:48
+    615|     const label = view.dom.querySelector<HTMLElement>('.cm-codelens-ma…
+    616|     expect(label.textContent).toBe('Run tests')
+    617|     expect(getComputedStyle(label).cursor).not.toBe('pointer')
+       |                                                ^
+    618|     expect(label.title).toBe('읽기 전용 정보 · 실행할 수 없음')
+    619|     expect(label.tabIndex).toBe(-1)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

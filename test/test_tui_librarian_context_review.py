@@ -6,14 +6,15 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, cast
 import zlib
+from pathlib import Path
+from typing import Any, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
 TUI_SCENARIOS = {
     "faithful",
@@ -29,13 +30,13 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
     review = result["context_review"]
     write = result["context_write"]
     run_id = run["run_id"]
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-    fixtures[h.lane_runs_path("librarian_exact")] = (200, fixture["page"])
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (200, fixture["page"])
     reads: list[str] = []
 
-    def detail() -> h.HttpResponse:
+    def detail() -> _keyboard_harness.HttpResponse:
         reads.append(run_id)
         return 200, fixture["detail"]
 
@@ -48,21 +49,21 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
         output: bytearray,
         _base: str,
     ) -> None:
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process, fd, output, rows=42, columns=180, needle=b"MASC Dashboard"
         )
-        h.palette_go(process, fd, output, b"go lanes", b"Librarian")
-        h.send_and_wait(
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"Librarian")
+        _keyboard_harness.send_and_wait(
             process,
             fd,
             output,
             b"/Librarian",
             re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian"),
         )
-        h.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
-        h.send_and_wait(process, fd, output, b"\r", b"1 loaded / 1 retained")
-        h.send_and_wait(process, fd, output, b"\r", b"context_review")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"1 loaded / 1 retained")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"context_review")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         needles = [
             b'"context_review"',
             b'"context_write"',
@@ -75,16 +76,16 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
         if "response" in review:
             needles.append(review["response"]["model"].encode())
             needles.append(b'"request_body_sha256"')
-        seen = h.screen_text(bytes(output))
+        seen = _keyboard_harness.screen_text(bytes(output))
         for _ in range(len(json.dumps(result, indent=2).splitlines()) + 1):
             if all(needle in seen for needle in needles):
                 break
-            h.read_available(fd, output)
+            _keyboard_harness.read_available(fd, output)
             start = len(output)
             os.write(fd, b"j")
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
-            h.drain_until_quiet(process, fd, output)
-            seen += b"\n" + h.screen_text(bytes(output))
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            seen += b"\n" + _keyboard_harness.screen_text(bytes(output))
         for needle in needles:
             if needle not in seen:
                 raise AssertionError(f"{fixture['scenario']}: missing {needle!r}")
@@ -111,7 +112,7 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
         )
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Context review: " + fixture["scenario"],
         interact=interact,
@@ -120,7 +121,7 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    executable = h.tui_executable(sys.argv[1])
+    executable = _keyboard_harness.tui_executable(sys.argv[1])
     producer = str(Path(sys.argv[2]).resolve())
     test_dir = Path(__file__).resolve().parent
     env = os.environ.copy()
@@ -159,3 +160,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Exact helper inputs consumed by the PR test selector.
+SOURCE_MODULES = (
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_keepers.py",
+    "test/tui_keyboard_runtime.py",
+)

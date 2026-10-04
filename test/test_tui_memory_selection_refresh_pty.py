@@ -7,11 +7,12 @@ import json
 import os
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+from tui_keyboard_memory import memory_facts_http_fixtures
 
 
 def run(executable, baseline=False):
-    fixtures = h.memory_facts_http_fixtures()
+    fixtures = memory_facts_http_fixtures()
     health = fixtures["/api/v1/dashboard/keeper-memory-health"][1]
     beta = copy.deepcopy(health["keepers"][0])
     beta.update(keeper_id="beta", facts=1, observed_facts=1)

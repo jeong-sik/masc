@@ -17,7 +17,8 @@ import sys
 import threading
 import time
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_runtime as _keyboard_runtime
 
 
 
@@ -118,7 +119,7 @@ class ServerCopy:
                 self.text = json.loads(body)["source_text"]
                 return 200, commit_receipt()
             return 200, {
-                **h.runtime_config_read_metadata(),
+                **_keyboard_runtime.runtime_config_read_metadata(),
                 "path": "/workspace/config/runtime.toml",
                 "source_text": self.text,
             }
@@ -126,8 +127,8 @@ class ServerCopy:
 
 def run(executable: str) -> None:
     server = ServerCopy()
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[RAW_PATH] = h.RequestHttpResponse(server.raw)
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[RAW_PATH] = _keyboard_harness.RequestHttpResponse(server.raw)
     fixtures[PREVIEW_PATH] = (
         200,
         {"ok": True, "can_save": True, "validation": {"valid": True, "issues": []}},
@@ -135,11 +136,11 @@ def run(executable: str) -> None:
     requests: list[tuple[str, bytes]] = []
 
     def interact(process, fd, _slave_fd, output, _base_path) -> None:
-        h.tab_until(process, fd, output, b"MASC System")
-        h.wait_for_output(process, fd, output, b"codex_acct1", start=0, timeout=5.0)
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.wait_for_output(process, fd, output, b"codex_acct1", start=0, timeout=5.0)
 
-        h.send_and_wait(process, fd, output, b"a", b"codex_subscription_2")
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"codex_subscription_2")
+        screen = _keyboard_harness.screen_text(bytes(output))
         if b"Enter:next / save" not in screen:
             raise AssertionError(f"the form's footer is not drawn: {screen!r}")
 
@@ -147,13 +148,13 @@ def run(executable: str) -> None:
         server.append(MEANWHILE)
 
         # Provider, then id, then a home codex_acct1 already signs in at.
-        h.send_and_wait(process, fd, output, b"\r\r/tmp/codex-one", b"CODEX_HOME='/tmp/codex-one'")
-        h.send_and_wait(process, fd, output, b"\r", b"already signs in at /tmp/codex-one")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r\r/tmp/codex-one", b"CODEX_HOME='/tmp/codex-one'")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"already signs in at /tmp/codex-one")
         if any(path == RAW_PATH for path, _ in requests):
             raise AssertionError("a refused declaration was saved")
 
-        h.send_and_wait(process, fd, output, b"\x7f\x7f\x7fsecond", b"CODEX_HOME='/tmp/codex-second'")
-        h.send_and_wait(process, fd, output, b"\r", b"runtime.toml saved")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x7f\x7f\x7fsecond", b"CODEX_HOME='/tmp/codex-second'")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"runtime.toml saved")
         # The fixture server records a POST after answering it, so the screen
         # can say "saved" a moment before the save is in [requests].
         deadline = time.monotonic() + 5.0
@@ -179,20 +180,20 @@ def run(executable: str) -> None:
         # The form stays open on the command and names its copy key under
         # it: the save notice leads the footer, whose fitter keeps only the
         # way out. Then [y] copies the command whole.
-        h.wait_for_output(process, fd, output, b"  y:copy sign-in", start=0, timeout=5.0)
-        rows = h.screen_rows(bytes(output))
-        command_row = h.screen_row_of(rows, SIGN_IN)
-        key_row = h.screen_row_of(rows, b"y:copy sign-in")
+        _keyboard_harness.wait_for_output(process, fd, output, b"  y:copy sign-in", start=0, timeout=5.0)
+        rows = _keyboard_harness.screen_rows(bytes(output))
+        command_row = _keyboard_harness.screen_row_of(rows, SIGN_IN)
+        key_row = _keyboard_harness.screen_row_of(rows, b"y:copy sign-in")
         if not 0 <= command_row < key_row:
-            raise AssertionError(f"the copy key is not drawn under the command: {h.screen_text(bytes(output))!r}")
+            raise AssertionError(f"the copy key is not drawn under the command: {_keyboard_harness.screen_text(bytes(output))!r}")
         osc52 = b"\x1b]52;c;" + base64.b64encode(SIGN_IN) + b"\x07"
-        h.send_and_wait(process, fd, output, b"y", osc52)
+        _keyboard_harness.send_and_wait(process, fd, output, b"y", osc52)
         # Enter closes it. While it stood open [q] was ignored, so the runner's
         # quit below times out unless the form closed.
         os.write(fd, b"\r")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="The runtime.toml account form declares against the file at submit",
         interact=interact,

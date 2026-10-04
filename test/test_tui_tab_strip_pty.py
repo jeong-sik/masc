@@ -1,7 +1,8 @@
 """A tab strip keeps the entry it marks readable at the width it is given."""
 import os
 import sys
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 
 

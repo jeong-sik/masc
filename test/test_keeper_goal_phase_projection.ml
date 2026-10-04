@@ -58,7 +58,7 @@ let goal_in phase id title =
    holds the phase, not the work — so it survives alongside Executing. *)
 let seed_all_phases config =
   Goal_store.write_state config
-    { pending_events = []; version = 1
+    { pending_events = []; pending_notifications = []; version = 1
     ; updated_at = Masc_domain.now_iso ()
     ; goals =
         [ goal_in Goal_phase.Executing "goal-executing" "still work"
@@ -73,7 +73,7 @@ let seed_all_phases config =
    mistaken for an empty list produced some other way. *)
 let seed_terminal_phases_only config =
   Goal_store.write_state config
-    { pending_events = []; version = 1
+    { pending_events = []; pending_notifications = []; version = 1
     ; updated_at = Masc_domain.now_iso ()
     ; goals =
         [ goal_in Goal_phase.Completed "goal-completed" "already achieved"
@@ -265,7 +265,7 @@ let contains_in haystack needle =
 let test_no_goal_is_offered_as_work_to_pick_up () =
   with_workspace @@ fun config ->
   Goal_store.write_state config
-    { pending_events = []; version = 1
+    { pending_events = []; pending_notifications = []; version = 1
     ; updated_at = Masc_domain.now_iso ()
     ; goals =
         [ goal_in Goal_phase.Executing "goal-open" "nobody started this"
@@ -310,7 +310,7 @@ max-concurrent = 1
     target_value = Some "1";
     last_review_note = Some "Audio has not yet been played back." } in
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = Masc_domain.now_iso (); goals = [goal] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = Masc_domain.now_iso (); goals = [goal] };
   let meta = keeper_meta () in
   let check_criterion expected_metric expected_target expected_review absent_text () =
     let observation = Keeper_world_observation.observe
@@ -336,7 +336,7 @@ max-concurrent = 1
     "\"target_value\":\"1\"" "Audio has not yet been played back."
     "Provide an explicit measurable criterion." ();
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = Masc_domain.now_iso ();
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = Masc_domain.now_iso ();
       goals = [{ goal with metric = None; target_value = None;
         last_review_note = Some "Provide an explicit measurable criterion." }] };
   check_criterion "\"metric\":null" "\"target_value\":null"

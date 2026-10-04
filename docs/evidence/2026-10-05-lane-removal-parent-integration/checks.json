@@ -1,0 +1,29 @@
+{
+  "response_checkpoint": "1d1ddbe8314c22e930180eb4f4aa467a435d1c3f",
+  "parent": "45b9888ef761f5c532169bd67fef0396fb1329ec",
+  "native_closure_changed_paths": [],
+  "native_source_hashes_match_response": true,
+  "source_sha256": {
+    "bin/masc_tui_lane_addons.ml": "036ed12342271a452999850031652882c1932bedd110792121c8ada09973b391",
+    "bin/masc_tui_lane_addons.mli": "f005c972d81736e745d71f215937c78a71ea13ac671ec00e3f6cf804671f5a5b",
+    "test/test_tui_lane_addons.ml": "8d281d505b9c0ebd4516e35020cf24c81a20efd585fac4fb11970f42f8d9114a",
+    "dashboard/src/components/lane-addons-panel.ts": "6a1bbb5c7002bcd135f5c85669ee9e2f167e62516b95311f043ecbfceec3e186",
+    "dashboard/src/components/lane-addons-panel.test.ts": "c6b89031a05811ac2c6e5db26a14993da1bd7354b7012a1f3e0759820321cfad",
+    "dashboard/src/components/lane-addon-readings.ts": "3bcc2bf1fb853ecb24417047f95459ceaff01c1bf1600973c744079c0df6284a"
+  },
+  "results": {
+    "web_tests": 38,
+    "matched_files": 1,
+    "web_exit": 0,
+    "tsc_exit": 0,
+    "eslint_exit": 0,
+    "reused_native_tests": 17
+  },
+  "artifact_sha256": {
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/web.log": "aa16c1327fc7699054ebfcd5f5471577b9153c2cc9ded8322fd60b9d31cfe646",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/README.md": "8a068df2c70d729ce412f7f3faf66adf6745072bee005771c4b64dbf4cfadf97",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "scope": "Intermediate38-test source attestation; final Web source/results in renamed-owner-checks.json"
+}

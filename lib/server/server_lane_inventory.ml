@@ -78,8 +78,14 @@ let snapshot ~config =
           | Machine_lane.Dos -> machine_publication (Dos_lane.current_publication ())) in
     {id=Lane_id.to_wire (Lane_id.Builtin lane); label=Lane_manifest.label lane;
      purpose=Lane_manifest.purpose lane; selection; state}) in
-  let directory = Addon.configuration_directory config in
-  let declarations = Eio_unix.run_in_systhread (fun () -> Config.load ~directory) in
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
+  let directory = Filename.concat resolution.config_root.path "lane-addons" in
+  let declarations : Config.snapshot = match resolution.status with
+    | Config_dir_resolver.Invalid_env_status ->
+        {declarations=[];paths=[];complete=false;
+         issues=[{source_path=directory;id=None;message=String.concat "; " resolution.warnings}]}
+    | Ready | Warn | Missing_status ->
+        Eio_unix.run_in_systhread (fun () -> Config.load ~directory) in
   let packages = Addon.inventory ~config in
   {observed_at=Time_compat.now (); rows=builtin @ package_rows ~declarations ~instances:packages.instances;
    exact;directory;complete=declarations.complete && packages.complete;

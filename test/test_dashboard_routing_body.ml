@@ -195,7 +195,7 @@ let () =
               expect_error "unknown-action"
                 ~message:
                   "unknown lane action: renombrar (expected set, create, remove, \
-                   rename, append, drop move or replace)"
+                   rename, append, drop, move or replace)"
                 {|{"lane":"runpod_mtp.qwen","action":"renombrar","runtime_ids":[]}|})
         ; Alcotest.test_case "append adds one slot to an exact lane" `Quick
             (fun () ->

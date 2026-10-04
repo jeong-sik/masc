@@ -43,6 +43,7 @@ class ItemWire(authority.WorkspaceWire):
         super().__init__(roster)
         self.account_state = "ready"
         self.roster_unavailable = False
+        self.observing_denied_retry = False
         self.malformed_revision = False
         self.missing_revision = False
         self.booting = False
@@ -66,6 +67,8 @@ class ItemWire(authority.WorkspaceWire):
     def set_roster_unavailable(self, unavailable):
         with self.lock:
             self.roster_unavailable = unavailable
+            if not unavailable:
+                self.observing_denied_retry = False
 
     def set_malformed_revision(self, malformed):
         with self.lock:
@@ -117,6 +120,8 @@ class ItemWire(authority.WorkspaceWire):
             if held:
                 self.hold_next = False
             self.events.append({"event": "items", "phase": phase, "state": state, "held": held,
+                "roster_unavailable": self.roster_unavailable,
+                "denied_retry_observation": self.observing_denied_retry,
                 "missing_revision": self.missing_revision, "malformed_revision": self.malformed_revision})
         if held:
             self.held_started.set()
@@ -359,12 +364,26 @@ def run(binary, captures):
                       or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
             with wire.lock:
+                # The rendered refusal establishes that the client applied
+                # the failed roster. Earlier in-flight reads were admitted
+                # before that observation and are not this denied retry.
+                wire.observing_denied_retry = True
                 item_reads = sum(event["event"] == "items" for event in wire.events)
             # The refusal may already be drawn. Moving the selection after
             # retrying proves the input was processed without requiring the
             # unchanged error to be emitted again.
             h.send_and_wait(process, fd, output, b"rj", b"Items 2/18")
             h.send_and_wait(process, fd, output, b"k", b"Items 1/18")
+            def unexpected_item_read():
+                with wire.lock:
+                    return sum(event["event"] == "items" for event in wire.events) != item_reads
+            # Keyboard frames do not settle asynchronous HTTP work. Keep the
+            # TUI draining and authority unavailable for the whole existing
+            # fixture deadline, failing if any account request arrives.
+            assert not h.wait_for_fixture_state(process, fd, output, unexpected_item_read,
+                timeout=authority.WAIT_SECONDS), \
+                "explicit Item retry asynchronously read the account without roster authority"
+            assert process.poll() is None, "TUI exited during denied Item retry observation"
             assert b"Keeper roster authority is unavailable" in visible()
             with wire.lock:
                 assert sum(event["event"] == "items" for event in wire.events) == item_reads, \
@@ -422,6 +441,12 @@ def run(binary, captures):
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=posts, refresh=0.5, terminal_rows=34,
         terminal_cols=authority.TERMINAL_COLUMNS)
+    # The fixture joins all handlers before returning. Include requests that
+    # arrive after the immediate keyboard assertions in the final ledger.
+    with wire.lock:
+        assert not [event for event in wire.events
+                    if event["event"] == "items" and event["denied_retry_observation"]], \
+            "an Item request was admitted during the denied retry observation"
 
 
 if __name__ == "__main__":

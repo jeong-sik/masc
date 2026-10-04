@@ -77,12 +77,14 @@ type stimulus_intake_result =
   | Stimulus_retry_later of
       Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
+  | Stimulus_connector_missing of string
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
   | Connector_read_failed of Keeper_external_attention.read_error
+  | Connector_item_missing of string
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
@@ -92,17 +94,20 @@ let event_queue_intake_error_to_string = function
     ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
   | Connector_read_failed error ->
     "connector attention intake retry: " ^ Keeper_external_attention.read_error_to_string error
+  | Connector_item_missing event_id ->
+    "connector attention item missing: " ^ event_id
 ;;
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
   | Transient_board_read _ -> "event_queue_transient_board_read"
   | Connector_read_failed _ -> "event_queue_connector_read_failed"
+  | Connector_item_missing _ -> "event_queue_connector_item_missing"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
-  | Transient_board_read _ | Connector_read_failed _ -> false
+  | Transient_board_read _ | Connector_read_failed _ | Connector_item_missing _ -> false
 ;;
 
 let classify_pending_board_event_result = function
@@ -372,26 +377,15 @@ let consume_single_heartbeat_stimulus
       in
       (match recorded_item with
        | Error error -> Stimulus_connector_retry_later error
-       | Ok recorded_item ->
-         let pending_events =
-           match recorded_item with
-           | Some item ->
-             [ Keeper_world_observation.pending_board_event_of_external_attention
-                 ~meta:meta_after_triage
-                 item
-             ]
-           | None ->
-             Log.Keeper.warn
-               "connector attention stimulus missing recorded item event_id=%s (keeper=%s)"
-               ca.event_id
-               meta_after_triage.name;
-             []
-         in
+       | Ok None -> Stimulus_connector_missing ca.event_id
+       | Ok (Some item) ->
          Log.Keeper.info
            "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
            ca.event_id
            meta_after_triage.name;
-         Stimulus_consumed pending_events)
+         Stimulus_consumed
+           [ Keeper_world_observation.pending_board_event_of_external_attention
+               ~meta:meta_after_triage item ])
     | Keeper_event_queue.Hitl_resolved r ->
       (* The approval has left the queue, so this cycle no longer skips. There
          is no observation to fabricate: the typed resolution itself is
@@ -465,7 +459,8 @@ let consume_single_heartbeat_stimulus
       Stimulus_consumed []
   in
   match intake_result with
-  | Stimulus_retry_later _ | Stimulus_connector_retry_later _ -> intake_result
+  | Stimulus_retry_later _ | Stimulus_connector_retry_later _
+  | Stimulus_connector_missing _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StimulusConsumed)
@@ -917,7 +912,6 @@ let heartbeat_event_intake
       |> Seq.filter_map
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
            connector_attention_event_id selection.source)
-      |> Seq.take max_events
       |> List.of_seq
     in
     match event_ids with
@@ -946,10 +940,10 @@ let heartbeat_event_intake
     | Keeper_event_queue.Task_outcome _ -> false
   in
   let consume_batch selections =
-    (* Each Connector source spends one admission slot, so at most the first
-       [max_events] Connector ids can enter this turn. This private lazy is
-       forced only by this sequential intake loop, and avoids reading the
-       Connector store when earlier sources fill all slots. *)
+    (* Missing Connector items spend no admission slot. Resolve all eligible
+       pointers against one snapshot so readable items beyond a missing prefix
+       remain eligible. The lazy avoids the read when earlier sources fill
+       every admission slot. *)
     let connector_attention_items =
       lazy (connector_attention_items_of_batch selections)
     in
@@ -1015,6 +1009,15 @@ let heartbeat_event_intake
               let first_withdrawn =
                 match first_withdrawn with
                 | None -> Some (selection, Transient_board_read unavailable)
+                | Some _ as kept -> kept
+              in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_connector_missing event_id ->
+              Log.Keeper.warn
+                "turn entry: retaining missing connector attention keeper=%s event_id=%s"
+                keeper_name event_id;
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection, Connector_item_missing event_id)
                 | Some _ as kept -> kept
               in
               loop remaining observations_rev selections_rev first_withdrawn rest

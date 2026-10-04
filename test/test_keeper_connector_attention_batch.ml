@@ -398,9 +398,9 @@ let test_transient_board_prefix_keeps_connector_content_within_admission_limit (
        |> Result.map Q.length |> Result.value ~default:(-1)))
 ;;
 
-let test_unread_connector_sources_survive_other_completed_work ~torn_tail () =
+let test_unread_connector_sources_survive_other_completed_work ~failure () =
   List.iter (fun count ->
-    with_ctx (Printf.sprintf "connector-unread-%b-%d" torn_tail count)
+    with_ctx (Printf.sprintf "connector-unread-%d" count)
       (fun ~base_path ~keeper_name ~meta ~ctx ->
         let messages = List.init count (fun index ->
           connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"restore-channel"
@@ -410,16 +410,22 @@ let test_unread_connector_sources_survive_other_completed_work ~torn_tail () =
         let path = A.attention_path ~base_path ~keeper_name in
         let original = Fs_compat.load_file path in
         let backup = path ^ ".fixture-backup" in
-        if torn_tail then Fs_compat.save_file path (original ^ "{")
-        else (Sys.rename path backup; Unix.mkdir path 0o700);
+        (match failure with
+         | `Torn_tail -> Fs_compat.save_file path (original ^ "{")
+         | `Unreadable -> Sys.rename path backup; Unix.mkdir path 0o700
+         | `Missing_file -> Sys.rename path backup
+         | `Missing_rows -> Fs_compat.save_file path "");
         let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
           ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
         let assert_read_failure intake =
           match intake.Keeper_heartbeat_stimulus_intake.event_queue_intake_error with
-          | Some (Keeper_heartbeat_stimulus_intake.Connector_read_failed error) ->
+          | Some (Keeper_heartbeat_stimulus_intake.Connector_read_failed error)
+            when failure = `Torn_tail || failure = `Unreadable ->
             check bool "connector read failure is a retry, not a crashed cycle" false
               (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
                  (Keeper_heartbeat_stimulus_intake.Connector_read_failed error))
+          | Some (Keeper_heartbeat_stimulus_intake.Connector_item_missing _)
+            when failure = `Missing_file || failure = `Missing_rows -> ()
           | _ -> fail "unread connector store was treated as missing content" in
         let first = intake () in
         assert_read_failure first;
@@ -468,8 +474,10 @@ let test_unread_connector_sources_survive_other_completed_work ~torn_tail () =
           | Ok queue -> Q.to_list queue |> List.map (fun (source : Q.stimulus) -> source.post_id) in
         check (list string) "successful other work cannot ACK unread messages"
           (List.map (fun (source : Q.stimulus) -> source.post_id) messages) (pending_ids ());
-        if torn_tail then Fs_compat.save_file path original
-        else (Unix.rmdir path; Sys.rename backup path);
+        (match failure with
+         | `Torn_tail | `Missing_rows -> Fs_compat.save_file path original
+         | `Unreadable -> Unix.rmdir path; Sys.rename backup path
+         | `Missing_file -> Sys.rename backup path);
         let restored = intake () in
         check int "restored original messages enter the next turn" count
           (Keeper_heartbeat_source_batch.count restored.source_batch);
@@ -480,6 +488,70 @@ let test_unread_connector_sources_survive_other_completed_work ~torn_tail () =
         complete restored.source_batch;
         check (list string) "only successful restored delivery drains the messages" [] (pending_ids ())))
     [ 1; 2 ]
+;;
+
+let test_missing_prefix_does_not_starve_readable_connector () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  @@ fun () ->
+  with_ctx "connector-missing-prefix" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let messages = List.init 3 (fun index ->
+      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"same-channel"
+        ~message_id:(string_of_int index) ~arrived_at:(Float.of_int (index + 1))
+        ~content:(Printf.sprintf "recoverable %d" index)) in
+    let path = A.attention_path ~base_path ~keeper_name in
+    let original = Fs_compat.load_file path in
+    Fs_compat.save_file path "";
+    let readable = connector_attention_stimulus ~base_path ~keeper_name
+      ~channel_id:"same-channel" ~message_id:"readable" ~arrived_at:4.
+      ~content:"readable after missing prefix" in
+    let bootstrap : Q.stimulus =
+      { post_id="independent-work"; urgency=Q.Low; arrived_at=5.; payload=Q.Bootstrap } in
+    List.iter (enqueue_exn ~base_path keeper_name) (messages @ [readable; bootstrap]);
+    let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let pending_ids () =
+      match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+      | Error detail -> fail detail
+      | Ok queue -> Q.to_list queue |> List.map (fun (source : Q.stimulus) -> source.post_id) in
+    let complete batch =
+      match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+        (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_not_applicable meta)) with
+      | Keeper_heartbeat_loop.Batch_ack_completed ->
+        List.iter (fun selection ->
+          match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+            ~base_path keeper_name ~applied_at:1000. ~selection with
+          | Ok (Keeper_registry_event_queue.Turn_source_acked
+              (Keeper_registry_event_queue.Acked _ | Keeper_registry_event_queue.Already_acked _)) -> ()
+          | Ok _ -> fail "completion did not settle the admitted source"
+          | Error detail -> fail detail)
+          (Keeper_heartbeat_source_batch.selections batch)
+      | _ -> fail "completed turn did not use normal batch settlement" in
+    let mixed = intake () in
+    check (list string) "readable connector and independent work pass a missing prefix"
+      [readable.post_id; bootstrap.post_id]
+      (Keeper_heartbeat_source_batch.stimuli mixed.source_batch
+       |> List.map (fun (source : Q.stimulus) -> source.post_id));
+    check (list string) "readable connector body reaches the turn"
+      ["readable after missing prefix"]
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+         mixed.pending_board_events);
+    complete mixed.source_batch;
+    check (list string) "unrelated completion retains all missing pointers"
+      (List.map (fun (source : Q.stimulus) -> source.post_id) messages) (pending_ids ());
+    Fs_compat.save_file path (original ^ Fs_compat.load_file path);
+    let first = intake () in
+    check (list string) "restored prefix delivers within the admission bound"
+      ["recoverable 0"; "recoverable 1"]
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+         first.pending_board_events);
+    complete first.source_batch;
+    let last = intake () in
+    check (list string) "remaining restored body is delivered"
+      ["recoverable 2"]
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+         last.pending_board_events);
+    complete last.source_batch;
+    check (list string) "restored successful deliveries ACK the remaining sources" [] (pending_ids ()))
 ;;
 
 (* A shared store failure needs one diagnostic, regardless of backlog size.
@@ -1521,12 +1593,18 @@ let () =
             "transient Board prefix preserves bounded connector content"
             `Quick
             test_transient_board_prefix_keeps_connector_content_within_admission_limit
+        ; test_case "missing connector file survives other completion and restoration" `Quick
+            (test_unread_connector_sources_survive_other_completed_work ~failure:`Missing_file)
+        ; test_case "missing connector rows survive other completion and restoration" `Quick
+            (test_unread_connector_sources_survive_other_completed_work ~failure:`Missing_rows)
+        ; test_case "missing prefix does not starve a readable connector" `Quick
+            test_missing_prefix_does_not_starve_readable_connector
         ; test_case "shared connector read failure skips backlog and admits independent work" `Quick
             test_failed_connector_batch_skips_shared_store_without_starving_other_work
         ; test_case "torn connector store survives other completed work and restoration" `Quick
-            (test_unread_connector_sources_survive_other_completed_work ~torn_tail:true)
+            (test_unread_connector_sources_survive_other_completed_work ~failure:`Torn_tail)
         ; test_case "unreadable connector store survives other completed work and restoration" `Quick
-            (test_unread_connector_sources_survive_other_completed_work ~torn_tail:false)
+            (test_unread_connector_sources_survive_other_completed_work ~failure:`Unreadable)
         ; test_case
             "admits a channel's whole backlog in arrival order, leaves other \
              channels queued"

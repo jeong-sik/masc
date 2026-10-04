@@ -24,12 +24,14 @@ val pending_board_event_of_stimulus
 
 (** Closed consumption result for an Event-Layer stimulus. A transient Board
     read or unread Connector store cannot become an empty successful rendering: it retains
-    the exact pending queue selection for a later heartbeat. *)
+    the exact pending queue selection for a later heartbeat. A missing referenced
+    Connector item retains only its own selection, allowing readable siblings. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
   | Stimulus_retry_later of
       Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
+  | Stimulus_connector_missing of string (** Missing event ID. *)
 
 (** Pure disposition boundary for one rendered Board event. Permanent
     unavailability is consumed as an empty event; transient unavailability
@@ -55,6 +57,7 @@ type event_queue_intake_error =
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
   | Connector_read_failed of Keeper_external_attention.read_error
+  | Connector_item_missing of string (** Missing event ID, not a whole-store failure. *)
 
 (** Map one durable event-queue payload to its typed turn trigger. A payload
     with no dedicated trigger returns [None]; completion-authority rejection

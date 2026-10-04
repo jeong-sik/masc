@@ -97,11 +97,27 @@ let pending_event_to_yojson event =
            "event_type", `String (event_kind_to_string event.kind);
            "payload", event.payload ]
 
+type notification_delivery = Awaiting_recipients | Pending_recipients of string list
+
+type pending_notification = {
+  notification_id : string;
+  goal_id : string;
+  sender : string;
+  content : string;
+  delivery : notification_delivery;
+}
+
+type transition_effects = {
+  events : (event_kind * Yojson.Safe.t) list;
+  notifications : (string * string) list;
+}
+
 type state = {
   version : int;
   updated_at : string;
   goals : goal list;
   pending_events : pending_event list;
+  pending_notifications : pending_notification list;
 }
 
 let goal_to_yojson (goal : goal) =
@@ -121,6 +137,13 @@ let goal_to_yojson (goal : goal) =
       ("updated_at", `String goal.updated_at);
     ]
 
+let pending_notification_to_yojson (notice : pending_notification) =
+  let recipients = match notice.delivery with
+    | Awaiting_recipients -> `Null
+    | Pending_recipients names -> `List (List.map (fun name -> `String name) names) in
+  `Assoc ["notification_id", `String notice.notification_id; "goal_id", `String notice.goal_id;
+    "sender", `String notice.sender; "content", `String notice.content; "recipients", recipients]
+
 let state_to_yojson (state : state) =
   `Assoc
     [
@@ -128,6 +151,7 @@ let state_to_yojson (state : state) =
       ("updated_at", `String state.updated_at);
       ("goals", `List (List.map goal_to_yojson state.goals));
       ("pending_events", `List (List.map pending_event_to_yojson state.pending_events));
+      ("pending_notifications", `List (List.map pending_notification_to_yojson state.pending_notifications));
     ]
 
 (* {1 Decoder}
@@ -265,6 +289,29 @@ let pending_event_of_yojson = function
          | _ -> rejected ~field:"pending_events" "malformed pending event")
   | _ -> rejected ~field:"pending_events" "pending event must be an object"
 
+let pending_notification_of_yojson = function
+  | `Assoc fields as json ->
+      let expected = ["notification_id"; "goal_id"; "sender"; "content"; "recipients"] in
+      if List.sort String.compare (List.map fst fields) <> List.sort String.compare expected then
+        rejected ~field:"pending_notifications" "unexpected notification fields"
+      else
+        let* delivery = match Json_util.assoc_member_opt "recipients" json with
+          | Some `Null -> Ok Awaiting_recipients
+          | Some (`List values) ->
+              let rec names acc = function
+                | [] -> Ok (Pending_recipients (List.rev acc))
+                | `String name :: rest when Result.is_ok (Keeper_id.Keeper_name.of_string name) && not (List.mem name acc) -> names (name :: acc) rest
+                | _ -> rejected ~field:"pending_notifications" "invalid or duplicate recipient" in
+              names [] values
+          | _ -> rejected ~field:"pending_notifications" "missing recipients" in
+        (match Json_util.get_string json "notification_id", Json_util.get_string json "goal_id",
+               Json_util.get_string json "sender", Json_util.get_string json "content" with
+         | Some notification_id, Some goal_id, Some sender, Some content
+           when notification_id <> "" && goal_id <> "" && String.trim sender <> "" && content <> "" ->
+             Ok {notification_id; goal_id; sender; content; delivery}
+         | _ -> rejected ~field:"pending_notifications" "invalid notification identity or content")
+  | _ -> rejected ~field:"pending_notifications" "notification must be an object"
+
 let state_of_yojson : Yojson.Safe.t -> (state, schema_rejection) result = function
   | `Assoc _ as json ->
       let* version =
@@ -305,7 +352,19 @@ let state_of_yojson : Yojson.Safe.t -> (state, schema_rejection) result = functi
         | None -> Ok []
         | Some (`List rows) -> collect_events [] rows
         | Some _ -> rejected ~field:"pending_events" "pending_events must be a list" in
-      Ok { version; updated_at; goals; pending_events }
+      let* pending_notifications =
+        let rec collect acc = function
+          | [] -> Ok (List.rev acc)
+          | row :: rest ->
+              let* notice = pending_notification_of_yojson row in
+              if List.exists (fun old -> old.notification_id = notice.notification_id) acc then
+                rejected ~field:"pending_notifications" "duplicate notification identity"
+              else collect (notice :: acc) rest in
+        match Json_util.assoc_member_opt "pending_notifications" json with
+        | None -> Ok []
+        | Some (`List rows) -> collect [] rows
+        | Some _ -> rejected ~field:"pending_notifications" "pending_notifications must be a list" in
+      Ok { version; updated_at; goals; pending_events; pending_notifications }
   | json ->
       rejected ~field:document_root_field
         ("state is not an object: " ^ Yojson.Safe.to_string json)
@@ -344,7 +403,7 @@ let ensure_dirs config =
    write on an [Uninitialized] store (RFC-0444 §2.2, criterion 2); no reader
    builds it. *)
 let default_state : unit -> state = fun () ->
-  { version = 1; updated_at = Masc_domain.now_iso (); goals = []; pending_events = [] }
+  { version = 1; updated_at = Masc_domain.now_iso (); goals = []; pending_events = []; pending_notifications = [] }
 
 (* {1 Source (RFC-0444 §2.1)} *)
 
@@ -601,7 +660,7 @@ let update_state config f : (state, write_error) result =
         | Ok () -> Ok next_state
         | Error detail -> Error (Persist_failed detail))
 
-let transact_goal config ~goal_id f =
+let transact_goal ?effects config ~goal_id f =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
       let loaded : (goal * state, write_error) result =
         match load_source config with
@@ -622,8 +681,22 @@ let transact_goal config ~goal_id f =
         else
           let now = Masc_domain.now_iso () in
           let updated = { updated with updated_at = now } in
-          let next = { state with version = state.version + 1; updated_at = now;
-                       goals = replace_goal state.goals updated } in
+          let revision = state.version + 1 in
+          let effects = match effects with None -> {events=[]; notifications=[]}
+            | Some make -> make updated result in
+          let events = List.map (fun (kind, payload) ->
+            {event_id=Random_id.hex ~bytes:16; goal_id; store_revision=revision;
+             recorded_at=now; kind; payload}) effects.events in
+          let notices = List.map (fun (sender, content) ->
+            {notification_id=Random_id.prefixed ~prefix:"wmsg-" ~bytes:16;
+             goal_id; sender; content; delivery=Awaiting_recipients}) effects.notifications in
+          let next =
+            { version = revision
+            ; updated_at = now
+            ; goals = replace_goal state.goals updated
+            ; pending_events = state.pending_events @ events
+            ; pending_notifications = state.pending_notifications @ notices
+            } in
           (match write_state_result config next with
            | Ok () -> Ok (updated, result)
            | Error detail -> Error (Persist_failed detail)))
@@ -1040,3 +1113,56 @@ let compute_rollup goals =
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
   }
+
+let pending_notifications config = match load_source config with
+  | Uninitialized -> Ok []
+  | Unavailable unavailable -> Error (Store_unavailable unavailable)
+  | Available state -> Ok state.pending_notifications
+
+let update_notification config (expected : pending_notification) change =
+  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+    match load_source config with
+    | Uninitialized -> Ok None
+    | Unavailable unavailable -> Error (Store_unavailable unavailable)
+    | Available state ->
+        match List.find_opt (fun notice -> notice.notification_id = expected.notification_id)
+            state.pending_notifications with
+        | None -> Ok None
+        | Some current ->
+            if current.goal_id <> expected.goal_id || current.sender <> expected.sender
+              || current.content <> expected.content then
+              Error (Rejected "Goal notification identity has different content")
+            else
+              let* next = change current |> Result.map_error (fun detail -> Rejected detail) in
+              if next = Some current then Ok next else
+              let pending_notifications = List.filter_map (fun notice ->
+                if notice.notification_id = expected.notification_id then next else Some notice)
+                state.pending_notifications in
+              let updated = {state with pending_notifications; version=state.version + 1;
+                updated_at=Masc_domain.now_iso ()} in
+              write_state_result config updated |> Result.map_error (fun detail -> Persist_failed detail)
+              |> Result.map (fun () -> next))
+
+let snapshot_notification_recipients config notice ~recipients =
+  if List.exists (fun name -> Result.is_error (Keeper_id.Keeper_name.of_string name)) recipients then
+    Error (Rejected "invalid Goal notification recipient")
+  else update_notification config notice (fun current -> match current.delivery with
+    | Pending_recipients _ -> Ok (Some current)
+    | Awaiting_recipients ->
+        Ok (Some {current with delivery=Pending_recipients (List.sort_uniq String.compare recipients)}))
+
+let acknowledge_notification_recipient config notice ~recipient =
+  let* () = match notice.delivery with
+    | Pending_recipients names when List.mem recipient names -> Ok ()
+    | Pending_recipients _ | Awaiting_recipients -> Error (Rejected "recipient is outside the captured Goal notification") in
+  update_notification config notice (fun current -> match current.delivery with
+    | Awaiting_recipients -> Error "Goal notification recipients have not been captured"
+    | Pending_recipients remaining ->
+        Ok (Some {current with delivery=Pending_recipients (List.filter ((<>) recipient) remaining)}))
+  |> Result.map (fun _ -> ())
+
+let acknowledge_notification config notice =
+  update_notification config notice (fun current -> match current.delivery with
+    | Pending_recipients [] -> Ok None
+    | Awaiting_recipients | Pending_recipients (_ :: _) -> Error "Goal notification recipients are still pending")
+  |> Result.map (fun _ -> ())

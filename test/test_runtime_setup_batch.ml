@@ -148,6 +148,70 @@ wizard-default = true
   Alcotest.(check bool) "new binding names the original provider" true
     (List.exists (fun (binding:Runtime_schema.binding) ->
        Runtime_schema.binding_key binding=id && binding.provider_id="operator_account") after.bindings))
+let test_existing_provider_wizard_default_survives_expansion () =
+  List.iter (fun (name, old_binding, extra, expected_model) ->
+    fixture (fun base runtime binary spec _original ->
+      let configured = {|
+[runtime]
+default = "primary.main"
+[providers.primary]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+[providers.operator_account]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models.main]
+api-name = "primary-model"
+max-context = 1024
+tools-support = true
+[models.old]
+api-name = "old-model"
+max-context = 1024
+tools-support = true
+[primary.main]
+wizard-default = true
+[operator_account.old]
+# retain this binding's operator settings
+|} ^ old_binding ^ extra in
+      save runtime configured;
+      fake base binary "pass";
+      let parsed = Runtime_toml.parse_file runtime |> Result.get_ok in
+      let raw = spec "added-fallback" in
+      let prepared = Runtime_setup_spec.resolve_provider raw parsed.providers |> Result.get_ok in
+      let added = Runtime_setup_spec.render prepared in
+      let selected = ["primary.main"; added.runtime_id] in
+      ignore (get (apply base binary [raw] selected (get (Batch.observe ~base_path:base)) false));
+      let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+      let provider = List.find (fun (p:Runtime_schema.provider) -> p.id="operator_account") after.providers in
+      let chosen = match Runtime_wizard_inventory.binding_for_provider after provider with
+        | Ok binding -> binding | Error reason -> Alcotest.fail (name ^ ": " ^ reason) in
+      let expected = match expected_model with
+        | Some model -> "operator_account." ^ model
+        | None -> added.runtime_id in
+      Alcotest.(check string) (name ^ ": wizard keeps the prior unambiguous choice")
+        expected (Runtime_schema.binding_key chosen);
+      let bindings = List.filter (fun (binding:Runtime_schema.binding) ->
+        binding.enabled && binding.provider_id=provider.id) after.bindings in
+      Alcotest.(check int) (name ^ ": exactly one enabled wizard default") 1
+        (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.wizard_default) bindings));
+      Alcotest.(check (option string)) (name ^ ": workspace primary remains another provider")
+        (Some "primary.main") after.default_runtime_id;
+      Alcotest.(check bool) (name ^ ": prior binding comment survives") true
+        (List.mem "# retain this binding's operator settings"
+          (String.split_on_char '\n' (text runtime)))))
+    ["sole implicit", "", "", Some "old";
+     "explicit other model", "", {|
+[models.preferred]
+api-name = "preferred-model"
+max-context = 1024
+tools-support = true
+[operator_account.preferred]
+wizard-default = true
+|}, Some "preferred";
+     "disabled-only prior binding", "enabled = false\n", "", None]
+
 let test_named_default_lane () = fixture (fun base runtime binary spec original ->
   let first = (Runtime_setup_spec.render (spec "old-model")).runtime_id in
   let second = Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "old-fallback") in
@@ -477,6 +541,7 @@ let test_save_publishes_the_registry () = fixture (fun base _runtime binary spec
     ignore (get (apply base binary [added] [id] revision false));
     Alcotest.check Alcotest.bool "the saved account is live in the published registry" true (List.mem id (ids (Runtime.get_runtimes ())))))
 let () = Alcotest.run "runtime setup batch" ["workspace",[
+  Alcotest.test_case "extending a provider preserves its wizard choice" `Quick test_existing_provider_wizard_default_survives_expansion;
   Alcotest.test_case "native batch reuses custom account" `Quick test_custom_account_new_model;
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;

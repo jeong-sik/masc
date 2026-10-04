@@ -81,15 +81,24 @@ let of_json json =
    and leaf enum/type constraints use the same validation path as host tools. *)
 let schema_keys = ["type"; "properties"; "required"; "additionalProperties"; "items";
   "enum"; "const"; "description"; "title"; "minimum"; "maximum";
-  "exclusiveMinimum"; "exclusiveMaximum"; "minLength"; "maxLength"; "minItems"; "maxItems"]
+  "exclusiveMinimum"; "exclusiveMaximum"; "minLength"; "maxLength"; "minItems"; "maxItems"; "oneOf"]
 let rec schema_node schema =
   let* fields = object_ schema in let* () = unique fields in
   let* () = if List.for_all (fun (key, _) -> List.mem key schema_keys) fields then Ok ()
     else Error "action schema declares an unsupported JSON Schema keyword" in
   let* () = match List.assoc_opt "enum" fields with
     | None | Some (`List _) -> Ok () | Some _ -> Error "schema enum must be an array" in
+  let* () = match List.assoc_opt "oneOf" fields with
+    | None -> Ok ()
+    | Some (`List (_ :: _ as branches)) ->
+        let* _ = traverse schema_node branches in Ok ()
+    | Some _ -> Error "schema oneOf requires a nonempty array of supported schemas" in
   let* kind = text fields "type" in
   match kind with
+  | "object" when List.mem_assoc "oneOf" fields && not (List.mem_assoc "properties" fields) ->
+      if List.mem_assoc "additionalProperties" fields || List.mem_assoc "required" fields
+      then Error "object union constraints require declared properties"
+      else Ok ()
   | "object" ->
       let* properties = match List.assoc_opt "properties" fields with
         | Some (`Assoc values) -> let* () = unique values in Ok values
@@ -133,14 +142,23 @@ let validate_schema schema =
       then Error "action context must require exactly instance_id and incarnation"
       else Ok ()
 let rec validate_node ~name schema value =
+  let* fields = object_ schema in
+  let* () = match List.assoc_opt "oneOf" fields with
+    | None -> Ok ()
+    | Some (`List branches) ->
+        let matches = List.fold_left (fun count branch ->
+          if Result.is_ok (validate_node ~name branch value) then count + 1 else count) 0 branches in
+        if matches = 1 then Ok () else Error (name ^ " must match exactly one schema alternative")
+    | Some _ -> Error "schema oneOf requires an array" in
+  let schema = `Assoc (List.remove_assoc "oneOf" fields) in
   (* The outer value property preserves this node's type/enum/range contract,
      including scalar and array nodes. It avoids synthetic string matching. *)
   let wrapper = `Assoc ["type", `String "object"; "properties", `Assoc ["value", schema];
     "required", `List [`String "value"]; "additionalProperties", `Bool false] in
   let* _ = Tool_input_validation.validate_args ~schema:wrapper ~name
     ~args:(`Assoc ["value", value]) () |> Result.map_error Tool_result.message in
-  let* fields = object_ schema in
   match value with
+  | `Assoc _ when List.mem_assoc "oneOf" fields && not (List.mem_assoc "properties" fields) -> Ok ()
   | `Assoc values ->
       let* _ = Tool_input_validation.validate_args ~schema ~name ~args:value ()
         |> Result.map_error Tool_result.message in

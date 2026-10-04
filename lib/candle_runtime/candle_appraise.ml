@@ -14,8 +14,8 @@ let call ~(appraise : A.runner) ~identity request =
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
   let* trace = A.trace_of_json (A.trace_json answer.trace) |> Result.map_error (fun detail -> A.Invalid_response detail) in
   Ok {A.decision;trace}
-let grade ~appraise ~identity goal =
-  let* answer = call ~appraise ~identity (A.Grade goal) in
+let grade ~appraise ~identity ~(policy : Candle_config.payout_policy) goal =
+  let* answer = call ~appraise ~identity (A.Grade {goal; grades=List.map (fun (grade, _, criterion) -> grade, criterion) policy.grades}) in
   match answer.decision with
   | A.Grade_decided grade -> Ok (grade, answer.trace)
   | A.Relation_decided _ | A.Weights_decided _ -> Error (A.Invalid_response "appraiser returned the wrong stage")
@@ -55,7 +55,7 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
        Ok (E.Payout_failed {goal_id=waiting.goal_id;request_id=waiting.request_id;
                            verification_run_id=waiting.verification_run_id;due_date})
      | Ok overdue_hours ->
-       let* grade, grade_trace = grade ~appraise ~identity pass.goal in
+       let* grade, grade_trace = grade ~appraise ~identity ~policy pass.goal in
        let* relations = relations ~appraise ~identity pass.goal tasks candidates.candidate_task_ids in
        let related = related_tasks tasks candidates.candidate_task_keepers relations in
        let attribution = {E.grade;grade_trace;relations} in
@@ -71,8 +71,11 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
          let* answer = call ~appraise ~identity request in
          let* weights = match answer.decision with A.Weights_decided weights -> Ok weights
            | A.Grade_decided _ | A.Relation_decided _ -> Error (A.Invalid_response "appraiser returned the wrong stage") in
-         let* payment = Candle_payment.make ~identity ~grade
-           ~total_milli:(Candle_config.grade_amount_milli policy grade) ~grade_trace ~relations
+         let* total_milli = match Candle_config.grade_amount_milli policy grade with
+           | Some amount -> Ok amount
+           | None -> Error (A.Invalid_response "grade is not in the captured policy") in
+         let* payment = Candle_payment.make ~distribution:policy.distribution ~identity ~grade
+           ~total_milli ~grade_trace ~relations
            ~weights_trace:answer.trace ~weight_max:policy.weight_max ~deduction_rate:policy.deduction_rate
            ~deduction_floor:policy.deduction_floor ~overdue_hours ~weights |> Result.map_error (fun detail -> A.Invalid_response detail) in
          Ok (E.Paid payment))

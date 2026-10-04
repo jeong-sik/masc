@@ -4,7 +4,10 @@ import os
 import re
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_runtime as _keyboard_runtime
 
 
 
@@ -26,33 +29,33 @@ def run(executable: str) -> None:
         ),
         ("decode", (200, {}), b"schema"),
     ):
-        fixtures = h.keeper_runtime_http_fixtures()
-        fixtures[h.STANDALONE_LANES_PATH] = h.SequencedHttpResponse(
-            [h.standalone_lanes_response(), failed_reading]
+        fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+        fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_harness.SequencedHttpResponse(
+            [_keyboard_keepers.standalone_lanes_response(), failed_reading]
         )
-        fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
-            h.standalone_lane_runtime_config_response()
+        fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
+            _keyboard_keepers.standalone_lane_runtime_config_response()
         )
 
         def interact(process, fd, _slave, output, _base_path):
-            h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
-            h.resize_and_wait(
+            _keyboard_harness.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+            _keyboard_harness.resize_and_wait(
                 process, fd, output, rows=30, columns=160, needle=b"MASC Dashboard"
             )
-            h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-            h.wait_for_output(process, fd, output, LANES_OBSERVED, start=0, timeout=5)
-            drawn = h.send_and_wait(process, fd, output, b"r", b"STALE")
-            frame = h.unwrapped(h.screen_text(drawn))
+            _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+            _keyboard_harness.wait_for_output(process, fd, output, LANES_OBSERVED, start=0, timeout=5)
+            drawn = _keyboard_harness.send_and_wait(process, fd, output, b"r", b"STALE")
+            frame = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(drawn))
             if b"STALE \xc2\xb7 lanes load failed:" not in frame:
                 raise AssertionError(f"stale reading lost the failure verdict: {frame!r}")
             if cause not in frame:
                 raise AssertionError(f"stale reading lost the cause: {frame!r}")
             if frame.count(b"lanes load failed:") != 1:
                 raise AssertionError(f"stale reading repeated its verdict: {frame!r}")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
             os.write(fd, b"q")
 
-        h.run_terminal_scenario(
+        _keyboard_harness.run_terminal_scenario(
             executable,
             description=f"stale standalone lane reading keeps one {kind} failure",
             interact=interact,

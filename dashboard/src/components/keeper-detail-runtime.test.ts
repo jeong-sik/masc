@@ -18,11 +18,14 @@ vi.mock('../api/dashboard', async () => {
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type { DashboardMissionKeeperBrief, Keeper } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
+import { fetchKeeperComposite } from '../api/keeper'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
+import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import {
   RuntimeLensSection,
   RuntimeSignals,
   KeeperSecretProjectionPanel,
+  KeeperLiveTruthPanel,
   filterSignalGroups,
   deriveKeeperLiveTruth,
 } from './keeper-detail-runtime'
@@ -39,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   resetRuntimeCatalog()
+  vi.unstubAllGlobals()
 })
 
 function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnapshot {
@@ -564,6 +568,48 @@ describe('RuntimeLensSection', () => {
     }
     return { ...base, ...overrides }
   }
+
+  it.each([
+    { condition: 'fiber_alive', value: true, kind: 'running', visible: 'fiber alive' },
+    { condition: 'fiber_alive', value: false, kind: 'stuck', visible: 'fiber_dead' },
+    { condition: 'operator_paused', value: true, kind: 'paused', visible: 'fiber alive' },
+    { condition: 'stop_requested', value: true, kind: 'running', visible: '종료 신호' },
+  ])('uses fetched $condition=$value in the live keeper view', async ({ condition, value, kind, visible }) => {
+    const snapshot = compositeFixture()
+    const diagnosis = snapshot.phase_diagnosis!
+    const payload = {
+      ...snapshot,
+      phase_diagnosis: {
+        ...diagnosis,
+        conditions: { ...diagnosis.conditions, [condition]: value },
+      },
+      runtime_attention: {
+        ...snapshot.runtime_attention,
+        state: 'ok',
+        blocked: false,
+        needs_attention: false,
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    const composite = await fetchKeeperComposite('sangsu')
+    const keeper: Keeper = { name: 'sangsu', status: 'active', phase: 'Running', keepalive_running: true }
+    const state = deriveKeeperOperationalState({ keeper, composite })
+    expect(state.kind).toBe(kind)
+    if (state.kind === 'paused') expect(state.cause).toBe('operator')
+
+    render(h(KeeperLiveTruthPanel, {
+      keeper,
+      compositeSnapshot: composite,
+      runtimeTrace: null,
+      compositeEvidence: { kind: 'loading' },
+      runtimeTraceEvidence: { kind: 'loading' },
+    }))
+    expect(screen.getByText(visible, { exact: true })).toBeVisible()
+  })
 
   it('renders axis summary, swimlanes, and gap badges', () => {
     render(h(RuntimeLensSection, { trace: runtimeTraceFixture() }))

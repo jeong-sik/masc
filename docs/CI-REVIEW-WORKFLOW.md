@@ -10,7 +10,17 @@ Release verdicts also cite the completed successful full run. Current independen
 approval, later blocking reviews, exact head and base changes remain admission
 checks; land parents first and review the changed child diff before integration.
 
-There is no automatic PR, push, tag or scheduled CI. For an explicitly selected
+There is no automatic PR, push or tag CI. The operator-authorized
+`main-minimal-build.yml` checks main at minutes 7 and 37: it builds the server,
+TUI, browser host and deployment preflight executables in one Dune invocation.
+Successful non-documentation input fingerprints skip toolchain setup and build;
+the summary names the actual previously built SHA, and a skip is not compilation
+evidence for a newer SHA. Existing opam caching and a shared Dune cache reduce
+repeated work. Builds are serialized without cancelling the active build.
+Scheduling may be delayed; this does not guarantee a build within 30 minutes.
+This observation does not approve a PR or replace full Release/Tag checks.
+
+For an explicitly selected
 approved combination, use [the selection commands](../scripts/review/APPROVED-CI-SELECTION.md)
 to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with the
 exact candidate SHA, receipt and chosen scopes. Main's verifier rechecks source
@@ -40,7 +50,7 @@ existing distribution; it does not rebuild or rerun tests. A publication run is
 not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
 one toolchain job; node behavior runs under the behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
 there is no known-failure exemption list or second standalone compilation pass.
-The behavior lane runs product suites, without CI/review/PTY-helper self-tests.
+The behavior lane runs product suites. CI/review/PTY-helper, build-checker and evidence-validator self-tests are not part of the test suite. The optional credential check runs the scanner directly against the tracked tree.
 Presentation tools are installed only for the behavior lane. The dashboard is
 built once with the production configuration and shared by all native targets;
 type checks and dashboard payload-consumer tests stay in their own job. That

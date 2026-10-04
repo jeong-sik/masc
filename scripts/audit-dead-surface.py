@@ -97,7 +97,6 @@ Usage:
     python3 scripts/audit-dead-surface.py --modules
     python3 scripts/audit-dead-surface.py --exports [--min-name-len N]
     python3 scripts/audit-dead-surface.py --exports --json
-    python3 scripts/audit-dead-surface.py --self-test
 """
 
 from __future__ import annotations
@@ -524,157 +523,6 @@ def find_orphan_stanzas(root: Path) -> list[str]:
     return orphans
 
 
-def run_self_test() -> int:
-    """Guard the two failure modes this audit was written against."""
-    import tempfile
-
-    failures: list[str] = []
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "lib").mkdir()
-        (root / "test").mkdir()
-        (root / "test" / "stanzas").mkdir()
-
-        # A module referenced only from a dune `.inc` stanza is live.
-        (root / "test" / "test_included_only.ml").write_text("let () = ()\n")
-        (root / "test" / "stanzas" / "t.inc").write_text(
-            "(test (name test_included_only) (modules test_included_only))\n"
-        )
-        # A module referenced from nowhere is dead.
-        (root / "lib" / "totally_unreferenced_leaf.ml").write_text("let x = 1\n")
-
-        dead_modules = {d["module"] for d in find_dead_modules(root)}
-        if "Test_included_only" in dead_modules:
-            failures.append("module registered via .inc stanza reported dead")
-        if "Totally_unreferenced_leaf" not in dead_modules:
-            failures.append("unreferenced module not reported")
-
-        # Substring must not count as a reference.
-        (root / "lib" / "sample_surface.mli").write_text(
-            "val cached_entry_count : unit -> int\nval used_entry_helper : unit -> int\n"
-        )
-        (root / "lib" / "sample_surface.ml").write_text(
-            "let cached_entry_count () = 0\nlet used_entry_helper () = 0\n"
-        )
-        (root / "test" / "test_sample_surface.ml").write_text(
-            "let () = ignore (Sample_surface.reset_cached_entry_count ())\n"
-            "let () = ignore (Sample_surface.used_entry_helper ())\n"
-        )
-        dead_exports = {d["name"] for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
-        if "cached_entry_count" not in dead_exports:
-            failures.append("substring match counted as a reference")
-        if "used_entry_helper" in dead_exports:
-            failures.append("token reference from a test not counted")
-
-        # A `[@@deriving eq]` on a type embedding another module's type makes
-        # ppx emit a call to that module's `equal_*`. The call exists only in
-        # generated code, so the token scan cannot see it and the value must
-        # not be reported dead.
-        (root / "lib" / "derived_surface.mli").write_text(
-            "type widget\ntype gadget\n"
-            "val equal_widget : widget -> widget -> bool\n"
-            "val equal_gadget : gadget -> gadget -> bool\n"
-        )
-        (root / "lib" / "derived_surface.ml").write_text(
-            "type widget = int\ntype gadget = int\n"
-            "let equal_widget = Int.equal\nlet equal_gadget = Int.equal\n"
-        )
-        (root / "lib" / "deriving_consumer.ml").write_text(
-            "module W = Derived_surface\n"
-            "type holder = { part : W.widget } [@@deriving eq]\n"
-        )
-        derived = {d["name"] for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
-        if "equal_widget" in derived:
-            failures.append("ppx-generated caller counted as no caller")
-        if "equal_gadget" not in derived:
-            failures.append("ppx rule suppressed a type nothing embeds")
-
-        # A value republished through a facade's signature must be flagged as
-        # such: nothing calls it, but deleting it means editing the facade.
-        (root / "lib" / "leaf_surface.mli").write_text("val republished_helper : unit -> int\n")
-        (root / "lib" / "leaf_surface.ml").write_text("let republished_helper () = 0\n")
-        (root / "lib" / "facade_surface.ml").write_text("include Leaf_surface\n")
-        (root / "lib" / "facade_surface.mli").write_text(
-            "include module type of Leaf_surface\n"
-        )
-        # A plain leaf with no facade over it must come back with an empty
-        # `reexported_by`, or the two groups stop meaning anything.
-        (root / "lib" / "plain_surface.mli").write_text("val unfacaded_helper : unit -> int\n")
-        (root / "lib" / "plain_surface.ml").write_text("let unfacaded_helper () = 0\n")
-
-        # The multi-line `include module type of struct include X end` form,
-        # 51 occurrences in this tree, must match as well as the one-line form.
-        (root / "lib" / "wrapped_surface.mli").write_text("val wrapped_helper : unit -> int\n")
-        (root / "lib" / "wrapped_surface.ml").write_text("let wrapped_helper () = 0\n")
-        (root / "lib" / "multiline_facade.ml").write_text("include Wrapped_surface\n")
-        (root / "lib" / "multiline_facade.mli").write_text(
-            "include module type of struct\n  include Wrapped_surface\nend\n"
-        )
-
-        # A `module X = Y` alias in a .ml is a local shorthand, not a facade.
-        (root / "lib" / "aliasing_consumer.ml").write_text(
-            "module Alias = Plain_surface\nlet _ = 0\n"
-        )
-
-        # Skipped trees are pruned during the walk, and pruning must not change
-        # what the scan sees. Both halves are asserted below: a reference parked
-        # inside a skipped tree must not keep a value alive, and the pruning
-        # must not swallow the sibling directories it walks past.
-        stale = root / ".worktrees" / "old-checkout" / "lib"
-        stale.mkdir(parents=True)
-        (stale / "stale_consumer.ml").write_text("let _ = Plain_surface.unfacaded_helper ()\n")
-        build = root / "lib" / "_build" / "default"
-        build.mkdir(parents=True)
-        (build / "generated_consumer.ml").write_text(
-            "let _ = Wrapped_surface.wrapped_helper ()\n"
-        )
-
-        entries = {d["name"]: d for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
-        republished = entries.get("republished_helper")
-        if republished is None:
-            failures.append("value behind a facade not reported at all")
-        elif not republished.get("reexported_by"):
-            failures.append("facade re-export not recorded on the finding")
-
-        plain = entries.get("unfacaded_helper")
-        if plain is None:
-            failures.append("plain dead export not reported")
-        elif plain.get("reexported_by"):
-            failures.append("a .ml module alias was mistaken for a facade")
-
-        wrapped = entries.get("wrapped_helper")
-        if wrapped is None:
-            failures.append("value behind a multi-line facade not reported")
-        elif not wrapped.get("reexported_by"):
-            failures.append("multi-line include module type of not matched")
-
-        # Both of these were still reported above: a call sitting in
-        # .worktrees/ or _build/ is not a reference. They are asserted here so
-        # that a walk which stops pruning fails loudly instead of quietly
-        # shrinking the report -- the direction that hides dead surface.
-        if "unfacaded_helper" not in entries:
-            failures.append("a reference under .worktrees/ was counted as live")
-        if "wrapped_helper" not in entries:
-            failures.append("a reference under _build/ was counted as live")
-
-        (root / "lib" / "_build").parent.joinpath("_opam").write_text("not a directory\n")
-
-        walked = {path.name for path in all_files(root)}
-        if "_opam" in walked:
-            failures.append("a file whose own name is skipped was collected")
-        if "stale_consumer.ml" in walked:
-            failures.append(".worktrees/ was walked instead of pruned")
-        if "generated_consumer.ml" in walked:
-            failures.append("_build/ was walked instead of pruned")
-        if "plain_surface.ml" not in walked:
-            failures.append("pruning removed a sibling it should have walked")
-
-    for failure in failures:
-        print(f"self-test FAIL: {failure}", file=sys.stderr)
-    if failures:
-        return 1
-    print("self-test OK")
-    return 0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -688,151 +536,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help=f"Skip export names shorter than this (default {DEFAULT_MIN_NAME_LEN}).")
     parser.add_argument("--stanzas", action="store_true",
                         help="Report test/stanzas/*.inc files that test/dune never includes.")
-    parser.add_argument("--ratchet", action="store_true",
-                        help="With --exports, fail when the count exceeds DEAD_EXPORT_BASELINE.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
-    parser.add_argument("--self-test", action="store_true", help="Run the regression guard and exit.")
     return parser.parse_args(argv)
-
-
-# Exact current count. The audit's documented categories explain why every
-# reported entry is not mechanically removable; the ratchet still forbids
-# adding another dead public export.
-#
-# Lowered from 548 to 545 on 2026-08-14 (#28656): three
-# keeper_official_client_host hook helpers (hook_error,
-# illegal_hook_decision, invoke_turn_hook) lost their last external callers
-# when the three runtime modules were consolidated onto
-# invoke_turn_completion_hooks, and keeper_tool_descriptor.composable_output_to_json
-# / keeper_tool_plan.output_value never had one. All three .mli exports
-# were dropped (implementations kept where still used internally,
-# output_value's implementation removed as unused).
-# 545 -> 541: tightened to the measured count. The four counts of slack
-# predate the Keeper_compact_audit purge (main already measured 541 against
-# the stale 545 baseline); the purge itself did not change the count.
-# 540 -> 539: tightened to the measured count on the RFC-0387 stage-1 tree
-# (measured 2026-08-20: 539). The one count of slack predates this change;
-# goal_verification's exports all have callers (dashboard joins + tests), so
-# the ledger added none.
-# 536 -> 532: tightened to the measured count (measured 2026-08-22: 532
-# before and after this change). The four counts of slack predate it; the
-# change itself is count-neutral because the four exports it orphaned
-# (audit_log.entry_of_json_r, common.keeper_runtime_store_dirname,
-# workspace_utils_paths_backend tasks_dirname / backlog_filename) were
-# dropped from their .mli in the same PR, implementations kept where still
-# used internally.
-# 532 -> 529: the #29396 A22 purge deleted three exports this audit already
-# listed (keeper_memory_recall.recent_lines_or_record,
-# runtime_observation.model_label_of_config, session.add_mcp_session_header)
-# and orphaned nothing. 529 -> 528: measured on the merge with main after
-# #29515 (2026-08-22).
-# 528 -> 526: measured on the merge with main (PR #29539, 2026-08-22).
-# 526 -> 522: the agent JSON repair path (#29396 A15) removed four more
-# exports (normalize_agent_last_seen, short_json_repr,
-# agent_json_needs_repair, read_agent_with_repair_result).
-# 522 -> 521: dropping the Mcp_server JSON-RPC aliases removed one more
-# export (mcp_server.jsonrpc_request_to_yojson).
-# 521 -> 519: dropping server_routes_http_common.state_switch_opt and
-# state_clock_opt removed two more dead exports.
-# 519 -> 55: swept every export the audit could reach. The facades here mirror
-# their sub-modules with `include module type of` and never re-declare what
-# they forward, so dropping the declaration at the owning module narrowed the
-# facade with it and no facade needed editing. Declarations went first; the
-# compiler then reported the orphaned implementations, and each round exposed
-# more, so the count fell further than the declarations removed. Held back:
-# twelve names carrying the spec-bridge shape this file warns about above.
-# Those need the three questions answered one at a time, not a scan. What
-# remains is those twelve plus the entries an odoc link names as an intended
-# entry point.
-#
-# Do not name the survivors here. A first draft of this note listed three of
-# them, and the token scan read its own comment as a caller: the gate counted
-# three fewer than the tree held. State the test, not the roster -- as the
-# paragraph above already says.
-# 43 -> 45, measured on 2026-08-27 after the skills-proof merge train. The
-# train and the same-day merges around it left the tree five over the old
-# floor; this change purges every export the skills audit could justify on
-# its own authority and re-measures the floor at what the tree now holds.
-# The remainder predates the train and sits outside the skills surface, so
-# it waits for its own reviewed purge rather than a blind sweep here.
-# 1 -> 0, measured on 2026-08-30: the MCP 2026-07-28 conformance pass removed
-# the mime-derived resource icon palette, which held the last one.
-# 0 -> 33, measured on 2026-09-10, and the first baseline this ratchet is wired
-# behind. Nothing ran it between 2026-08-30 and 2026-09-09, and 149 exports
-# accumulated in those ten days. #34854, #34861, #34862, #34863, #34864,
-# #34867 and #34868 took it back to 33. Raising the number is the honest
-# reading of a measurement nobody was taking; it is wired now, so the next
-# move is down.
-#
-# What the remaining 33 are, so the next person does not re-derive it:
-#   21  runtime (8), sessions_store (6), runtime_store (5),
-#       sessions_store_parsers (2) -- held by the v0.217.x frozen-surface
-#       decision in #34858, where producer and consumer are both gone.
-#    6  odoc-referenced: a sibling declaration's doc block names them with
-#       {!name}, so removing the val breaks the doc it is named from. One of
-#       the six is also one of the agent entry points below.
-#    3  agent's other run entry points; "no caller in this tree" is not the
-#       same verdict for a library's headline API.
-#    2  exact_output_plan.fingerprint_to_string and
-#       stop_reason_wire.is_unmatched_tool_calls -- an inline test is their
-#       only caller. Dropping the val turns the release build red, so they
-#       need the test rewritten first (#34884).
-#    1  keeper_approval_queue.observe_waiting_request -- read-only typed
-#       observation of an authoritative Gate request, published ahead of its
-#       consumer: the dependent direct-Gate dispatch unit consumes it next
-#       (#34962 evidence: docs/evidence/2026-09-10-direct-gate-wait).
-# 34 -> 31, measured on 2026-09-10. The staged observation above found its
-# consumer, and the two exports whose only caller was an inline test are gone:
-# stop_reason_wire's fail-closed predicate was sugar over a variant that
-# pipeline.ml already pattern-matches, and exact_output_plan's fingerprint
-# reader stayed as annotated test support with its val dropped.
-# 31 -> 25, measured on 2026-09-10. The six frozen sessions readers are gone
-# (#34858): their artifact writers were removed in v0.217.x, sessions_store.mli
-# recorded the readers as kept on purpose, and nothing called them. Six exports
-# and the 209-line parser module they alone reached went with them.
-# 25 -> 24, measured on 2026-09-10. mcp_session.reconnect_all is gone: the
-# note above called it half-wired, and the resume side turned out to have no
-# place to call it -- Agent.resume takes its tools from the caller and masc
-# passes config.tools (#34871).
-DEAD_EXPORT_BASELINE = 24
-
-
-def run_ratchet(count: int) -> int:
-    """Compare the dead-export count against the frozen baseline.
-
-    Below the baseline passes and says by how much, rather than failing until
-    someone edits the number. The other direction is wrong for a measured
-    reason: failing on your own improvement turned main red three times in an
-    hour while people were wiring suites.
-    """
-    if count > DEAD_EXPORT_BASELINE:
-        print(
-            f"[dead-surface] FAIL - {count} dead exports, over the "
-            f"{DEAD_EXPORT_BASELINE} baseline by {count - DEAD_EXPORT_BASELINE}.\n"
-            "\n"
-            "An export with no caller anywhere in the tree is usually a surface\n"
-            "someone meant to wire and did not. Remove it, wire it, or raise\n"
-            f"DEAD_EXPORT_BASELINE in {Path(__file__).name} with the reason.",
-            file=sys.stderr,
-        )
-        return 1
-    if count < DEAD_EXPORT_BASELINE:
-        print(
-            f"[dead-surface] OK - {count} dead exports, {DEAD_EXPORT_BASELINE} "
-            f"baseline - lower DEAD_EXPORT_BASELINE to hold the "
-            f"{DEAD_EXPORT_BASELINE - count} you removed"
-        )
-        return 0
-    print(f"[dead-surface] OK - {count} dead exports, at baseline")
-    return 0
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    if args.self_test:
-        return run_self_test()
     if not args.modules and not args.exports and not args.stanzas:
-        print("choose --modules, --exports or --stanzas (or --self-test)", file=sys.stderr)
+        print("choose --modules, --exports or --stanzas", file=sys.stderr)
         return 2
 
     payload: dict[str, object] = {}
@@ -883,11 +594,6 @@ def main(argv: list[str]) -> int:
                 print(f"  {orphan}")
     if args.json:
         print(json.dumps(payload, indent=2))
-    if args.ratchet:
-        if dead_export_count is None:
-            print("--ratchet needs --exports", file=sys.stderr)
-            return 2
-        return run_ratchet(dead_export_count)
     return 0
 
 

@@ -5,10 +5,7 @@
     MASC_HTTP_MAX_CONNECTIONS as 128 while [Http_server_eio] used 512, for the
     three months between #14143 raising the reader and this suite.
 
-    [check-env-snapshot-default-drift.py] catches the same class by comparing
-    literals across the two sources. It cannot check this knob any more,
-    because the fix was to stop writing a literal on either side — so the
-    property is asserted here instead, through the JSON the operator actually
+    These tests compare the applied defaults with the JSON the operator
     receives. *)
 
 open Alcotest

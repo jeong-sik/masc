@@ -1,15 +1,14 @@
 (* See candle_config.mli. *)
 
 type payout_policy = {
-  trivial_milli : int; small_milli : int; medium_milli : int;
-  large_milli : int; epic_milli : int;
+  grades : (Candle_grade.t * int * string) list;
+  distribution : Candle_math.distribution;
   weight_max : int; deduction_rate : int; deduction_floor : int;
 }
 
-let grade_amount_milli policy = function
- | Candle_grade.Trivial -> policy.trivial_milli
- | Small -> policy.small_milli | Medium -> policy.medium_milli
- | Large -> policy.large_milli | Epic -> policy.epic_milli
+let grade_amount_milli policy grade =
+  List.find_map (fun (candidate, amount, _) ->
+    if candidate = grade then Some amount else None) policy.grades
 
 type policy = {
   payout : payout_policy;
@@ -59,21 +58,48 @@ let integer context fields key low high =
 
 let payout_of_toml payout =
   let* fields = exact_table "payout"
-      ["grades_milli"; "weight_max"; "deduction_rate"; "deduction_floor"] payout in
+      ["grades_milli"; "grade_criteria"; "weight_max"; "deduction_rate"; "deduction_floor";
+       "share_rounding"; "remainder_tie_break"; "deduction_rounding"] payout in
   let* weight_max = integer "payout" fields "weight_max" 1 max_int in
   let* deduction_rate = integer "payout" fields "deduction_rate" 0 1000 in
   let* deduction_floor = integer "payout" fields "deduction_floor" 0 1000 in
-  let* grades = required "payout" fields "grades_milli" in
-  let* grades = exact_table "payout.grades_milli"
-      (List.map Candle_grade.to_string Candle_grade.all) grades in
-  let amount grade = integer "payout.grades_milli" grades (Candle_grade.to_string grade)
-      0 max_int in
-  let* trivial_milli = amount Candle_grade.Trivial in
-  let* small_milli = amount Candle_grade.Small in
-  let* medium_milli = amount Candle_grade.Medium in
-  let* large_milli = amount Candle_grade.Large in
-  let* epic_milli = amount Candle_grade.Epic in
-  Ok {trivial_milli; small_milli; medium_milli; large_milli; epic_milli;
+  let choice key choices =
+    let* value = required "payout" fields key in
+    match value with
+    | Otoml.TomlString value ->
+      (match List.assoc_opt value choices with
+       | Some policy -> Ok policy | None -> Error ("unknown payout." ^ key))
+    | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _
+    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> Error ("payout." ^ key ^ " must be a string") in
+  let* share_rounding = choice "share_rounding"
+      ["largest_remainder", Candle_math.Largest_remainder; "down", Candle_math.Down] in
+  let* tie_break = choice "remainder_tie_break"
+      ["name_ascending", Candle_math.Name_ascending; "name_descending", Candle_math.Name_descending] in
+  let* deduction_rounding = choice "deduction_rounding"
+      ["down", Candle_math.Floor; "up", Candle_math.Ceil] in
+  let* raw_grades = required "payout" fields "grades_milli" in
+  let* grades = match table_fields raw_grades with
+    | Some (_ :: _ as grades) -> Ok grades
+    | _ -> Error "payout.grades_milli must be a nonempty table" in
+  let* raw_criteria = required "payout" fields "grade_criteria" in
+  let names = List.map fst grades in
+  let* criteria = exact_table "payout.grade_criteria" names raw_criteria in
+  let* grades = List.fold_right (fun (name, _) result ->
+    let* result = result in
+    let* grade = match Candle_grade.of_string name with
+      | Some grade -> Ok grade | None -> Error ("invalid grade identifier: " ^ name) in
+    let* amount = integer "payout.grades_milli" grades name 0 max_int in
+    let* criterion = required "payout.grade_criteria" criteria name in
+    let* criterion = match criterion with
+      | Otoml.TomlString text when String.trim text <> "" -> Ok text
+      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _
+    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> Error ("payout.grade_criteria." ^ name ^ " must be nonblank text") in
+    Ok ((grade, amount, criterion) :: result)) grades (Ok []) in
+  Ok {grades; distribution={Candle_math.share_rounding; tie_break; deduction_rounding};
       weight_max; deduction_rate; deduction_floor}
 
 let prices_of_toml shop =

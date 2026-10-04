@@ -556,7 +556,7 @@ let load_failure_to_string { kind; message } =
   Printf.sprintf "%s %s" verb message
 ;;
 
-let load_and_apply ~base_path =
+let load_and_apply_document ~base_path =
   let path = toml_path ~base_path in
   if not (Sys.file_exists path) then
     Ok 0
@@ -595,3 +595,16 @@ let load_and_apply ~base_path =
            in
            Atomic.set last_applied_at (Some (Time_compat.now ()));
            Ok count)
+
+let load_and_apply ~base_path : (int, load_failure) result =
+  let validation =
+    try
+      List.iter (fun setting ->
+        ignore (Keeper_runtime_setting_registry.effective_value setting))
+        Keeper_runtime_setting_registry.toml_settings;
+      Ok ()
+    with Env_config_core.Config_error message -> Result.Error {kind=Validate; message}
+  in
+  match validation with
+  | Result.Error error -> Result.Error error
+  | Ok () -> load_and_apply_document ~base_path

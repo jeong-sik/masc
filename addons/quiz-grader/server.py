@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from protocol import (InvalidInput, OUTPUT_SCHEMA, evidence, object_value, optional_string,
+from protocol import (InvalidInput, OUTPUT_SCHEMA, decode_json, evidence, object_value, optional_string,
                       sources_from_json, stable_id, string)
 
 TEXT = {"type": "string", "minLength": 1}
@@ -254,7 +254,7 @@ def main():
     for line in sys.stdin:
         request_id = None
         try:
-            request = object_value(json.loads(line), "request")
+            request = object_value(decode_json(line), "request")
             request_id = request.get("id")
             if "id" not in request:
                 continue

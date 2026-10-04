@@ -84,7 +84,7 @@ let test_a_rate_or_floor_outside_the_range_is_refused () =
 
 (* {1 Split} *)
 
-let split ~total weights = ok_or_fail (Candle_math.split ~total weights)
+let split ~total weights = ok_or_fail (Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total weights)
 
 let test_a_split_gives_the_leftover_to_the_largest_remainders () =
   Alcotest.(check (list (pair string int)))
@@ -118,11 +118,11 @@ let test_a_zero_weight_gets_nothing_and_one_name_gets_everything () =
 ;;
 
 let test_split_checks_inputs_and_preserves_large_results () =
-  is_error "negative total" Candle_math.Negative_total (Candle_math.split ~total:(-1) [ "a", 1 ]);
-  is_error "no names" Candle_math.No_weight (Candle_math.split ~total:5 []);
-  is_error "all zero" Candle_math.No_weight (Candle_math.split ~total:5 [ "a", 0; "b", 0 ]);
-  is_error "negative weight" (Candle_math.Negative_weight "b") (Candle_math.split ~total:5 [ "a", 1; "b", -1 ]);
-  is_error "a name twice" (Candle_math.Duplicate_name "a") (Candle_math.split ~total:5 [ "a", 1; "b", 1; "a", 2 ]);
+  is_error "negative total" Candle_math.Negative_total (Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total:(-1) [ "a", 1 ]);
+  is_error "no names" Candle_math.No_weight (Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total:5 []);
+  is_error "all zero" Candle_math.No_weight (Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total:5 [ "a", 0; "b", 0 ]);
+  is_error "negative weight" (Candle_math.Negative_weight "b") (Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total:5 [ "a", 1; "b", -1 ]);
+  is_error "a name twice" (Candle_math.Duplicate_name "a") (Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total:5 [ "a", 1; "b", 1; "a", 2 ]);
   Alcotest.(check (list (pair string int))) "representable shares despite a large product"
     [ "a", 2 * (max_int / 3); "b", max_int / 3 ]
     (split ~total:max_int [ "a", 2; "b", 1 ]);
@@ -145,7 +145,7 @@ let test_the_shares_always_sum_to_the_total_and_stay_within_one_of_exact () =
   for _ = 1 to 3000 do
     let total, weights = random_case state in
     let sum = List.fold_left (fun acc (_, weight) -> acc + weight) 0 weights in
-    match Candle_math.split ~total weights with
+    match Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total weights with
     | Error Candle_math.No_weight -> Alcotest.(check int) "only when every weight is zero" 0 sum
     | Error error -> Alcotest.failf "%s" (Candle_math.error_to_string error)
     | Ok shares ->
@@ -165,7 +165,7 @@ let test_the_split_does_not_depend_on_the_order_names_are_given_in () =
   let state = Random.State.make [| 7 |] in
   for _ = 1 to 500 do
     let total, weights = random_case state in
-    match Candle_math.split ~total weights with
+    match Candle_math.split ~rounding:Candle_math.Largest_remainder ~tie_break:Candle_math.Name_ascending ~total weights with
     | Error _ -> ()
     | Ok shares ->
       let reversed = List.rev weights in
@@ -180,7 +180,7 @@ let test_the_split_does_not_depend_on_the_order_names_are_given_in () =
 (* {1 Deduct} *)
 
 let test_a_deduction_rounds_down () =
-  let deduct ~coefficient share = ok_or_fail (Candle_math.deduct ~coefficient share) in
+  let deduct ~coefficient share = ok_or_fail (Candle_math.deduct ~rounding:Candle_math.Floor ~coefficient share) in
   Alcotest.(check int) "10000 at 70%" 7000 (deduct ~coefficient:700 10_000);
   Alcotest.(check int) "999 at 70% is 699.3" 699 (deduct ~coefficient:700 999);
   Alcotest.(check int) "at 100% nothing is taken" 12_345 (deduct ~coefficient:1000 12_345);
@@ -189,10 +189,10 @@ let test_a_deduction_rounds_down () =
 ;;
 
 let test_deduction_checks_inputs_and_preserves_large_results () =
-  is_error "coefficient above 1000" (Candle_math.Rate_out_of_range 1001) (Candle_math.deduct ~coefficient:1001 5);
-  is_error "coefficient below 0" (Candle_math.Rate_out_of_range (-1)) (Candle_math.deduct ~coefficient:(-1) 5);
+  is_error "coefficient above 1000" (Candle_math.Rate_out_of_range 1001) (Candle_math.deduct ~rounding:Candle_math.Floor ~coefficient:1001 5);
+  is_error "coefficient below 0" (Candle_math.Rate_out_of_range (-1)) (Candle_math.deduct ~rounding:Candle_math.Floor ~coefficient:(-1) 5);
   Alcotest.(check int) "identity deduction preserves the largest public amount"
-    max_int (ok_or_fail (Candle_math.deduct ~coefficient:1000 max_int))
+    max_int (ok_or_fail (Candle_math.deduct ~rounding:Candle_math.Floor ~coefficient:1000 max_int))
 ;;
 
 let test_negative_shares_never_become_payments () =
@@ -202,7 +202,7 @@ let test_negative_shares_never_become_payments () =
          (fun coefficient ->
             is_error "a negative input cannot mint or destroy a payment"
               (Candle_math.Negative_share share)
-              (Candle_math.deduct ~coefficient share))
+              (Candle_math.deduct ~rounding:Candle_math.Floor ~coefficient share))
          [ 0; 1; 500; 999; 1000 ])
     [ -1; -1000; min_int; min_int + 1 ]
 ;;

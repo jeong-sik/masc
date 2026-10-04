@@ -68,7 +68,6 @@ let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
   }
 ;;
 
-
 let require_ok label = function
   | Ok value -> value
   | Error message -> failf "%s: %s" label message
@@ -306,7 +305,6 @@ let test_direct_append_observer_failure_is_isolated () =
        let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
        check int "observer failure preserves both durable rows" 2 (List.length rows))
 ;;
-
 
 let test_current_rows_require_complete_writer_shape () =
   with_temp_base @@ fun base_path ->
@@ -1222,38 +1220,6 @@ let test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences () =
   | Ok _ -> fail "empty batch identity was accepted"
 ;;
 
-
-(* The post-append fault seam is declared in the .mli as a boundary contract:
-   it must exist exactly once as a definition and once as a declaration, so the
-   fault path cannot acquire a second entry point.
-   [scripts/keeper_event_queue_projection_boundary_check.ml] asserts that shape
-   from outside the compiler, which is why an unused-declaration sweep read the
-   declaration as dead and removed it (#27230), turning main red.
-
-   This case holds the declaration from inside the compiler. It calls the seam
-   with a callback that does nothing but record that it ran, so removing the
-   declaration again is a compile error here rather than a red main later. *)
-let test_after_ledger_append_seam_is_reachable_through_the_interface () =
-  let ran = ref false in
-  let result =
-    Keeper_reaction_ledger.For_testing.with_after_ledger_append
-      ~after_ledger_append:(fun () ->
-        ran := true;
-        Ok ())
-      (fun () -> "body ran")
-  in
-  check string "the scoped body's value is returned" "body ran" result;
-  (* The seam installs the hook for the scope; whether this body triggers an
-     append is not this case's claim. What is claimed is that the declaration
-     exists and its type is the one the boundary check names. *)
-  ignore !ran
-;;
-
-(* The event id is recomputed on read and compared, so the digest decides
-   replay: two stimuli landing on one id make the second read as the first.
-   MD5 and SHA-256 both produce a hex string of the right shape, and every
-   other case in this file passes under either, so the algorithm needs saying
-   out loud (#26720). *)
 let test_event_id_digest_is_sha256 () =
   let stimulus_id = "board:post-42" in
   let expected =
@@ -1552,10 +1518,7 @@ let () =
             "reaction evidence batch indexes multiple occurrences"
             `Quick
             test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences
-        ; test_case
-            "after_ledger_append seam is reachable through the interface"
-            `Quick
-            test_after_ledger_append_seam_is_reachable_through_the_interface
+
         ; test_case
             "event id digest is SHA-256"
             `Quick

@@ -52,7 +52,7 @@ let test_failure_stops_child_before_same_switch_retry () =
     done);
   let chrome = Filename.concat masc_root "fake-chromium" in
   fake_chromium ~path:chrome ~port;
-  let config : Masc.Browser_configuration.stagehand = { chrome; extension = masc_root; profile = None } in
+  let config : Browser_configuration.stagehand = { chrome; extension = masc_root; profile = None } in
   let profile = Process.server_profile ~masc_root in
   let record = Process.owner_record_path ~masc_root in
   let log_path = Filename.concat (Filename.dirname profile) "chromium.log" in
@@ -105,7 +105,7 @@ let test_malformed_owner_record_blocks_profile_reset () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let config : Masc.Browser_configuration.stagehand =
+  let config : Browser_configuration.stagehand =
     { chrome = Filename.concat masc_root "missing-chromium"; extension = masc_root; profile = None }
   in
   (match
@@ -139,7 +139,7 @@ let test_unmatched_live_pid_blocks_profile_reset () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let config : Masc.Browser_configuration.stagehand =
+  let config : Browser_configuration.stagehand =
     { chrome; extension = masc_root; profile = None }
   in
   (match
@@ -209,7 +209,7 @@ let test_dead_leader_with_live_group_blocks_profile_reset () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let config : Masc.Browser_configuration.stagehand =
+  let config : Browser_configuration.stagehand =
     { chrome; extension = masc_root; profile = None }
   in
   (match

@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 open Alcotest
 module Surface = Masc.Browser_surface
 (* A workspace path nothing creates: these scenarios never reach an installed

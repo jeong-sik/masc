@@ -623,6 +623,11 @@ val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
     an ordered list of runtime ids validated at load. *)
 
+val browser_configuration : unit -> Browser_configuration.t option
+(** Published Browser configuration. [None] means the runtime configuration
+    is unavailable. Activity follows this snapshot immediately; backend paths
+    are consumed when the server installs its executors. *)
+
 val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
 (** [\[lsp.servers\]] applied over the client's own table: the command that
     starts a language's server, the operator's where one was written for that

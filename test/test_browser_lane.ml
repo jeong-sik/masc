@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 open Alcotest
 module Lane = Browser_lane
 let serial = ref 0
@@ -140,7 +143,7 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   ignore (take info);
   client.connected_until <- Monotonic_deadline.after ~seconds:0.;
   check bool "expired client is not counted" true
-    (Lane.inventory_observation Lane.Lane_name.Live = Lane.Live_clients 0);
+    (Lane.inventory_observation Lane.Lane_name.Live = {Lane.activity=Enabled;backend=Lane.Live_clients 0});
   check bool "inventory did not retire client" false client.closed;
   check int "inventory did not finish waiting request" 1 (Hashtbl.length client.waiters);
   ignore (Lane.disconnect_client ~client_id:info.client_id);

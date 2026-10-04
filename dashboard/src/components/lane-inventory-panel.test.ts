@@ -16,6 +16,28 @@ function workspace(root: string) {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 beforeEach(() => { invalidateExecutionSnapshotGeneration(epoch, 0); generation = 0; workspace('/fixture/default') })
 describe('operator Lane inventory', () => {
+  it('shows browser off and unavailable without losing executor or live observations', async () => {
+    const raw = structuredClone(fixture)
+    const automation = raw.rows.find(item => item.id === 'browser/automation')!
+    const stagehand = raw.rows.find(item => item.id === 'browser/stagehand')!
+    const live = raw.rows.find(item => item.id === 'browser/live')!
+    Object.assign(automation.state, { activity: 'off', registered: true })
+    Object.assign(stagehand.state, { activity: 'unobserved', registered: true })
+    Object.assign(live.state, { activity: 'off', connected_clients: 2 })
+    api.fetchLaneInventory.mockResolvedValue(parseLaneInventory(raw))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: `Inspect ${automation.label}` }))
+    expect(screen.getAllByText('Off · configuration and sessions retained').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Executor registered · session activity unverified').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Status and close remain available while off/).length).toBeGreaterThan(0)
+    fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'browser/stagehand' } })
+    fireEvent.click(screen.getByRole('button', { name: `Inspect ${stagehand.label}` }))
+    expect(screen.getAllByText('Activity configuration unavailable').length).toBeGreaterThan(0)
+    fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'browser/live' } })
+    fireEvent.click(screen.getByRole('button', { name: `Inspect ${live.label}` }))
+    expect(screen.getAllByText('2 connected clients').length).toBeGreaterThan(0)
+    expect(api.fetchLaneInventory).toHaveBeenCalledTimes(1)
+  })
   it('searches all families and offers existing owner destinations without inventing controls', async () => {
     api.fetchLaneInventory.mockResolvedValue(parseLaneInventory(fixture))
     const screen = render(html`<${LaneInventoryPanel} />`)

@@ -1606,6 +1606,7 @@ let activate_owner_state
 
 let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
     ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
+  Server_browser_configuration.install_activity_observer ~sw;
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
     | Ok config -> config

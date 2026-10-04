@@ -3298,6 +3298,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let egress_allowlists_result = parse_egress_allowlists toml in
   let lsp_servers_result = parse_lsp_servers toml in
   let typesafeai_result = parse_typesafeai toml in
+  let browser_result = Browser_configuration.parse toml
+    |> Result.map_error (fun message -> error (Ns.key Ns.Browser) message) in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs obsolete_namespaces_result
@@ -3312,6 +3314,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs egress_allowlists_result
     @ errs lsp_servers_result
     @ errs typesafeai_result
+    @ errs browser_result
   in
   if all_errors <> []
   then Error all_errors
@@ -3348,6 +3351,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lsp_servers =
       extract_after_all_errors_guard ~label:"lsp_servers" lsp_servers_result
     in
+    let browser = extract_after_all_errors_guard ~label:(Ns.key Ns.Browser) browser_result in
     let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
@@ -3368,6 +3372,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ; egress_allowlists
         ; lsp_servers
         ; typesafeai
+        ; browser
         })
 ;;
 

@@ -13,8 +13,23 @@
     empty profile the server owns. *)
 
 type automation = { driver : string; binary : string option }
+[@@deriving show, eq]
 type stagehand = { chrome : string; extension : string; profile : string option }
-type t = { automation : automation option; stagehand : stagehand option }
+[@@deriving show, eq]
+type t = {
+  automation : automation option;
+  stagehand : stagehand option;
+  live_enabled : bool;
+  automation_enabled : bool;
+  stagehand_enabled : bool;
+}
+[@@deriving show, eq]
+
+(** Activity is independent of backend configuration and installed executors.
+    Omitted [enabled] keys preserve current behavior during the accepting
+    deployment. The canonical automation table is [\[browser.automation\]].
+    That deployment also accepts root [geckodriver]/[binary], but refuses a
+    file using both locations. Turning a lane off keeps these paths intact. *)
 
 (** Neither backend configured. *)
 val none : t

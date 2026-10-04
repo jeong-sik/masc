@@ -210,11 +210,11 @@ let start ~sw ~env ~base_path =
     (match Result.bind (stop_browsers_using ~clock ~profile_root) (fun () -> clear_profile_root ~profile_root) with
      | Ok () -> ()
      | Error detail -> Log.Server.warn "browser-lane: profiles under %s kept: %s" profile_root detail);
-    match Server_browser_configuration.load ~base_path with
-    | Error detail -> Log.Server.error "browser-lane: %s" detail
-    | Ok { Browser_configuration.automation = None; _ } ->
-      Log.Server.info "browser-lane: automation has no browser.geckodriver"
-    | Ok { Browser_configuration.automation = Some { driver; binary }; _ } ->
+    match Runtime.browser_configuration () with
+    | None -> Log.Server.error "browser-lane: Runtime configuration is unavailable"
+    | Some { Browser_configuration.automation = None; _ } ->
+      Log.Server.info "browser-lane: automation has no browser.automation.geckodriver"
+    | Some { Browser_configuration.automation = Some { driver; binary }; _ } ->
       match launch_driver ~sw ~env ~masc_root ~record_path ~driver with
       | Error detail -> Log.Server.error "browser-lane: %s" detail
       | Ok (endpoint, process, pid, log_path) ->

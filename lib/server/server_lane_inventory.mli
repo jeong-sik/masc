@@ -13,8 +13,8 @@ type declaration =
 type machine_publication = No_screen | Stable | Running
 type state =
   | Exact_state of Server_standalone_lane_projection.lane_configuration
-  | Browser_clients of int
-  | Browser_executor of bool
+  | Browser_clients of Browser_lane.activity * int
+  | Browser_executor of Browser_lane.activity * bool
   | Machine_state of machine_publication
   | Package_state of {
       declaration : declaration option;

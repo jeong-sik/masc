@@ -6856,6 +6856,8 @@
  (modules test_browser_lane)
  (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
+(include stanzas/test_browser_activity.inc)
+
 ; Mock clock as the lane's clock: a command taken, and an answer delivered,
 ; as their window passed stand.
 (test

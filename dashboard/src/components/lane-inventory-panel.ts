@@ -7,6 +7,8 @@ import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
+const browserActivityText = { on: 'New requests enabled', off: 'Off · configuration and sessions retained',
+  unobserved: 'Activity configuration unavailable' }
 function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   const state = row.state
   switch (state.kind) {
@@ -21,8 +23,10 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
           : `${config.kind}: ${config.detail}`,
       ...(lane ? [`${lane.status} · ${lane.runningCount} running · ${lane.retainedRunCount} retained runs`] : [])]
     }
-    case 'browser_clients': return [`${state.connected_clients} connected clients`]
-    case 'browser_executor': return [state.registered ? 'Executor registered · session activity unverified' : 'Executor not registered']
+    case 'browser_clients': return [browserActivityText[state.activity], `${state.connected_clients} connected clients`]
+    case 'browser_executor': return [browserActivityText[state.activity],
+      state.registered ? 'Executor registered · session activity unverified' : 'Executor not registered',
+      'Status and close remain available while off. Executable and profile paths apply at server startup.']
     case 'machine': return [{ no_screen: 'No screen observed', stable: 'Stable screen published', running: 'Machine running' }[state.publication]]
     case 'package': {
       const declared = state.declaration

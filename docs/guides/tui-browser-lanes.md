@@ -73,6 +73,14 @@ before another pointer action can execute.
 
 See [setup and Keeper usage](../design/browser-lane-examples.md).
 
+All Lanes displays each Browser backend's activity separately from its live
+connections or registered executor. Off rejects new reads and actions while
+preserving accepted work and sessions; server session status and close remain
+available. Activity follows validated Runtime configuration saves. Executable,
+extension and profile paths apply at server startup, including when a previously
+unconfigured backend is added. See [backend activity settings](../design/browser-lane-examples.md#backend별-활동-설정)
+for the current Runtime TOML editing workflow and restart requirements.
+
 ## Verification
 
 `test/test_browser_surface.ml` covers page selection, empty browsers and failures.

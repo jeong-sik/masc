@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* Keeper_vision_tool pure-core tests — RFC-keeper-vision-delegation-tool §2.6.
 
    Locks the two contract-critical pure pieces:

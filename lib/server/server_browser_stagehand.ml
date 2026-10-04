@@ -328,11 +328,11 @@ let start ~sw ~env ~base_path =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
     stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
-    match Server_browser_configuration.load ~base_path with
-    | Error detail -> Log.Server.error "browser-lane: %s" detail
-    | Ok { Browser_configuration.stagehand = None; _ } ->
+    match Runtime.browser_configuration () with
+    | None -> Log.Server.error "browser-lane: Runtime configuration is unavailable"
+    | Some { Browser_configuration.stagehand = None; _ } ->
       Log.Server.info "browser-lane: stagehand has no [browser.stagehand]"
-    | Ok { Browser_configuration.stagehand = Some config; _ } ->
+    | Some { Browser_configuration.stagehand = Some config; _ } ->
       let clock = Eio.Stdenv.clock env in
       (* [base_path] is where the lane's official-client CLI slots run. *)
       let model params =

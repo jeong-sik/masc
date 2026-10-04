@@ -3,6 +3,22 @@ import { parseLaneInventory } from './lane-inventory'
 import fixture from './fixtures/lane-inventory.json'
 
 describe('common Lane inventory wire', () => {
+  it('preserves browser activity independently of registration and requires an explicit observation', () => {
+    for (const activity of ['on', 'off', 'unobserved']) {
+      const raw = structuredClone(fixture)
+      const row = raw.rows.find(item => item.id === 'browser/automation')!
+      Object.assign(row.state, { activity, registered: true })
+      expect(parseLaneInventory(raw).rows.find(item => item.id === row.id)?.state)
+        .toEqual({ kind: 'browser_executor', activity, registered: true })
+    }
+    for (const activity of [undefined, null, true, 'enabled']) {
+      const raw = structuredClone(fixture)
+      for (const row of raw.rows.filter(item => item.selection.kind === 'browser')) {
+        Object.assign(row.state, { activity })
+      }
+      expect(() => parseLaneInventory(raw)).toThrow()
+    }
+  })
   it('reads the actual TUI fixture contract with every built-in and exact observation', () => {
     const parsed = parseLaneInventory(fixture)
     expect(parsed.rows).toHaveLength(12)

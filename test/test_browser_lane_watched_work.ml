@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* The browser lane's waits keep what arrived as their window passed.
 
    Each wait raced work against a timer with [Fiber.first], which keeps

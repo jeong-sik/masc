@@ -220,6 +220,26 @@ type answer =
   | Refused of string
   | Rejected_before_effect of string
 
+(* The server supplies a view of Runtime's immutable configuration snapshot.
+   Read it at admission; do not keep a second configuration cache here. *)
+type activity = Enabled | Disabled | Unobserved
+let activity_observer : (Lane_name.t -> activity) option Atomic.t = Atomic.make None
+let install_activity_observer observer = Atomic.set activity_observer observer
+let activity lane = match Atomic.get activity_observer with
+  | None -> Unobserved
+  | Some observe -> observe lane
+
+let activity_refusal lane = function
+  | Session_close | Session_status -> None
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Page_scene _ | Page_interact _ | Session_open _ | Page_goto _ | Page_elements _
+  | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ ->
+    match activity lane with
+    | Enabled -> None
+    | Disabled -> Some (Rejected_before_effect
+        ("browser." ^ Lane_name.to_wire lane ^ " is off; enable it before issuing new browser work"))
+    | Unobserved -> Some (Rejected_before_effect "Browser activity configuration is unavailable")
+
 type browser = Firefox | Zen
 let browser_name = function Firefox -> "firefox" | Zen -> "zen"
 let browser_of_string = function
@@ -289,7 +309,7 @@ let lane_absent_message = function
     "no browser lane connected: the live lane needs the operator's browser \
      running with the browser-lane extension and host (connectors/browser)"
   | Lane_name.Automation ->
-    "the automation lane has no WebDriver: configure browser.geckodriver, or \
+    "the automation lane has no WebDriver: configure browser.automation.geckodriver, or \
      read the server log for why it did not start"
   | Lane_name.Stagehand ->
     "the stagehand lane has no browser: configure [browser.stagehand], or \
@@ -391,14 +411,17 @@ let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in
       let accepted = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-        if only_if_idle &&
+        match activity_refusal Lane_name.Live verb with
+        | Some refusal -> Error refusal
+        | None -> if only_if_idle &&
            (Hashtbl.length client.waiters <> 0 || Eio.Stream.length client.commands <> 0)
-        then false
-        else (Hashtbl.add client.waiters id resolver; true)) in
+        then Error (Refused "optional_document_observation_busy")
+        else (Hashtbl.add client.waiters id resolver; Ok ())) in
       Eio.Switch.on_release sw (fun () ->
         Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id));
-      if not accepted then Refused "optional_document_observation_busy"
-      else Watched_work.run
+      match accepted with
+      | Error refusal -> refusal
+      | Ok () -> Watched_work.run
         (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
           Answered (Eio.Promise.await promise))
         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))
@@ -418,25 +441,31 @@ let install_automation_document_observer observer = Atomic.set automation_docume
 let issue_automation ~verb ~timeout_sec =
   if not (verb_allowed_on_automation verb) then
     Rejected_before_effect sentence_verbs_refused
-  else
-  match Atomic.get automation_executor with
+  else match activity_refusal Lane_name.Automation verb with
+  | Some refusal -> refusal
+  | None -> match Atomic.get automation_executor with
   | None -> Lane_absent
   | Some execute -> Watched_work.run (fun () -> execute verb)
       ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
-type inventory_observation = Live_clients of int | Executor_registered of bool
+type backend_observation = Live_clients of int | Executor_registered of bool
+type inventory_observation = { activity : activity; backend : backend_observation }
 (* Reading inventory must not prune clients or resolve their waiting requests. *)
-let inventory_observation = function
+let inventory_observation lane =
+  let activity = activity lane in
+  let backend = match lane with
   | Lane_name.Live -> Live_clients (Eio.Mutex.use_ro clients_mutex (fun () ->
       Hashtbl.fold (fun _ client count -> if connected client then count+1 else count) clients 0))
   | Lane_name.Automation -> Executor_registered (Option.is_some (Atomic.get automation_executor))
   | Lane_name.Stagehand -> Executor_registered (Option.is_some (Atomic.get stagehand_executor))
+  in { activity; backend }
 let issue_stagehand ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
     Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb)
-  else
-  match Atomic.get stagehand_executor with
+  else match activity_refusal Lane_name.Stagehand verb with
+  | Some refusal -> refusal
+  | None -> match Atomic.get stagehand_executor with
   | None -> Lane_absent
   | Some execute ->
     (match timeout_sec with
@@ -534,7 +563,9 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
      source is unavailable there, as it is for a busy browser. *)
   | Stagehand -> Ok Lane_absent
   | Automation ->
-    match Atomic.get automation_document_observer with
+    match activity_refusal Lane_name.Automation (Page_document {tab_id}) with
+    | Some refusal -> Ok refusal
+    | None -> match Atomic.get automation_document_observer with
     | None -> Ok Lane_absent
     | Some observe -> Ok (Watched_work.run (fun () -> observe ~tab_id)
         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))

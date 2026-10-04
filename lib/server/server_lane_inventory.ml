@@ -12,8 +12,8 @@ type declaration = Valid of Config.declaration | Invalid of string list | Absent
 type machine_publication = No_screen | Stable | Running
 type state =
   | Exact_state of Exact_projection.lane_configuration
-  | Browser_clients of int
-  | Browser_executor of bool
+  | Browser_clients of Browser_lane.activity * int
+  | Browser_executor of Browser_lane.activity * bool
   | Machine_state of machine_publication
   | Package_state of { declaration : declaration option; instances : Addon.inventory_instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
@@ -71,8 +71,8 @@ let snapshot ~config =
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)
       | Lane_id.Browser id ->
           Browser id,(match Browser_lane.inventory_observation id with
-            | Browser_lane.Live_clients count -> Browser_clients count
-            | Browser_lane.Executor_registered registered -> Browser_executor registered)
+            | {Browser_lane.activity; backend=Live_clients count} -> Browser_clients (activity,count)
+            | {Browser_lane.activity; backend=Executor_registered registered} -> Browser_executor (activity,registered))
       | Lane_id.Machine id -> Machine id,Machine_state (match id with
           | Machine_lane.Msx -> machine_publication (Msx_lane.current_publication ())
           | Machine_lane.Dos -> machine_publication (Dos_lane.current_publication ())) in
@@ -117,10 +117,14 @@ let instance_json (i : Addon.inventory_instance) = `Assoc [
   "presence",str (match i.presence with Addon.Live -> "live" | Addon.Retained -> "retained");
   "phase",Lane_addon_types.phase_to_json i.phase;
   "applied_revision",optional (fun (o : Addon.configuration_owner) -> str o.revision) i.configuration]
+let browser_activity_json = function
+  | Browser_lane.Enabled -> str "on"
+  | Disabled -> str "off"
+  | Unobserved -> str "unobserved"
 let state_json = function
   | Exact_state configuration -> `Assoc ["kind",str "exact";"configuration",configuration_json configuration]
-  | Browser_clients count -> `Assoc ["kind",str "browser_clients";"connected_clients",`Int count]
-  | Browser_executor registered -> `Assoc ["kind",str "browser_executor";"registered",`Bool registered]
+  | Browser_clients (activity,count) -> `Assoc ["kind",str "browser_clients";"activity",browser_activity_json activity;"connected_clients",`Int count]
+  | Browser_executor (activity,registered) -> `Assoc ["kind",str "browser_executor";"activity",browser_activity_json activity;"registered",`Bool registered]
   | Machine_state publication -> `Assoc ["kind",str "machine";
       "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running")]
   | Package_state {declaration;instances} -> `Assoc ["kind",str "package";

@@ -4183,7 +4183,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
-    ; typesafeai = Runtime_schema.default_typesafeai
+    ; browser = Browser_configuration.none; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -6276,10 +6276,88 @@ let test_context_scope_survives_config_edit () =
       check int "saved resolution remains scoped" 1000000 (Runtime_instance.max_context_of_runtime runtime)))
 ;;
 
+let test_browser_config_publication_follows_visible_file () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let saved_state = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved_state) @@ fun () ->
+  let content enabled = Printf.sprintf {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+[browser.live]
+enabled = %b
+[browser.automation]
+enabled = %b
+geckodriver = "/fixture/geckodriver"
+[browser.stagehand]
+enabled = %b
+chrome = "/fixture/chrome"
+extension = "/fixture/extension"
+|} enabled enabled enabled in
+  let on = content true and off = content false in
+  let expected text = match Runtime_toml.parse_string text with
+    | Ok config -> config.Runtime_schema.browser
+    | Error errors -> failf "browser fixture: %s" (render_parse_errors errors) in
+  let check_published label text =
+    check bool label true (match Runtime.browser_configuration () with
+      | None -> false
+      | Some actual -> Browser_configuration.equal (expected text) actual) in
+  with_temp_runtime_toml on (fun path ->
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> () | Error detail -> failf "browser boot: %s" detail);
+    check_published "boot publishes browser settings from the same parsed file" on;
+    let on_state = Runtime.For_testing.snapshot () in
+    let revision = Runtime.config_source_revision_to_string
+      (Runtime.config_observation ~path on).source_revision in
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+        ~expected_source_revision:revision off with
+     | Ok _ -> () | Error _ -> fail "fresh Browser save refused");
+    check_published "visible save publishes off with retained paths" off;
+    check string "same off bytes on disk" off (Fs_compat.load_file path);
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+        ~expected_source_revision:revision on with
+     | Error (Runtime.Config_source_conflict _) -> ()
+     | Ok _ | Error (Runtime.Config_edit_failed _) -> fail "stale Browser save must conflict");
+    check_published "conflict preserves published activity" off;
+    let malformed = off ^ "\n[browser]\ngeckodriver = '/fixture/other'\n" in
+    check bool "both automation locations rejected before saving" true
+      (Result.is_error (Runtime.save_config_text ~runtime_config_path:path malformed));
+    check string "invalid browser configuration leaves file intact" off (Fs_compat.load_file path);
+    check_published "invalid save leaves published activity intact" off;
+    let directory = path ^ ".directory" in
+    Unix.mkdir directory 0o700;
+    Fun.protect ~finally:(fun () -> Unix.rmdir directory) (fun () ->
+      check bool "write failure is reported" true
+        (Result.is_error (Runtime.save_config_text ~runtime_config_path:directory on)));
+    check_published "pre-rename failure leaves activity intact" off;
+    (match Runtime.For_testing.save_config_text_with_sync_parent ~runtime_config_path:path
+        ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "browser fixture"))) on with
+     | Ok { durability = Runtime.Durability_unconfirmed _; _ } -> ()
+     | Ok _ -> fail "injected directory sync failure must be unconfirmed"
+     | Error detail -> failf "visible rename must publish despite sync failure: %s" detail);
+    check_published "after-rename uncertainty follows visible new activity" on;
+    check string "uncertain durability still has the new visible file" on (Fs_compat.load_file path);
+    (match Runtime.save_config_text ~runtime_config_path:path off with
+     | Ok _ -> () | Error detail -> failf "second Browser save: %s" detail);
+    Runtime.For_testing.restore on_state;
+    check_published "snapshot restore includes Browser state" on;
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> () | Error detail -> failf "Browser reload: %s" detail);
+    check_published "restart loads saved off instead of restored old state" off)
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
-        [ test_case "same model serves three context windows concurrently" `Quick
+        [ test_case "Browser activity follows the visible config across save failure and reload" `Quick
+            test_browser_config_publication_follows_visible_file;
+          test_case "same model serves three context windows concurrently" `Quick
             test_same_model_context_windows_coexist;
           test_case "context declarations resolve by deployment scope" `Quick
             test_context_declaration_precedence_and_http_agreement;

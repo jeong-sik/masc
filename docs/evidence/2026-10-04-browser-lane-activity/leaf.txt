@@ -1,0 +1,68 @@
++ ocamlc -version
+5.5.1
++ ocamlfind ocamldep -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -sort browser_action.ml browser_action.mli browser_configuration.ml browser_configuration.mli browser_document.ml browser_lane.ml browser_lane_name.ml browser_lane_name.mli browser_pointer.ml browser_pointer.mli browser_upload_lease.ml browser_upload_lease.mli monotonic_deadline.ml monotonic_deadline.mli runtime_toml_namespace.ml runtime_toml_namespace.mli test_browser_activity.ml time_compat.ml time_compat.mli watched_work.ml watched_work.mli
+browser_action.mli browser_configuration.mli browser_document.ml browser_lane_name.mli browser_pointer.mli browser_upload_lease.mli monotonic_deadline.mli runtime_toml_namespace.mli time_compat.mli watched_work.mli watched_work.ml time_compat.ml runtime_toml_namespace.ml monotonic_deadline.ml browser_upload_lease.ml browser_pointer.ml browser_lane_name.ml browser_configuration.ml browser_action.ml browser_lane.ml test_browser_activity.ml 
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_action.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_configuration.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_document.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_lane_name.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_pointer.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_upload_lease.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c monotonic_deadline.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c runtime_toml_namespace.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c time_compat.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c watched_work.mli
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c watched_work.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c time_compat.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c runtime_toml_namespace.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c monotonic_deadline.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_upload_lease.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_pointer.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_lane_name.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_configuration.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_action.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c browser_lane.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -c test_browser_activity.ml
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ocamlfind ocamlc -package alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq -linkpkg browser_document.cmo watched_work.cmo time_compat.cmo runtime_toml_namespace.cmo monotonic_deadline.cmo browser_upload_lease.cmo browser_pointer.cmo browser_lane_name.cmo browser_configuration.cmo browser_action.cmo browser_lane.cmo test_browser_activity.cmo -o test.exe
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
++ ./test.exe
+Testing `Browser activity'.
+This run has ID `X5N4FGU8'.
+
+  [OK]          configuration          0   paths retained and accepting locat...
+  [OK]          configuration          1   both automation locations.
+  [OK]          configuration          2   flat binary and nested driver.
+  [OK]          configuration          3   wrong flag type.
+  [OK]          configuration          4   unknown backend key.
+  [OK]          configuration          5   wrong table type.
+  [OK]          configuration          6   stray browser key.
+  [OK]          configuration          7   relative path even when off.
+  [OK]          configuration          8   partial stagehand even when off.
+  [OK]          configuration          9   stagehand empty table.
+  [OK]          admission              0   off and unavailable keep status/cl...
+  [OK]          admission              1   accepted automation request finishes.
+  [OK]          admission              2   accepted live request survives off.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-activity-audit-gwbhnlzv/_build/_tests/Browser activity'.
+Test Successful in 0.008s. 13 tests run.

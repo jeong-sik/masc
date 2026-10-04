@@ -213,7 +213,7 @@ tools-support = true
 [operator_account.preferred]
 wizard-default = true
 |}, Some "preferred", None;
-     "disabled-only prior binding", "", "[operator_account.old]\n# retain this binding's operator settings\nenabled = false\n", None, None;
+     "disabled-only prior binding", "", "[operator_account.old]\n# retain this binding's operator settings\nenabled = false\n", None, Some 1024;
      "inline binding", "", "[operator_account]\n# retain this binding's operator settings\nold = { max-context = 8192, price-input = 0.075 }\n", Some "old", Some 8192;
      "dotted binding", "", "[operator_account]\n# retain this binding's operator settings\nold.max-context = 8192\n", Some "old", Some 8192;
      "implicit model set", "model-set = \"single\"\n", "# retain this binding's operator settings\n[model_sets.single]\nmodels = [\"old\"]\n", Some "old", None]

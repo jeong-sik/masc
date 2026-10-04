@@ -1770,6 +1770,31 @@ let test_runtime_history_unreadable_decision_file () =
     check int "readable account is counted after recovery" 1
       (recovered |> member "runtimes" |> to_list |> List.hd |> member "success_count" |> to_int))
 
+let test_runtime_history_dangling_decision_file () =
+  let base = test_dir () in
+  let broken = make_keeper_dir base "dangling-history" in
+  Fun.protect ~finally:(fun () ->
+    (try Unix.unlink broken with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+    cleanup_dir base) (fun () ->
+    Unix.symlink (Filename.concat base "missing-target") broken;
+    let open Yojson.Safe.Util in
+    let check_failed () =
+      let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+      check string "enumerated broken link is not an empty readable file" "unavailable"
+        (failed |> member "state" |> to_string);
+      check string "broken link reports file failure" "files_unreadable"
+        (failed |> member "decision_read" |> member "cause" |> to_string);
+      check int "broken link is counted" 1
+        (failed |> member "decision_read" |> member "unreadable_files" |> to_int) in
+    check_failed ();
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:Fs_compat.clear_fs check_failed);
+    Unix.unlink broken;
+    let recovered = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "removed broken entry leaves a genuinely empty store" "ready"
+      (recovered |> member "state" |> to_string))
+
 let test_runtime_history_directory_read_failure () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1842,6 +1867,7 @@ let () =
       test_case "json roundtrip" `Quick test_json_roundtrip;
       test_case "runtime history keeps account attribution" `Quick test_runtime_history_keeps_account_attribution;
       test_case "runtime history refuses partial decision reads and recovers" `Quick test_runtime_history_unreadable_decision_file;
+      test_case "runtime history reports dangling decision files" `Quick test_runtime_history_dangling_decision_file;
       test_case "runtime history distinguishes missing and unreadable store" `Quick test_runtime_history_directory_read_failure;
     ];
     "thinking_fraction", [

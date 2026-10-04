@@ -40,6 +40,34 @@ let decision_files directory =
           | exception (Unix.Unix_error _ as exn) -> log exn; Error () in
         read [])
 
+(* Inventory already observed each path. Open it directly: the permissive
+   JSONL helper's existence check can hide denied stat calls and dangling
+   symlinks as an empty file. Keep streaming and propagate every open/read
+   failure to the typed decision diagnostics below. *)
+let fold_decision_file ~init ~f path =
+  let line_no = ref 0 in
+  let consume acc raw =
+    let line = String.trim raw in
+    if line = "" then acc
+    else begin
+      incr line_no;
+      match Fs_compat.parse_jsonl_line ~source:path ~line_no:!line_no line with
+      | None -> acc
+      | Some json -> f acc ~line_no:!line_no json
+    end in
+  match Fs_compat.get_fs_opt (), Fs_compat.execution_context () with
+  | Some fs, Fs_compat.Eio_fiber ->
+      Eio.Path.with_open_in Eio.Path.(fs / path) (fun flow ->
+        Eio.Buf_read.of_flow ~max_size:(16 * 1024 * 1024) flow
+        |> Eio.Buf_read.lines |> Seq.fold_left consume init)
+  | None, _ | Some _, Fs_compat.Non_eio ->
+      let channel = open_in path in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+        let rec read acc = match input_line channel with
+          | line -> read (consume acc line)
+          | exception End_of_file -> acc in
+        read init)
+
 let read_all_decisions ~base_path ~since_unix =
   let keeper_dir =
     Common.keepers_runtime_dir_of_base ~base_path
@@ -58,7 +86,7 @@ let read_all_decisions ~base_path ~since_unix =
       (fun fname ->
          let path = Filename.concat keeper_dir fname in
          try
-           Fs_compat.fold_jsonl_lines
+           fold_decision_file
              ~init:[]
              ~f:(fun acc ~line_no json ->
                match parse_telemetry_entry json ~since_unix with

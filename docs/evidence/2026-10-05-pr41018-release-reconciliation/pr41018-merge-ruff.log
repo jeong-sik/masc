@@ -1,0 +1,34 @@
+F821 Undefined name `refreshes`
+    --> test/test_tui_remote_workspace_history_pty.py:1639:68
+     |
+1637 |                     os.write(fd, b"r")
+1638 |                 assert h.wait_for_fixture_state(process, fd, output,
+1639 |                     lambda: calls.count(("b", "resources/list")) > refreshes,
+     |                                                                    ^^^^^^^^^
+1640 |                     timeout=WAIT_SECONDS), "B resource refresh was not requested"
+1641 |                 def refreshed_b_visible():
+     |
+
+F821 Undefined name `refreshes`
+    --> test/test_tui_remote_workspace_history_pty.py:1643:66
+     |
+1641 |                 def refreshed_b_visible():
+1642 |                     match = re.search(rb"resource-b-read-(\d+)", screen(output))
+1643 |                     return match is not None and int(match[1]) > refreshes
+     |                                                                  ^^^^^^^^^
+1644 |
+1645 |                 # A later B refresh can overtake this response before resize.
+     |
+
+F821 Undefined name `refreshes`
+    --> test/test_tui_remote_workspace_history_pty.py:1660:50
+     |
+1658 |                 if held_method == "initialize":
+1659 |                     resource_lists = [phase for phase, method in calls if method == "resources/list"]
+1660 |                     assert len(resource_lists) > refreshes and all(phase == "b" for phase in resource_lists), calls
+     |                                                  ^^^^^^^^^
+1661 |                 os.write(fd, b"q")
+1662 |             finally:
+     |
+
+Found 3 errors.

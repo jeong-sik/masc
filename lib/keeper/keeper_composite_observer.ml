@@ -158,13 +158,18 @@ let invariant_key_to_string = function
 
 (* Derivation from registry entry *)
 
+let live_turn_observation (entry : Keeper_registry.registry_entry) =
+  match entry.phase with
+  | Keeper_state_machine.Offline | Stopped | Crashed | Restarting -> None
+  | Running | Failing | Draining | Paused -> entry.current_turn_observation
+
 (* Exhaustive on [Keeper_state_machine.phase]: maps the raw Keeper phase
    to the turn phase projection when
    no live turn observation exists.  Spelling each branch out turns a
    future phase
    addition into a compile error. *)
 let live_turn_phase (entry : Keeper_registry.registry_entry) =
-  match entry.current_turn_observation with
+  match live_turn_observation entry with
   | Some obs -> obs.turn_phase
   | None ->
       (match entry.phase with
@@ -180,12 +185,12 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
            Keeper_registry.Packed Turn_idle)
 
 let live_decision_stage (entry : Keeper_registry.registry_entry) =
-  match entry.current_turn_observation with
+  match live_turn_observation entry with
   | Some obs -> obs.decision_stage
   | None -> Keeper_registry.Packed Decision_undecided
 
 let live_runtime_state (entry : Keeper_registry.registry_entry) =
-  match entry.current_turn_observation with
+  match live_turn_observation entry with
   | Some obs ->
     (match obs.turn_phase with
      | Keeper_registry.Packed Turn_idle
@@ -197,7 +202,7 @@ let live_runtime_state (entry : Keeper_registry.registry_entry) =
   | None -> "idle"
 
 let live_measurement (entry : Keeper_registry.registry_entry) =
-  match entry.current_turn_observation with
+  match live_turn_observation entry with
   | Some { measurement = Some measurement; _ } -> Some measurement.tm_context_actions
   | _ -> None
 
@@ -206,25 +211,24 @@ let live_measurement (entry : Keeper_registry.registry_entry) =
    here explicitly rather than silently inheriting a catch-all arm. *)
 let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
     : run_state =
-  (* Only phases with a potentially live owner may retain executing work.
-     Terminal/offline phases override observations left by a failed finish write. *)
-  match entry.phase, entry.current_turn_observation with
-  | (Keeper_state_machine.Offline | Stopped | Crashed | Restarting), _ ->
-    Suspended entry.phase
-  | (Running | Failing | Draining | Paused), Some obs ->
+  match live_turn_observation entry with
+  | Some obs ->
     In_turn
       {
         rs_wake = obs.wake;
         rs_started_at = obs.started_at;
         rs_active_tool_count = obs.active_tool_count;
       }
-  | Running, None ->
-    Waiting
-      {
-        rs_queue_depth = Keeper_event_queue.length (Atomic.get entry.event_queue);
-        rs_last_skip = last_skip;
-      }
-  | (Failing | Draining | Paused), None -> Suspended entry.phase
+  | None ->
+    match entry.phase with
+    | Keeper_state_machine.Running ->
+      Waiting
+        {
+          rs_queue_depth = Keeper_event_queue.length (Atomic.get entry.event_queue);
+          rs_last_skip = last_skip;
+        }
+    | Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting ->
+      Suspended entry.phase
 
 (* [wake_kind] + [stimulus_kinds] pair for [run_state_to_json]'s
    [In_turn] arm. *)
@@ -346,7 +350,7 @@ let observe
     | Some s when String.length s > 0 -> s
     | _ -> stable_run_id entry
   in
-  let is_live = entry.current_turn_observation <> None in
+  let is_live = Option.is_some (live_turn_observation entry) in
   let turn_phase = live_turn_phase entry in
   let decision_stage = live_decision_stage entry in
   let runtime_state = live_runtime_state entry in
@@ -372,7 +376,7 @@ let observe
     conditions = entry.conditions;
     is_live;
     live_turn =
-      (match entry.current_turn_observation with
+      (match live_turn_observation entry with
        | Some obs ->
          Some
            {

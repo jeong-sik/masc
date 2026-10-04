@@ -416,7 +416,15 @@ let test_nonlive_lifecycle_overrides_stale_turn () =
       | Some entry -> entry | None -> fail "keeper disappeared" in
     check bool "stale observation remains in registry fixture" true
       (Option.is_some entry.current_turn_observation);
-    let rs = Observer.snapshot_to_json (Observer.observe entry) |> J.member "run_state" in
+    let json = Observer.snapshot_to_json (Observer.observe entry) in
+    check bool "nonlive owner is not live" false (J.member "is_live" json |> J.to_bool);
+    check bool "live turn is absent" true (J.member "live_turn" json = `Null);
+    check string "turn phase is idle" "idle" (J.member "turn_phase" json |> J.to_string);
+    check string "runtime projection is idle" "idle"
+      (J.member "runtime" json |> J.member "state" |> J.to_string);
+    check bool "source for turn records also hides stale observations" true
+      (Option.is_none (Observer.live_turn_observation entry));
+    let rs = J.member "run_state" json in
     check string "nonlive owner cannot be in_turn" "suspended" (J.member "kind" rs |> J.to_string);
     check string "suspended phase is authoritative" (Keeper_state_machine.phase_to_string phase)
       (J.member "phase" rs |> J.to_string))

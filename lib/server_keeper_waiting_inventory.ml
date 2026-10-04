@@ -774,29 +774,29 @@ let pending_confirm_row ?keeper_name
   }
 ;;
 
-let pending_confirm_keeper_target keeper_names
+let pending_confirm_keeper_target
       (entry : Workspace_hooks.operator_pending_confirm_request)
   =
-  match entry.target_type, entry.target_id with
-  | "keeper", Some keeper_name when List.exists (String.equal keeper_name) keeper_names ->
+  match Operator_action_constants.target_type_of_string entry.target_type, entry.target_id with
+  | Some Keeper, Some keeper_name ->
     Some keeper_name
-  | _, (None | Some _) -> None
+  | (Some Workspace | Some Goal | None), _ | Some Keeper, None -> None
 ;;
 
 let pending_confirm_rows keeper_names pending_confirms =
   pending_confirms
   |> List.filter_map (fun (entry : Workspace_hooks.operator_pending_confirm_request) ->
-    match pending_confirm_keeper_target keeper_names entry with
-    | Some keeper_name -> Some (pending_confirm_row ~keeper_name entry)
-    | None -> None)
+    match pending_confirm_keeper_target entry with
+    | Some keeper_name when List.mem keeper_name keeper_names -> Some (pending_confirm_row ~keeper_name entry)
+    | Some _ | None -> None)
 ;;
 
-let global_pending_confirm_rows keeper_names pending_confirms =
+let global_pending_confirm_rows ?keeper_name keeper_names pending_confirms =
   pending_confirms
   |> List.filter_map (fun entry ->
-    if Option.is_some (pending_confirm_keeper_target keeper_names entry)
-    then None
-    else Some (pending_confirm_row entry))
+    match pending_confirm_keeper_target entry with
+    | Some target when Option.is_some keeper_name || List.mem target keeper_names -> None
+    | Some _ | None -> Some (pending_confirm_row entry))
 ;;
 
 let schedule_active (request : Schedule_domain.schedule_request) =
@@ -923,20 +923,10 @@ let source_counts rows =
   |> List.map (fun (source, count) -> source, `Int count)
 ;;
 
-let global_pending_confirm_count keeper_names pending_confirms =
-  pending_confirms
-  |> List.fold_left
-       (fun count (entry : Workspace_hooks.operator_pending_confirm_request) ->
-          if Option.is_some (pending_confirm_keeper_target keeper_names entry)
-          then count
-          else count + 1)
-       0
-;;
-
 let busy_keeper_names ~base_path =
   Keeper_registry.all ~base_path ()
   |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-    match entry.current_turn_observation with
+    match Keeper_composite_observer.live_turn_observation entry with
     | Some _ -> Some entry.name
     | None -> None)
 ;;
@@ -1014,7 +1004,7 @@ let record_metrics ~now ~per_keeper ~global_rows =
 
 let current_execution_json ~base_path keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
-  | Some ({ current_turn_observation = Some _; _ } as entry) ->
+  | Some entry when Option.is_some (Keeper_composite_observer.live_turn_observation entry) ->
     let latest_tool =
       Keeper_registry.StringMap.bindings entry.tool_usage
       |> List.fold_left
@@ -1043,7 +1033,7 @@ let current_execution_json ~base_path keeper_name =
                ])
           :: fields)
      | value -> value)
-  | None | Some { current_turn_observation = None; _ } -> `Null
+  | None | Some _ -> `Null
 ;;
 
 let source_next_actions rows =
@@ -1178,9 +1168,10 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in
       keeper_name, keeper_is_busy busy_names keeper_name, rows)
   in
+  let global_confirm_rows = global_pending_confirm_rows ?keeper_name keeper_names pending_confirms in
   let global_rows =
     global_rows_from schedule_rows
-    @ global_pending_confirm_rows keeper_names pending_confirms
+    @ global_confirm_rows
     @ keeper_name_read_error_rows
     @ pending_confirm_read_error_rows
     @ pending_approval_read_error_rows
@@ -1241,7 +1232,7 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     ; "oldest_age_seconds", oldest_age_seconds
     ; ( "global_pending_confirm_count_known"
       , `Bool (List.length pending_confirm_read_error_rows = 0) )
-    ; "global_pending_confirm_count", `Int (global_pending_confirm_count keeper_names pending_confirms)
+    ; "global_pending_confirm_count", `Int (List.length global_confirm_rows)
     ; "pending_approval_state", pending_approval_state
     ; "source_counts", `Assoc (source_counts (all_keeper_rows @ global_rows))
     ; "rows", `List (List.map waiting_row_json all_rows)

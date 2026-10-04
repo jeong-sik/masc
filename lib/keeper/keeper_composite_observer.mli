@@ -264,6 +264,12 @@ type snapshot = {
     [keeper:<name>:<transition_seq>] as a stable identifier so repeated
     reads within the same keeper transition return the same id. *)
 
+val live_turn_observation :
+  Keeper_registry.registry_entry -> Keeper_registry.turn_observation option
+(** Current execution projection. Offline, Stopped, Crashed and Restarting
+    suppress retained observations from a failed finish write. This does not
+    mutate or discard the registry's diagnostic evidence. *)
+
 val observe :
   ?correlation_id:string ->
   ?run_id:string ->

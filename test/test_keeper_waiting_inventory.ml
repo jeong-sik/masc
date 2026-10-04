@@ -712,6 +712,62 @@ let write_pending_confirms_exn config entries =
   | Error err -> fail ("write pending confirms failed: " ^ err)
 ;;
 
+let test_scoped_confirmations_keep_target_identity () =
+  with_workspace @@ fun config ->
+  let requested = "confirm-requested" and other = "confirm-other" in
+  ensure_keeper config requested;
+  ensure_keeper config other;
+  let global = pending_confirm_fixture () in
+  let targeted target token =
+    { global with Operator_pending_confirm.target_type = "keeper";
+      target_id = Some target; confirm_token = token } in
+  write_pending_confirms_exn config
+    [global; targeted requested "confirm-a"; targeted other "confirm-b";
+     targeted "not-registered" "confirm-missing"];
+  let json = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:requested in
+  let tokens rows = List.map (fun row -> U.(row |> member "detail" |> member "confirm_token" |> to_string)) rows in
+  check (list string) "scoped global rows contain only workspace confirmation"
+    [global.confirm_token] (tokens U.(json |> member "global_waiting_on" |> to_list));
+  check int "global confirmation count comes from those exact rows" 1
+    (json_int_member "global_pending_confirm_count" json);
+  let keeper = match find_keeper json requested with Some row -> row | None -> fail "missing requested keeper" in
+  check (list string) "only the requested keeper confirmation is local"
+    ["confirm-a"] (tokens U.(keeper |> member "waiting_on" |> to_list));
+  let fleet = Server_keeper_waiting_inventory.dashboard_json config in
+  check (list string) "fleet still exposes an unresolved target for diagnosis"
+    [global.confirm_token; "confirm-missing"]
+    (tokens U.(fleet |> member "global_waiting_on" |> to_list));
+  save_text (Operator_pending_confirm.pending_confirms_path config) "{broken";
+  let failed = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:requested in
+  check bool "scoped pending confirmation read failure is not zero certainty" false
+    (json_bool_member "global_pending_confirm_count_known" failed);
+  check (list string) "scoped view retains authoritative read failure" ["read_error"]
+    (U.(failed |> member "global_waiting_on" |> to_list) |> List.map (json_string_member "source"))
+;;
+
+let test_nonlive_keeper_has_no_current_execution () =
+  with_workspace @@ fun config ->
+  let keeper_name = "retained-turn" in
+  ensure_keeper config keeper_name;
+  let meta = keeper_meta_exn config keeper_name in
+  let base_path = config.Workspace_utils_backend_setup.base_path in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ()) @@ fun () ->
+  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
+  Keeper_registry.mark_turn_started
+    ~observation_token:(Masc.Keeper_turn_observation_token.fresh ())
+    ~base_path ~wake:Keeper_registry.Chat_request keeper_name;
+  List.iter (fun phase ->
+    (match Keeper_registry.update_entry ~base_path keeper_name (fun entry -> {entry with phase}) with
+     | Ok () -> () | Error _ -> fail "could not set nonlive phase");
+    let json = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name in
+    check int "nonlive observation is not counted busy" 0 (json_int_member "waiting_keeper_count" json);
+    let keeper = match find_keeper json keeper_name with Some row -> row | None -> fail "missing keeper" in
+    check string "no pending rows and no active turn is idle" "idle" (json_string_member "state" keeper);
+    check bool "queue current execution is absent" true U.(member "current_execution" keeper = `Null))
+    Keeper_state_machine.[Offline; Stopped; Crashed; Restarting]
+;;
+
 let test_corrupt_schedule_ledger_is_read_error () =
   with_workspace
   @@ fun config ->
@@ -924,6 +980,8 @@ let () =
             test_owner_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
+        ; test_case "scoped confirmations preserve targets" `Quick test_scoped_confirmations_keep_target_identity
+        ; test_case "nonlive keeper has no current execution" `Quick test_nonlive_keeper_has_no_current_execution
         ; test_case "live turn keeper is busy without waiting rows" `Quick
             test_live_turn_keeper_is_busy_without_waiting_rows
         ; test_case "corrupt schedule ledger is read_error" `Quick

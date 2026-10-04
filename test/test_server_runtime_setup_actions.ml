@@ -40,6 +40,14 @@ if args[0]=='runtime-muse-models':
       'invocation_verified':False,'account_availability_verified':False,
       'models':models}))
     sys.exit(0)
+if args[0]=='runtime-model-list':
+    assert args[1] in ('codex','claude-code') and len(args)==2
+    catalog_file=os.path.join(os.path.dirname(__file__),'fixture-native-catalog.json')
+    if os.path.exists(catalog_file):
+        with open(catalog_file) as f: models=json.load(f)
+    else: models=[{'id':'fresh-model','max_context':272000,'supports_image_input':True}]
+    print(json.dumps({'models':models}))
+    sys.exit(0)
 if args[0]=='runtime-codex-models':
     with open(os.path.join(os.path.dirname(__file__),'codex-args.json'),'w') as f:
         json.dump(args,f)

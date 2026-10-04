@@ -1,0 +1,106 @@
+[
+  {
+    "description": "workspace withdrawal cancels pending task creation and permits a fresh task after return",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace verification withdrawal requires fresh rows and confirmation",
+    "status": "PASS"
+  },
+  {
+    "description": "Tools workspace withdrawal clears cached inventory and supersedes held same-Keeper reads",
+    "status": "PASS"
+  },
+  {
+    "description": "Resource initialize ownership is withdrawn before same-URI B recovery",
+    "status": "PASS"
+  },
+  {
+    "description": "Resource resources/read ownership is withdrawn before same-URI B recovery",
+    "status": "PASS"
+  },
+  {
+    "description": "Workspace withdrawal retires parameter edits before successor writes",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace switch withdraws connector arms and held sequential writes with reused IDs",
+    "status": "PASS"
+  },
+  {
+    "description": "Live dispatch identity refuses cached workspace chat",
+    "status": "PASS"
+  },
+  {
+    "description": "Live dispatch identity refuses cached workspace pause",
+    "status": "PASS"
+  },
+  {
+    "description": "Live dispatch identity refuses cached workspace boot-recovery",
+    "status": "PASS"
+  },
+  {
+    "description": "discard a bundle whose workspace changes during its roster GET",
+    "status": "PASS"
+  },
+  {
+    "description": "same-revision workspace replacement during settings editor refuses the POST",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace replacement while Schedule editor blocks refuses the update POST",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace replacement while runtime.toml editor blocks refuses preview and save",
+    "status": "PASS"
+  },
+  {
+    "description": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+    "status": "PASS"
+  },
+  {
+    "description": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+    "status": "PASS"
+  },
+  {
+    "description": "GitHub device stream cannot restore a withdrawn workspace view",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace change withdraws held chat history and retains its unsent draft",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace change suspends complete unsent inputs until explicit resume in A",
+    "status": "PASS"
+  },
+  {
+    "description": "MASC-root-only change suspends complete unsent inputs until explicit resume in A",
+    "status": "PASS"
+  },
+  {
+    "description": "superseded scoped roster cannot replace a newer full workspace reading",
+    "status": "PASS"
+  },
+  {
+    "description": "staged image bytes and references retain exact workspace and Keeper ownership",
+    "status": "PASS"
+  },
+  {
+    "description": "MASC-root-only transition: staged image bytes and references retain exact workspace and Keeper ownership",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace switch withdraws schedule confirmation, runtime picker and unknown-identity lifecycle",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace switch retires live observer session, cursor and acting events",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace withdrawal cancels held identity mutation before its next provider and allows fresh A retry",
+    "status": "PASS"
+  }
+]

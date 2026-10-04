@@ -1,0 +1,43 @@
+{
+  "original41064": "187fad7335be1ecccb2a63265828cf124879dff3",
+  "original41067": "29d53c5c2284ee5b0fd2e63b9141e041a5f96e0f",
+  "closed40313_prerequisite": "bdd448e956fab264219713b26bd554d3023dfed4",
+  "prepared41064": "7d2fb4ff798134e8257b6d49955b5a22c8bd1e2d",
+  "source_sha256": {
+    "test/test_tui_remote_workspace_history_pty.py": "ff9ca08c6e84ce9d44410b5df3e5aa10ea53dec75bf72c4d7381d319a6682f8c",
+    "test/test_tui_keyboard_input.py": "07f9a7c87e5fda04349936561a4f69afa3d97bf10b61a6016bfc99534c49d0dd",
+    "bin/masc_tui.ml": "5e628fc1ec066cef8d649c093d131ef944652f6e195ff283a7e0611280c1ffd6"
+  },
+  "raw_sha256": {
+    "native41095-tui-build.log": "04c8ba3fd3024292214e3a02425b6b78b198c91c5659153e462d38b4c1951188",
+    "native41095-focused-pty.log": "622f80872bdd4e94580c0e3395c144ebd06a5c63941c1a50c59e18951e9952f3",
+    "native41095-history-green.log": "b8a2b78747400b762e19afc0904555408042cf0559eda9bbcd61921f1e49e4dd",
+    "native41095-ruff-final.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "native41095-pyright-baseline.json": "718cb7372c5a01f538c34b994685c5f9f4e8453ea9de5f27b4c72d2f2390777c",
+    "native41095-pyright-final.json": "2535891599eb950f3b32012c5fab040a7ccce12276b79de1b09d3f647c7edeef",
+    "native41095-authoring-note.txt": "3950f8ec3bd7dee2dab92063c5c32a8c23dd28200f8cfbdf012247fc276f5061"
+  },
+  "binary_sha256": "0de92c0135bec13726852a902ce7392a7dc30afaba84463f790eb16ae7c168db",
+  "build": {
+    "handle": 91450,
+    "exit": 0,
+    "command": "DUNE_JOBS=2 opam exec --switch=5.5.1 -- scripts/dune-local.sh build bin/masc_tui.exe"
+  },
+  "tests": {
+    "initial_handle": 68656,
+    "exit": 1,
+    "queue_workspace": "PASS",
+    "queue_root_only": "PASS",
+    "history": "FAIL redundant unchanged-size resize waits FULL_REDRAW",
+    "final_history_handle": 99889,
+    "final_history_exit": 0,
+    "final_history": "PASS"
+  },
+  "pyright": {
+    "baseline": 270,
+    "final": 270,
+    "rule_message_multiset_equal": true
+  },
+  "release_qualification": false,
+  "native_stack": 41095
+}

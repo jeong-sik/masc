@@ -1,0 +1,40 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+
+   MASC / librarian_exact / Model order                                                                                            
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    librarian_exact · HTTP candidates first, then CLI candidates                                                                   
+    HTTP slots · tried first (0) · a adds one                                                                                      
+    CLI slots · tried after every HTTP slot (2)                                                                                    
+    > 1/2  [CLI] gpt-6-luna medium                                                                                                 
+      2/2  [CLI] gpt-6-sol high                                                                                                    
+    Account account                                                                                                 · 750k conte…  
+    Selected: account.luna-medium                                                                                                  
+    arrows/j/k select · r replace model/effort · a add fallback · 1 first in group                                                 
+    J/K reorder · x remove · Enter/d settings · e TOML · Esc back                                                                  
+    Changes save immediately; success is shown after the saved order reloads                                                       
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+                                                                                                                                   
+
+  j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Right / Enter:runs  Esc:dashboard  q:quit  …?
+ › to alpha   (i to write)                                                                                                         

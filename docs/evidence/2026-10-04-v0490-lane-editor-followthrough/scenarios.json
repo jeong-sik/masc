@@ -1,0 +1,79 @@
+[
+  {
+    "description": "Librarian replaces model and effort and promotes within its group",
+    "status": "PASS",
+    "started_epoch": 1791053523.5973482,
+    "tui_pid": 32941,
+    "elapsed_s": 2.4067819118499756
+  },
+  {
+    "description": "Runtime lanes reading edits lanes",
+    "status": "PASS",
+    "started_epoch": 1791053526.006332,
+    "tui_pid": 32962,
+    "elapsed_s": 8.396403074264526
+  },
+  {
+    "description": "Standalone lane picks wait for the standalone list",
+    "status": "PASS",
+    "started_epoch": 1791053534.404959,
+    "tui_pid": 33278,
+    "elapsed_s": 7.349804162979126
+  },
+  {
+    "description": "Librarian provider editor includes CLI fallback slots",
+    "status": "PASS",
+    "started_epoch": 1791053541.758892,
+    "tui_pid": 33622,
+    "elapsed_s": 2.530122995376587
+  },
+  {
+    "description": "An empty CLI group says a fills it, and a CLI pick lands there",
+    "status": "PASS",
+    "started_epoch": 1791053544.294037,
+    "tui_pid": 33800,
+    "elapsed_s": 1.403106927871704
+  },
+  {
+    "description": "Workspace curator takes CLI slots; schema-less clients sink and refuse",
+    "status": "PASS",
+    "started_epoch": 1791053545.699584,
+    "tui_pid": 33823,
+    "elapsed_s": 2.4028329849243164
+  },
+  {
+    "description": "Runtime lane concurrent edit is refused",
+    "status": "PASS",
+    "started_epoch": 1791053548.105331,
+    "tui_pid": 33829,
+    "elapsed_s": 2.7365779876708984
+  },
+  {
+    "description": "Malformed runtime config explains lane refusal",
+    "status": "PASS",
+    "started_epoch": 1791053550.843908,
+    "tui_pid": 34020,
+    "elapsed_s": 2.8877787590026855
+  },
+  {
+    "description": "Runtime candidate picker filters and pages",
+    "status": "PASS",
+    "started_epoch": 1791053553.734316,
+    "tui_pid": 34025,
+    "elapsed_s": 4.843792915344238
+  },
+  {
+    "description": "Slot editor opens an HTTP slot's provider table",
+    "status": "PASS",
+    "started_epoch": 1791053558.579051,
+    "tui_pid": 34074,
+    "elapsed_s": 1.6614110469818115
+  },
+  {
+    "description": "Rejected Librarian CLI slot opens its binding configuration",
+    "status": "PASS",
+    "started_epoch": 1791053560.241405,
+    "tui_pid": 34079,
+    "elapsed_s": 1.4154338836669922
+  }
+]

@@ -3621,16 +3621,28 @@ let visible_item_revision state =
 
 let refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous =
   let current = visible_item_revision state in
+  (* A capped roster can stop reporting this Keeper's public revision without
+     changing the authority of its private account or pending Item read. *)
+  let partial_same_authority =
+    match previous, current with
+    | Some (previous_keeper, _, _, previous_workspace),
+      Some (keeper, _, _, workspace) ->
+        roster_refreshed && String.equal previous_keeper keeper
+        && previous_workspace = workspace
+        && Keeper_control.liveness_of_roster state.keeper_roster keeper = Unobserved
+    | None, _ | _, None -> false
+  in
+  let revision_changed = current <> previous && not partial_same_authority in
   let read_pending =
     List.exists (fun request -> request.drr_tab = Detail_items) state.detail_reads
   in
   let retry_settled_failure =
     Option.is_some state.item_account_error && not read_pending
   in
-  if current <> previous || retry_settled_failure || (roster_refreshed && not read_pending) then
+  if revision_changed || retry_settled_failure || (roster_refreshed && not read_pending) then
     match current with
     | Some (keeper_name, _, _, _) ->
-        launch_keeper_items ~keep_observed_account:(current = previous)
+        launch_keeper_items ~keep_observed_account:(not revision_changed)
           state ~mailbox keeper_name
     | None -> ()
 

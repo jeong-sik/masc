@@ -1,0 +1,4334 @@
+{
+    "version": "1.1.409",
+    "time": "1791152536178",
+    "generalDiagnostics": [
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__setitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 91,
+                    "character": 8
+                },
+                "end": {
+                    "line": 91,
+                    "character": 15
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 144,
+                    "character": 25
+                },
+                "end": {
+                    "line": 144,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"() -> RawHttpResponse\" cannot be assigned to parameter \"value\" of type \"HttpFixture\" in function \"__setitem__\"\n  Type \"() -> RawHttpResponse\" is not assignable to type \"HttpFixture\"\n    \"MethodType\" is not assignable to \"tuple[int, object]\"\n    \"MethodType\" is not assignable to \"RawHttpResponse\"\n    \"MethodType\" is not assignable to \"StreamingHttpResponse\"\n    \"MethodType\" is not assignable to \"DroppedHttpResponse\"\n    \"MethodType\" is not assignable to \"RequestHttpResponse\"\n    \"MethodType\" is not assignable to \"MethodHttpResponse\"\n    \"MethodType\" is not assignable to \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 148,
+                    "character": 4
+                },
+                "end": {
+                    "line": 148,
+                    "character": 23
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"() -> RawHttpResponse\" cannot be assigned to parameter \"value\" of type \"HttpFixture\" in function \"__setitem__\"\n  Type \"() -> RawHttpResponse\" is not assignable to type \"HttpFixture\"\n    \"MethodType\" is not assignable to \"tuple[int, object]\"\n    \"MethodType\" is not assignable to \"RawHttpResponse\"\n    \"MethodType\" is not assignable to \"StreamingHttpResponse\"\n    \"MethodType\" is not assignable to \"DroppedHttpResponse\"\n    \"MethodType\" is not assignable to \"RequestHttpResponse\"\n    \"MethodType\" is not assignable to \"MethodHttpResponse\"\n    \"MethodType\" is not assignable to \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 149,
+                    "character": 4
+                },
+                "end": {
+                    "line": 149,
+                    "character": 30
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"HttpFixture\" cannot be assigned to parameter \"response\" of type \"HttpResponse\" in function \"__init__\"\n  Type \"HttpFixture\" is not assignable to type \"HttpResponse\"\n    \"ConnectionHttpResponse\" is not assignable to \"tuple[int, object]\"",
+            "range": {
+                "start": {
+                    "line": 152,
+                    "character": 39
+                },
+                "end": {
+                    "line": 152,
+                    "character": 60
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"HttpFixture\" cannot be assigned to parameter \"subsequent_response\" of type \"HttpResponse | None\" in function \"__init__\"\n  Type \"HttpFixture\" is not assignable to type \"HttpResponse | None\"\n    Type \"ConnectionHttpResponse\" is not assignable to type \"HttpResponse | None\"\n      \"ConnectionHttpResponse\" is not assignable to \"tuple[int, object]\"\n      \"ConnectionHttpResponse\" is not assignable to \"None\"",
+            "range": {
+                "start": {
+                    "line": 153,
+                    "character": 28
+                },
+                "end": {
+                    "line": 153,
+                    "character": 49
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"metadata_path\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 289,
+                    "character": 16
+                },
+                "end": {
+                    "line": 289,
+                    "character": 29
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"metadata_bytes\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 289,
+                    "character": 42
+                },
+                "end": {
+                    "line": 289,
+                    "character": 56
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 309,
+                    "character": 15
+                },
+                "end": {
+                    "line": 309,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__setitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 321,
+                    "character": 12
+                },
+                "end": {
+                    "line": 321,
+                    "character": 19
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 331,
+                    "character": 38
+                },
+                "end": {
+                    "line": 331,
+                    "character": 45
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 343,
+                    "character": 4
+                },
+                "end": {
+                    "line": 345,
+                    "character": 62
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, list[dict[str, object]]]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/board?sort_by=hot']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 343,
+                    "character": 20
+                },
+                "end": {
+                    "line": 345,
+                    "character": 61
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 395,
+                    "character": 25
+                },
+                "end": {
+                    "line": 395,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 414,
+                    "character": 4
+                },
+                "end": {
+                    "line": 416,
+                    "character": 47
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 414,
+                    "character": 20
+                },
+                "end": {
+                    "line": 416,
+                    "character": 46
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 473,
+                    "character": 25
+                },
+                "end": {
+                    "line": 473,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 495,
+                    "character": 4
+                },
+                "end": {
+                    "line": 497,
+                    "character": 47
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 495,
+                    "character": 20
+                },
+                "end": {
+                    "line": 497,
+                    "character": 46
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 591,
+                    "character": 25
+                },
+                "end": {
+                    "line": 591,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 593,
+                    "character": 24
+                },
+                "end": {
+                    "line": 593,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 600,
+                    "character": 8
+                },
+                "end": {
+                    "line": 600,
+                    "character": 15
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 612,
+                    "character": 4
+                },
+                "end": {
+                    "line": 614,
+                    "character": 90
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/dashboard/scheduled-automation']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/tools/masc_schedule_cancel']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 612,
+                    "character": 20
+                },
+                "end": {
+                    "line": 614,
+                    "character": 89
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 662,
+                    "character": 25
+                },
+                "end": {
+                    "line": 662,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 696,
+                    "character": 4
+                },
+                "end": {
+                    "line": 698,
+                    "character": 80
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse | HeadersHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp?sse_kind=observer']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 696,
+                    "character": 20
+                },
+                "end": {
+                    "line": 698,
+                    "character": 79
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 736,
+                    "character": 25
+                },
+                "end": {
+                    "line": 736,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 760,
+                    "character": 4
+                },
+                "end": {
+                    "line": 762,
+                    "character": 82
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, list[dict[str, Unknown]]]]) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/oauth/attached-tools?keeper=alpha']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/identity-refresh']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 760,
+                    "character": 20
+                },
+                "end": {
+                    "line": 762,
+                    "character": 81
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"encode\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 812,
+                    "character": 66
+                },
+                "end": {
+                    "line": 812,
+                    "character": 72
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 845,
+                    "character": 22
+                },
+                "end": {
+                    "line": 845,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 846,
+                    "character": 4
+                },
+                "end": {
+                    "line": 847,
+                    "character": 52
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], Unknown]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 846,
+                    "character": 20
+                },
+                "end": {
+                    "line": 847,
+                    "character": 51
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 881,
+                    "character": 25
+                },
+                "end": {
+                    "line": 881,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 882,
+                    "character": 4
+                },
+                "end": {
+                    "line": 884,
+                    "character": 74
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/config']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 882,
+                    "character": 20
+                },
+                "end": {
+                    "line": 884,
+                    "character": 73
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 926,
+                    "character": 25
+                },
+                "end": {
+                    "line": 926,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 30
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 928,
+                    "character": 4
+                },
+                "end": {
+                    "line": 928,
+                    "character": 33
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 929,
+                    "character": 4
+                },
+                "end": {
+                    "line": 930,
+                    "character": 52
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 929,
+                    "character": 20
+                },
+                "end": {
+                    "line": 930,
+                    "character": 51
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 970,
+                    "character": 25
+                },
+                "end": {
+                    "line": 970,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 975,
+                    "character": 4
+                },
+                "end": {
+                    "line": 976,
+                    "character": 52
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 975,
+                    "character": 20
+                },
+                "end": {
+                    "line": 976,
+                    "character": 51
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1030,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1030,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1058,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1060,
+                    "character": 80
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (HttpFixture | tuple[Literal[503], dict[str, str]])) | ConnectionHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/asks']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/ask-answer']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1058,
+                    "character": 24
+                },
+                "end": {
+                    "line": 1060,
+                    "character": 79
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"answer_deadline\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 1099,
+                    "character": 32
+                },
+                "end": {
+                    "line": 1099,
+                    "character": 47
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"answer_deadline\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 1103,
+                    "character": 46
+                },
+                "end": {
+                    "line": 1103,
+                    "character": 61
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1133,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1133,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1144,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1146,
+                    "character": 79
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, Unknown]]) | StreamingHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/github-identity']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/github-login']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1144,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1146,
+                    "character": 78
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1198,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1198,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"ConnectionHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"DroppedHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"HeadersHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"MethodHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"PathHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"RawHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"RequestHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"StreamingHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"HttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1205,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1205,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 1208,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1208,
+                    "character": 15
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1219,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1221,
+                    "character": 64
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/gate/connectors']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/gate/connector/unbind']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1219,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1221,
+                    "character": 63
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1288,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1288,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1325,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1326,
+                    "character": 89
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, Unknown]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/dashboard/tools?keeper=alpha']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/dashboard/tools']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1325,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1326,
+                    "character": 88
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1363,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1363,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1395,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1398,
+                    "character": 82
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[503], dict[str, str]] | tuple[Literal[200], dict[str, object]])) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/verification/requests?view=awaiting&limit=…']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/verification/verdict']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1395,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1398,
+                    "character": 81
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1456,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1456,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1488,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1492,
+                    "character": 96
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]]) | RequestHttpResponse | tuple[int, dict[str, str]]]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/chat/stream']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1488,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1492,
+                    "character": 95
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1575,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1575,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1612,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1613,
+                    "character": 79
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1612,
+                    "character": 24
+                },
+                "end": {
+                    "line": 1613,
+                    "character": 78
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1675,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1692,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1695,
+                    "character": 70
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[503], dict[str, str]] | tuple[Literal[200], dict[str, list[dict[str, Unknown]]]])) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/runtime/params']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/runtime/params/set']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/runtime/params/clear']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1692,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1695,
+                    "character": 69
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1728,
+                    "character": 42
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1730,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1730,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1745,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1746,
+                    "character": 93
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-native41095-release-fixtures-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1745,
+                    "character": 24
+                },
+                "end": {
+                    "line": 1746,
+                    "character": 92
+                }
+            },
+            "rule": "reportArgumentType"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 270,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.503
+    }
+}
+

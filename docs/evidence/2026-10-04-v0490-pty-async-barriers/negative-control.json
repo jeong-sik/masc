@@ -1,0 +1,10 @@
+{
+  "scope": "harness negative control; injected HTTP GET 250ms after the keyboard frame, not a product-originated request",
+  "status": "PASS_EXPECTED_REJECTION",
+  "assertion": "explicit Item retry asynchronously read the account without roster authority",
+  "injected_http_status": [
+    200
+  ],
+  "source_sha256": "d2350ac480a18ca5e2e4b1458f3610f8cad439f7fc2cf6824c68896dbcd473c1",
+  "binary_sha256": "64ea20854e47c3a5883c717303de468cbc7ed7b811b8fcea815f263ee8bc41d6"
+}

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   fetchRuntimeModelMetrics,
   fetchRuntimeResolved,
@@ -63,9 +63,7 @@ function OfficialClientAccount({ client, usage, authority }: {
   const loading = state?.kind === 'loading'
   const error = state?.kind === 'error' ? state.message : null
   const requestVersion = useRef(0)
-  // Retire old requests before the new account can be clicked. A passive
-  // effect could invalidate that account's first click after it starts.
-  useLayoutEffect(() => {
+  useEffect(() => {
     requestVersion.current += 1
     return () => { requestVersion.current += 1 }
   }, [client, authority])

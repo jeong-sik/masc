@@ -355,14 +355,21 @@ def test_http_endpoint(
                     payload["paths"] = paths
                 body = json.dumps(payload).encode()
                 content_type = "application/json"
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            for name, value in extra_headers:
-                self.send_header(name, value)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Connection", "close")
-            self.end_headers()
-            self.wfile.write(body)
+            # A TUI client may drop the connection before the reply is
+            # written (quiet leaves, screen switches, process exit). The
+            # streaming branch above already swallows that; a plain reply
+            # must too, or the fixture thread kills the whole suite run.
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                for name, value in extra_headers:
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def do_GET(self) -> None:
             self.respond()

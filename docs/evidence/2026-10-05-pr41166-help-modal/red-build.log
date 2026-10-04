@@ -1,0 +1,41 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-1952941476.lock
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41166-help-modal-20261005/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41166-help-modal-20261005 bin/masc_tui.exe test/test_tui_exact_activity.exe
+Warning: option "-j-std" is deprecated.
+apple_keychain_stubs.c:46:23: warning: 'SecKeychainGetUserInteractionAllowed' is deprecated: first deprecated in macOS 10.10 - SecKeychain is deprecated [-Wdeprecated-declarations]
+   46 |     status = locked ? SecKeychainGetUserInteractionAllowed(&previous_interaction)
+      |                       ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecKeychain.h:649:10: note: 'SecKeychainGetUserInteractionAllowed' has been explicitly marked deprecated here
+  649 | OSStatus SecKeychainGetUserInteractionAllowed(Boolean *state)
+      |          ^
+apple_keychain_stubs.c:50:16: warning: 'SecKeychainSetUserInteractionAllowed' is deprecated: first deprecated in macOS 10.10 - SecKeychain is deprecated [-Wdeprecated-declarations]
+   50 |       status = SecKeychainSetUserInteractionAllowed(false);
+      |                ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecKeychain.h:639:10: note: 'SecKeychainSetUserInteractionAllowed' has been explicitly marked deprecated here
+  639 | OSStatus SecKeychainSetUserInteractionAllowed(Boolean state)
+      |          ^
+apple_keychain_stubs.c:52:43: warning: 'SecKeychainOpen' is deprecated: first deprecated in macOS 10.10 - SecKeychain is deprecated [-Wdeprecated-declarations]
+   52 |     if (status == errSecSuccess) status = SecKeychainOpen(owned_path, &keychain);
+      |                                           ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecKeychain.h:294:10: note: 'SecKeychainOpen' has been explicitly marked deprecated here
+  294 | OSStatus SecKeychainOpen(const char *pathName, SecKeychainRef * __nonnull CF_RETURNS_RETAINED keychain)
+      |          ^
+apple_keychain_stubs.c:54:43: warning: 'SecKeychainGetStatus' is deprecated: first deprecated in macOS 10.10 - SecKeychain is deprecated [-Wdeprecated-declarations]
+   54 |     if (status == errSecSuccess) status = SecKeychainGetStatus(keychain, &state);
+      |                                           ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecKeychain.h:462:10: note: 'SecKeychainGetStatus' has been explicitly marked deprecated here
+  462 | OSStatus SecKeychainGetStatus(SecKeychainRef __nullable keychain, SecKeychainStatus *keychainStatus)
+      |          ^
+apple_keychain_stubs.c:68:62: warning: 'kSecUseAuthenticationUIFail' is deprecated: first deprecated in macOS 11.0 - Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [-Wdeprecated-declarations]
+   68 |         CFDictionarySetValue(query, kSecUseAuthenticationUI, kSecUseAuthenticationUIFail);
+      |                                                              ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecItem.h:1078:26: note: 'kSecUseAuthenticationUIFail' has been explicitly marked deprecated here
+ 1078 | extern const CFStringRef kSecUseAuthenticationUIFail
+      |                          ^
+apple_keychain_stubs.c:81:27: warning: 'SecKeychainSetUserInteractionAllowed' is deprecated: first deprecated in macOS 10.10 - SecKeychain is deprecated [-Wdeprecated-declarations]
+   81 |       OSStatus restored = SecKeychainSetUserInteractionAllowed(previous_interaction);
+      |                           ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecKeychain.h:639:10: note: 'SecKeychainSetUserInteractionAllowed' has been explicitly marked deprecated here
+  639 | OSStatus SecKeychainSetUserInteractionAllowed(Boolean state)
+      |          ^
+6 warnings generated.

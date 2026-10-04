@@ -501,14 +501,21 @@ let test_lane_activity_publication_preserves_acquired_work () =
   let unwrap = function Ok value -> value
     | Error error -> Alcotest.fail (Registry.publication_error_to_string error) in
   let original = unwrap (Registry.publish ~lanes:[lane] snapshot) in
-  let accepted = match Runtime.verifier_exact_lane_slot_ids () with
+  let accepted = match Runtime.verifier_exact_lane_slots () with
     | Ok slots -> slots | Error error -> Alcotest.fail error in
   let off = {lane with enabled=false} in
   let replace value =
     let prepared = unwrap (Registry.prepare_replacement ~runtime_observations:[]
       ~lanes:[value] ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
     ignore (unwrap (Registry.transact_replacement prepared
-      ~apply_write:(fun () -> Registry.Committed ()))) in
+      ~apply_write:(fun () ->
+        Alcotest.(check bool) "new acquisitions stay fenced during the write" true
+          (Result.is_error (Runtime.verifier_exact_lane_slots ()));
+        List.iter (fun (runtime_id, candidate_kind) ->
+          if candidate_kind = Types_core.Cli_slot then
+            Alcotest.(check bool) "accepted CLI candidate survives the write fence" true
+              (Result.is_ok (Runtime.verifier_exact_slot_admission ~candidate_kind ~runtime_id))) accepted;
+        Registry.Committed ()))) in
   replace off;
   let current = unwrap (Registry.current ()) in
   (match Registry.resolve_lane current ~lane_id:lane.id with
@@ -516,14 +523,19 @@ let test_lane_activity_publication_preserves_acquired_work () =
    | Error error -> Alcotest.fail (Registry.lane_resolution_error_to_string error)
    | Ok _ -> Alcotest.fail "disabled lane accepted new work");
   Alcotest.(check bool) "implicit verifier refuses a new review" true
-    (Result.is_error (Runtime.verifier_exact_lane_slot_ids ()));
-  Alcotest.(check bool) "accepted review had a CLI candidate" true (List.mem "official.verifier" accepted);
+    (Result.is_error (Runtime.verifier_exact_lane_slots ()));
+  Alcotest.(check bool) "accepted review had a CLI candidate" true (List.mem ("official.verifier", Types_core.Cli_slot) accepted);
   Alcotest.(check bool) "accepted CLI candidate retains its execution constraint" true
-    (Result.is_ok (Runtime.verifier_exact_slot_admission ~runtime_id:"official.verifier"));
+    (Result.is_ok (Runtime.verifier_exact_slot_admission ~candidate_kind:Types_core.Cli_slot ~runtime_id:"official.verifier"));
   require_lane_slots "previous acquired snapshot remains usable" ~lane_id:lane.id
     ~expected:lane.slot_ids original;
   Alcotest.(check bool) "all configured candidates remain stored" true
     (Registry.declared_lane current ~lane_id:lane.id = Some off);
+  replace {off with cli_slot_ids=[]};
+  let runtime_id, candidate_kind = List.find (fun (id, _) -> id = "official.verifier") accepted in
+  Alcotest.(check bool) "accepted CLI kind survives completed declaration replacement" true
+    (candidate_kind = Types_core.Cli_slot &&
+     Result.is_ok (Runtime.verifier_exact_slot_admission ~candidate_kind ~runtime_id));
   replace lane;
   require_lane_slots "enable restores candidates in order" ~lane_id:lane.id
     ~expected:lane.slot_ids (unwrap (Registry.current ()));
@@ -592,9 +604,9 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
       snapshot with
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
    | Ok _ ->
-     (match Runtime.verifier_exact_lane_slot_ids () with
+     (match Runtime.verifier_exact_lane_slots () with
       | Ok slots -> Alcotest.(check (list string))
-          "completion authority retains configured official clients" cli slots
+          "completion authority retains configured official clients" cli (List.map fst slots)
       | Error detail -> Alcotest.fail detail);
      (* Carrying the id and being able to judge with it are different answers,
         and the server reports exact_output_authority_available from the
@@ -950,7 +962,7 @@ require_lane_slots
         | _, Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
         | _, Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
             (Registry.lane_resolution_error_to_string error));
-       (match protocol, Runtime.verifier_exact_lane_slot_ids () with
+       (match protocol, Runtime.verifier_exact_lane_slots () with
         | "codex-app-server", Error detail ->
           Alcotest.(check string) "an unwritten verifier lane reads as unconfigured"
             (Registry.lane_resolution_error_to_string
@@ -959,7 +971,7 @@ require_lane_slots
         | "codex-app-server", Ok _ -> Alcotest.fail "unsafe Codex verifier was admitted"
         | _, Error detail -> Alcotest.fail detail
         | _, Ok slots -> Alcotest.(check (list string))
-            "configured Claude direct binding supplies completion authority" [runtime_id] slots))
+            "configured Claude direct binding supplies completion authority" [runtime_id] (List.map fst slots)))
     [ "codex-app-server", "codex"; "claude-code", "claude" ]
 ;;
 

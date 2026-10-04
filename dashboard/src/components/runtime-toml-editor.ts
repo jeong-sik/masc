@@ -19,6 +19,7 @@ import {
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { runtimeTomlSessionFor, type RuntimeTomlSession, type RuntimeSectionId } from '../lib/runtime-toml-session'
 import { errorToString } from '../lib/format-string'
+import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import {
   cascadeDeleteProvider,
   createRuntimeTomlBinding,
@@ -33,7 +34,7 @@ import {
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
-import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
+import { announceExactLaneObservationChanged, exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -215,7 +216,8 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
   const setError = (value: string | null) => session.edit('error', value)
   const setNotice = (value: string | null) => session.edit('notice', value)
   const setSection = (value: RuntimeSectionId) => session.edit('section', value)
-  const ready = session.ready(authority)
+  const ready = session.writable(authority)
+  const canAdopt = session.ready(authority)
   const observationRevision = exactLaneObservationRevision(authority)
   const [projection, setProjection] = useState<{
     authority: ExecutionWorkspaceAuthority; config: typeof config; revision: number; observationRevision: number;
@@ -259,6 +261,15 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
   useEffect(() => {
     void session.ensure(authority)
   }, [session, authority, sourceGeneration])
+
+  async function afterSetupResume() {
+    if (!session.admits(authority)) return
+    announceExactLaneObservationChanged(authority)
+    try { await refreshRuntimeConfigConsumers() }
+    catch (error) {
+      if (mounted.current && session.admits(authority)) setError(`런타임 목록 갱신 실패: ${errorToString(error)}`)
+    }
+  }
 
   async function afterWrite(committed: boolean) {
     if (!committed || !mounted.current || !session.admits(authority)) return
@@ -735,8 +746,8 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
                 </div>
                 <p>초안을 유지하고 현재 revision을 채택하면, 다음 저장 시 현재 파일을 아래 초안으로 교체합니다. 필요한 변경을 먼저 합치세요.</p>
                 <div class="flex flex-wrap gap-2">
-                  <${ActionButton} disabled=${!ready || saving || readingCurrent} onClick=${() => useCurrentSource(false)} testId="runtime-toml-adopt-revision">현재 revision 채택 · 초안 유지<//>
-                  <${ActionButton} disabled=${!ready || saving || readingCurrent} onClick=${() => useCurrentSource(true)} testId="runtime-toml-replace-draft">현재 원문으로 초안 교체<//>
+                  <${ActionButton} disabled=${!canAdopt || saving || readingCurrent} onClick=${() => useCurrentSource(false)} testId="runtime-toml-adopt-revision">현재 revision 채택 · 초안 유지<//>
+                  <${ActionButton} disabled=${!canAdopt || saving || readingCurrent} onClick=${() => useCurrentSource(true)} testId="runtime-toml-replace-draft">현재 원문으로 초안 교체<//>
                 </div>
               </section>
             ` : null}
@@ -893,7 +904,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
     return html`
       <div class="rt-overlay" data-testid="runtime-toml-editor" onClick=${onClose}>
         <div class="rt-overlay-content" onClick=${stopOverlayContentClick}>
-          <${ModelSetupResumeControl} disabled=${saving} />
+          <${ModelSetupResumeControl} disabled=${saving} onComplete=${afterSetupResume} />
           ${body}
         </div>
       </div>
@@ -907,7 +918,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
       testId="runtime-toml-editor"
       right=${statusPill}
     >
-      <${ModelSetupResumeControl} disabled=${saving} />
+      <${ModelSetupResumeControl} disabled=${saving} onComplete=${afterSetupResume} />
       ${body}
     <//>
   `

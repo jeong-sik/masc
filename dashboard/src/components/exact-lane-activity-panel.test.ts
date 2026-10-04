@@ -108,6 +108,35 @@ describe('Exact activity operator flow', () => {
     expect(next.view.getByText(/Exact registry 적용됨/)).toBeTruthy()
     expect(next.view.getByRole('button', { name: '활동 설정 닫기' })).toBeTruthy()
   })
+  it('refreshes Runtime and All Lanes after a successful manual setup retry', async () => {
+    let published = false
+    const snapshot = () => {
+      const value = parseLaneInventory(inventory)
+      value.exact_snapshot.lanes = value.exact_snapshot.lanes.map(row => row.laneId === lane.laneId
+        ? { ...row, status: published ? 'off' : 'unavailable' } : row)
+      return value
+    }
+    inventoryApi.fetchLaneInventory.mockImplementation(async () => snapshot())
+    projectionApi.fetchStandaloneLanes.mockImplementation(async () => snapshot().exact_snapshot)
+    followup.resumeSavedModelSetup.mockResolvedValueOnce({ kind: 'failed', reason: 'activation_failed' })
+    const pending = await draft()
+    await pending.session.save(pending.authority)
+    expect(pending.session.state.value.followupError).not.toBeNull()
+    const view = render(html`<div><${RuntimeTomlEditor} /><${LaneInventoryPanel} /></div>`)
+    fireEvent.click(await view.findByTestId('runtime-toml-nav-lanes'))
+    fireEvent.click(await view.findByRole('button', { name: `Inspect ${lane.label}` }))
+    act(() => { pending.session.expanded.value = true })
+    await waitFor(() => expect(view.getAllByText(/관측 상태: unavailable/)).toHaveLength(2))
+    const reads = [projectionApi.fetchStandaloneLanes.mock.calls.length, inventoryApi.fetchLaneInventory.mock.calls.length]
+    followup.resumeSavedModelSetup.mockImplementationOnce(async () => {
+      published = true; return { kind: 'active', exactOutputAvailable: true }
+    })
+    fireEvent.click(view.getByRole('button', { name: '설정 재개' }))
+    await waitFor(() => expect(view.getAllByText(/관측 상태: off/)).toHaveLength(2))
+    expect(projectionApi.fetchStandaloneLanes.mock.calls.length).toBeGreaterThan(reads[0]!)
+    expect(inventoryApi.fetchLaneInventory.mock.calls.length).toBeGreaterThan(reads[1]!)
+    expect(followup.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(2)
+  })
   it('follows a fresh file when there is no unsaved activity change', async () => {
     const authority = executionWorkspaceAuthority.peek()!, session = exactLaneActivitySessionFor(authority, lane)
     await session.read(authority)

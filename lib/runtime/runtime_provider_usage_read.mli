@@ -10,7 +10,8 @@
 
     Codex answers [account/rateLimits/read] after account admission, with no
     thread or turn. The Antigravity CLI answers a print-mode [/usage] in a
-    disposable HOME ({!Runtime_antigravity_usage}), at server start only.
+    disposable HOME ({!Runtime_antigravity_usage}), at server start and after
+    the runtime catalogue changes.
     A provider that declares [usage-read] in runtime.toml is
     asked with one HTTP GET to that URL, authenticated with the key its HTTP
     runtime was built with, and the answer is decoded by the declared shape.
@@ -109,17 +110,29 @@ val refresh_readables :
     logs it, and the repeats go on; only {!Eio.Cancel.Cancelled} is
     re-raised. Returns when every account's repeats have ended. *)
 
-val refresh_declared :
+val watch_readables :
+  clock:_ Eio.Time.clock ->
+  codex:(scope:Runtime_quota_window.scope -> Runtime_execution.codex_app_server -> (unit, string) result) ->
+  antigravity:(scope:Runtime_quota_window.scope -> Runtime_execution.antigravity_cli -> (unit, string) result) ->
+  fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
+  catalogue:(unit -> readable list) ->
+  revision:(unit -> int) ->
+  await_change:(after:int -> int) ->
+  unit
+(** Read the current catalogue immediately, then maintain its declared HTTP
+    repeats. A catalogue publication cancels that generation's reads and repeats
+    and starts a fresh read, including Codex and Antigravity. An empty catalogue
+    waits for publication. The surrounding switch owns cancellation. *)
+
+val watch_declared :
+  mgr:_ Eio.Process.mgr ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
   unit
-(** {!refresh_readables} over the runtime catalogue, one HTTP GET per read.
-    The accounts that repeat are the ones the catalogue declares at the call.
-    An account whose repeats a config save ended does not repeat again, even
-    when a later save restores it, and one whose [refresh-s] a save adds
-    does not start; both repeat from the next server start. The server calls
-    it right after {!read_all}, so each first repeat waits its period from
-    the end of that whole start pass. *)
+(** {!watch_readables} over Runtime's catalogue and publication condition.
+    Added, removed, reconfigured and restored accounts take effect without a
+    server restart. Claude Code still reports usage during model turns only. *)
 
 type background =
   | Started  (** A read was forked on the server's root switch. *)

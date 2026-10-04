@@ -1,0 +1,12 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-audit-ide-document-uri-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/ide/ide-lsp-client.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-audit-ide-document-uri-20261004/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  36 passed (36)
+   Start at  01:52:33
+   Duration  970ms (transform 31%, environment 26%, setup 23%, tests 12%, import 8%)

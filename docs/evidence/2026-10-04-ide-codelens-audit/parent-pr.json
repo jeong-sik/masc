@@ -1,0 +1,11 @@
+{
+  "number": 41042,
+  "state": "open",
+  "draft": false,
+  "head": "7384d0168833dbea38664ab079f64960b9e31247",
+  "head_ref": "fix/audit-ide-inlay-hints-20261004",
+  "base": "fix/audit-ide-document-uri-20261004",
+  "base_sha": "e4476abcd9397fef20aca008b968d1688e20e919",
+  "stack_field_present": false,
+  "stack": null
+}

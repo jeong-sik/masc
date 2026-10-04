@@ -10,8 +10,17 @@
     [integrations] independently projects configured providers, AGENT_CORE
     provider prototypes, and named CLI/local-server transports. Setup and
     verification support describe adapter capability, never account access or
-    measured readiness. Unsupported protocols remain visible with null protocol
-    or unsupported status. Catalog endpoint credentials are also redacted. *)
+    measured readiness. Antigravity rows expose their declared [provider_timeout_s]
+    so selecting a saved account preserves its exact transport identity.
+    Unsupported protocols remain visible with null protocol
+    or unsupported status. Catalog endpoint credentials are also redacted.
+
+    [account_groups] groups configured official-client providers by the same
+    typed credential-location quota scope their runtime uses. Its opaque [id]
+    is [Runtime_quota_window.scope_id], shared with Runtime and Usage history.
+    [integration_ids] and [runtime_ids] preserve every declared provider/binding.
+    Groups are presentation identities, never mutation targets, provider account
+    IDs or email-based guesses; credentials changing in place retain the scope. *)
 val to_json : ?include_credential_references:bool -> Runtime_schema.config -> Yojson.Safe.t
 (** [include_credential_references] is for the local setup CLI only. It adds
     file references, never secret values, so new model bindings can preserve

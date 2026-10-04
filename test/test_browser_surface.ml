@@ -270,6 +270,64 @@ let test_keeper_discovers_clients_without_dispatch () =
       List.iter (fun info -> check bool "no dispatch before explicit selection" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None)) clients))
 
+let test_off_precedes_client_guidance () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let module Lane = Browser_lane in
+      let module Tools = Masc.Tool_misc_browser_lane in
+      let current = ref Lane.Disabled in
+      Lane.install_activity_observer (Some (fun _ -> !current));
+      Eio.Switch.on_release sw (fun () ->
+        Lane.install_activity_observer (Some (fun _ -> Lane.Enabled)));
+      let info n : Lane.client_info =
+        let raw = Printf.sprintf "50000000-0000-4000-8000-%012d" n in
+        let client_id = match Lane.client_id_of_string raw with
+          | Ok id -> id | Error detail -> fail detail in
+        {client_id;browser=Lane.Firefox;version="fixture";engine_version="fixture"} in
+      let connect client =
+        ignore (Lane.take_command ~client_info:client ~window_sec:0.001);
+        Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.Lane.client_id)) in
+      let tabs fields = Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
+        ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+      let check_off name result =
+        check bool (name ^ " is a workflow rejection") true
+          (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+        let data = Tool_result.data result in
+        check string (name ^ " reports off before client selection") "browser_lane_off"
+          Yojson.Safe.Util.(data |> member "error" |> to_string);
+        check bool (name ^ " names the activity remedy") true
+          (String_util.contains_substring (Tool_result.message result)
+            "browser.live is off; enable it before issuing new browser work");
+        List.iter (fun key -> check bool (name ^ " has no misleading " ^ key) true
+          (Yojson.Safe.Util.member key data = `Null)) ["host";"clients";"retry"] in
+      let check_requests name fields =
+        check_off (name ^ " tabs") (tabs fields);
+        check_off (name ^ " scene") (Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead"
+          ~start_time:(Tool_timing.start ()) (`Assoc (fields @ ["mode",`String "scene";"tabId",`Int 1])));
+        let result, phase = Tools.handle_interact_with_phase ~base_path:no_workspace ~tool_name:"BrowserInteract"
+          ~start_time:(Tool_timing.start ()) (`Assoc (fields @ ["tabId",`Int 1;"action",`String "click";
+            "selector",`String "a";"expectedUrl",`String "https://example.org/"])) in
+        check bool (name ^ " interaction has no effect") true (phase = Tool_result.Proven_pre_effect);
+        check_off (name ^ " interact") result in
+      let enabled_error fields expected =
+        current := Lane.Enabled;
+        check string "enabled lane retains selection diagnostics" expected
+          Yojson.Safe.Util.(Tool_result.data (tabs fields) |> member "error" |> to_string);
+        current := Lane.Disabled in
+      check_requests "no clients" [];
+      enabled_error [] "no_live_client";
+      let first = info 1 and second = info 2 and stale = info 3 in
+      List.iter connect [first;second;stale];
+      ignore (Lane.disconnect_client ~client_id:stale.client_id);
+      check_requests "multiple clients" [];
+      enabled_error [] "ambiguous_browser_clients";
+      let selected = ["clientId",`String (Lane.client_id_to_string stale.client_id)] in
+      check_requests "stale selected client" selected;
+      enabled_error selected "selected_client_disconnected";
+      List.iter (fun client -> check bool "off requests queued no browser command" true
+        (Lane.take_command ~client_info:client ~window_sec:0.001 = Ok None)) [first;second]))
+
 (* Measured 2026-09-15: a Keeper's BrowserTabs answered only
    {"error":"client_not_connected","clients":[]} for days while the installed
    host polled port 64850 and the workspace connection named 61372. The
@@ -460,5 +518,6 @@ let () = run "browser surface" ["behavior",[
   test_case "an absent lane names its own setup" `Quick test_absent_lane_names_its_setup;
   test_case "capture target and image identity" `Quick test_capture_identity;
   test_case "Keeper discovers ambiguous clients without dispatch" `Quick test_keeper_discovers_clients_without_dispatch;
+  test_case "off precedes live client guidance" `Quick test_off_precedes_client_guidance;
   test_case "Keeper hears why no browser is connected" `Quick test_keeper_hears_why_no_browser_is_connected;
   test_case "live read pins client across both hops" `Quick test_live_read_pins_client_between_hops]]

@@ -1,0 +1,18 @@
+{
+  "test_runtime_config_validity": {
+    "exit": 0,
+    "binary_sha256": "75de00917aeb95d30da5f16519b5214b5c89df4df5b02899cfc970e238b3cba5"
+  },
+  "test_prompt_preset": {
+    "exit": 0,
+    "binary_sha256": "0304fbb935bda24b91a9dbb19a9dbb767ae849b8f85aa165e8c51ec87041c9a6"
+  },
+  "test_exact_output_catalog_precedence": {
+    "exit": 0,
+    "binary_sha256": "5c9700e9099fd3904e55e2a5d020ec5b3c02f1e784bca5f1a9055dd10d17d054"
+  },
+  "test_verifier_exact_lane": {
+    "exit": 0,
+    "binary_sha256": "7fcb165c1495c9600accfd2edd3f954bb14ca5e8877901843cda879c9d8eeb6e"
+  }
+}

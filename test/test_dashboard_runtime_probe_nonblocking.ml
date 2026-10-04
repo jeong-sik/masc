@@ -255,6 +255,7 @@ let fanout_provider ~id ~url =
   ; display_name = id
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
+  ; request_path = None
   ; wire_kind = None
   ; max_context = None
   ; transport = Http url

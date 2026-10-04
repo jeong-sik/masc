@@ -1,5 +1,7 @@
 # Exact activity: configuration, admission and readout
 
+This is the original author evidence record for `8b36ed906441270a673ab40aa7bcb50fcf514e0e`. Its unexecuted-native statements describe that initial scope. Later native integration and review repairs are recorded [separately](../2026-10-05-pr41162-integrated-validation/README.md).
+
 This unit adds `enabled` to Exact declarations and their immutable registry,
 refuses new acquisitions when off, and preserves the previous acquired handles.
 Existing Required lanes cannot be disabled. It updates the read-only TUI/Web

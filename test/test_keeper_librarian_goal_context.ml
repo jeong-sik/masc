@@ -25,7 +25,7 @@ let goal id title : Goal_store.goal =
 
 let write_goals config goals =
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = Masc_domain.now_iso (); goals }
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = Masc_domain.now_iso (); goals }
 
 let expect_goal config task_id expected =
   match Sources.goal_context_for_task ~config (task task_id) with

@@ -82,6 +82,13 @@ describe('Machine activity operator flow', () => {
     followup.refreshRuntimeConfigConsumers.mockReturnValueOnce(pending.promise)
     const saving = session.save(authority)
     await waitFor(() => expect(session.state.value.receipt?.commit.durability).toBe('durable'))
+    expect(session.state.value.phase).toBe('followup')
+    expect(session.ready(authority)).toBe(false)
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    await session.read(authority)
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     workspace('/fixture/B')
     expect(session.state.value.uncertain).toBe(false)
     expect(session.state.value.current).toBeNull()

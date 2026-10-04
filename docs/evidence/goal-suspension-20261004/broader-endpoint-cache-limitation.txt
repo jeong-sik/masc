@@ -49,4 +49,3 @@ File "dashboard_goals.ml", line 1:
 Error: The files dashboard_goals_types.cmi
        and masc__Keeper_execution_receipt.cmi make inconsistent assumptions
        over interface Goal_store
-

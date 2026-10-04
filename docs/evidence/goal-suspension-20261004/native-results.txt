@@ -70,4 +70,3 @@ This run has ID `RPA1U5KC'.
 
 Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-2z9pfi2z/_build/_tests/Goal suspension projection'.
 Test Successful in 0.000s. 2 tests run.
-

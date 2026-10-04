@@ -118,6 +118,36 @@ let test_account_model_variants () = fixture (fun base runtime binary _spec _ori
     (List.length (List.filter (fun (row:Runtime_schema.provider) -> row.id=provider) after.providers));
   Alcotest.check Alcotest.int "later save adds a fourth variant under that account" 4
     (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.provider_id=provider) after.bindings)))
+let test_custom_account_new_model () = fixture (fun base runtime binary spec _original ->
+  let configured = {|
+[runtime]
+default = "operator_account.old"
+[providers.operator_account]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models.old]
+api-name = "old-model"
+max-context = 1024
+tools-support = true
+[operator_account.old]
+wizard-default = true
+|} in
+  save runtime configured;
+  fake base binary "pass";
+  let parsed = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let raw = spec "new-model" in
+  let prepared = Runtime_setup_spec.resolve_provider raw parsed.providers |> Result.get_ok in
+  let id = (Runtime_setup_spec.render prepared).runtime_id in
+  let receipt = get (apply base binary [raw] [id] (get (Batch.observe ~base_path:base)) true) in
+  Alcotest.(check (list string)) "prepared native ID is the committed selection" [id] receipt.runtime_ids;
+  let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+  Alcotest.(check int) "batch adds a binding without duplicating account" 1 (List.length after.providers);
+  Alcotest.(check bool) "operator provider source is retained" true
+    (String.starts_with ~prefix:configured (text runtime));
+  Alcotest.(check bool) "new binding names the original provider" true
+    (List.exists (fun (binding:Runtime_schema.binding) ->
+       Runtime_schema.binding_key binding=id && binding.provider_id="operator_account") after.bindings))
 let test_named_default_lane () = fixture (fun base runtime binary spec original ->
   let first = (Runtime_setup_spec.render (spec "old-model")).runtime_id in
   let second = Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "old-fallback") in
@@ -447,6 +477,7 @@ let test_save_publishes_the_registry () = fixture (fun base _runtime binary spec
     ignore (get (apply base binary [added] [id] revision false));
     Alcotest.check Alcotest.bool "the saved account is live in the published registry" true (List.mem id (ids (Runtime.get_runtimes ())))))
 let () = Alcotest.run "runtime setup batch" ["workspace",[
+  Alcotest.test_case "native batch reuses custom account" `Quick test_custom_account_new_model;
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
   Alcotest.test_case "the saved account is live in the registry without a restart" `Quick test_save_publishes_the_registry;

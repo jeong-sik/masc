@@ -3,11 +3,11 @@ type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
   | Http of {endpoint:string; credential:credential option;
-      kind:http_kind}
+      kind:http_kind; request_path:string option}
   | Client of {command:string; oauth:string option; timeout:float option; account_home:string option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   supports_image_input:bool option;
-  transport:transport; canonical_spec:string; declared_provider_id:string option}
+  transport:transport; canonical_spec:string; declared_provider_id:string option; requested_provider_id:string option}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
 let ( let* ) = Result.bind
@@ -55,6 +55,15 @@ let wire_kind_name = function
   | Glm -> "glm"
   | Ollama_kind -> "ollama"
 
+let schema_kind = function
+  | Openai_compat -> Runtime_schema.OpenAI_compat | Anthropic -> Anthropic
+  | Kimi -> Kimi | Glm -> Glm | Ollama_kind -> Ollama
+let effective_path ~endpoint ~kind request_path =
+  let kind = schema_kind kind in
+  match request_path with
+  | None -> Runtime_adapter.default_http_request_path ~kind ~base_url:endpoint
+  | Some request_path -> Runtime_adapter.normalize_http_request_path ~kind ~base_url:endpoint ~request_path
+
 (* Identity comes from the parsed connection, not from the text that produced
    it. Hashing the raw field bag made a field left out and the same field
    written with its default two different connections, and the inventory fills
@@ -75,9 +84,11 @@ let[@warning "+9"] transport_json transport =
      says nothing about [h.endpoint], so a fourth field on either constructor
      would drop out of the identity the same way a seventh on [t] would. *)
   match transport with
-    | Http {endpoint; kind; credential} ->
-      `Assoc ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
+    | Http {endpoint; kind; credential; request_path} ->
+      ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
               "credential", credential_json credential]
+      @ (match request_path with None -> [] | Some path -> ["request_path", `String path])
+      |> fun fields -> `Assoc fields
     | Client {command; oauth; timeout; account_home} ->
       ["command",`String command;
               "oauth",(match oauth with None -> `Null | Some path -> `String path);
@@ -87,7 +98,7 @@ let[@warning "+9"] transport_json transport =
 
 let[@warning "+9"] canonical_spec_of
       ({ choice; model; context; tools; streaming; supports_image_input; transport;
-         canonical_spec = _; declared_provider_id = _ } : t)
+         canonical_spec = _; declared_provider_id = _; requested_provider_id = _ } : t)
   =
   Yojson.Safe.to_string (`Assoc ([
     "choice",`String (choice_name choice); "model",`String model;
@@ -104,11 +115,12 @@ let of_json ?home_dir = function
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
       | "muse" -> Ok Muse
       | _ -> invalid "choice" in
-    let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input"]
-      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
+    let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input";"existing_provider_id"]
+      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
       @ (match choice with Claude_code | Codex | Muse -> ["account_home"] | _ -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
+    let* requested_provider_id = optional fields "existing_provider_id" in
     let* model = required fields "model" in
     let* context = match List.assoc_opt "max_context" fields with Some (`Int value) when value > 0 -> Ok value | _ -> invalid "max_context" in
     let* tools = bool fields "tools" in let* streaming = bool fields "streaming" in
@@ -132,7 +144,21 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | _ -> invalid "provider_kind" in
-      Ok (Http {endpoint;credential;kind}))
+      let* request_path = match List.assoc_opt "request_path" fields with
+        | None -> Ok None
+        | Some (`String value) when safe_text value ->
+          let uri = Uri.of_string value in
+          if value.[0] = '/' && Uri.scheme uri = None && Uri.host uri = None
+             && Uri.query uri = [] && Uri.fragment uri = None
+             && not (String.contains value ' ')
+          then
+            let path = effective_path ~endpoint ~kind (Some value) in
+            if Llm_provider.Provider_config.request_path_targets_responses_api path
+               && kind <> Openai_compat then invalid "request_path dialect"
+            else Ok (if path = effective_path ~endpoint ~kind None then None else Some path)
+          else invalid "request_path"
+        | Some _ -> invalid "request_path" in
+      Ok (Http {endpoint;credential;kind;request_path}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
         else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | Muse -> "muse" | _ -> "agy") in
@@ -157,7 +183,7 @@ let of_json ?home_dir = function
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout;account_home})) in
     let parsed = {choice;model;context;tools;streaming;supports_image_input;transport;
-      canonical_spec="";declared_provider_id=None} in
+      canonical_spec="";declared_provider_id=None;requested_provider_id} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
@@ -199,7 +225,13 @@ let provider_id spec =
       "choice", `String (choice_name spec.choice);
       "transport", transport_json spec.transport]) in
     choice_name spec.choice ^ "_" ^ answers_hash identity
-let for_provider spec (provider : Runtime_schema.provider) =
+let account_home_matches choice left right =
+  let effective = match choice with
+    | Claude_code -> Runtime_claude_code.effective_account_home
+    | Codex -> Runtime_codex_app_server.effective_account_home
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Muse -> Fun.id in
+  effective left = effective right
+let connection_matches spec (provider : Runtime_schema.provider) =
   let credential_matches expected = match expected, provider.credentials with
     | None, None -> true
     | Some (Env_reference name), Some (Runtime_schema.Env configured) -> name=configured
@@ -207,22 +239,46 @@ let for_provider spec (provider : Runtime_schema.provider) =
     | _ -> false in
   let connection_matches = match spec.transport, provider.transport with
     | Client client, Runtime_schema.Cli command ->
-      client.command=command && client.account_home=provider.account_home
+      client.command=command && account_home_matches spec.choice client.account_home provider.account_home
       && credential_matches (Option.map (fun path -> File_reference path) client.oauth)
       && (match client.timeout, provider.antigravity_cli with
           | None, None -> true
           | Some timeout, Some options -> timeout=options.timeout_s
           | _ -> false)
     | Http connection, Runtime_schema.Http endpoint ->
-      let kind = match connection.kind with
-        | Openai_compat -> Runtime_schema.OpenAI_compat | Anthropic -> Anthropic
-        | Kimi -> Kimi | Glm -> Glm | Ollama_kind -> Ollama in
+      let kind = schema_kind connection.kind in
       connection.endpoint=endpoint && credential_matches connection.credential
       && (match Runtime_adapter.http_protocol_metadata provider with
-          | Ok (configured, _) -> configured=kind | Error _ -> false)
+          | Ok (configured, path) -> configured=kind
+            && path=effective_path ~endpoint ~kind:connection.kind connection.request_path
+          | Error _ -> false)
     | Client _, Runtime_schema.Http _ | Http _, Runtime_schema.Cli _ -> false in
-  if provider.protocol=protocol spec.choice && connection_matches
+  provider.protocol=protocol spec.choice && connection_matches
+let for_provider spec (provider : Runtime_schema.provider) =
+  if provider.enabled && connection_matches spec provider
   then Some {spec with declared_provider_id=Some provider.id} else None
+let resolve_provider spec providers =
+  let selected = match spec.declared_provider_id with
+    | Some _ as selected -> selected | None -> spec.requested_provider_id in
+  match selected with
+  | Some id ->
+    (match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) providers with
+     | Some provider -> (match for_provider spec provider with
+         | Some bound -> Ok bound | None -> invalid "selected provider is disabled or changed")
+     | None -> invalid "selected provider is absent")
+  | None ->
+    let matches = List.filter (connection_matches spec) providers in
+    let enabled = List.filter (fun (p:Runtime_schema.provider) -> p.enabled) matches in
+    let generated = provider_id spec in
+    let enabled = match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=generated) enabled with
+      | Some provider -> [provider] | None -> enabled in
+    (match enabled, matches with
+     | [provider], _ -> Ok {spec with declared_provider_id=Some provider.id}
+     | [], _ :: _ -> invalid "matching provider is disabled"
+     | _ :: _ :: _, _ -> invalid "matching providers are ambiguous"
+     | [], [] ->
+       if List.exists (fun (p:Runtime_schema.provider) -> p.id=generated) providers
+       then invalid "generated provider identity is already declared" else Ok spec)
 let model_id_character decoded =
   let c = Uchar.utf_decode_uchar decoded in
   if Uchar.is_char c then
@@ -249,6 +305,7 @@ let render ?(include_provider=true) ?(wizard_default=true) spec =
   let transport_fields,credential = match spec.transport with
     | Http h ->
       (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
+      @ (match h.request_path with None -> [] | Some path -> ["request-path", `String path])
       @ ["endpoint",`String h.endpoint;
          Runtime_schema.exact_body_timeout_s_key,`Float setup_exact_body_timeout_s],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]

@@ -249,6 +249,76 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
     let retained = List.find (fun (provider:Runtime_schema.provider) -> provider.id="private_codex") after.providers in
     Alcotest.check (Alcotest.option Alcotest.string) "the previous account home remains unchanged"
       (Some account_home) retained.account_home))
+let test_disabled_provider_refused () = fixture (fun base runtime binary net ->
+  Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun out ->
+    output_string out {|
+[providers.disabled_account]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+enabled = false
+|});
+  let before = In_channel.with_open_bin runtime In_channel.input_all in
+  let source = `Assoc ["integration_id", `String "disabled_account"] in
+  Eio.Switch.run (fun sw ->
+    Alcotest.(check bool) "disabled account discovery refuses" true
+      (Actions.discover ~binary ~sw ~net ~base_path:base source = Error Actions.Disabled_connection));
+  Alcotest.(check bool) "disabled account save refuses" true
+    (Actions.save ~binary ~base_path:base (request base source) = Error Actions.Disabled_connection);
+  Alcotest.(check string) "no silent enable or new provider" before
+    (In_channel.with_open_bin runtime In_channel.input_all);
+  let current_home = Filename.concat base "current-account-home" in
+  Unix.mkdir current_home 0o700;
+  let current_ref = Runtime_setup_accounts.register_home ~workspace:base
+      ~integration_id:"disabled_account" ~cli_path:"codex" ~account_home:current_home
+    |> Result.get_ok |> Runtime_setup_accounts.reference_to_string in
+  let previous = Sys.getenv_opt "CODEX_HOME" in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> Unix.putenv "CODEX_HOME" value | None -> Unix.unsetenv "CODEX_HOME") (fun () ->
+    Unix.putenv "CODEX_HOME" current_home;
+    Alcotest.(check bool) "explicit reference to disabled effective default remains refused" true
+      (Actions.save ~binary ~base_path:base (request base (`Assoc [
+        "integration_id", `String "disabled_account"; "account_ref", `String current_ref]))
+       = Error Actions.Disabled_connection));
+  let new_home = Filename.concat base "new-account-home" in
+  Unix.mkdir new_home 0o700;
+  let account_ref = Runtime_setup_accounts.register_home ~workspace:base
+      ~integration_id:"disabled_account" ~cli_path:"codex" ~account_home:new_home
+    |> Result.get_ok |> Runtime_setup_accounts.reference_to_string in
+  ignore (get (Actions.save ~binary ~base_path:base (request base (`Assoc [
+    "integration_id", `String "disabled_account"; "account_ref", `String account_ref]))));
+  let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let retained = Runtime_schema.provider_of_id after "disabled_account" |> Option.get in
+  Alcotest.(check bool) "new login never enables its disabled template" false retained.enabled;
+  Alcotest.(check bool) "new login has a separate enabled account provider" true
+    (List.exists (fun (provider:Runtime_schema.provider) ->
+      provider.id<>retained.id && provider.enabled && provider.account_home=Some new_home) after.providers))
+
+let test_catalog_responses_save () = fixture (fun base runtime binary _net ->
+  List.iter (fun id ->
+    let selected = `Assoc ["integration_id", `String id; "api_key", `String "fixture-private-key"] in
+    let receipt = get (Actions.save ~binary ~base_path:base (request base selected)) in
+    let runtime_id = Yojson.Safe.Util.(receipt |> member "runtime_id" |> to_string) in
+    let config = Runtime_toml.parse_file runtime |> Result.get_ok in
+    let binding = List.find (fun binding -> Runtime_schema.binding_key binding=runtime_id) config.bindings in
+    let provider = Runtime_schema.provider_of_id config binding.provider_id |> Option.get in
+    let _, actual = Runtime_adapter.http_protocol_metadata provider |> Result.get_ok in
+    let inventory = Runtime_wizard_inventory.to_json config in
+    let catalog = Yojson.Safe.Util.(inventory |> member "integrations" |> to_list)
+      |> List.find (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string)=id) in
+    let expected = Yojson.Safe.Util.(catalog |> member "request_path" |> to_string) in
+    let endpoint = match provider.transport with Runtime_schema.Http endpoint -> endpoint | Cli _ -> Alcotest.fail "HTTP expected" in
+    Alcotest.(check string) "catalog request surface survives generated account"
+      (Runtime_adapter.normalize_http_request_path ~kind:Runtime_schema.OpenAI_compat ~base_url:endpoint ~request_path:expected) actual;
+    Alcotest.(check bool) "Responses dispatch remains selected" true
+      (Llm_provider.Provider_config.request_path_targets_responses_api actual);
+    let same = `Assoc ["integration_id", `String provider.id] in
+    ignore (get (Actions.save ~binary ~base_path:base (request ~context:16384 base same)));
+    let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+    Alcotest.(check int) "next variant retains the catalog-derived account" 2
+      (List.length (List.filter (fun (b:Runtime_schema.binding) -> b.provider_id=provider.id) after.bindings)))
+    ["openai-responses"; "deepseek-responses"])
+
 let test_configured_muse_readiness_inventory () = fixture (fun _base runtime _binary _net ->
   Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
     output_string channel {|
@@ -490,6 +560,8 @@ let test_status_of_error () =
   check "wrong discovery connection is 400" `Bad_request
     (Actions.Discovery_failed Runtime_model_discovery.Invalid_connection)
 let () = Alcotest.run "web setup actions" ["request boundary",[
+  Alcotest.test_case "disabled provider is preserved and refused" `Quick test_disabled_provider_refused;
+  Alcotest.test_case "catalog Responses paths survive account setup and reuse" `Quick test_catalog_responses_save;
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
   Alcotest.test_case "configured HTTP account accepts another context variant" `Quick test_existing_http_context_variant;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;

@@ -197,6 +197,13 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
       if parsed.Runtime_schema.default_runtime_id = Some lane_id
          && List.exists (fun (lane:Runtime_schema.lane_decl) -> String.equal lane.id lane_id) parsed.lane_decls
       then Ok () else Error Invalid_selection in
+  let rec resolve_specs = function
+    | [] -> Ok []
+    | spec :: rest ->
+      let* spec = Runtime_setup_spec.resolve_provider spec parsed.providers
+        |> Result.map_error (fun _ -> Invalid_selection) in
+      let* rest = resolve_specs rest in Ok (spec :: rest) in
+  let* specs = resolve_specs specs in
   let existing = List.map Runtime_instance.id_of_binding parsed.Runtime_schema.bindings in
   let previous_primary = match default_lane_id with
     | None -> parsed.Runtime_schema.default_runtime_id

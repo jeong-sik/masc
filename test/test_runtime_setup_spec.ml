@@ -1,17 +1,24 @@
-let test_existing_installer_contract () =
-  let rows = Yojson.Safe.from_file "fixtures/runtime-setup-spec-parity.json" |> Yojson.Safe.Util.to_list in
-  List.iter (fun row ->
+let test_installer_declarations () =
+  let specs = Yojson.Safe.from_file "fixtures/runtime-setup-specs.json" |> Yojson.Safe.Util.to_list in
+  List.iter (fun json ->
     let open Yojson.Safe.Util in
-    let spec = match Runtime_setup_spec.of_json (row |> member "spec") with
+    let spec = match Runtime_setup_spec.of_json json with
       | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
     let rendered = Runtime_setup_spec.render spec in
-    Alcotest.check Alcotest.string "same persistent provider/model identity"
-      (row |> member "runtime_id" |> to_string) rendered.runtime_id;
-    Alcotest.check Alcotest.string "same appended runtime fragment"
-      (row |> member "runtime_toml" |> to_string) rendered.runtime_toml;
     let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id) ^ "\n" ^ rendered.runtime_toml in
     match Runtime_toml.parse_string whole with
-    | Ok _ -> () | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML") rows
+    | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML"
+    | Ok config ->
+      let model = List.hd config.Runtime_schema.models in
+      let binding = List.hd config.bindings in
+      Alcotest.check Alcotest.string "selected API model survives rendering"
+        (json |> member "model" |> to_string) model.api_name;
+      Alcotest.check (Alcotest.option Alcotest.int) "declared context survives rendering"
+        (Some (json |> member "max_context" |> to_int)) model.max_context;
+      Alcotest.check Alcotest.string "binding uses the account connection"
+        (Runtime_setup_spec.provider_id spec) binding.provider_id;
+      Alcotest.check Alcotest.string "rendered identity resolves to its binding"
+        rendered.runtime_id (Runtime_schema.binding_key binding)) specs
 let test_rejects_invalid_transport_claims () =
   let valid = {|{"choice":"codex","model":"m","max_context":1024,"tools":true,"streaming":true}|} in
   let fields = match Yojson.Safe.from_string valid with `Assoc fields -> fields | _ -> assert false in
@@ -157,10 +164,8 @@ let test_codex_account_home_preserved () =
       "{" ^ base ^ {|,"account_home":"accounts/a"|} ^ "}"
     ; "an HTTP connection cannot carry an account home",
       {|{"choice":"messages","model":"m","max_context":1024,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid","provider_kind":"anthropic","account_home":"/accounts/a"}|} ]
-(* The operator reads this id in the TUI and in runtime.toml, so it names the
-   client and the model. The same short hash follows each and keeps one id
-   per answer set; a character a model id does not admit becomes one '-',
-   counted in characters rather than UTF-8 bytes. *)
+(* Human-readable prefixes keep the client and model recognizable. The
+   hashes distinguish account connections and model declarations separately. *)
 let test_id_names_the_client_and_the_model () =
   let render model =
     let input = Printf.sprintf
@@ -187,7 +192,8 @@ let test_id_names_the_client_and_the_model () =
   Alcotest.check Alcotest.bool "a short hash follows the client" true
     (String.length provider_hash = 8
      && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) provider_hash);
-  Alcotest.check Alcotest.string "the same hash follows the model" provider_hash model_hash;
+  Alcotest.check Alcotest.bool "a model declaration has its own identity" true
+    (String.length model_hash = 8 && provider_hash <> model_hash);
   let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String id) ^ "\n" ^ rendered.runtime_toml in
   Alcotest.check Alcotest.bool "the rendered connection parses as configuration" true
     (Result.is_ok (Runtime_toml.parse_string whole))
@@ -213,9 +219,171 @@ let test_image_declaration_survives_native_save () =
           (Some 750000) model.max_context
       | _ -> Alcotest.fail "expected one saved model") [None; Some false; Some true]
 
+let test_http_request_surface () =
+  let parse path =
+    Runtime_setup_spec.of_json (`Assoc (["choice", `String "openai_compatible";
+      "model", `String "selected-model"; "max_context", `Int 8192;
+      "tools", `Bool true; "streaming", `Bool true;
+      "endpoint", `String "https://fixture.invalid/v1";
+      "api_key_env", `String "MASC_SETUP_TEST_KEY"]
+      @ match path with None -> [] | Some path -> ["request_path", `String path])) in
+  let get = function Ok value -> value | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let bare = get (parse None) in
+  Alcotest.(check string) "explicit default surface retains its identity"
+    (Runtime_setup_spec.provider_id bare)
+    (Runtime_setup_spec.provider_id (get (parse (Some "/v1/chat/completions"))));
+  List.iter (fun path ->
+    let spec = get (parse (Some path)) in
+    let rendered = Runtime_setup_spec.render spec in
+    let config = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
+    let provider = List.hd config.Runtime_schema.providers in
+    let kind, resolved = Runtime_adapter.http_protocol_metadata provider |> Result.get_ok in
+    Alcotest.(check string) "Responses surface survives generated provider and endpoint normalization" "/responses" resolved;
+    let wire = Llm_provider.Provider_config.make ~kind ~request_path:resolved
+        ~model_id:"selected-model" ~base_url:"https://fixture.invalid/v1" () in
+    Alcotest.(check bool) "dispatch surface selects Responses" true
+      (Llm_provider.Provider_config.request_path_targets_responses_api wire.request_path);
+    Alcotest.(check bool) "chat transport cannot reuse a Responses account" true
+      (Option.is_none (Runtime_setup_spec.for_provider bare provider));
+    Alcotest.(check bool) "matching path can reuse the saved account" true
+      (Option.is_some (Runtime_setup_spec.for_provider spec provider))) ["/responses"; "/v1/responses"];
+  List.iter (fun path -> Alcotest.(check bool) "unsafe surface rejected" true
+    (Result.is_error (parse (Some path))))
+    ["https://other.invalid/responses"; "//other.invalid/responses"; "/responses?secret=x"; "/responses#fragment"; "/bad path"]
+
+let test_configured_account_resolution () =
+  let spec = Runtime_setup_spec.of_json (`Assoc ["choice", `String "codex";
+    "model", `String "new-model"; "max_context", `Int 8192;
+    "tools", `Bool true; "streaming", `Bool true; "account_home", `String "/fixture/account-a"])
+    |> Result.get_ok in
+  let config = Runtime_toml.parse_string {|
+[providers.operator_account]
+protocol = "codex-app-server"
+command = "codex"
+account-home = "/fixture/account-a"
+is-non-interactive = true
+|} |> Result.get_ok in
+  let provider = List.hd config.Runtime_schema.providers in
+  let bound = Runtime_setup_spec.resolve_provider spec config.providers |> Result.get_ok in
+  Alcotest.(check string) "new model reuses operator-owned account ID" "operator_account"
+    (Runtime_setup_spec.provider_id bound);
+  let exact = Runtime_setup_spec.of_json (`Assoc ["choice", `String "codex";
+    "existing_provider_id", `String "operator_account"; "model", `String "new-model";
+    "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
+    "account_home", `String "/fixture/account-a"]) |> Result.get_ok in
+  let exact = Runtime_setup_spec.resolve_provider exact [provider; {provider with id="sibling"}] |> Result.get_ok in
+  Alcotest.(check string) "explicit configured selection survives identical sibling accounts" "operator_account"
+    (Runtime_setup_spec.provider_id exact);
+  let previous = Sys.getenv_opt "CODEX_HOME" in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> Unix.putenv "CODEX_HOME" value | None -> Unix.unsetenv "CODEX_HOME") (fun () ->
+    Unix.putenv "CODEX_HOME" "/fixture/account-a";
+    let ambient = {provider with account_home=None} in
+    let selected = Runtime_setup_spec.resolve_provider spec [ambient] |> Result.get_ok in
+    Alcotest.(check string) "explicit effective default reuses ambient configured account"
+      "operator_account" (Runtime_setup_spec.provider_id selected);
+    Alcotest.(check bool) "same native default is not a new disabled account" true
+      (Runtime_setup_spec.account_home_matches Runtime_setup_spec.Codex None (Some "/fixture/account-a")));
+  let disabled = {provider with enabled=false} in
+  Alcotest.(check bool) "disabled provider is not reusable" true
+    (Option.is_none (Runtime_setup_spec.for_provider spec disabled));
+  Alcotest.(check bool) "disabled matching account is refused before rendering" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider spec [disabled]));
+  Alcotest.(check bool) "stale bound identity cannot target a disabled provider" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider bound [disabled]));
+  Alcotest.(check bool) "identical operator accounts require explicit choice" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider spec [provider; {provider with id="other"}]))
+
+let test_inventory_groups_existing_account_providers () =
+  let source = {|
+[providers.first]
+display-name = "Codex shared label"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/fixture/account-one"
+[providers.first_wide]
+display-name = "Codex shared label"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/fixture/account-one"
+[providers.second]
+display-name = "Codex shared label"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/fixture/account-two"
+[models.luna]
+api-name = "gpt-6-luna"
+max-context = 272000
+[models.luna_wide]
+api-name = "gpt-6-luna"
+max-context = 500000
+[first.luna]
+[first_wide.luna_wide]
+[second.luna]
+|} in
+  let config = match Runtime_toml.parse_string source with
+    | Ok config -> config | Error _ -> Alcotest.fail "account grouping fixture must parse" in
+  let json = Runtime_wizard_inventory.to_json config in
+  let open Yojson.Safe.Util in
+  let groups = json |> member "account_groups" |> to_list in
+  let ids group field = group |> member field |> to_list |> List.map to_string in
+  Alcotest.check (Alcotest.list (Alcotest.list Alcotest.string)) "same native scope groups only its own providers"
+    [["first";"first_wide"];["second"]] (List.map (fun group -> ids group "integration_ids") groups);
+  Alcotest.check (Alcotest.list (Alcotest.list Alcotest.string)) "both context variants retain their original runtime IDs"
+    [["first.luna";"first_wide.luna_wide"];["second.luna"]] (List.map (fun group -> ids group "runtime_ids") groups);
+  Alcotest.check Alcotest.int "public inventory retains all runtime rows" 3
+    (json |> member "runtimes" |> to_list |> List.length);
+  Alcotest.check (Alcotest.list Alcotest.int) "public runtime variants retain context" [272000;500000;272000]
+    (json |> member "runtimes" |> to_list |> List.map (fun row -> row |> member "max_context" |> to_int));
+  Alcotest.check (Alcotest.list Alcotest.string) "Setup group IDs match Runtime and persisted Usage scope IDs"
+    (List.map (fun home -> Runtime_quota_window.scope_id
+      (Runtime_quota_window.scope_of_codex_home (Some home)))
+      ["/fixture/account-one";"/fixture/account-two"])
+    (List.map (fun group -> group |> member "id" |> to_string) groups);
+  Alcotest.check Alcotest.bool "public quota scope IDs expose no account home" false
+    (String_util.contains_substring (Yojson.Safe.to_string (`List groups)) "/fixture/")
+
+let test_cli_reuse_requires_non_interactive () =
+  List.iter (fun (choice, fields) ->
+    let json = `Assoc (["choice", `String choice; "model", `String "fixture-model";
+      "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true] @ fields) in
+    let spec = Runtime_setup_spec.of_json json |> Result.get_ok in
+    let rendered = Runtime_setup_spec.render spec in
+    let config = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
+    let provider = List.hd config.Runtime_schema.providers in
+    let binding = List.hd config.bindings in
+    Alcotest.(check bool) (choice ^ " generated provider is executable") true
+      (Result.is_ok (Runtime_adapter.binding_to_execution config binding));
+    let interactive = {provider with is_non_interactive=false} in
+    let interactive_config = {config with providers=[interactive]} in
+    Alcotest.(check bool) (choice ^ " actual adapter refuses interactive declaration") true
+      (Result.is_error (Runtime_adapter.binding_to_execution interactive_config binding));
+    Alcotest.(check bool) (choice ^ " direct reuse refuses interactive declaration") true
+      (Option.is_none (Runtime_setup_spec.for_provider spec interactive));
+    Alcotest.(check bool) (choice ^ " implicit account resolution refuses before stage") true
+      (Result.is_error (Runtime_setup_spec.resolve_provider spec [interactive]));
+    let bound = Runtime_setup_spec.for_provider spec provider |> Option.get in
+    Alcotest.(check bool) (choice ^ " selected identity is rechecked") true
+      (Result.is_error (Runtime_setup_spec.resolve_provider bound [interactive]));
+    let sibling = {provider with id="admissible_account"} in
+    let selected = Runtime_setup_spec.resolve_provider spec [interactive;sibling] |> Result.get_ok in
+    Alcotest.(check string) (choice ^ " alias chooses the admissible existing connection")
+      sibling.id (Runtime_setup_spec.provider_id selected))
+    ["codex", ["account_home", `String "/fixture/codex"];
+     "claude_code", ["account_home", `String "/fixture/claude"];
+     "antigravity", ["credential_file", `String "/fixture/oauth.json"; "timeout_s", `Int 60];
+     "muse", ["account_home", `String "/fixture/muse"]]
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
+  Alcotest.test_case "CLI reuse follows actual execution eligibility" `Quick test_cli_reuse_requires_non_interactive;
+  Alcotest.test_case "HTTP request surface survives setup" `Quick test_http_request_surface;
+  Alcotest.test_case "existing and disabled account identity" `Quick test_configured_account_resolution;
+  Alcotest.test_case "inventory groups existing account providers without renaming" `Quick test_inventory_groups_existing_account_providers;
   Alcotest.test_case "image declaration survives native save" `Quick test_image_declaration_survives_native_save;
-  Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
+  Alcotest.test_case "installer declarations survive rendering" `Quick test_installer_declarations;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
   Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;

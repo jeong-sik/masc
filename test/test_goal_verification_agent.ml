@@ -83,8 +83,12 @@ let with_workspace f =
   workspace_clock := Some (Eio.Stdenv.clock env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
+  let previous_delivery = Goal_delivery.For_testing.replace_backend
+    (Some Server_bootstrap_loops.For_testing.goal_notification_backend) in
   Fun.protect
-    ~finally:(fun () -> rm_rf dir)
+    ~finally:(fun () ->
+      ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
+      rm_rf dir)
     (fun () ->
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));
@@ -213,6 +217,7 @@ type stub_behavior =
   | Stub_reject of string
   | Stub_malformed (* no verdict tool call *)
   | Stub_unavailable
+  | Stub_permanent
 
 let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
   fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_
@@ -237,6 +242,9 @@ let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
         (`Assoc [ "verdict", `String "REJECT"; "reason", `String reason ])
         (AR.Reject reason)
     | Some Stub_malformed -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=None}
+    | Some Stub_permanent ->
+      Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+        {field="verifier";detail="test evaluator unavailable"}))
     | Some Stub_unavailable ->
       Error
         (Agent_core.Error.Api
@@ -1357,12 +1365,14 @@ let test_superseded_review_keeps_the_evaluated_original_criterion () =
   List.iter scenario [ false; true ]
 ;;
 
-let test_wake_after_deferred_persist_survives_active_scan () =
+let test_wake_after_deferred_persist_survives_active_scan ~same_request () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Wake retained across worker release" in
   ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
   let old_request, _ = pending_identity config goal_id in
+  let retry_clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time retry_clock (Time_compat.now ());
   let calls = ref [] in
   let injected = ref false in
   let scanned_while_active = ref false in
@@ -1385,12 +1395,12 @@ let test_wake_after_deferred_persist_survives_active_scan () =
         (* This notification runs after the old worker computed Deferred and
            persisted it, but before its in-flight claim is released. *)
         injected := true;
-        ignore (must_succeed "edit after terminal observation"
+        if not same_request then ignore (must_succeed "edit after terminal observation"
           (dispatch ctx ~name:"masc_goal_upsert" ["id", `String goal_id; "target_value", `String "4"]));
         ignore (must_succeed "new request during old claim"
           (transition ctx goal_id "request_complete"));
         let new_request, _ = pending_identity config goal_id in
-        check bool "new request has its own identity" false (String.equal old_request new_request);
+        check bool "request identity follows the explicit edit" same_request (String.equal old_request new_request);
         Atomic.set AR.run_llm_reviewer_fn
           (recording_reviewer calls ["verifier-a", Stub_approve "new target measured"]);
         check bool "scan ran against real active runtime" true (Agent.scan_active_once ());
@@ -1407,7 +1417,7 @@ let test_wake_after_deferred_persist_survives_active_scan () =
         ~reviewer:(recording_reviewer calls ["verifier-a", Stub_unavailable])
         (fun () ->
           Eio.Switch.run (fun sw ->
-            Goal_verification_agent.start ~sw ~config;
+            Goal_verification_agent.start ~sw ~clock:(retry_clock :> float Eio.Time.clock_ty Eio.Resource.t) ~config;
             match Eio.Promise.await finished with
             | Ok () -> () | Error message -> fail message)));
   check bool "wake was consumed while old claim active" true !scanned_while_active;
@@ -1459,7 +1469,7 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
         ~reviewer:hanging_reviewer
         (fun () ->
           Eio.Switch.run (fun sw ->
-            Goal_verification_agent.start ~sw ~config;
+            Goal_verification_agent.start ~sw ~clock:(Option.get !workspace_clock) ~config;
             Eio.Promise.await entered;
             Atomic.set AR.run_llm_reviewer_fn
               (recording_reviewer calls ["verifier-a", Stub_approve "measured after reopen"]);
@@ -1581,11 +1591,21 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
     (fun () ->
       Atomic.set Goal_verification_run_registry.change_observer_fn observer;
       with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
-        ~reviewer:(recording_reviewer (ref []) ["verifier-a", Stub_unavailable])
+        ~reviewer:(recording_reviewer (ref []) ["verifier-a", Stub_permanent])
         (fun () ->
           Eio.Switch.run (fun sw ->
-            Goal_verification_agent.start ~sw ~config;
+            Goal_verification_agent.start ~sw ~clock:(Option.get !workspace_clock) ~config;
             await_within "the boot scan's deferral" deferred_once;
+            (* The durable run record precedes scheduling and its Board
+               notice. Wait for that observable side effect, not the earlier
+               registry notification. *)
+            (match Eio.Time.with_timeout (clock ()) hung_review_wait_s (fun () ->
+               let rec await_notice () =
+                 if stall_posts () <> [] then Ok ()
+                 else (Eio.Fiber.yield (); await_notice ()) in
+               await_notice ()) with
+             | Ok () -> ()
+             | Error `Timeout -> fail "deferral notice was not published");
             (match stall_posts () with
              | [ (post, fields) ] ->
                let text name =
@@ -1633,6 +1653,65 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
   check int "each request started exactly one review" 3
     (List.length (reviews_of_goal registry goal_id));
   check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
+;;
+
+(* A real daemon keeps the same durable proof while the provider recovers.
+   Only the injected clock advances; no new request_complete triggers retry. *)
+let test_transient_goal_retry ~drop () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Transient verifier recovery" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let request_id = pending_request_id config goal_id in
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock (Time_compat.now ());
+  let calls = ref [] in
+  let finished, finish = Eio.Promise.create () in
+  let permanent = Atomic.get Goal_verification_run_registry.change_observer_fn in
+  let registry = Goal_verification_run_registry.global () in
+  let observer () =
+    if List.exists (fun (run : Goal_verification_run_registry.run) ->
+      match run.status with
+      | Completed {outcome=Committed; _} -> true
+      | _ -> false) (reviews_of_goal registry goal_id)
+    then ignore (Eio.Promise.try_resolve finish ())
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn permanent)
+    (fun () ->
+      Atomic.set Goal_verification_run_registry.change_observer_fn observer;
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+        ~reviewer:(recording_reviewer calls ["verifier-a", Stub_unavailable])
+        (fun () -> Eio.Switch.run (fun sw ->
+          Goal_verification_agent.start ~sw ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~config;
+          let actual_clock = Option.get !workspace_clock in
+          let await f = match Eio.Time.with_timeout actual_clock hung_review_wait_s (fun () -> f (); Ok ()) with
+            | Ok () -> () | Error `Timeout -> fail "verifier retry did not progress" in
+          (* Yield until the real scheduling owner has registered its timer. *)
+          await (fun () ->
+            let rec advance () =
+              if Eio_mock.Clock.try_advance clock then ()
+              else (Eio.Fiber.yield (); advance ())
+            in
+            let rec scheduled () =
+              if Agent.retry_pending ~goal_id then ()
+              else (Eio.Fiber.yield (); scheduled ()) in
+            scheduled ();
+            if drop then
+              ignore (must_succeed "drop waiting proof" (transition ctx goal_id "drop"));
+            Atomic.set AR.run_llm_reviewer_fn
+              (recording_reviewer calls ["verifier-a", Stub_approve "provider recovered, target measured"]);
+            advance ());
+          if drop then (
+            Eio.Fiber.yield ();
+            check string "dropped Goal stays dropped" "dropped" (stored_phase config goal_id);
+            check int "old retry never calls evaluator" 1 (List.length !calls))
+          else (
+            await (fun () -> Eio.Promise.await finished);
+            check int "one failure then one review" 2 (List.length !calls);
+            check string "proof awaits human confirmation" "awaiting_confirmation" (stored_phase config goal_id);
+            List.iter (fun (run : Goal_verification_run_registry.run) ->
+              check string "retry preserves request identity" request_id run.request_id)
+              (reviews_of_goal registry goal_id)))))
 ;;
 
 let test_pending_before_phase_waits_for_explicit_request () =
@@ -1801,7 +1880,9 @@ let () =
             test_superseded_review_keeps_the_evaluated_original_criterion ] )
     ; ( "drain"
       , [ test_case "wake after deferred persistence survives active scan" `Quick
-            test_wake_after_deferred_persist_survives_active_scan
+            (test_wake_after_deferred_persist_survives_active_scan ~same_request:false)
+        ; test_case "same-request explicit wake precedes retry timer" `Quick
+            (test_wake_after_deferred_persist_survives_active_scan ~same_request:true)
         ; test_case "deferred review is announced and waits for a request" `Quick
             test_deferred_review_is_announced_and_waits_for_a_request
         ; test_case "pending before phase waits for explicit retry" `Quick
@@ -1844,6 +1925,9 @@ let () =
         ; test_case "priority edit preserves the in-flight approval" `Quick
             test_priority_edit_during_review_preserves_approval
         ] )
+    ; ( "transient retry"
+      , [test_case "provider recovery needs no new submission" `Quick (test_transient_goal_retry ~drop:false)
+        ; test_case "drop invalidates an old retry" `Quick (test_transient_goal_retry ~drop:true)] )
     ; ( "re-arm"
       , [ test_case
             "committed proven proof reconciles without review"

@@ -157,7 +157,7 @@ class LaneStore:
             return 200, {"source_revision": f"{self.revision:064x}",
                          "source_text": source}
 
-    def standalone_lanes(self) -> _keyboard_harness.HttpResponse:
+    def lane_inventory(self) -> _keyboard_harness.HttpResponse:
         """The standalone lanes as they stand when the read arrives. A held
         read answers with that, after the release: a load that left before a
         write and lands after it."""
@@ -169,7 +169,7 @@ class LaneStore:
             arrived.set()
             if not release.wait(timeout=10.0):
                 return 504, {"error": "fixture hold was never released"}
-        return 200, body
+        return _keyboard_keepers.lane_inventory_response(exact_snapshot=body)
 
     def hold_next_standalone_read(self) -> tuple[threading.Event, threading.Event]:
         arrived, release = threading.Event(), threading.Event()
@@ -260,6 +260,10 @@ class LaneStore:
                 lane["declared_slots"] = list(declared)
                 lane["declared_cli_slots"] = list(declared_cli)
                 lane["cli_slots"] = list(declared_cli)
+                lane["configuration_state"] = (
+                    "degraded" if lane["admission_error"] is not None or
+                    not (lane["admitted_slots"] or lane["cli_slots"]) else "ready"
+                )
                 return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
@@ -526,7 +530,7 @@ def run_exact(executable: str) -> None:
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
@@ -562,10 +566,12 @@ def run_exact(executable: str) -> None:
         screen_lacks(process, fd, output, picker, timeout=5.0)
         mark = mark_output(fd, output)
         release.set()
-        # The queued read-back is what draws the new slot. The held load
-        # lands first, with slots that do not name runtime-a, and the picker
-        # that did is closed.
+        # The queued read-back is what draws the new slot. The common list
+        # shows admission counts; d exposes the exact lane's complete slots.
+        # The held load lands first with slots that do not name runtime-a.
+        _keyboard_harness.send_and_wait(process, fd, output, b"d", b"MASC Lane reading")
         _keyboard_harness.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
         # The second picker is built from that list, so runtime-a is no
         # longer offered and the cursor opens on runtime-b.
         mark = mark_output(fd, output)
@@ -614,7 +620,7 @@ def run_cli_editor(executable: str) -> None:
     store.exact_declared_cli["librarian_exact"] = list(cli)
     fixtures = _keyboard_harness.overview_event_http_fixtures()
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
@@ -707,7 +713,7 @@ def run_empty_cli_group(executable: str) -> None:
     })
     fixtures = _keyboard_harness.overview_event_http_fixtures()
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
@@ -769,7 +775,7 @@ def run_curator_takes_cli(executable: str) -> None:
     })
     fixtures = _keyboard_harness.overview_event_http_fixtures()
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
@@ -839,7 +845,7 @@ def run_provider_jump(executable: str) -> None:
     )
     fixtures = _keyboard_harness.overview_event_http_fixtures()
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
@@ -907,7 +913,7 @@ def run_cli_binding_jump(executable: str) -> None:
     store.exact_declared_cli["librarian_exact"] = [slot]
     fixtures = _keyboard_harness.overview_event_http_fixtures()
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
         status,
@@ -1167,7 +1173,7 @@ def run_replace_and_promote(executable: str) -> None:
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = forced_probe
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []

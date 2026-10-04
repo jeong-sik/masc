@@ -212,23 +212,36 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
         if String.equal lane.id lane_id then List.nth_opt lane.candidate_ids 0 else None)
         parsed.lane_decls in
   let providers = List.map (fun (provider:Runtime_schema.provider) -> provider.id) parsed.providers in
-  let bound_providers = List.map (fun (binding:Runtime_schema.binding) -> binding.provider_id) parsed.bindings in
+  let bound_providers = List.filter_map (fun (binding:Runtime_schema.binding) ->
+    if binding.enabled then Some binding.provider_id else None) parsed.bindings in
   (* One account has one provider section, even when this save selects several
      models or context variants. Subsequent saves append only their new model
      and binding; existing provider settings remain the operator's values. *)
-  let _, _, additions = List.fold_left (fun (providers, bound_providers, acc) spec ->
+  let _, _, added_providers, additions = List.fold_left (fun (providers, bound_providers, added_providers, acc) spec ->
     let provider = Runtime_setup_spec.provider_id spec in
     let row = Runtime_setup_spec.render
         ~include_provider:(not (List.mem provider providers))
         ~wizard_default:(not (List.mem provider bound_providers)) spec in
     if List.mem row.runtime_id existing || List.exists (fun (r:Runtime_setup_spec.rendered) -> r.runtime_id=row.runtime_id) acc
-    then providers, bound_providers, acc
-    else provider :: providers, provider :: bound_providers, acc @ [row])
-      (providers, bound_providers, []) specs in
+    then providers, bound_providers, added_providers, acc
+    else provider :: providers, provider :: bound_providers, provider :: added_providers, acc @ [row])
+      (providers, bound_providers, [], []) specs in
   let available = existing @ List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_id) additions in
   if not (List.for_all (fun id -> List.mem id available) selected) then Error Invalid_selection else
   let added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_toml) additions) in
-  let runtime_text = content first ^ (if added="" then "" else "\n" ^ added) in
+  (* Freeze the wizard's already resolved choice before adding candidates.
+     A sole enabled binding (or the provider-owned workspace default) was a
+     real choice without a flag; expansion must not make it ambiguous. *)
+  let* preserved = List.fold_left (fun result (provider:Runtime_schema.provider) ->
+    let* text = result in
+    if not (List.mem provider.id added_providers) then Ok text else
+    match Runtime_wizard_inventory.binding_for_provider parsed provider with
+    | Ok binding when not binding.wizard_default ->
+        Toml_line_editor.edit_nested_bool text ~path:[binding.provider_id; binding.model_id]
+          ~key:"wizard-default" ~value:true
+        |> Result.map_error (fun _ -> Invalid_configuration)
+    | Ok _ | Error _ -> Ok text) (Ok (content first)) parsed.providers in
+  let runtime_text = preserved ^ (if added="" then "" else "\n" ^ added) in
   let runtime_text = match default_lane_id with
     | None -> runtime_text
     | Some lane_id -> Toml_line_editor.edit_table_multiline_array runtime_text

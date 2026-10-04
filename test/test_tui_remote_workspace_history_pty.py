@@ -38,6 +38,7 @@ DRAFT = b"unsent-draft-owned-by-workspace-a"
 WAIT_SECONDS = 8.0  # Fixture failure deadline, not a product refresh policy.
 # Runtime identities are the response-generation barrier below. Keep the
 # lifecycle/runtime column visible instead of waiting for a hidden cell.
+# Identity assertions use the header badge: the footer may omit long paths.
 TERMINAL_COLUMNS = _keyboard_harness.KEEPER_RUNTIME_COLUMN_COLUMNS
 
 
@@ -193,7 +194,7 @@ def run(binary: str, captures: Path | None) -> None:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held_context.requested,
                 timeout=WAIT_SECONDS), "A exact-context read was not held"
             wire.publish("b")
-            await_screen(lambda text: b"MISMATCH local " in text and b"b.current" in text
+            await_screen(lambda text: b"[workspace mismatch]" in text and b"b.current" in text
                 and b"MASC Keepers" in text and "▸ chat".encode() not in text,
                 "B authority did not withdraw the old chat surface")
             assert BEFORE not in screen(output) and DRAFT not in screen(output)
@@ -206,7 +207,7 @@ def run(binary: str, captures: Path | None) -> None:
             # Withdrawal cancels the chained read. A server thread returning
             # its old response does not prove a client callback was applied.
             wire.publish("b-after-late")
-            await_screen(lambda text: b"b.settled" in text and b"MISMATCH local " in text,
+            await_screen(lambda text: b"b.settled" in text and b"[workspace mismatch]" in text,
                          "fresh B roster after the late response was not applied")
             _keyboard_harness.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
                              needle=b"b.settled", controls=(_keyboard_harness.FULL_REDRAW,))
@@ -242,7 +243,7 @@ def run(binary: str, captures: Path | None) -> None:
             # selectable row or combine its metadata with A lifecycle facts.
             metadata_path.write_text("{not-json", encoding="utf-8")
             wire.publish("a-returned")
-            await_screen(lambda text: b"MISMATCH" not in text
+            await_screen(lambda text: b"[workspace mismatch]" not in text
                          and b"no Keeper selected" in text and b"keeper metadata read failed" in text,
                          "failed A metadata reload retained B's Keeper detail")
             metadata_path.write_bytes(metadata_bytes)
@@ -253,7 +254,7 @@ def run(binary: str, captures: Path | None) -> None:
                          and b"no Keeper selected" not in text,
                          "repaired A metadata was not reloaded")
             _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
+            await_screen(lambda text: b"a.returned" in text and b"[workspace mismatch]" not in text,
                          "the original workspace did not become authoritative again")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
@@ -420,14 +421,14 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, queued, _keyboard_harness.composer_showing(queued))
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
             wire.publish("b")
-            await_screen(lambda text: b"b.current" in text and b"MISMATCH local " in text,
+            await_screen(lambda text: b"b.current" in text and b"[workspace mismatch]" in text,
                          "B authority did not become visible")
             admission.release_admission.set()
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text, "fresh B receipt was not applied")
             assert admission.phases == ["a"], "late admission sent A's queued input to B"
             wire.publish("a-returned")
-            await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
+            await_screen(lambda text: b"a.returned" in text and b"[workspace mismatch]" not in text,
                          "A authority was not restored")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
@@ -496,11 +497,11 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, staged_text, _keyboard_harness.composer_showing(staged_text))
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"MASC Keepers" in text
-                         and b"MISMATCH local " in text, "B withdrawal was not applied")
+                         and b"[workspace mismatch]" in text, "B withdrawal was not applied")
             assert staged_text not in screen(output)
             assert admission.submitted == [] and beta_submitted == []
             wire.publish("a-returned")
-            await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
+            await_screen(lambda text: b"a.returned" in text and b"[workspace mismatch]" not in text,
                          "A authority was not restored")
             _keyboard_harness.select_keeper_row(process, fd, output, b"beta")
             _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode())
@@ -578,7 +579,7 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
         _keyboard_harness.palette_go(process, fd, output, b"go schedules", b"reaction:matched_consumed_ack")
         _keyboard_harness.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
         wire.publish("b")
-        await_screen(lambda text: b"MISMATCH local " in text and b"armed: cancel" not in text
+        await_screen(lambda text: b"[workspace mismatch]" in text and b"armed: cancel" not in text
                      and b"reaction:matched_consumed_ack" in text,
                      "B identity did not withdraw A's cancel arm and apply its list")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"workspace-b-schedule-owner")
@@ -739,7 +740,7 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held_first,
                 timeout=WAIT_SECONDS), "first provider POST was not held"
             wire.publish("b")
-            await_screen(lambda text: b"MISMATCH local " in text
+            await_screen(lambda text: b"[workspace mismatch]" in text
                          and b"a-identity-first" not in text,
                          "B authority was not applied while first POST was held")
             open_identity(b"b-identity-second")
@@ -753,7 +754,7 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             assert submitted == [("a", "first")], submitted
             wire.publish("a-returned")
             await_screen(lambda text: b"Base: " + wire.local_base.encode() in text
-                         and b"MISMATCH" not in text,
+                         and b"[workspace mismatch]" not in text,
                          "A identity was not restored in the current footer")
             open_identity(b"a-returned-identity-second")
             os.write(fd, b"R")
@@ -808,7 +809,7 @@ def bundle_identity_during_read(binary: str) -> None:
                          needle=b"MASC Keepers", controls=(_keyboard_harness.FULL_REDRAW,))
         os.write(fd, b"r")
         assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
-            lambda: b"b.current" in screen(output) and b"MISMATCH local " in screen(output),
+            lambda: b"b.current" in screen(output) and b"[workspace mismatch]" in screen(output),
             timeout=WAIT_SECONDS), "a fresh coherent B bundle did not recover"
         assert b"cross-workspace-poison" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[start:])), \
             "an A-started bundle displayed the B response before revalidation"
@@ -988,7 +989,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
                 wire.publish("b")
                 assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
-                    lambda: b"MISMATCH local " in screen(output)
+                    lambda: b"[workspace mismatch]" in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
@@ -1049,7 +1050,7 @@ def github_workspace_withdrawal(binary: str) -> None:
                                     needle=b"a-github-current")
             _keyboard_harness.send_and_wait(process, fd, output, b"L", b"A-device-code-visible")
             wire.publish("b")
-            await_screen(lambda text: b"MISMATCH local " in text and b"A-device-code-visible" not in text)
+            await_screen(lambda text: b"[workspace mismatch]" in text and b"A-device-code-visible" not in text)
             boundary = len(output)
             release.set()
             wire.publish("b-after-late")
@@ -1127,7 +1128,7 @@ def connector_workspace_withdrawal(binary: str) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
             assert submitted == [], submitted
             wire.publish("b")
-            await_screen(lambda text: b"MISMATCH local " in text and b"a-Discord" not in text,
+            await_screen(lambda text: b"[workspace mismatch]" in text and b"a-Discord" not in text,
                          "workspace B did not withdraw A's connector projection")
             _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             await_screen(lambda text: b"b.current" in text, "B roster not ready")
@@ -1139,7 +1140,7 @@ def connector_workspace_withdrawal(binary: str) -> None:
             os.write(fd, b"U")
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held, timeout=WAIT_SECONDS)
             wire.publish("a-returned")
-            await_screen(lambda text: b"MISMATCH" not in text and b"b-Discord" not in text,
+            await_screen(lambda text: b"[workspace mismatch]" not in text and b"b-Discord" not in text,
                          "returning authority did not retire the held connector write")
             released.set()
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
@@ -1214,7 +1215,7 @@ def tools_workspace_withdrawal(binary: str) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, b"t", b"workspace_a_initial_tools")
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, old_started, timeout=WAIT_SECONDS)
             wire.publish("b")
-            await_screen(lambda text: b"MISMATCH local " in text, "B authority did not become current")
+            await_screen(lambda text: b"[workspace mismatch]" in text, "B authority did not become current")
             assert b"workspace_a_initial_tools" not in screen(output), "old cached inventory survived withdrawal"
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, new_started, timeout=WAIT_SECONDS), "old pending slot blocked B read"
             new_release.set()
@@ -1297,7 +1298,7 @@ def verification_workspace_withdrawal(binary: str) -> None:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, old_started,
                 timeout=WAIT_SECONDS), "next A verification read was not held"
             wire.publish("b")
-            await_screen(lambda text: b"MISMATCH local " in text
+            await_screen(lambda text: b"[workspace mismatch]" in text
                          and b"workspace-a-verification-row" not in text
                          and b"armed: approve" not in text,
                          "B did not withdraw A verification rows and confirmation")
@@ -1392,7 +1393,7 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, initialized,
                 timeout=WAIT_SECONDS), "A task initialization not held"
             wire.publish("b")
-            await_screen(lambda text: b"MISMATCH local " in text and b"b.current" in text,
+            await_screen(lambda text: b"[workspace mismatch]" in text and b"b.current" in text,
                          "B authority not applied while initialization held")
             release_initialize.set()
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, initialize_returned,
@@ -1403,7 +1404,7 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             assert b"workspace-a-pending-task" not in screen(output), "A dispatch revived its draft"
             assert not [path for path, _ in requests if path == "/api/v1/keepers/chat/stream"], requests
             wire.publish("a-returned")
-            await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
+            await_screen(lambda text: b"a.returned" in text and b"[workspace mismatch]" not in text,
                          "A authority did not return")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
@@ -1501,7 +1502,7 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert _keyboard_harness.wait_for_fixture_event(process, fd, output, started, timeout=WAIT_SECONDS)
                 wire.publish("b")
                 assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
-                    lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
+                    lambda: b"[workspace mismatch]" in screen(output), timeout=WAIT_SECONDS)
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
                 assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
@@ -1556,7 +1557,7 @@ def runtime_parameter_workspace_withdrawal(binary: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"editing original_a_parameter")
         wire.publish("b")
         assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
-            lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
+            lambda: b"[workspace mismatch]" in screen(output), timeout=WAIT_SECONDS)
         assert b"original_a_parameter" not in screen(output), screen(output)
         os.write(fd, b"\r")
         # Re-read B explicitly. Its failure cannot authorize retained A input.

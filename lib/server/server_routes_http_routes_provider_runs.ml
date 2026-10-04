@@ -22,6 +22,7 @@ let dashboard_metrics_cache_ttl_s = 60.0
 let dashboard_metrics_cache_max_entries = 128
 let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
 let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
+let dashboard_runtime_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_costs_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_provider_history_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
@@ -29,6 +30,24 @@ let dashboard_keeper_decisions_cache : (string, dashboard_json_cache_entry) Hash
 let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 
 let cache_key parts = String.concat "\x1f" parts
+
+(* Declarations remain separate from the catalog limit and effective context.
+   Official clients do not expose an original capability catalog here. *)
+let runtime_specification_json (runtime : Runtime_instance.t) =
+  let catalog = match runtime.execution with
+    | Runtime_execution.Agent_core config ->
+      Llm_provider.Provider_config.capabilities_for_config_model
+        { config with model_capabilities_override = None }
+    | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+    | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> None in
+  `Assoc [ "runtime_id", `String runtime.id;
+    "catalog_context", Json_util.int_opt_to_json
+      (Option.bind catalog (fun caps -> caps.Llm_provider.Capabilities.max_context_tokens));
+    "catalog_max_output", Json_util.int_opt_to_json
+      (Option.bind catalog (fun caps -> caps.Llm_provider.Capabilities.max_output_tokens));
+    "model_context", Json_util.int_opt_to_json runtime.model.max_context;
+    "provider_context", Json_util.int_opt_to_json runtime.provider.max_context;
+    "binding_context", Json_util.int_opt_to_json runtime.binding.max_context ]
 
 let new_cache_entry () =
   { value = None; updated_at = 0.0; in_flight = false; last_error = None }
@@ -71,8 +90,8 @@ let redact_provider_history_cache_error = function
            fields)
   | json -> json
 
-let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
-  let now = Unix.gettimeofday () in
+let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeholder ~compute =
+  let now = clock () in
   let run_compute_and_store entry =
     let result =
       (* Offload via the Executor_pool, NOT [Eio_guard.run_in_systhread].
@@ -86,12 +105,12 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
          with a [Get_context] handler), so [use_rw] resolves normally; when no
          pool is set [submit_or_inline] runs inline in the calling fiber, which
          also carries an Eio context. *)
-      try Ok (Executor_pool_ref.submit_or_inline compute) with
+      try Executor_pool_ref.submit_or_inline compute with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Printexc.to_string exn)
     in
     (* NDT-OK: moved cache freshness timestamp; wall-clock metadata is boundary output. *)
-    let refreshed_at = Unix.gettimeofday () in
+    let refreshed_at = clock () in
     Stdlib.Mutex.lock dashboard_metrics_cache_mu;
     (match result with
      | Ok json ->
@@ -167,6 +186,16 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   in
   response
 
+let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
+  cached_dashboard_json_result ~now:Unix.gettimeofday
+    ~sync_first ~sw ~cache ~key ~placeholder ~compute:(fun () -> Ok (compute ()))
+
+module For_testing = struct
+  type cache = (string, dashboard_json_cache_entry) Hashtbl.t
+  let create_cache () : cache = Hashtbl.create 1
+  let cached_json = cached_dashboard_json_result
+end
+
 let empty_model_metrics_json ~window ~bucket_min =
   `Assoc
     [ "window_minutes", `Int window
@@ -212,7 +241,7 @@ let add_routes ~sw router =
              [ base_path; string_of_int window; string_of_int bucket_min ]
          in
          let json =
-           cached_dashboard_json ~sw ~sync_first:false
+           cached_dashboard_json_result ~now:Unix.gettimeofday ~sw ~sync_first:false
              ~cache:dashboard_model_metrics_cache ~key
              ~placeholder:(empty_model_metrics_json ~window ~bucket_min)
              ~compute:(fun () ->
@@ -224,10 +253,26 @@ let add_routes ~sw router =
                    Model_inference_metrics.compute
                      ~base_path ~window_minutes:window
                in
-               Model_inference_metrics.to_json agg)
+               Result.map Model_inference_metrics.to_json agg
+               |> Result.map_error Model_inference_metrics.read_error_to_string)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/runtime/metrics" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state _agent req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let window_minutes = 1440 in
+         let history = cached_dashboard_json ~sw ~sync_first:false
+           ~cache:dashboard_runtime_metrics_cache ~key:base_path
+           ~placeholder:(`Assoc [ "state", `String "loading" ])
+           ~compute:(fun () -> Model_inference_metrics.compute_runtime_metrics_json
+             ~base_path ~window_minutes)
+           |> redact_provider_history_cache_error in
+         let _, _, runtimes = Runtime.get_default_route_and_runtimes () in
+         let json = `Assoc [ "history", history;
+           "specifications", `List (List.map runtime_specification_json runtimes) ] in
+         Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
        with_public_read (fun state req reqd ->
          match
@@ -329,13 +374,14 @@ let add_routes ~sw router =
          let window = int_query_param req "window" ~default:1440 in
          let base_path = (Mcp_server.workspace_config state).base_path in
          let json =
-           cached_dashboard_json ~sw ~sync_first:false
+           cached_dashboard_json_result ~now:Unix.gettimeofday ~sw ~sync_first:false
              ~cache:dashboard_cost_latency_cache
              ~key:(cache_key [ base_path; string_of_int window ])
              ~placeholder:(empty_cost_latency_json ~window)
              ~compute:(fun () ->
                Model_inference_metrics.compute_cost_latency_json
-                 ~base_path ~window_minutes:window)
+                 ~base_path ~window_minutes:window
+               |> Result.map_error Model_inference_metrics.read_error_to_string)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

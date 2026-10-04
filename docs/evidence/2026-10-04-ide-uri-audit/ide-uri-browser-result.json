@@ -1,0 +1,40 @@
+{
+  "scope": "real CodeMirror and MASC LSP extension with synthetic WebSocket; not a language-server or production integration test",
+  "source_commit": "fe24a86faa168a49be1e76043b56bb87fb526e15",
+  "data": {
+    "messages": [
+      {
+        "method": "initialize",
+        "uri": null
+      },
+      {
+        "method": "initialized",
+        "uri": null
+      },
+      {
+        "method": "textDocument/didOpen",
+        "uri": "file:///workspace/space%20%23%3F%25/%ED%95%9C%EA%B8%80/src/%ED%95%9C%EA%B8%80%20%23%3F%2520.ml"
+      },
+      {
+        "method": "textDocument/codeLens",
+        "uri": "file:///workspace/space%20%23%3F%25/%ED%95%9C%EA%B8%80/src/%ED%95%9C%EA%B8%80%20%23%3F%2520.ml"
+      },
+      {
+        "method": "textDocument/inlayHint",
+        "uri": "file:///workspace/space%20%23%3F%25/%ED%95%9C%EA%B8%80/src/%ED%95%9C%EA%B8%80%20%23%3F%2520.ml"
+      },
+      {
+        "method": "textDocument/diagnostic",
+        "uri": "file:///workspace/space%20%23%3F%25/%ED%95%9C%EA%B8%80/src/%ED%95%9C%EA%B8%80%20%23%3F%2520.ml"
+      },
+      {
+        "method": "textDocument/hover",
+        "uri": "file:///workspace/space%20%23%3F%25/%ED%95%9C%EA%B8%80/src/%ED%95%9C%EA%B8%80%20%23%3F%2520.ml"
+      }
+    ],
+    "decoded": "/workspace/space #?%/한글/src/한글 #?%20.ml",
+    "expected": "/workspace/space #?%/한글/src/한글 #?%20.ml",
+    "errors": []
+  },
+  "page_errors": []
+}

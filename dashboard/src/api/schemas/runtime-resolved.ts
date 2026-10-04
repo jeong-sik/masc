@@ -90,6 +90,7 @@ const ProviderUsageWindowSchema = object({
   utilization: union([
     object({ unit: literal('fraction'), value: number() }),
     object({ unit: literal('percent'), value: number() }),
+    object({ unit: literal('usd'), value: number(), limit: nullable(number()) }),
   ]),
   resets_at: nullable(number()),
   observed_at: number(),
@@ -109,7 +110,9 @@ const ProviderUsageProviderSchema = object({
 const ProviderUsageScopeSchema = object({
   scope: string(),
   providers: array(ProviderUsageProviderSchema),
-  state: union([literal('reported'), literal('not_reported_since_start')]),
+  state: union([literal('reported'), literal('reported_no_windows'), literal('not_reported_since_start')]),
+  observed_at: optional(number()),
+  source: optional(string()),
   windows: array(ProviderUsageWindowSchema),
 })
 

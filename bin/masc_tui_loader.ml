@@ -6,7 +6,6 @@ module Keeper_status_runtime = Masc.Keeper_status_runtime
 module Keeper_snapshot_unread = Masc.Keeper_snapshot_unread
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
-module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
@@ -1273,12 +1272,17 @@ let load_approvals ~(host : string) ~(port : int) :
 let load_runtime_resolved ~(host : string) ~(port : int) :
     ( Tui_decode.runtime_option list
       * Tui_decode.runtime_resolved_lane list
-      * Tui_decode.runtime_assignment list,
+      * Tui_decode.runtime_assignment list
+      * string option,
       string )
     result =
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_runtime_resolved_full json
+  | Ok json ->
+      let ( let* ) = Result.bind in
+      let* runtimes, lanes, assignments = Tui_decode.decode_runtime_resolved_full json in
+      let* snapshot = Tui_decode.decode_runtime_resolved_snapshot json in
+      Ok (runtimes, lanes, assignments, snapshot.rrs_default_route)
 
 (** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
     and the provider usage windows. The two decode apart, and a failed fetch
@@ -1328,10 +1332,11 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
   rsl_probe : (Masc.Tui_decode_runtime_probe.runtime_probe_snapshot, string) result;
+  rsl_evidence : (Masc_tui_runtime_evidence.t, string) result;
 }
 
-(** Load the Runtime operator surface from its identity projection and optional
-    probe observation. The requests run together when an Eio switch is
+(** Load the Runtime operator surface from its identity projection, optional
+    probe observation and operator history. The requests run together when an Eio switch is
     available. A resolved failure rejects the load; a probe failure remains an
     inner result so lane identity can still be drawn as unobserved. *)
 let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
@@ -1339,16 +1344,17 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
   let requests =
     [ (fun () -> fetch_runtime_probe ~host ~port ~force)
     ; (fun () -> fetch_runtime_resolved ~host ~port)
+    ; (fun () -> Masc_tui_http.get_json ~host ~port ~path:"/api/v1/runtime/metrics")
     ]
   in
   let results =
     match Eio_context.get_switch_opt () with
-    | Some _ -> Eio.Fiber.List.map ~max_fibers:2 (fun request -> request ()) requests
+    | Some _ -> Eio.Fiber.List.map ~max_fibers:3 (fun request -> request ()) requests
     | None -> List.map (fun request -> request ()) requests
   in
   match results with
-  | [ _; Error detail ] -> Error ("runtime resolved load failed: " ^ detail)
-  | [ probe_result; Ok resolved_json ] ->
+  | [ _; Error detail; _ ] -> Error ("runtime resolved load failed: " ^ detail)
+  | [ probe_result; Ok resolved_json; evidence_result ] ->
       (match Tui_decode.decode_runtime_resolved_snapshot resolved_json with
        | Error detail -> Error ("runtime resolved decode failed: " ^ detail)
        | Ok rsl_resolved ->
@@ -1361,8 +1367,11 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
                   | Error detail ->
                       Error ("runtime probe decode failed: " ^ detail))
            in
-           Ok { rsl_resolved; rsl_probe })
-  | _ -> Error "runtime surface loader lost one of its two projection reads"
+           let rsl_evidence = match evidence_result with
+             | Ok json -> Masc_tui_runtime_evidence.decode json
+             | Error _ -> Error "runtime history unavailable; check server support and operator access" in
+           Ok { rsl_resolved; rsl_probe; rsl_evidence })
+  | _ -> Error "runtime surface loader lost a projection read"
 
 (** Load the tool calls keepers are holding, for the Approvals surface. *)
 let load_keeper_tool_approvals ~(host : string) ~(port : int) :

@@ -35,7 +35,8 @@ type recovery_report = { delivered : int; unroutable : int; retained : int }
 
 val reconcile_pending :
   config:Workspace_utils_backend_setup.config -> (recovery_report, string) result
-(** Deliver verdict-committed repair obligations from the authoritative backlog.
+(** Deliver both rejection and approval obligations from the authoritative backlog.
+    Approval delivery never changes the completed Task back to an active state.
     A durable Keeper queue write precedes exact-key source acknowledgment.
     Identity lookup, queue and acknowledgement failures retain the obligation
     for the next recovery. An {!Unroutable_producer} returns the Task to the

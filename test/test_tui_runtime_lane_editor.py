@@ -839,11 +839,34 @@ def run_curator_takes_cli(executable: str) -> None:
     )
 
 
+def model_settings_config(*, cli_context=272000):
+    status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
+    return status, {**config, "source_text": config["source_text"] + '\n'.join([
+        "", '[providers."glm-coding"] # request window',
+        'protocol = "openai-compatible-http"', 'kind = "openai_compat"',
+        'endpoint = "https://usage.invalid/v1"', 'exact-body-timeout-s = 1200',
+        '[models."glm-5-turbo"]', 'max-context = 131072',
+        '["glm-coding"."glm-5-turbo"]', 'max-context = 65536', 'max-tokens = 4096',
+        '[providers.codex_subscription]', 'protocol = "codex-app-server"',
+        'command = "codex"', 'is-non-interactive = true',
+        'account-home = "/tmp/fixture-codex-account"',
+        '[models.luna]', 'api-name = "gpt-6-luna"', 'max-context = 500000',
+        '[codex_subscription."luna"] # CLI binding', f'max-context = {cli_context}', 'max-tokens = 8192', "",
+    ])}
+
+
+def assert_model_form(output, *, provider, model, context):
+    screen = _keyboard_harness.screen_text(bytes(output))
+    expected = [("Edit model · " + provider).encode(), model.encode(), context.encode(),
+                b"Context tokens", b"Max output tokens", b"Enter next/save", b"Esc cancel"]
+    for needle in expected:
+        if needle not in screen:
+            raise AssertionError(f"shared model form omitted {needle!r}: {screen!r}")
+
+
 def run_provider_jump(executable: str) -> None:
-    """[d] on an HTTP slot opens its [providers.<id>] table in Config. The
-    table key is the catalogue's provider_id, and the header is found by the
-    key path the TOML grammar reads, so a quoted key with a trailing comment
-    is the same table. While the picker is open, [d] stays with it."""
+    """[d] on an HTTP slot opens the shared account/model form.
+    The picker retains focus until closed; cancelling the form writes nothing."""
     store = LaneStore()
     slot = "glm-coding.glm-5-turbo"
     store.body["runtimes"].append(
@@ -854,17 +877,7 @@ def run_provider_jump(executable: str) -> None:
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
-    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
-    status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
-    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
-        status,
-        {
-            **config,
-            "source_text": config["source_text"]
-            + '\n\n[providers."glm-coding"] # request window\n'
-            + "exact-body-timeout-s = 1200\n",
-        },
-    )
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = model_settings_config()
     requests: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
@@ -878,42 +891,32 @@ def run_provider_jump(executable: str) -> None:
                           b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
         _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         # The picker owns focus: [d] neither jumps nor closes it, so the
-        # [e] after it lands on the picker and returns to the slot rows.
+        # Esc after it lands on the picker and returns to the slot rows.
         os.write(fd, b"d")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b",
                         b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
-        os.write(fd, b"d")
-        # Config colours a header's pieces apart, so the drawn screen, not
-        # the byte stream, is what names the table.
-        wanted = (b'[providers."glm-coding"] # request window',
-                  b"exact-body-timeout-s = 1200")
-        deadline = time.monotonic() + 5.0
-        while True:
-            _keyboard_harness.read_available(fd, output)
-            screen = _keyboard_harness.screen_text(bytes(output))
-            if all(needle in screen for needle in wanted):
-                break
-            if time.monotonic() > deadline:
-                raise AssertionError("[d] did not open the provider table")
-            time.sleep(0.05)
-        if any(path == ROUTING_PATH for path, _body in requests):
-            raise AssertionError("the provider jump posted a routing write")
+        _keyboard_harness.send_and_wait(process, fd, output, b"d", "Edit model · glm-coding".encode())
+        assert_model_form(output, provider="glm-coding", model="glm-5-turbo", context="65536_")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Models")
+        if any(path in (ROUTING_PATH, _keyboard_runtime.RUNTIME_CONFIG_RAW_PATH)
+               for path, _body in requests):
+            raise AssertionError("opening or cancelling model settings posted a write")
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(
         executable,
-        description="Slot editor opens an HTTP slot's provider table",
+        description="Slot editor opens an HTTP slot in shared model settings",
         interact=interact,
         http_fixtures=fixtures,
         http_requests=requests,
     )
 
 
-def run_cli_binding_jump(executable: str) -> None:
-    """Enter on a rejected CLI fallback still opens its declared binding."""
+def run_cli_binding_jump(executable: str, *, missing_binding: bool = False) -> None:
+    """Enter edits a declared CLI binding even when the registry rejected its slot."""
     store = LaneStore()
-    slot = "codex_subscription.luna"
+    slot = "codex_subscription.retired" if missing_binding else "codex_subscription.luna"
     librarian = store.exact_lane("librarian_exact")
     librarian["declared_cli_slots"] = [slot]
     librarian["cli_slots"] = []
@@ -921,12 +924,7 @@ def run_cli_binding_jump(executable: str) -> None:
     fixtures = _keyboard_harness.overview_event_http_fixtures()
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
-    status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
-    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
-        status,
-        {**config, "source_text": config["source_text"]
-         + '\n[codex_subscription."luna"] # CLI binding\n'},
-    )
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = model_settings_config()
 
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
@@ -943,21 +941,116 @@ def run_cli_binding_jump(executable: str) -> None:
             raise AssertionError(f"The slot groups are unclear: {screen!r}")
         _keyboard_harness.send_and_wait(process, fd, output, b"j",
                         b"> 2/2  [CLI] " + slot.encode() + b"  (not admitted)")
-        os.write(fd, b"\r")
-        wanted = b'[codex_subscription."luna"] # CLI binding'
-        _keyboard_harness.wait_for_output(process, fd, output, wanted, start=0, timeout=5.0)
-        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=wanted, controls=(_keyboard_harness.FULL_REDRAW,),
-                          final_cursor=b"\x1b[?25l")
-        if wanted not in _keyboard_harness.screen_text(bytes(output)):
-            raise AssertionError("Enter did not open the CLI binding table")
+        if missing_binding:
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"[providers.codex_subscription]")
+            screen = _keyboard_harness.screen_text(bytes(output))
+            if b"Edit model" in screen or b"protocol" not in screen:
+                raise AssertionError("a missing binding did not open its provider source for repair")
+            os.write(fd, b"q")
+            return
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", "Edit model · codex_subscription".encode())
+        assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=80,
+                          needle=b"Context tokens", controls=(_keyboard_harness.FULL_REDRAW,))
+        assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Models")
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(
         executable,
-        description="Rejected Librarian CLI slot opens its binding configuration",
+        description="Rejected Librarian CLI slot opens " + ("raw repair source" if missing_binding else "shared model settings"),
         interact=interact,
         http_fixtures=fixtures,
+    )
+
+
+def run_model_settings_read_isolation(executable: str, *, old_fails: bool) -> None:
+    """A superseded source read cannot open or consume the newer model intent."""
+    store = LaneStore()
+    slot = "codex_subscription.luna"
+    librarian = store.exact_lane("librarian_exact")
+    librarian["declared_cli_slots"] = [slot]
+    librarian["cli_slots"] = []
+    store.exact_declared_cli["librarian_exact"] = [slot]
+    stale = ((503, {"error": "old source read failed"}) if old_fails
+             else model_settings_config(cli_context=111111))
+    older = _keyboard_harness.GatedHttpResponse(stale, hold_seconds=30.0)
+    newer = _keyboard_harness.GatedHttpResponse(model_settings_config(), hold_seconds=30.0)
+    queued = []
+    lock = threading.Lock()
+
+    def raw():
+        with lock:
+            gate = queued.pop(0) if queued else None
+        return model_settings_config() if gate is None else gate()
+
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = raw
+    requests: _keyboard_harness.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        def await_event(event, description):
+            if not _keyboard_harness.wait_for_fixture_event(
+                    process, fd, output, event, timeout=5.0):
+                raise AssertionError(description)
+
+        try:
+            _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
+            _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
+            _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
+            _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            with lock:
+                queued.append(older)
+            _keyboard_harness.send_and_wait(process, fd, output, b"d", b"MASC Models")
+            await_event(older.requested, "the first settings read was not requested")
+
+            # Cancel the pending HTTP model, then request the CLI binding.
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+            _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
+            _keyboard_harness.send_and_wait(process, fd, output, b"j",
+                b"> 2/2  [CLI] " + slot.encode() + b"  (not admitted)")
+            with lock:
+                queued.append(newer)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"MASC Models")
+            # Automatic ticks must neither start another read nor invalidate
+            # this slow one. Edit/copy must not consume the retained cursor.
+            os.write(fd, b"ec")
+            if _keyboard_harness.wait_for_fixture_event(
+                    process, fd, output, newer.requested, timeout=2.5):
+                raise AssertionError("a second source read started before the first completed")
+            if b"Edit model" in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("edit used retained rows while the requested model was loading")
+            older.release.set()
+            await_event(newer.requested, "the queued settings read was not requested")
+            await_event(older.completed, "the old settings read did not finish")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            # Force a complete frame after the old callback has been delivered.
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=132,
+                needle=b"MASC Models", controls=(_keyboard_harness.FULL_REDRAW,))
+            if b"Edit model" in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("an old response opened the newer model with stale source")
+            _keyboard_harness.release_and_wait_for_frame(process, fd, output, newer,
+                "Edit model · codex_subscription".encode())
+            assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Models")
+            if any(path in (ROUTING_PATH, _keyboard_runtime.RUNTIME_CONFIG_RAW_PATH)
+                   for path, _ in requests):
+                raise AssertionError("cancelled settings posted a write")
+            os.write(fd, b"q")
+        finally:
+            older.release.set()
+            newer.release.set()
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="Model settings ignore an older " + ("failed" if old_fails else "successful") + " source read",
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
     )
 
 
@@ -1183,9 +1276,37 @@ def run_replace_and_promote(executable: str) -> None:
     store.exact_declared["librarian_exact"] = []
     store.exact_declared_cli["librarian_exact"] = [backup, current]
     fixtures = _keyboard_harness.overview_event_http_fixtures()
-    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    hold_catalog = threading.Event()
+    catalog_arrived = threading.Event()
+    release_catalog = threading.Event()
+
+    def resolved():
+        if hold_catalog.is_set():
+            hold_catalog.clear()
+            catalog_arrived.set()
+            if not release_catalog.wait(timeout=10.0):
+                return 504, {"error": "catalogue hold was never released"}
+        return store.resolved()
+
+    refresh_called = threading.Event()
+
+    def forced_probe():
+        refresh_called.set()
+        return _keyboard_runtime.runtime_probe_response(fresh=True)
+
+    routing_calls: list[bytes] = []
+
+    def route(raw: bytes):
+        # The shared request log records completed replies. Count arrivals
+        # here as well so the deliberately held POST remains observable.
+        routing_calls.append(raw)
+        return store.route(raw)
+
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = forced_probe
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = resolved
     fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
 
@@ -1195,6 +1316,25 @@ def run_replace_and_promote(executable: str) -> None:
                           needle=b"MASC Lanes", controls=(_keyboard_harness.FULL_REDRAW,))
         _keyboard_harness.send_and_wait(process, fd, output, b"j", b"HITL")
         _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
+        # Prime the model catalogue, then hold a fresh read while the same
+        # runtime ID is still cached. Actions must be labelled by slot ID.
+        _keyboard_harness.send_and_wait(process, fd, output, b"s", b"gpt-6-sol high")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Librarian")
+        hold_catalog.set()
+        _keyboard_harness.send_and_wait(process, fd, output, b"s", b"runtime catalogue loading")
+        try:
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, catalog_arrived, timeout=5.0):
+                raise AssertionError("editor catalogue did not start loading")
+            if b"account.backup" not in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("loading editor did not show the declared slot ID")
+            if b"gpt-6-sol high" in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("editable candidate kept its cached model label")
+        finally:
+            release_catalog.set()
+        _keyboard_harness.wait_for_output(process, fd, output, b"gpt-6-sol high", start=len(output), timeout=5.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Librarian")
+        catalog_arrived.clear()
+        release_catalog.clear()
         arrived, release = store.hold_next_standalone_read()
         try:
             os.write(fd, b"r")
@@ -1202,8 +1342,24 @@ def run_replace_and_promote(executable: str) -> None:
                 raise AssertionError("the old lane read did not start")
             _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
             _keyboard_harness.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
-            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
-            _keyboard_harness.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
+            hold_catalog.set()
+            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"runtime catalogue loading")
+            try:
+                if not _keyboard_harness.wait_for_fixture_event(process, fd, output, catalog_arrived, timeout=5.0):
+                    raise AssertionError("replacement catalogue did not start loading")
+                _keyboard_harness.send_and_wait(process, fd, output, b"luna medium", b"filter: luna medium")
+                if b"runtime catalogue loading" not in _keyboard_harness.screen_text(bytes(output)):
+                    raise AssertionError("replacement search lost its pending catalogue state")
+                _keyboard_harness.write_all(fd, output, b"\r")
+                # A refused Enter need not redraw. A subsequent filter edit
+                # confirms the input queue passed it before releasing the read.
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x7f", b"filter: luna mediu")
+                _keyboard_harness.send_and_wait(process, fd, output, b"m", b"filter: luna medium")
+                if routing_calls:
+                    raise AssertionError("Enter submitted a cached replacement during refresh")
+            finally:
+                release_catalog.set()
+            _keyboard_harness.wait_for_output(process, fd, output, b"gpt-6-luna medium", start=0, timeout=5.0)
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
         finally:
             release.set()
@@ -1216,7 +1372,25 @@ def run_replace_and_promote(executable: str) -> None:
                      "runtime_id": current, "replacement_runtime_id": replacement}]
         if posted != expected or store.exact_declared_cli["librarian_exact"] != [backup, replacement]:
             raise AssertionError(f"replacement did not preserve position: {posted!r}")
-        _keyboard_harness.send_and_wait(process, fd, output, b"1", b"> 1/2  [CLI] gpt-6-luna medium")
+        arrived, release = store.hold_next_post()
+        mark = mark_output(fd, output)
+        try:
+            os.write(fd, b"1")
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
+                raise AssertionError("promotion write did not reach the fixture")
+            _keyboard_harness.send_and_wait(process, fd, output, b"r", BUSY)
+            if BUSY not in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("pending write notice is not visible")
+            if b"Replace selected candidate" in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("replacement search opened during the previous write")
+            if len(routing_calls) != 2:
+                raise AssertionError("pending replacement search posted another write")
+        finally:
+            release.set()
+        _keyboard_harness.wait_for_output(process, fd, output, b"> 1/2  [CLI] gpt-6-luna medium",
+                          start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"current candidate order reloaded",
+                          start=mark, timeout=5.0)
         posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
         if posted[-1] != {"lane": "exact/librarian_exact", "action": "move",
                           "runtime_id": replacement, "direction": "first"}:
@@ -1225,13 +1399,39 @@ def run_replace_and_promote(executable: str) -> None:
             raise AssertionError("promotion lost or reordered other candidates")
         _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=131,
-                          needle=b"Account", controls=(_keyboard_harness.FULL_REDRAW,))
+                          needle=b"gpt-6-luna medium", controls=(_keyboard_harness.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
         screen = _keyboard_harness.screen_text(bytes(output))
         if screen.count(b"context") <= 3:
             raise AssertionError("a tall terminal still shows only three model choices")
         if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
             raise AssertionError("expanded model choices are not visible")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Model order")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"> 1/2  [CLI] gpt-6-luna medium")
+        if b"Model order" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("closing the picker lost the model order editor")
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"MASC System / Runtime")
+        mark = mark_output(fd, output)
+        refresh_called.clear()
+        _keyboard_harness.write_all(fd, output, b"r")
+        if not _keyboard_harness.wait_for_fixture_event(process, fd, output, refresh_called, timeout=5.0):
+            raise AssertionError("Runtime r was swallowed by the previous Lane editor")
+        frame = _keyboard_harness.screen_text(bytes(output[mark:]))
+        if b"Replace selected candidate" in frame or b"Model order" in frame:
+            raise AssertionError("Runtime refresh reopened a hidden Lane editor")
+        if len([path for path, _ in requests if path == ROUTING_PATH]) != 2:
+            raise AssertionError("leaving the Lane editor changed its candidate order")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"m",
+                                        b"the order the vision runtimes are called in")
+        writes_before_refresh = list(requests)
+        refresh_called.clear()
+        _keyboard_harness.write_all(fd, output, b"r")
+        if not _keyboard_harness.wait_for_fixture_event(process, fd, output, refresh_called, timeout=5.0):
+            raise AssertionError("media editor swallowed Runtime refresh")
+        if b"the order the vision runtimes are called in" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("Runtime refresh closed the media editor")
+        if requests != writes_before_refresh:
+            raise AssertionError("refreshing Runtime from the media editor posted a write")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 
@@ -1255,4 +1455,7 @@ if __name__ == "__main__":
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))
     run_default_route(os.path.abspath(sys.argv[1]))
+    run_cli_binding_jump(os.path.abspath(sys.argv[1]), missing_binding=True)
+    run_model_settings_read_isolation(os.path.abspath(sys.argv[1]), old_fails=False)
+    run_model_settings_read_isolation(os.path.abspath(sys.argv[1]), old_fails=True)
     print("runtime lane editor: PASS")

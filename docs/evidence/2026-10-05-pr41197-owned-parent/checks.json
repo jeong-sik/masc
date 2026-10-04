@@ -1,0 +1,23 @@
+{
+  "previous_head": "0ffcbc237711d9190726d5ce0bee4990c6a1be69",
+  "parent": "d3e765062a3f2621b3f4a5f0f2dddb61ac1c26be",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_types.ml": "b36397158cef8b9ec50f64fd1e9894d502783149513827fe49e00584012f939d",
+    "lib/lane_addon/lane_addon_types.mli": "2225838b092ff9f7b42439de8c17bbed8896c68953177f1fbcaf0d0908403d9f",
+    "lib/lane_addon/lane_addon_sampling.ml": "1a6420d560a119a2ac46a9c4eaffff49f03c77516b3296dbc3a0e9f60bfe66ea",
+    "lib/lane_addon/lane_addon_manifest.ml": "fba9a8d401393dc0c265efce7f0d45bf1f10fea8a803e11887bad82f7f4e5e40",
+    "lib/lane_addon/lane_addon_store.ml": "9eaf3f65a886c87635746bdb6cd1df1b0a1f9998c478a6bd9bc7cc96d8526dcd",
+    "test/test_lane_addon_worker.ml": "e76fa33bf987b92ced196a1a99a97c29a49d7c9788b0e880cb4550fc244ffeb6"
+  },
+  "artifact_sha256": {
+    "worker.log": "fb589817c1e04f519c9537a3dd859a2fba5a89c0c349a52e6d95e86423bb004b",
+    "build.log": "abfa9882165cd673917edb583e219cc2bc8218d8047acb77b5a56ef266db0374"
+  },
+  "binary_sha256": "66be759e6816827f392232adffa3791154a4e5f6dd7c42cf47d36745f41eb246",
+  "results": {
+    "focused_build": 0,
+    "worker_passed": 37,
+    "duration_seconds": 7.015
+  },
+  "scope": "Local integrated worker suite only; no fullRPC transport, live provider, full CI or release."
+}

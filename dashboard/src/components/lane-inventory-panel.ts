@@ -7,6 +7,8 @@ import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { BrowserLaneActivityPanel } from './browser-lane-activity-panel'
 import { browserLaneObservationRevision } from '../lib/browser-lane-observation'
+import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
+import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
 
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
 const browserActivityText = { on: 'New requests enabled', off: 'Off · configuration and sessions retained',
@@ -55,6 +57,7 @@ function LaneDetails({ row, snapshot }: { row: LaneInventoryRow; snapshot: LaneI
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
     ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
     ${selection.kind === 'browser' ? html`<${BrowserLaneActivityPanel} key=${selection.lane} lane=${selection.lane} title=${row.label} />` : null}
+    ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
       <${RouteLink} tab="monitoring" params=${{ section: 'internal-agents' }}>Exact runs and diagnostics<//>
       <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Runtime settings · Lane candidates<//>
@@ -62,9 +65,7 @@ function LaneDetails({ row, snapshot }: { row: LaneInventoryRow; snapshot: LaneI
       ${selection.kind === 'declaration' ? html`<p class="break-all">${selection.source_path}</p>` : html`<p>Incarnation: ${selection.incarnation}</p>`}
       <${RouteLink} tab="monitoring" params=${{ section: 'lane-addons' }}>Manage package declarations and retained observations<//>
     </div>` : selection.kind === 'browser' ? html`<${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Runtime settings · Browser paths<//>`
-      : html`<p>Manage this machine through its TUI detail or operator tools.</p>
-        <p>Off refuses new execution and input; existing machine state and checkpoints are retained.</p>
-        <p>Dedicated activity controls are not available here; edit and save runtime.toml.</p>`}
+      : html`<p>Use the TUI detail or operator tools to load, inspect or restore this machine.</p>`}
     <details><summary>Observed configuration and worker details</summary>
       <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.state, null, 2)}</pre>
     </details>
@@ -79,6 +80,7 @@ export function LaneInventoryPanel() {
   const authority = executionWorkspaceAuthority.value
   const observationRevision = exactLaneObservationRevision(authority)
   const browserRevision = browserLaneObservationRevision(authority)
+  const machineRevision = machineLaneObservationRevision(authority)
   const [reading, setReading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [received, setReceived] = useState<{ authority: ExecutionWorkspaceAuthority; value: LaneInventory } | null>(null)
@@ -125,7 +127,7 @@ export function LaneInventoryPanel() {
     request.current?.abort()
     if (authority !== null) void refresh()
     return () => request.current?.abort()
-  }, [authority, observationRevision, browserRevision])
+  }, [authority, observationRevision, browserRevision, machineRevision])
   const search = query.trim().toLocaleLowerCase()
   const rows = snapshot?.rows.filter(row => [row.id, row.label, row.purpose].some(value => value.toLocaleLowerCase().includes(search))) ?? []
   const detail = snapshot?.rows.find(row => row.id === selected)

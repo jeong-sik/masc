@@ -3753,6 +3753,14 @@ let exact_lane_runtime_toml ~lane ~slot =
 ;;
 
 let test_off_exact_lanes_retain_unavailable_candidates () =
+  let resolver = match Exact_output.load_resolver_snapshot
+    ~io:{getenv=(fun _ -> Ok None)} ~catalog:(Exact_output.Embedded_with_targets []) () with
+    | Ok value -> value | Error _ -> fail "empty resolver snapshot did not load" in
+  let admission text =
+    let config = match Runtime_toml.parse_string text with
+      | Ok value -> value | Error _ -> fail "dormant lane TOML did not parse" in
+    Runtime_exact_output_registry.check_publication ~required_lane_ids:[]
+      ~lanes:config.exact_output_lane_decls resolver in
   List.iter (fun lane ->
     let active = exact_lane_runtime_toml ~lane ~slot:"local.absent"
       ^ "cli_slots = [\"local.missing-client\"]\n" in
@@ -3762,6 +3770,13 @@ let test_off_exact_lanes_retain_unavailable_candidates () =
       match load_list_text ~config_path:path with
       | Ok _ -> ()
       | Error error -> failf "off %s rejected dormant candidates: %s" lane error);
+    check bool "unavailable well-formed dormant targets remain admissible" true (Result.is_ok (admission off));
+    let malformed = exact_lane_runtime_toml ~lane ~slot:"../target"
+      |> fun text -> Toml_line_editor.edit_table_bool text
+        ~path:("runtime.exact_output_lanes." ^ lane) ~key:"enabled" ~value:false in
+    (match admission malformed with
+     | Error (Runtime_exact_output_registry.Invalid_lane_slot {cause=Exact_output.Invalid_target_ref;_}) -> ()
+     | _ -> failf "off %s did not reject malformed target reference through publication admission" lane);
     with_temp_runtime_toml active (fun path ->
       match load_list_text ~config_path:path with
       | Error _ -> ()

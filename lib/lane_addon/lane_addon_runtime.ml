@@ -963,17 +963,29 @@ let historical_detach ~sw m fields =
         | exn -> Error (Printexc.to_string exn) in
       let phase = match result with
         | Ok () -> Detached | Error message -> Failed ("cleanup incomplete: " ^ message) in
-      Lane_addon_resource_events.publish
-        (match result with
-         | Ok () -> Lane_addon_resource_events.Release_confirmed
-         | Error _ -> Lane_addon_resource_events.Release_incomplete)
-        { instance_id = id; run_id; package_id; package_revision;
-          container_id;
-          detail = (match result with Ok () -> None | Error message -> Some message) };
       let terminal =
         if phase = Detached && never_started ~seq ~has_container:(Option.is_some container_id)
         then None else Some (replace_phase fields phase) in
-      publish_cleanup m ~id ~writer {fields;terminal;phase});
+      let publication = {fields;terminal;phase} in
+      (* Event publication can yield. The cleanup result already exists, so
+         preserve its storage obligation before reporting the resource event. *)
+      Hashtbl.replace m.recovering id (Publishing_cleanup publication);
+      (try
+         Lane_addon_resource_events.publish
+           (match result with
+            | Ok () -> Lane_addon_resource_events.Release_confirmed
+            | Error _ -> Lane_addon_resource_events.Release_incomplete)
+           { instance_id = id; run_id; package_id; package_revision;
+             container_id;
+             detail = (match result with Ok () -> None | Error message -> Some message) };
+         publish_cleanup m ~id ~writer publication
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+           Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,"result publication cancelled"));
+           raise exn
+       | exn ->
+           Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,Printexc.to_string exn));
+           raise exn));
     Ok detaching
 let configuration_json m ~access =
   match m.configuration_status with

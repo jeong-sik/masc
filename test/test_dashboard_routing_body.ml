@@ -195,7 +195,7 @@ let () =
               expect_error "unknown-action"
                 ~message:
                   "unknown lane action: renombrar (expected set, create, remove, \
-                   rename, append, drop or move)"
+                   rename, append, drop, move or replace)"
                 {|{"lane":"runpod_mtp.qwen","action":"renombrar","runtime_ids":[]}|})
         ; Alcotest.test_case "append adds one slot to an exact lane" `Quick
             (fun () ->
@@ -225,6 +225,11 @@ let () =
               check_case "drop"
                 {|{"lane":"exact/board_attention_exact","action":"drop","runtime_id":"runpod_mtp.qwen"}|}
                 "exact/board_attention_exact" "drop" [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "replace carries the old and new exact-lane slot" `Quick
+            (fun () ->
+              check_case "replace"
+                {|{"lane":"exact/board_attention_exact","action":"replace","runtime_id":"runpod_mtp.qwen","replacement_runtime_id":"openai.gpt"}|}
+                "exact/board_attention_exact" "replace" [ "runpod_mtp.qwen"; "openai.gpt" ])
         ; Alcotest.test_case "move carries the slot and a direction" `Quick
             (fun () ->
               check_case "move-up"
@@ -232,11 +237,14 @@ let () =
                 "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "up" ];
               check_case "move-down"
                 {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"down"}|}
-                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "down" ])
+                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "down" ];
+              check_case "move-first"
+                {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"first"}|}
+                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "first" ])
         ; Alcotest.test_case "move refuses a direction it cannot read" `Quick
             (fun () ->
               expect_error "move-sideways"
-                ~message:"unknown direction: sideways (expected up or down)"
+                ~message:"unknown direction: sideways (expected up, down or first)"
                 {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"sideways"}|};
               expect_error "move-no-direction"
                 ~message:"direction required"

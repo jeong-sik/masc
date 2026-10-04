@@ -113,6 +113,17 @@ class MethodHttpResponse:
         self.resolve = resolve
 
 
+class ConnectionHttpResponse:
+    """Expose the peer socket while a fixture holds an admitted response.
+
+    The resolver may observe cancellation before releasing its response. The
+    handler retains socket ownership; a fixture must not close or consume it.
+    """
+
+    def __init__(self, resolve: Callable[[str, socket.socket], HttpResponse]) -> None:
+        self.resolve = resolve
+
+
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
@@ -120,6 +131,7 @@ HttpFixture = (
     | DroppedHttpResponse
     | RequestHttpResponse
     | MethodHttpResponse
+    | ConnectionHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
     | Callable[[], HttpResponse]
@@ -290,6 +302,8 @@ def test_http_endpoint(
                     resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
+            elif isinstance(fixture, ConnectionHttpResponse):
+                resolved = fixture.resolve(self.command, self.connection)
             elif isinstance(fixture, PathHttpResponse):
                 resolved = fixture.resolve(self.path)
             elif isinstance(fixture, HeadersHttpResponse):
@@ -15146,9 +15160,23 @@ def run_http_badge_refresh_regression(executable: str) -> None:
     slow_started = threading.Event()
     release_slow = threading.Event()
     fail_next = threading.Event()
+    health_response = fixtures["/health?full=1"]
+    if not isinstance(health_response, tuple):
+        raise AssertionError("health fixture must be a response tuple")
+    identity_probed = threading.Event()
+
+    def answer_health() -> HttpResponse:
+        identity_probed.set()
+        return health_response
+
+    # Full refresh starts with the compact identity probe, not fleet safety.
+    fixtures["/health"] = answer_health
+    fixtures["/health?full=1"] = answer_health
 
     def answer_briefing() -> HttpResponse:
         nonlocal completed
+        if not identity_probed.is_set():
+            raise AssertionError("briefing arrived before the refresh identity probe")
         if slow_next.is_set():
             slow_started.set()
             release_slow.wait(timeout=4.0)
@@ -15156,6 +15184,8 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         if fail_next.is_set():
             return (503, {"error": "refresh refused"})
         status, payload = briefing
+        if not isinstance(payload, dict):
+            raise AssertionError("briefing payload must be an object")
         payload = copy.deepcopy(payload)
         # Home renders this source reason only when the full refresh bundle
         # is applied. A server callback count is earlier than that boundary.
@@ -15168,7 +15198,7 @@ def run_http_badge_refresh_regression(executable: str) -> None:
     # The badge reports a full failure only when every requested surface fails.
     # A failed briefing beside successful Board/Planning reads is "partial".
     for path, response in tuple(fixtures.items()):
-        if path in ("/health?full=1", "/api/v1/dashboard/briefing"):
+        if path in ("/health", "/health?full=1", "/api/v1/dashboard/briefing"):
             continue
         if isinstance(response, tuple):
             fixtures[path] = lambda response=response: (

@@ -172,7 +172,10 @@ let test_the_recovery_read_retires_only_the_landed_login () =
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[unreadable "atlassian" "read failed"];
   check (Alcotest.list Alcotest.string) "an unreadable read is not completion"
-    [ "atlassian" ] (held_expectations state "A")
+    [ "atlassian" ] (held_expectations state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A" ~providers:[];
+  check (Alcotest.list Alcotest.string) "a removed provider is no longer owed"
+    [] (held_expectations state "A")
 
 let test_a_workspace_change_keeps_only_its_own_expectations () =
   let state = identity_state () in

@@ -1559,15 +1559,15 @@ let test_official_failure_observation_reaches_receipt () =
        { provider = "antigravity_cli"; error_type = Some "turn_failed";
          detail = "successful result response has no deliverable content" }) in
   let observe prompt_sent_at =
-    Keeper_turn_driver.For_testing.official_client_observation
+    Masc.Keeper_turn_driver.For_testing.official_client_observation
       ~runtime_id:"antigravity.test" ~model_id:"test-model"
       ~prompt_sent_at ~now:12.0 (Error error) in
   Alcotest.(check bool) "pre-admission error invents no invocation" true
     (Option.is_none (observe None));
   let observation = observe (Some 10.0) in
   Alcotest.(check bool) "failed invocation is visible in receipt" true
-    (Keeper_agent_error.runtime_outcome_of_observation
-       ~lane_failover_applied:false observation = Keeper_execution_receipt.Runtime_failed);
+    (Masc.Keeper_agent_error.runtime_outcome_of_observation
+       ~lane_failover_applied:false observation = Masc.Keeper_execution_receipt.Runtime_failed);
   match observation with
   | None -> Alcotest.fail "transmitted invocation was not observed"
   | Some observed ->
@@ -1587,7 +1587,7 @@ let test_official_success_observation_is_preserved () =
   let observed = Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:"official.test" ~selected_model_raw:None ~capture () in
   let result = { (run_result ()) with Runtime_agent.runtime_observation = Some observed } in
-  let actual = Keeper_turn_driver.For_testing.official_client_observation
+  let actual = Masc.Keeper_turn_driver.For_testing.official_client_observation
     ~runtime_id:"official.test" ~model_id:"test-model"
     ~prompt_sent_at:(Some 10.0) ~now:12.0 (Ok result) in
   Alcotest.(check bool) "successful provider observation stays authoritative" true

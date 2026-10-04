@@ -761,6 +761,8 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     (Yojson.Safe.Util.(invalid_receipt |> member "terminal" |> member "response") =
       Mcp_protocol.Sampling.create_message_result_to_yojson
         (Masc.Lane_addon_sampling.package_response retained_answer));
+  check string "retained invalid response preserves the missing model identity" ""
+    retained_answer.model;
   check bool "invalid-response raw host evidence keeps callback metadata" true
     (Yojson.Safe.Util.member "_meta" (Yojson.Safe.Util.member "response" invalid_record) <> `Null);
   check string "malformed actual answer remains in retained evidence" "host answer"

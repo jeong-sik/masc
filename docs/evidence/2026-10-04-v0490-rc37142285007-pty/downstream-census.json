@@ -1,0 +1,50 @@
+[
+  {
+    "description": "GitHub device stream cannot restore a withdrawn workspace view",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace change withdraws held chat history and retains its unsent draft",
+    "status": "FAIL",
+    "error": "timed out waiting for b'Chat requires a matching workspace' [stall: silence 1.01s (wait ran 3.01s, bytes 53945 -> 54514); loadavg(at timeout) unavailable; child utime/stime unavailable]"
+  },
+  {
+    "description": "workspace change suspends complete unsent inputs until explicit resume in A",
+    "status": "FAIL",
+    "error": "timed out waiting for b'Queue (1 waiting' [stall: silence 3.00s (wait ran 3.01s, bytes 48375 -> 49447); loadavg(at timeout) unavailable; child utime/stime unavailable]"
+  },
+  {
+    "description": "MASC-root-only change suspends complete unsent inputs until explicit resume in A",
+    "status": "FAIL",
+    "error": "timed out waiting for b'Queue (1 waiting' [stall: silence 3.00s (wait ran 3.00s, bytes 48135 -> 49207); loadavg(at timeout) unavailable; child utime/stime unavailable]"
+  },
+  {
+    "description": "superseded scoped roster cannot replace a newer full workspace reading",
+    "status": "FAIL",
+    "error": "B Board read did not settle"
+  },
+  {
+    "description": "staged image bytes and references retain exact workspace and Keeper ownership",
+    "status": "FAIL",
+    "error": "4 Escapes did not leave the chat for b'beta''s detail"
+  },
+  {
+    "description": "MASC-root-only transition: staged image bytes and references retain exact workspace and Keeper ownership",
+    "status": "FAIL",
+    "error": "4 Escapes did not leave the chat for b'beta''s detail"
+  },
+  {
+    "description": "workspace switch withdraws schedule confirmation, runtime picker and unknown-identity lifecycle",
+    "status": "FAIL",
+    "error": "timed out waiting for b'MASC Schedules' [stall: silence 0.01s (wait ran 3.00s, bytes 87732 -> 108819); loadavg(at timeout) unavailable; child utime/stime unavailable]"
+  },
+  {
+    "description": "workspace switch retires live observer session, cursor and acting events",
+    "status": "PASS"
+  },
+  {
+    "description": "workspace withdrawal cancels held identity mutation before its next provider and allows fresh A retry",
+    "status": "FAIL",
+    "error": "{1"
+  }
+]

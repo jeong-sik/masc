@@ -1,0 +1,21 @@
+{
+  "base_commit": "8be67f740e24e3df4770e0f0467bba44639d3482",
+  "script_path": "/Users/dancer/me/workspace/yousleepwhen/masc-v0490-lane-editor-followthrough-20261004/test/test_tui_runtime_lane_editor.py",
+  "script_sha256": "7639284e242e872194b233d205d67479253fd9f305e97159e257fafdcd83a52a",
+  "harness_sha256": "fb81773cec376e45c5caffab4c1b8df560bc845b8f0cb47e5c0208cb6f1ec203",
+  "binary_path": "/tmp/masc-v0490-residual-fixtures-20261004/candidate-native/masc-tui-macos-arm64",
+  "binary_commit": "fd7e6c37e006af09b1dba65fb2b3b55249104c7f",
+  "binary_sha256": "f3531778d03b6b2bfd68ae86ba47507cb653bcffd62cd543b2720c4e918b882d",
+  "runner_sha256": "07d9e8e844907aedd95f60d03c57533f0760dc2feb6df867ca9dc0ecdf2b8fa3",
+  "entrypoint": "runpy.run_path(script, run_name=__main__)",
+  "scope": "complete official runtime_lane_editor.py entrypoint once; fd7 binary with changed fixture source, not exact-head binary validation or full RC",
+  "started_epoch": 1791053523.588775,
+  "runner_pid": 32923,
+  "exit_code": 0,
+  "finished_epoch": 1791053561.657521,
+  "script_sha256_after": "7639284e242e872194b233d205d67479253fd9f305e97159e257fafdcd83a52a",
+  "harness_sha256_after": "fb81773cec376e45c5caffab4c1b8df560bc845b8f0cb47e5c0208cb6f1ec203",
+  "binary_sha256_after": "f3531778d03b6b2bfd68ae86ba47507cb653bcffd62cd543b2720c4e918b882d",
+  "scenarios_started": 11,
+  "scenarios_passed": 11
+}

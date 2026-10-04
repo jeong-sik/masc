@@ -1,0 +1,29 @@
+{
+  "binary_commit": "4a5517c1dac84d941cb99a7b89eafe1c61b384dd",
+  "binary_sha256": "6a09479a50037039bfea2246df7449db9514a4fcc63791c34d41d9ad30957a96",
+  "binary_artifact_id": 11285441166,
+  "binary_archive_sha256": "c16cfdbd3f4ee24703b15682dff183fe83c50707485c6f15cf5bfc42ede70375",
+  "image": "sha256:1b0e598b21b7f5232c16b23d4c9846cb8bd13a24128301140441a10d04bb5535",
+  "platform": "Linux arm64; Python3.11.2; network-disabled isolated Docker container",
+  "scenario_counts": {
+    "board": 8,
+    "portrait": 18,
+    "home_failure": 4
+  },
+  "exit_code": 0,
+  "unexpected_handler_exceptions": 0,
+  "started_at": "2026-10-03T22:12:14.693062+00:00",
+  "finished_at": "2026-10-03T22:13:33.403750+00:00",
+  "sources": {
+    "test/test_tui_board_scroll.py": "b2de4d2737d1a6a7da77a4ea33612220e7464d43d11ff9954a7290f31ec2f6a6",
+    "test/test_tui_keeper_portrait_pty.py": "ae68f4d2303b65bb79cc58d54b2f6a03884d3a391f7a6c61cac5684b2a9cde85",
+    "test/test_tui_home_failure_task_pty.py": "b8e8510475ff81520ed0226b123c0d10873f4acccd3afbcabcf1b89aa79cdd7d",
+    "test/test_tui_keyboard_input.py": "07f9a7c87e5fda04349936561a4f69afa3d97bf10b61a6016bfc99534c49d0dd",
+    "test/test_tui_home_decision_cards_pty.py": "fdb1382a852a8c40f3a93f036e2db0c9fb9d81310658f227234a96c83a7b3b30",
+    "test/test_tui_home_journey_pty.py": "ec037d00c2ed32fd891ba13d0fd35b75e40e6dd246bd6206efff21f8c314d22a"
+  },
+  "archive_sha256": "79aeb2698c241344c7e1b088cdfdbcb22a26f5d90056f38f8d7efb0630e8f326",
+  "archive_bytes": 404306,
+  "verified_manifest_files": 122,
+  "scope": "Actual RC4a Linux-arm64 executable with repaired Python fixture overlay; not a new build, Linux-x64 execution, final integrated-head Full RC or production."
+}

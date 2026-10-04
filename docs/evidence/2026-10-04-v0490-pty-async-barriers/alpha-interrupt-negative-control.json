@@ -1,0 +1,13 @@
+{
+  "assertion": "unexpected non-beta interrupt",
+  "delayed_http_status": [
+    409
+  ],
+  "interaction_finished": true,
+  "primary_scenario_returned": true,
+  "scope": "harness-injected valid alpha target, delayed until normal interaction cleanup and rejected after handler join",
+  "status": "PASS_EXPECTED_REJECTION",
+  "script_sha256": "907618c234fc51262e09b9370223bb34a279ed09d8f9b5643ef7d8de04a30047",
+  "authority_module_sha256": "38eff88e96da6bb51af2ef3ca714f43bbefd3cc7be039cb027cad165a08bff0f",
+  "binary_sha256": "64ea20854e47c3a5883c717303de468cbc7ed7b811b8fcea815f263ee8bc41d6"
+}

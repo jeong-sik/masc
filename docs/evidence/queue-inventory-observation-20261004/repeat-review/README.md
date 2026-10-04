@@ -23,3 +23,16 @@ inventory operations, including known/unknown other Keeper targets and store
 corruption. Those behavioral suites are authored and typechecked, not executed.
 No full build, HTTP/PTY execution, live runtime mutation or deployment ran.
 Earlier evidence remains scoped to its original source hashes.
+
+The subsequent schedule-scope finding is also repaired. Both confirmations and
+reservations use the same actor-scope predicate before roster-based grouping.
+A Keeper view contains that actor's automation reservations plus human/system
+workspace reservations; another known or unknown automated actor is not
+reclassified as global. The full fleet view preserves unknown actors' rows.
+The new storage regression covers A/B/unknown/human/system schedules, aggregate
+counts and a corrupt schedule store. It is authored, not executed.
+
+A shared-cache interface changed during the first follow-up typecheck. Starting
+with a fresh scratch interface directory, all nine checks passed again against
+the available cache. typecheck-results.json now identifies this final source.
+This remains isolated type evidence, not a full candidate build or runtime run.

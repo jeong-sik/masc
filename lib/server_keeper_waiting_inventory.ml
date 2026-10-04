@@ -783,6 +783,12 @@ let pending_confirm_keeper_target
   | (Some Workspace | Some Goal | None), _ | Some Keeper, None -> None
 ;;
 
+let scope_includes_actor ~keeper_name actor_id =
+  match keeper_name, actor_id with
+  | None, _ | Some _, None -> true
+  | Some requested, Some owner -> String.equal requested owner
+;;
+
 let pending_confirm_rows keeper_names pending_confirms =
   pending_confirms
   |> List.filter_map (fun (entry : Workspace_hooks.operator_pending_confirm_request) ->
@@ -793,9 +799,11 @@ let pending_confirm_rows keeper_names pending_confirms =
 
 let global_pending_confirm_rows ?keeper_name keeper_names pending_confirms =
   pending_confirms
+  |> List.filter (fun entry ->
+    scope_includes_actor ~keeper_name (pending_confirm_keeper_target entry))
   |> List.filter_map (fun entry ->
     match pending_confirm_keeper_target entry with
-    | Some target when Option.is_some keeper_name || List.mem target keeper_names -> None
+    | Some target when List.mem target keeper_names -> None
     | Some _ | None -> Some (pending_confirm_row entry))
 ;;
 
@@ -817,17 +825,22 @@ let schedule_waiting_on (request : Schedule_domain.schedule_request) =
   | None -> request.schedule_id
 ;;
 
-let schedule_keeper_owner keeper_names (request : Schedule_domain.schedule_request) =
+let schedule_actor_id (request : Schedule_domain.schedule_request) =
   match request.scheduled_by.kind with
   | Human_operator | System -> None
-  | Automated_actor ->
-    let keeper_name = request.scheduled_by.id in
-    if List.exists (String.equal keeper_name) keeper_names then Some keeper_name else None
+  | Automated_actor -> Some request.scheduled_by.id
 ;;
 
-let schedule_rows ~keeper_names state =
+let schedule_keeper_owner keeper_names request =
+  match schedule_actor_id request with
+  | Some owner when List.mem owner keeper_names -> Some owner
+  | Some _ | None -> None
+;;
+
+let schedule_rows ?keeper_name ~keeper_names state =
   state.Schedule_store.schedules
-  |> List.filter schedule_active
+  |> List.filter (fun request ->
+    schedule_active request && scope_includes_actor ~keeper_name (schedule_actor_id request))
   |> List.map (fun (request : Schedule_domain.schedule_request) ->
     { keeper_name = schedule_keeper_owner keeper_names request
     ; source = Schedule_waiting
@@ -854,9 +867,9 @@ let schedule_rows ~keeper_names state =
     })
 ;;
 
-let schedule_rows_or_error config ~keeper_names =
+let schedule_rows_or_error ?keeper_name config ~keeper_names =
   match Schedule_store.read_state_result config with
-  | Ok state -> schedule_rows ~keeper_names state
+  | Ok state -> schedule_rows ?keeper_name ~keeper_names state
   | Error err ->
     [ read_error_row
         ~waiting_on:"schedule_store"
@@ -1159,7 +1172,7 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
   let pending_confirms, pending_confirm_read_error_rows =
     pending_confirms_or_error_rows config
   in
-  let schedule_rows = schedule_rows_or_error config ~keeper_names in
+  let schedule_rows = schedule_rows_or_error ?keeper_name config ~keeper_names in
   let busy_names = busy_keeper_names ~base_path:config.Workspace.base_path in
   let per_keeper =
     keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs

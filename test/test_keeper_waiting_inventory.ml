@@ -745,6 +745,35 @@ let test_scoped_confirmations_keep_target_identity () =
     (U.(failed |> member "global_waiting_on" |> to_list) |> List.map (json_string_member "source"))
 ;;
 
+let test_scoped_schedules_keep_actor_identity () =
+  with_workspace @@ fun config ->
+  let requested = "schedule-requested" and other = "schedule-other" in
+  ensure_keeper config requested;
+  ensure_keeper config other;
+  List.iter (fun (schedule_id, scheduled_by) ->
+    ignore (create_schedule_exn config ~schedule_id ~scheduled_by : Schedule_domain.schedule_request))
+    ["sched-a", automated requested; "sched-b", automated other;
+     "sched-unknown", automated "unknown-actor"; "sched-human", human "operator";
+     "sched-system", {Schedule_domain.id="system"; kind=System; display_name=None}];
+  let ids rows = rows |> List.map (fun row -> U.(row |> member "detail" |> member "schedule_id" |> to_string))
+      |> List.sort String.compare in
+  let json = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:requested in
+  check (list string) "scoped global reservations are human/system only"
+    ["sched-human";"sched-system"] (ids U.(json |> member "global_waiting_on" |> to_list));
+  let keeper = match find_keeper json requested with Some row -> row | None -> fail "missing keeper" in
+  check (list string) "only this actor's schedule is local"
+    ["sched-a"] (ids U.(keeper |> member "waiting_on" |> to_list));
+  check int "scoped totals exclude other automated actors" 3 (json_int_member "total_row_count" json);
+  let fleet = Server_keeper_waiting_inventory.dashboard_json config in
+  check (list string) "fleet keeps unknown-actor reservations visible"
+    ["sched-human";"sched-system";"sched-unknown"]
+    (ids U.(fleet |> member "global_waiting_on" |> to_list));
+  save_text (Filename.concat (Workspace_utils.masc_dir config) "schedules.json") "{broken";
+  let failed = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:requested in
+  check (list string) "scoped schedule read failure stays visible" ["read_error"]
+    (U.(failed |> member "global_waiting_on" |> to_list) |> List.map (json_string_member "source"))
+;;
+
 let test_nonlive_keeper_has_no_current_execution () =
   with_workspace @@ fun config ->
   let keeper_name = "retained-turn" in
@@ -980,6 +1009,7 @@ let () =
             test_owner_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
+        ; test_case "scoped schedules preserve actors" `Quick test_scoped_schedules_keep_actor_identity
         ; test_case "scoped confirmations preserve targets" `Quick test_scoped_confirmations_keep_target_identity
         ; test_case "nonlive keeper has no current execution" `Quick test_nonlive_keeper_has_no_current_execution
         ; test_case "live turn keeper is busy without waiting rows" `Quick

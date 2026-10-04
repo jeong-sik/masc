@@ -17,7 +17,7 @@
   {
     "source": "lib/server_keeper_waiting_inventory.ml",
     "exit_code": 0,
-    "sha256": "a184f48d193c109726c6d323434a5c78c39b30bf4c381dd18f0dbabd0ddc8eb0"
+    "sha256": "c79a6be7c00613df77b2d0d5daa868ac5c79e19f218c5430bda0511ad3654f64"
   },
   {
     "source": "lib/server/server_dashboard_http_keeper_api.mli",
@@ -42,6 +42,6 @@
   {
     "source": "test/test_keeper_waiting_inventory.ml",
     "exit_code": 0,
-    "sha256": "372596135de7c2fdb7f0cf44eb3bffdb3e2fddc9f734d5591611938fabc8d35e"
+    "sha256": "d71e0bf905b34be6dadfc1416ca6dd36a46090cd876c7d70d170027fd70cd65a"
   }
 ]

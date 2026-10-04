@@ -127,6 +127,26 @@ describe('optional Lane Add-on surface', () => {
       '9007199254740991', '-9007199254740991', '1.25', '0',
     ])
   })
+  it('refuses rounded or nonfinite numbers anywhere in JSON readings', async () => {
+    const fields = JSON.parse('{"object":{"count":9007199254740993},"array":[{"counts":[0,-9007199254740993]}],"scalar":9007199254740993,"overflow":{"count":1e400},"safe":{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}}') as Record<string, unknown>
+    const readings = Object.keys(fields).map(key => ({
+      lane_id: 'quality', path: [key], label: key, format: 'json', unit: null,
+    }))
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings } } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · field does not match declared display format',
+      '{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}',
+    ])
+  })
   it('rejects malformed package display contracts instead of discarding them', () => {
     const reading = { lane_id: 'quality', path: ['count'], label: 'Count', unit: null, format: 'number' }
     for (const invalid of [{ ...reading, path: [] }, { ...reading, format: 'status' }, { ...reading, unit: 7 }]) {
@@ -222,12 +242,16 @@ describe('optional Lane Add-on surface', () => {
     expect(declarations.getByText('configuration-2')).toBeTruthy()
     expect(declarations.getByText('configuration-1')).toBeTruthy()
     expect(declarations.getByText('Revision change pending')).toBeTruthy()
+    const removal = screen.getByRole('button', { name: 'Resolve TOML before removal' })
+    expect(removal.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(removal)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+    expect(screen.getByText(/Resolve the changed declaration with Edit TOML/)).toBeTruthy()
     expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toEqual([
       expect.stringContaining('/workspace/.masc/config/lane-addons/site.toml · website — Replacement binding could not be applied'),
       expect.stringContaining('/workspace/.masc/config/lane-addons/broken.toml — Expected a closing quote'),
     ])
     expect(screen.getByText('observing')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Remove TOML + worker' }) as HTMLButtonElement).disabled).toBe(false)
     expect(api.detachLaneAddon).not.toHaveBeenCalled()
 
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,

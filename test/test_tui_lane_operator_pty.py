@@ -264,11 +264,48 @@ def broadcast_export(executable: str, captures: Path | None) -> None:
     print('Selected evidence / explicit Broadcast / cancelled draft / committed receipt: PASS')
 
 
+def stale_removal(executable: str) -> None:
+    data = snapshot()
+    worker = data['instances'][0]
+    owner = {'id': 'owned-installation', 'source_path': '/fixture/lane-addons/owned.toml',
+             'revision': 'installed'}
+    worker['configuration'] = owner
+    data['instances'] = [worker]
+    declaration = {'id': owner['id'], 'source_path': owner['source_path'],
+                   'desired_revision': 'changed', 'applied_revision': 'installed',
+                   'instance_id': worker['instance_id']}
+    data['configuration']['declarations'] = [declaration]
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures['/api/v1/lane-addons'] = lambda: (200, data)
+    requests: terminal.HttpRequests = []
+    fixtures['/api/v1/lane-addons/detach'] = (200, {'detached': True})
+
+    def interact(process, fd, _slave, output, _base):
+        terminal.palette_go(process, fd, output, b'go lane add-ons', b'Resolve changed TOML')
+        terminal.send_and_wait(process, fd, output, b'd', b'nothing was removed')
+        assert terminal.drain_until_quiet(process, fd, output)
+        assert not [p for p, _ in requests if p.endswith('/detach')], requests
+        declaration['desired_revision'] = 'installed'
+        terminal.send_and_wait(process, fd, output, b'r', b'd:remove TOML + worker')
+        os.write(fd, b'd')
+        assert terminal.wait_for_fixture_state(process, fd, output,
+            lambda: any(p.endswith('/detach') for p, _ in requests), timeout=5)
+        removals = [json.loads(body) for p, body in requests if p.endswith('/detach')]
+        assert removals == [{'instance_id': worker['instance_id']}], removals
+        terminal.send_and_wait(process, fd, output, b'q', b'MASC Dashboard')
+        os.write(fd, b'q')
+
+    terminal.run_terminal_scenario(executable, description='Known stale TOML removal refuses before dispatch',
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    print('Stale revision refuses removal; matching revision dispatches exact worker: PASS')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('executable')
     parser.add_argument('--capture-dir', type=Path)
     args = parser.parse_args()
+    stale_removal(os.path.abspath(args.executable))
     main(os.path.abspath(args.executable), args.capture_dir)
     guided_install(os.path.abspath(args.executable), args.capture_dir)
     broadcast_export(os.path.abspath(args.executable), args.capture_dir)

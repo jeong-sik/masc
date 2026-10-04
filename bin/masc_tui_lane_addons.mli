@@ -119,6 +119,7 @@ val pending_action : t -> action_request option
 val paste_action : text:string -> t -> t
 val edit_action : key:string -> t -> (t * action_request option, string) result
 val can_observe : instance -> bool
+val removal_block_reason : t -> instance -> string option
 val overview_hints : t -> string
 val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
 val move_observation : t -> int -> t

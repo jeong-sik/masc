@@ -19876,7 +19876,12 @@ and is loaded on demand through keeper_skill.
                          (match Addons.selected_instance view with
                           | Some instance when Addons.can_observe instance -> selected (fun id -> Addons.Observe id)
                           | Some _ | None -> update {view with error=lane_addons_input_failure "Select an active worker to observe; D shows retained state."})
-                     | "d" -> selected (fun id -> Addons.Detach id)
+                     | "d" ->
+                         (match Addons.selected_instance view with
+                          | Some item -> (match Addons.removal_block_reason view item with
+                              | Some reason -> update {view with error=lane_addons_input_failure reason}
+                              | None -> selected (fun id -> Addons.Detach id))
+                          | None -> selected (fun id -> Addons.Detach id))
                      | "1" when view.screen<>Addons.Overview -> update {view with focus=Addons.Timeline;scroll=0}
                      | "2" when view.screen<>Addons.Overview -> update {view with focus=Addons.Connections;scroll=0}
                      | "3" when view.screen<>Addons.Overview -> update {view with focus=Addons.Configurations;scroll=0}

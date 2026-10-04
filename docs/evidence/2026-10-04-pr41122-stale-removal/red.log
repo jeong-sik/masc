@@ -1,0 +1,587 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41122-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts -t 'keeps the previous instance visible'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41122-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-addons-panel.test.ts (28 tests | 1 failed | 27 skipped) 85ms
+   ❯ optional Lane Add-on surface (28)
+     × keeps the previous instance visible while a changed declaration and parse errors remain unresolved 84ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps the previous instance visible while a changed declaration and parse errors remain unresolved
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Resolve TOML before removal"
+
+Here are the accessible roles:
+
+  region:
+
+  Name "Lane Add-ons":
+  [36m<section[39m
+    [33maria-label[39m=[32m"Lane Add-ons"[39m
+    [33mclass[39m=[32m"space-y-4 p-4"[39m
+  [36m/>[39m
+
+  Name "TOML configuration":
+  [36m<section[39m
+    [33maria-label[39m=[32m"TOML configuration"[39m
+    [33mclass[39m=[32m"space-y-2"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"flex items-center justify-between gap-4"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "Lane Add-ons":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-lg font-semibold"[39m
+  [36m/>[39m
+
+  Name "TOML configuration":
+  [36m<h3[39m
+    [33mclass[39m=[32m"font-semibold"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "New TOML":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+  [36m/>[39m
+
+  Name "Refresh":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+  [36m/>[39m
+
+  Name "Inspect Same target, different observed revision · external-evidence-1":
+  [36m<circle[39m
+    [33maria-label[39m=[32m"Inspect Same target, different observed revision · external-evidence-1"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mcx[39m=[32m"600"[39m
+    [33mcy[39m=[32m"90"[39m
+    [33mfill[39m=[32m"#d99c56"[39m
+    [33mr[39m=[32m"6"[39m
+    [33mrole[39m=[32m"button"[39m
+    [33mstroke[39m=[32m"transparent"[39m
+    [33mstroke-width[39m=[32m"3"[39m
+    [33mstyle[39m=[32m"cursor: pointer;"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+
+  Name "Inspect event: Same target, different observed revision · external-evidence-1":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"underline text-left"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Edit TOML /workspace/.masc/config/lane-addons/site.toml":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Edit TOML /workspace/.masc/config/lane-addons/site.toml"[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Edit TOML /workspace/.masc/config/lane-addons/broken.toml":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Edit TOML /workspace/.masc/config/lane-addons/broken.toml"[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Edit TOML /workspace/.masc/config/lane-addons/site.toml":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Edit TOML /workspace/.masc/config/lane-addons/site.toml"[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Attach":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mtype[39m=[32m"submit"[39m
+  [36m/>[39m
+
+  Name "Edit TOML for instance-1":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Edit TOML for instance-1"[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Observe":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mdisabled[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Remove TOML + worker":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+  [36m/>[39m
+
+  Name "Slice":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mtype[39m=[32m"submit"[39m
+  [36m/>[39m
+
+  Name "Clear slice":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Preserve selected evidence":
+  [36m<button[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+    [33mdisabled[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  figure:
+
+  Name "Lane by time":
+  [36m<figure[39m
+    [33maria-label[39m=[32m"Lane by time"[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded p-3 overflow-x-auto"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "Parallel lanes with events and recorded relationships":
+  [36m<svg[39m
+    [33maria-label[39m=[32m"Parallel lanes with events and recorded relationships"[39m
+    [33mclass[39m=[32m"w-full min-w-[640px] touch-none"[39m
+    [33mrole[39m=[32m"group"[39m
+    [33mviewBox[39m=[32m"0 0 960 141"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<details />[39m
+
+  Name "":
+  [36m<details />[39m
+
+  Name "":
+  [36m<details />[39m
+
+  Name "":
+  [36m<details />[39m
+
+  --------------------------------------------------
+  list:
+
+  Name "":
+  [36m<ul />[39m
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  [36m<li />[39m
+
+  --------------------------------------------------
+  alert:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-red-400 break-all"[39m
+    [33mrole[39m=[32m"alert"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-red-400 break-all"[39m
+    [33mrole[39m=[32m"alert"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  table:
+
+  Name "TOML declarations":
+  [36m<table[39m
+    [33maria-label[39m=[32m"TOML declarations"[39m
+    [33mclass[39m=[32m"w-full text-left"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<table[39m
+    [33mclass[39m=[32m"w-full text-left"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  rowgroup:
+
+  Name "":
+  [36m<thead />[39m
+
+  Name "":
+  [36m<tbody />[39m
+
+  Name "":
+  [36m<thead />[39m
+
+  Name "":
+  [36m<tbody />[39m
+
+  --------------------------------------------------
+  row:
+
+  Name "Declaration / file Desired revision Applied revision / instance Configuration status":
+  [36m<tr />[39m
+
+  Name "website /workspace/.masc/config/lane-addons/site.toml Edit TOML configuration-2 configuration-1 instance-1 Revision change pending":
+  [36m<tr />[39m
+
+  Name "Instance / package Run / revision Status Cursor / rows Actions":
+  [36m<tr />[39m
+
+  Name "User supplied layer instance-1 · unregistered-package Configuration for instance-1 Package input and display contracts { "binding_schema": null, "presentation": { "description": null, "readings": [] }
+  } Output ports for instance-1 run-2 digest-1 observing 1 / 1 Observe Remove TOML + worker Deletes the matching installation TOML from disk and cleans up its worker. Retained observations and evidence remain.":
+  [36m<tr />[39m
+
+  --------------------------------------------------
+  columnheader:
+
+  Name "Declaration / file":
+  [36m<th />[39m
+
+  Name "Desired revision":
+  [36m<th />[39m
+
+  Name "Applied revision / instance":
+  [36m<th />[39m
+
+  Name "Configuration status":
+  [36m<th />[39m
+
+  Name "Instance / package":
+  [36m<th />[39m
+
+  Name "Run / revision":
+  [36m<th />[39m
+
+  Name "Status":
+  [36m<th />[39m
+
+  Name "Cursor / rows":
+  [36m<th />[39m
+
+  Name "Actions":
+  [36m<th />[39m
+
+  --------------------------------------------------
+  cell:
+
+  Name "website /workspace/.masc/config/lane-addons/site.toml Edit TOML":
+  [36m<td />[39m
+
+  Name "configuration-2":
+  [36m<td[39m
+    [33mclass[39m=[32m"break-all"[39m
+  [36m/>[39m
+
+  Name "configuration-1 instance-1":
+  [36m<td[39m
+    [33mclass[39m=[32m"break-all"[39m
+  [36m/>[39m
+
+  Name "Revision change pending":
+  [36m<td />[39m
+
+  Name "User supplied layer instance-1 · unregistered-package Configuration for instance-1 Package input and display contracts { "binding_schema": null, "presentation": { "description": null, "readings": [] }
+  } Output ports for instance-1":
+  [36m<td />[39m
+
+  Name "run-2 digest-1":
+  [36m<td />[39m
+
+  Name "observing":
+  [36m<td />[39m
+
+  Name "1 / 1":
+  [36m<td />[39m
+
+  Name "Observe Remove TOML + worker Deletes the matching installation TOML from disk and cleans up its worker. Retained observations and evidence remain.":
+  [36m<td[39m
+    [33mclass[39m=[32m"space-x-2"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Manifest path":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+    [33mrequired[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Run ID":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+    [33mrequired[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Binding JSON":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+  [36m/>[39m
+
+  Name "Run filter":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+  [36m/>[39m
+
+  Name "Lane filter":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+  [36m/>[39m
+
+  Name "Since (Unix seconds)":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+  [36m/>[39m
+
+  Name "Until (Unix seconds)":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+  [36m/>[39m
+
+  Name "Keeper (optional)":
+  [36m<input[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radio:
+
+  Name "User supplied layer":
+  [36m<input[39m
+    [33mname[39m=[32m"addon-instance"[39m
+    [33mtype[39m=[32m"radio"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  article:
+
+  Name "":
+  [36m<article[39m
+    [33mclass[39m=[32m"border border-[var(--border)] rounded p-3"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  checkbox:
+
+  Name "Same target, different observed revision · relation · unregistered-domain":
+  [36m<input[39m
+    [33mtype[39m=[32m"checkbox"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Lane Add-ons"[39m
+      [33mclass[39m=[32m"space-y-4 p-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex items-center justify-between gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-lg font-semibold"[39m
+          [36m>[39m
+            [0mLane Add-ons[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mOptional observations and relationships. Keeper work continues independently.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mNew TOML[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mRefresh[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<figure[39m
+        [33maria-label[39m=[32m"Lane by time"[39m
+        [33mclass[39m=[32m"border border-[var(--border)] rounded p-3 overflow-x-auto"[39m
+      [36m>[39m
+        [36m<figcaption>[39m
+          [0mLane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window.[0m
+        [36m</figcaption>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0mEach row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation.[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0m2026-09-10T18:13:20.000Z → 2026-09-10T18:13:20.000Z[0m
+        [36m</p>[39m
+        [36m<svg[39m
+          [33maria-label[39m=[32m"Parallel lanes with events and recorded relationships"[39m
+          [33mclass[39m=[32m"w-full min-w-[640px] touch-none"[39m
+          [33mrole[39m=[32m"group"[39m
+          [33mviewBox[39m=[32m"0 0 960 141"[39m
+        [36m>[39m
+          [36m<g>[39m
+            [36m<text[39m
+              [33maria-label[39m=[32m"instance-1/msx/frame"[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"36"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0minstance-1/msx/frame[0m
+              [36m</title>[39m
+              [0mmsx/frame · stance-1[0m
+            [36m</text>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"11"[39m
+              [33mopacity[39m=[32m"0.75"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"52"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0mUser supplied layer · run run-2 · instance-1[0m
+              [36m</title>[39m
+              [0mUser supplied layer · observing[0m
+            [36m</text>[39m
+            [36m<line[39m
+              [33mopacity[39m=[32m"0.25"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mx1[39m=[32m"260"[39m
+              [33mx2[39m=[32m"940"[39m
+              [33my1[39m=[32m"32"[39m
+              [33my2[39m=[32m"32"[39m
+            [36m/>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"272"[39m
+              [33my[39m=[32m"26"[39m
+            [36m>[39m
+              [0mNo observations in this view[0m
+            [36m</text>[39m
+          [36m</g>[39m
+          [36m<g>[39m
+            [36m<text[39m
+              [33maria-label[39m=[32m"unregistered-domain"[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"94"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0munregistered-domain[0m
+              [36m</title>[39m
+              [0munregistered-domain[0m
+            [36m</text>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"11"[39m
+              [33mopacity[39m=[32m"0.75"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"110"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0mLane unregistered-domain[0m
+              [36m</title>[39m
+              [0mRetained observation[0m
+            [36m</text>[39m
+            [36m<line[39m
+              [33mopacity[39m=[32m"0.25"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mx1[39m=[32m"260"[39m
+              [33mx2[39m=[32m"940"[39m
+              [33my1[39m=[32m"90"[39m
+              [33my2[39m=[32m"90"[39m
+            [36m/>[39m
+          [36m</g>[39m
+          [36m<circle[39m
+            [33maria-label[39m=[32m"Inspect Same target, different observed revision · external-evidence-1"[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mcx[39m=[32m"600"[39m
+            [33mcy[39m=[32m"90"[39m
+            [33mfill[39m=[32m"#d99c56"[39m
+            [33mr[39m=[32m"6"[39m
+            [33mrole[39m=[32m"button"[39m
+            [33mstroke[39m=[32m"transparent"[39m
+            [33mstroke-width[39m=[32m"3"[39m
+            [33mstyle[39m=[32m"cursor: pointer;"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<title>[39m
+              [0mSame target, different observed revision[0m
+              [0m · [0m
+              [0m2026-09-10T18:13:20.000Z[0m
+              [0m · frame 1234[0m
+            [36m</title>[39m
+          [36m</circle>[39m
+        [36m</svg>[39m
+        [36m<details>[39m
+          [36m<summary>[39m
+            [0mEvent list · [0m
+            [0m1[0m
+            [0m observations, including overlapping points[0m
+          [36m</summary>[39m
+          [36m<ul>[39m
+            [36m<li>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"underline text-left"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mInspect event: [0m
+                [0mSame target, different observed revision[0m
+                [0m · [0m
+                [0mexternal-evidence-...
+ ❯ Object.getElementError node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/lane-addons-panel.test.ts:245:28
+    243|     expect(declarations.getByText('configuration-1')).toBeTruthy()
+    244|     expect(declarations.getByText('Revision change pending')).toBeTrut…
+    245|     const removal = screen.getByRole('button', { name: 'Resolve TOML b…
+       |                            ^
+    246|     expect(removal.hasAttribute('disabled')).toBe(true)
+    247|     fireEvent.click(removal)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 27 skipped (28)
+   Start at  23:42:50
+   Duration  863ms (import 31%, environment 23%, setup 18%, transform 16%, tests 11%)
+
+ ELIFECYCLE  Test failed. See above for more details.

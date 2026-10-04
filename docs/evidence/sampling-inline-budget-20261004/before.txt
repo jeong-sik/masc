@@ -1,0 +1,34 @@
+Testing `Sampling receipt recovery'.
+This run has ID `FWO0VKH4'.
+
+  [OK]          bounded downstream          0   outcome_first=false missing.
+> [FAIL]        bounded downstream          1   outcome_first=false canonical.
+  [FAIL]        bounded downstream          2   outcome_first=false fallback.
+  [FAIL]        bounded downstream          3   outcome_first=false compactio...
+  [OK]          bounded downstream          4   outcome_first=true missing.
+  [FAIL]        bounded downstream          5   outcome_first=true canonical.
+  [FAIL]        bounded downstream          6   outcome_first=true fallback.
+  [FAIL]        bounded downstream          7   outcome_first=true compaction...
+  [OK]          bounded downstream          8   aggregate allowance is preser...
+  [OK]          bounded downstream          9   journal file bound is preserved.
+  [OK]          bounded downstream         10   failed verification consumes ...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        bounded downstream          1   outcome_first=false canoni...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT sampling receipts exceed aggregate read envelope
+FAIL sampling receipts exceed aggregate read envelope
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Probe.test_large_receipt.(fun) in file "probe.ml", line 64, characters 15-23
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-sampling-review-lmaxm023/_build/_tests/Sampling receipt recovery/bounded downstream.001.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-sampling-review-lmaxm023/_build/_tests/Sampling receipt recovery'.
+6 failures! in 1.092s. 11 tests run.

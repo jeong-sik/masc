@@ -1,0 +1,12 @@
+{
+  "checkout": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/sampling-inline-budget-20261004",
+  "source_ref": null,
+  "exit_code": 0,
+  "scope": "complete current Lane_addon_store and exact retained_receipts function, full registered regression suite with consumer alias; cached lower dependencies; actual filesystem",
+  "source_sha256": {
+    "probe.ml": "9e76ade62c2f225910e3bc2389c5837f746433025d92f833bbed9102b968d316",
+    "masc__Lane_addon_store.ml": "cf1e79793aff88fd30c225b4b05fde223802f7780c0e189da503a0801b37bbc3",
+    "receipt_projection.ml": "aaa0969fceae9c50d8766d870a4ff7ec558a79ad4bb4b3a22d953c922f9d710d",
+    "masc__Lane_addon_store.mli": "98522185b4e7e8a0ecdaa3ac62cde3229b87e40d3a7b1df8d7a89de71188e31f"
+  }
+}

@@ -38,5 +38,7 @@ val retained_receipts : store:Lane_addon_store.t -> instance_id:string -> max_by
   Lane_addon_types.output -> (Yojson.Safe.t list, string) result
 (** Resolve only the selected output's row evidence through exact host request
     records. Artifact bytes alone never attest a model invocation. All request,
-    outcome, arbitrary evidence and journal reads share [max_bytes] in total.
+    outcome, arbitrary evidence and compact receipts share [max_bytes] in total.
+    Interrupted journal publication is repaired separately under the initial
+    per-file envelope; repair cannot reset the aggregate query allowance.
     Run off-thread. *)

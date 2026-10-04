@@ -302,12 +302,6 @@ let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
                          "outcome",`Null;"terminal",`Null]))
                    | Some (`String "finished"), Some outcome ->
                        let* outcome_ref = Types.evidence_of_json outcome in
-                       (match member "outcome_bytes" record with
-                        | Some (`String bytes) ->
-                            (* The bounded store reader verified this digest
-                               and already charged these journal bytes. *)
-                            Hashtbl.replace blobs outcome_ref (Ok bytes)
-                        | _ -> ());
                        let* bytes = read_blob outcome_ref
                          |> Result.map_error read_error in
                        let* terminal = try Ok (Yojson.Safe.from_string bytes)

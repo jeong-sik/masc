@@ -24,17 +24,15 @@ val read_blob_bounded : budget:read_budget -> t -> Lane_addon_types.evidence ->
 val load_sampling_request_bounded : budget:read_budget -> t -> instance_id:string ->
   request_id:string -> (Yojson.Safe.t option, bounded_read_error) result
 (** Prefer the independently retained terminal link; otherwise read the pending
-    request index. Both use the caller's shared aggregate read allowance and
-    verify the exact file and parent durability before accepting a receipt.
-    Failed verification consumes the bytes read and never falls back to pending.
-    A matching record containing [outcome_bytes] restores its content-addressed
-    blob after verifying the recorded digest. Intact existing blobs are read
-    without replacement. Successful recovery attempts to compact this index;
-    if compaction fails, the verified durable blob still retains the outcome
-    and the index may retain its inline copy. The returned JSON still
-    includes its verified inline bytes, which callers can reuse without a
-    second read charge. Recovery failures remain errors and no model invocation
-    occurs. *)
+    request index. Verify identity and durability before accepting a receipt.
+    Interrupted publication is repaired under a separate per-file bound equal
+    to the query's initial byte envelope. Repair never replenishes the query
+    allowance: it charges the compact receipt, and the caller charges each
+    outcome payload through [read_blob_bounded]. A valid inline journal is
+    projected without [outcome_bytes] only after its outcome blob is durable.
+    Optional on-disk compaction failure does not invalidate that projection.
+    Failed journal verification still consumes the bytes read. No model is
+    invoked. *)
 type jsonl_snapshot = { entry_count : int; reference : Lane_addon_types.evidence }
 val retain_jsonl : t -> history:string -> entry_count:int -> newest_first:'a list ->
   encode:('a -> string) -> (jsonl_snapshot, string) result

@@ -69,9 +69,11 @@ let retained_address (reference : evidence) =
       else Error "evidence is not retained in this Lane store"
   | _ -> Error "evidence is not retained in this Lane store"
 let sequence_path hash = Filename.concat "sequences" (hash ^ ".json")
-type read_budget = { mutable remaining : int }
+type read_budget = { mutable remaining : int; per_file_limit : int }
 type bounded_read_error = Read_limit_exceeded | Read_failed of string
-let read_budget ~max_bytes = { remaining = max 0 max_bytes }
+let read_budget ~max_bytes =
+  let per_file_limit = max 0 max_bytes in
+  { remaining = per_file_limit; per_file_limit }
 let bounded_protect f =
   match protect (fun () -> Ok (f ())) with
   | Ok result -> result | Error detail -> Error (Read_failed detail)
@@ -440,7 +442,12 @@ let read_durable_record_bounded ~sync_file ~sync_parent ~budget path = bounded_p
       read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
       |> Result.map_error (fun detail -> Read_failed detail)
     end))
-let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id = bounded_protect (fun () ->
+let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id =
+  (* Recovery may read the journal and verify an already published blob.
+     Those copies are repair input, not two query results. Bound each file
+     independently, then charge only the receipt returned to the query. *)
+  let journal_budget = read_budget ~max_bytes:budget.per_file_limit in
+  let recovered = bounded_protect (fun () ->
   let relative_in directory = Filename.concat (directory instance_id) (digest request_id ^ ".json") in
   let outcome_relative = relative_in sampling_outcome_directory in
   let relative = match Fs_compat.exact_path_kind (Filename.concat t.root outcome_relative) with
@@ -450,7 +457,7 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
   match Fs_compat.exact_path_kind path with
   | Fs_compat.Exact_missing -> Ok None
   | _ ->
-      let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget path in
+      let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget:journal_budget path in
       let* json = try Ok (Yojson.Safe.from_string bytes)
         with Yojson.Json_error detail -> Error (Read_failed detail) in
       let* () = match json with
@@ -472,7 +479,8 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
             let publish () = write_sampling_blob t bytes
               |> Result.map (fun _ -> ()) |> Result.map_error (fun detail -> Read_failed detail) in
             let verify relative =
-              let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget
+              let repair_budget = read_budget ~max_bytes:(String.length bytes) in
+              let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget:repair_budget
                 (Filename.concat t.root relative) in
               if blob_reference bytes = reference then Ok ()
               else Error (Read_failed "sampling outcome blob digest mismatch") in
@@ -493,9 +501,21 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
                  (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
              | _ -> ());
             Ok () in
-      (* Return the inline bytes from this read even after compaction. The
-         caller can share them with other references without rereading them. *)
-      Ok (Some json))
+      let projected, query_bytes = match inline, json with
+        | Some _, `Assoc fields ->
+            let compact = `Assoc (List.remove_assoc "outcome_bytes" fields) in
+            compact, String.length (Yojson.Safe.to_string compact)
+        | None, _ | Some _, _ -> json, String.length bytes in
+      Ok (Some (projected, query_bytes))) in
+  match recovered with
+  | Error error ->
+      let read_bytes = journal_budget.per_file_limit - journal_budget.remaining in
+      budget.remaining <- max 0 (budget.remaining - read_bytes);
+      Error error
+  | Ok None -> Ok None
+  | Ok (Some (json, query_bytes)) ->
+      if query_bytes > budget.remaining then Error Read_limit_exceeded
+      else (budget.remaining <- budget.remaining - query_bytes; Ok (Some json))
 let load_sampling_request_bounded =
   load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 

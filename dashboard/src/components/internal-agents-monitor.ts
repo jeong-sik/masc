@@ -767,9 +767,12 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
   const allReadings = Object.values(runReadings)
   const completeReading = allReadings.every(readingHasRows)
   const allFresh = allReadings.every(reading => reading === 'ready')
-  const selectedReading = filter === 'all'
-    ? !completeReading ? 'unavailable' : allFresh ? 'ready' : 'stale'
-    : runReadings[sourceForKind(filter)]
+  const selectedSources: RunSource[] = target
+    ? target.lane === 'verifier_exact' ? ['exact', 'verification'] : ['exact']
+    : filter === 'all' ? ['exact', 'verification', 'fusion'] : [sourceForKind(filter)]
+  const selectedReadings = selectedSources.map(source => runReadings[source])
+  const selectedReading = !selectedReadings.every(readingHasRows) ? 'unavailable'
+    : selectedReadings.every(reading => reading === 'ready') ? 'ready' : 'stale'
   const inventory = FILTERS.filter(item => item.id !== 'all').map(item => {
     const kind = item.id as Exclude<Filter, 'all'>
     const matching = rows.filter(row => rowKind(row) === kind)
@@ -893,8 +896,8 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
             <button
               key=${item.id}
               type="button"
-              class=${`ai-stat cursor-pointer text-left ${filter === item.id ? 'border-[var(--volt-strong)]' : ''}`}
-              aria-pressed=${filter === item.id}
+              class=${`ai-stat cursor-pointer text-left ${!target && filter === item.id ? 'border-[var(--volt-strong)]' : ''}`}
+              aria-pressed=${!target && filter === item.id}
               onClick=${() => setFilter(item.id)}
             >
               <span class="k">${item.label}</span>
@@ -936,8 +939,8 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
           <button
             key=${item.id}
             type="button"
-            class=${`ia-filter ${filter === item.id ? 'on' : ''}`}
-            aria-pressed=${filter === item.id}
+            class=${`ia-filter ${!target && filter === item.id ? 'on' : ''}`}
+            aria-pressed=${!target && filter === item.id}
             onClick=${() => setFilter(item.id)}
           >${item.label} ${item.id === 'all' ? completeReading ? rows.length : '—' : inventory.find(entry => entry.id === item.id)?.count ?? '—'}</button>
         `)}

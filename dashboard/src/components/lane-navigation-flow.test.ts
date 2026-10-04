@@ -109,6 +109,65 @@ it('does not open a file when the fresh inventory assigns it to another installa
   expect(files.fetchLaneDeclaration).not.toHaveBeenCalled(); expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
 })
 
+const directory = '/fixture/navigation/.masc/config/lane-addons', path = `${directory}/pkg.toml`
+const declarationDocument = { file_name: 'pkg.toml', source_path: path, source_text: 'id = "pkg"\n',
+  source_revision: 'same-bytes', desired_revision: 'semantic', validation: { valid: true, messages: [] as string[] } }
+const declarations = parseLaneAddonSnapshot({ configuration: { directory, complete: true, issues: [], declarations: [
+  { id: 'pkg', source_path: path, enabled: true, desired_revision: 'semantic', applied_revision: null, instance_id: null },
+] }, instances: [], rows: [], coverage: [] })
+function declarationRoute() {
+  replaceRoute('monitoring', laneTargetParams({ kind: 'declaration', workspace: '/fixture/navigation', path, installation: 'pkg' }))
+}
+it('can retry an initial inventory failure without discarding the selected file target', async () => {
+  addons.fetchLaneAddons.mockRejectedValueOnce(new Error('inventory unavailable')).mockResolvedValue(declarations)
+  files.fetchLaneDeclaration.mockResolvedValue(declarationDocument); declarationRoute()
+  render(html`<${LaneAddonsPanel} />`)
+  await screen.findByText('inventory unavailable')
+  fireEvent.click(screen.getByRole('button', { name: 'Read target again' }))
+  await screen.findByRole('region', { name: 'Lane TOML editor' })
+  expect(route.value.params.lane_target).toBeDefined(); expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
+it('refreshes validation metadata for unchanged file bytes while retaining unsaved text', async () => {
+  addons.fetchLaneAddons.mockResolvedValue(declarations)
+  files.fetchLaneDeclaration.mockResolvedValue({ ...declarationDocument, desired_revision: null,
+    validation: { valid: false, messages: ['manifest is missing'] } }); declarationRoute()
+  render(html`<${LaneAddonsPanel} />`)
+  await screen.findByText('manifest is missing')
+  const source = screen.getByLabelText('TOML source') as HTMLTextAreaElement
+  fireEvent.input(source, { target: { value: '# unsaved\n'+declarationDocument.source_text } })
+  files.fetchLaneDeclaration.mockResolvedValue(declarationDocument)
+  fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
+  await waitFor(() => expect(screen.queryByText('manifest is missing')).toBeNull())
+  expect(source.value).toBe('# unsaved\n'+declarationDocument.source_text)
+  expect(screen.queryByRole('region', { name: 'Current file comparison' })).toBeNull()
+  expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
+it('releases the linked target when the operator starts a different declaration', async () => {
+  addons.fetchLaneAddons.mockResolvedValue(declarations); files.fetchLaneDeclaration.mockResolvedValue(declarationDocument); declarationRoute()
+  render(html`<${LaneAddonsPanel} />`); await screen.findByRole('region', { name: 'Lane TOML editor' })
+  fireEvent.input(screen.getByLabelText('TOML source'), { target: { value: '# retained\n'+declarationDocument.source_text } })
+  fireEvent.click(screen.getByRole('button', { name: 'New TOML' }))
+  await waitFor(() => expect(route.value.params.lane_target).toBeUndefined())
+  addons.fetchLaneAddons.mockResolvedValue({ ...declarations, configuration: { ...declarations.configuration!, declarations: [] } })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  await screen.findByText('No readable TOML declarations.')
+  expect(screen.getByRole('region', { name: 'Lane TOML editor' })).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('Open drafts'), { target: { value: path } })
+  expect((screen.getByLabelText('TOML source') as HTMLTextAreaElement).value).toBe('# retained\n'+declarationDocument.source_text)
+})
+it('uses the targeted run source for unavailable state instead of a previous successful filter', async () => {
+  api.fetchExactLaneRuns.mockRejectedValue(new Error('exact unavailable'))
+  replaceRoute('monitoring', { section: 'internal-agents' })
+  render(html`<${InternalAgentsMonitor} />`)
+  const filters = within(screen.getByRole('group', { name: 'Internal agent filters' }))
+  fireEvent.click(await filters.findByRole('button', { name: 'Fusion 0' }))
+  await screen.findByText('No internal agent runs for this filter.')
+  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'librarian_exact', workspace: '/fixture/navigation' }, true))
+  await screen.findByText('Run observations unavailable for this filter.')
+  expect(filters.getByRole('button', { name: 'Fusion 0' }).getAttribute('aria-pressed')).toBe('false')
+  expect(screen.queryByText('No internal agent runs for this filter.')).toBeNull()
+})
+
 it('keeps the chosen filter when leaving a selected Lane through the real router', async () => {
   render(html`<${InternalAgentsMonitor} />`)
   await screen.findByRole('button', { name: /succeeded Workspace Curator/ })

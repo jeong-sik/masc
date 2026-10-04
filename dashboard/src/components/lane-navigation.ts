@@ -16,7 +16,9 @@ export function useLaneNavigation(kinds: readonly LaneNavigationTarget['kind'][]
   return { raw, target, error, pending: target !== null && authority === null, authority }
 }
 export function clearLaneNavigation() {
-  const current = route.peek(), params = { ...current.params }; delete params.lane_target
+  const current = route.peek()
+  if (current.params.lane_target === undefined) return
+  const params = { ...current.params }; delete params.lane_target
   replaceRoute(current.tab, params)
 }
 export function LaneNavigationNotice({ message, pending = false, onRetry }: { message: string; pending?: boolean; onRetry?: () => void }) {

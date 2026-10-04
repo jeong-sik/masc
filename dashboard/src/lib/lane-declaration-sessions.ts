@@ -122,7 +122,7 @@ export class LaneDeclarationSession {
       this.update(key, value => initial
         ? { ...value, fileName: document.file_name, text: document.source_text, document, phase: 'idle', needsRead: false }
         : document.source_path === value.document?.source_path && document.source_revision === value.document.source_revision
-        ? { ...value, current: null, phase: 'idle', needsRead: false,
+        ? { ...value, document, current: null, phase: 'idle', needsRead: false,
           notice: 'Current file still matches your saved revision. Your draft is unchanged.' }
         : { ...value, current: document, phase: 'idle', notice: 'Current file read. Your draft is unchanged. Select its revision before saving.' })
       return document

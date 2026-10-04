@@ -15,7 +15,7 @@ import { LanePackageInstaller } from './lane-package-installer'
 import { LanePackageActivityPanel } from './lane-package-activity-panel'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
 import { lanePackageActivityObservationRevision } from '../lib/lane-package-activity-session'
-import { useLaneNavigation, LaneNavigationNotice } from './lane-navigation'
+import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
 import { declarationIdentity, laneTargetLabel, type LaneNavigationTarget } from '../lib/lane-navigation'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
@@ -215,7 +215,9 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const authority = executionWorkspaceAuthority.value
   const [recoveringAuthority, setRecoveringAuthority] = useState(false)
   const [authorityError, setAuthorityError] = useState<string | null>(null)
+  function releaseTarget() { if (navigationTarget) clearLaneNavigation() }
   function editToml(sourcePath: string | null) {
+    releaseTarget()
     if (session && authority) session.open(sourcePath, authority)
   }
   const [received, setReceived] = useState<Owned<LaneAddonSnapshot> | null>(null)
@@ -414,7 +416,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const coverage = slice?.coverage ?? snapshot?.coverage ?? []
   if (navigationTarget && targetError) return html`<${LaneNavigationNotice} message=${targetError} onRetry=${retryTarget} />`
   if (navigationTarget && (!snapshot || targetPending)) return html`<${LaneNavigationNotice}
-    message=${error ?? 'Reading the selected Lane target in the current workspace…'} onRetry=${reading || targetPending ? undefined : retryTarget} />`
+    message=${error ?? 'Reading the selected Lane target in the current workspace…'}
+    onRetry=${reading || targetDraft && targetDraft.phase !== 'idle' ? undefined : retryTarget} />`
   return html`<section class="space-y-4 p-4" aria-label="Lane Add-ons">
     ${navigationTarget && html`<p role="status" class="break-all">Selected: ${laneTargetLabel(navigationTarget)}</p>`}
     <header class="flex items-center justify-between gap-4">
@@ -446,7 +449,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       })}</div>`}
       <button type="button" class=${buttonClass} onClick=${() => {
         const owner = snapshot?.instances.find(item => focused.lane_id.startsWith(`${item.instance_id}/`))
-        if (owner) { setInstance(owner.instance_id); setSelected([focused.id]) }
+        if (owner) { releaseTarget(); setInstance(owner.instance_id); setSelected([focused.id]) }
       }} disabled=${!snapshot?.instances.some(item => focused.lane_id.startsWith(`${item.instance_id}/`))}>Select this evidence and its instance</button>
       <button type="button" class=${buttonClass} onClick=${() => setFocusedRow(null)}>Close event</button>
     </section>`}
@@ -467,7 +470,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
             <td>${declaration.id}<div class="break-all">${declaration.source_path}</div>
               <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button>
               <button type="button" class=${buttonClass} disabled=${session === null || authority === null}
-                onClick=${() => { if (session && authority) session.openActivity(declaration.source_path, declaration.id, authority) }}
+                onClick=${() => { if (session && authority) { releaseTarget(); session.openActivity(declaration.source_path, declaration.id, authority) } }}
                 aria-label=${`Configure activity for ${declaration.id}`}>On / off</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
             <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
@@ -492,8 +495,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       }} />`}
     ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
       key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
-      authority=${authority} documents=${session} snapshot=${snapshot} />`}
-    <div ref=${declarationFocus} tabIndex=${-1} aria-label="Selected declaration settings">${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSaved=${() => {
+      authority=${authority} documents=${session} snapshot=${snapshot} onSelectionChange=${releaseTarget} />`}
+    <div ref=${declarationFocus} tabIndex=${-1} aria-label="Selected declaration settings">${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSelectionChange=${releaseTarget} onSaved=${() => {
       if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
     }} />`}</div>
     <details><summary>Attach a package</summary>
@@ -518,7 +521,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       tabIndex=${navigationTarget?.kind === 'instance' && item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation ? -1 : undefined}
       aria-label=${`Worker ${item.instance_id} · incarnation ${item.incarnation}`}>
       <td><label><input type="radio" name="addon-instance" checked=${instance === item.instance_id}
-        onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
+        onChange=${() => { releaseTarget(); setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
         ${item.configuration === null ? html`<p>Not managed by TOML</p>` : html`<div class="break-all" aria-label=${`Configuration for ${item.instance_id}`}>
           <p>TOML: ${item.configuration.id}</p><p>${item.configuration.source_path}</p><p>Installed configuration: ${item.configuration.revision}</p>
           ${hasCurrentDeclaration(configuration, item) && html`<button type="button" class=${buttonClass} disabled=${session === null}

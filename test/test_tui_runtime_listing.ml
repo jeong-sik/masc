@@ -20,8 +20,8 @@ let check_cols = 140
 
 let check_layout state expected =
   expect "rendering chrome" expected
-    (runtime_surface_listing_chrome ~cols:check_cols state);
-  match runtime_scrolled ~cols:check_cols state with
+    (runtime_surface_listing_chrome ~rows:100 ~cols:check_cols state);
+  match runtime_scrolled ~rows:100 ~cols:check_cols state with
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout -> expect "keyboard shares rendering chrome" expected layout.sc_chrome
 
@@ -411,14 +411,14 @@ let test_the_authority_row_spells_its_config_path_whole () =
   (* The budget follows the rows. Counting one authority row at every width put
      the footer past the frame's last row exactly when the sentence wrapped. *)
   Alcotest.(check int) "the chrome count follows the rows drawn"
-    (runtime_surface_listing_chrome ~cols:260 state
+    (runtime_surface_listing_chrome ~rows:100 ~cols:260 state
      + List.length (rows_at 100) - 1)
-    (runtime_surface_listing_chrome ~cols:100 state);
-  match runtime_scrolled ~cols:100 state with
+    (runtime_surface_listing_chrome ~rows:100 ~cols:100 state);
+  match runtime_scrolled ~rows:100 ~cols:100 state with
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout ->
       Alcotest.(check int) "the keys move through the drawing's count"
-        (runtime_surface_listing_chrome ~cols:100 state) layout.sc_chrome
+        (runtime_surface_listing_chrome ~rows:100 ~cols:100 state) layout.sc_chrome
 
 let test_search_follows_the_runtime_mode () =
   let state = state () in
@@ -436,7 +436,7 @@ let test_search_follows_the_runtime_mode () =
   let expect_rows expected =
     Alcotest.(check (option (list string))) "search uses the visible cursor order"
       (Some expected) (Masc_tui_surface_search.surface_row_texts state Runtime);
-    match runtime_scrolled ~cols:check_cols state with
+    match runtime_scrolled ~rows:100 ~cols:check_cols state with
     | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
     | None -> Alcotest.fail "runtime list lost its scroll geometry" in
   state.runtime_mode <- Runtime_lanes;
@@ -1449,20 +1449,66 @@ let test_selected_status_wraps_and_reserves_rows () =
     let text = String.concat " " (List.map String.trim lines) in
     List.iter (fun fact -> Alcotest.(check bool) ("complete selected fact: " ^ fact) true
         (Astring.String.is_infix ~affix:fact text))
-      [ "Account codex-account-two"; "Account Two / model";
+      [ "Account account:status"; "Connection codex-account-two"; "Account Two / model";
         "quota exhausted (no reset stated)"; "rate limited"; "account limit spent / unobserved" ];
     List.iter (fun line -> Alcotest.(check bool) "wrapped status fits frame" true
         (Masc_tui_message_layout.display_width line <= Masc_tui_frame.inner_width ~cols)) lines;
-    let chrome = runtime_surface_listing_chrome ~cols state in
+    let chrome = runtime_surface_listing_chrome ~rows:100 ~cols state in
     state.runtime_cursor <- 99;
-    let without_selection = runtime_surface_listing_chrome ~cols state in
+    let without_selection = runtime_surface_listing_chrome ~rows:100 ~cols state in
     state.runtime_cursor <- 0;
     expect "render and navigation reserve the full selected block"
       (without_selection + List.length lines + 1) chrome)
     [80;132]
 
+let test_account_label_tracks_quota_scope () =
+  let first = { (runtime "a") with ro_provider_id = "connection-a";
+    ro_quota_scope = Some "account:shared" } in
+  let sibling = { first with ro_provider_id = "connection-b" } in
+  Alcotest.(check string) "connections sharing quota share account label"
+    (runtime_account_label first) (runtime_account_label sibling);
+  Alcotest.(check string) "switching account under same connection changes label"
+    "account:changed" (runtime_account_label {first with ro_quota_scope = Some "account:changed"});
+  Alcotest.(check string) "unreported account does not claim connection is an account"
+    "unreported (connection connection-a)"
+    (runtime_account_label {first with ro_quota_scope = None})
+
+let test_short_viewport_preserves_selected_list_row () =
+  let state = lane_state () in
+  List.iter (fun mode ->
+    state.runtime_mode <- mode;
+    List.iter (fun cols ->
+      List.iter (fun rows ->
+        List.iter (fun cursor ->
+          state.runtime_cursor <- cursor;
+          let chrome = runtime_surface_listing_chrome ~rows ~cols state in
+          let visible = rows - chrome in
+          Alcotest.(check bool) "supported viewport retains a list row" true
+            (visible >= 1);
+          let summary = runtime_selection_summary_for_viewport ~rows ~cols state in
+          expect "render budget counts exactly the drawn summary and divider"
+            (runtime_surface_base_chrome ~cols state
+             + (if summary = [] then 0 else List.length summary + 1)) chrome;
+          (match runtime_scrolled ~rows ~cols state with
+           | None -> Alcotest.fail "runtime list has no scroll geometry"
+           | Some layout ->
+               expect "navigation and renderer share short-height chrome" chrome layout.sc_chrome;
+               expect "navigation sees every runtime" 3 layout.sc_count))
+          [0; 1; 2]) [14; 15; 16; 40]) [80; 132])
+    [Runtime_lanes; Runtime_all];
+  state.runtime_mode <- Runtime_lanes;
+  state.runtime_cursor <- 0;
+  List.iter (fun cols ->
+    Alcotest.(check (list string)) "ample height retains complete selected evidence"
+      (runtime_selection_summary_lines ~cols state)
+      (runtime_selection_summary_for_viewport ~rows:100 ~cols state)) [80; 132]
+
 let () = Alcotest.run "runtime list geometry"
-  ["operator states", [ Alcotest.test_case "account usage survives reset until new report" `Quick
+  ["operator states", [ Alcotest.test_case "account label follows quota scope" `Quick
+        test_account_label_tracks_quota_scope;
+      Alcotest.test_case "short viewport retains selected list row" `Quick
+        test_short_viewport_preserves_selected_list_row;
+      Alcotest.test_case "account usage survives reset until new report" `Quick
         test_account_usage_stays_spent_until_new_report;
         Alcotest.test_case "selected status wraps with shared scroll geometry" `Quick
           test_selected_status_wraps_and_reserves_rows;

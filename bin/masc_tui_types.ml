@@ -11137,6 +11137,13 @@ let runtime_authority_rows ~cols (state : state) : string list =
   Masc_tui_message_layout.pack_clauses ~max_cells:room clauses
   |> List.map (fun line -> indent ^ line)
 
+(* The resolved response owns this scope label. It is shared with its Usage
+   rows, but is not a persistent account id or a configuration edit key. *)
+let runtime_account_label (runtime : Tui_decode.runtime_option) =
+  match runtime.ro_quota_scope with
+  | Some scope -> scope
+  | None -> "unreported (connection " ^ runtime.ro_provider_id ^ ")"
+
 let runtime_selection_summary_lines ~cols state =
   let selected = match state.runtime_surface, state.runtime_mode with
     | None, _ -> None
@@ -11151,7 +11158,8 @@ let runtime_selection_summary_lines ~cols state =
   | None -> []
   | Some (runtime, probe) ->
       let width = max 1 (Masc_tui_frame.inner_width ~cols - 2) in
-      [ "Selected " ^ runtime.ro_id ^ " · Account " ^ runtime.ro_provider_id
+      [ "Selected " ^ runtime.ro_id ^ " · Account " ^ runtime_account_label runtime
+          ^ " · Connection " ^ runtime.ro_provider_id
           ^ " · " ^ runtime.ro_provider ^ " / " ^ runtime.ro_model
       ; runtime_route_probe_text state runtime probe ]
       |> List.concat_map (fun line ->
@@ -11159,10 +11167,7 @@ let runtime_selection_summary_lines ~cols state =
             (Masc.Tui_terminal_text.sanitize_terminal_text line))
       |> List.map (fun line -> "  " ^ line)
 
-let runtime_surface_listing_chrome ~cols state =
-  let selection_rows = runtime_selection_summary_lines ~cols state in
-  (if selection_rows = [] then 0 else List.length selection_rows + 1)
-  +
+let runtime_surface_base_chrome ~cols state =
   runtime_listing_chrome
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
     ~error:state.runtime_surface_error
@@ -11185,8 +11190,22 @@ let runtime_surface_listing_chrome ~cols state =
       (runtime_picker_projection state))
     ()
 
-(* The Runtime listing's bound. Its chrome depends on the terminal width, so
-   the caller passes the width it drew at and the keys move through the same
+(* The selected row must keep a place in the list. Full account/status facts
+   remain in Enter's detail reading when a short viewport cannot fit both. *)
+let runtime_selection_summary_for_viewport ~rows ~cols state =
+  let lines = runtime_selection_summary_lines ~cols state in
+  let spare = rows - runtime_surface_base_chrome ~cols state - 1 in
+  if lines = [] || List.length lines + 1 <= spare then lines
+  else if spare >= 2 then ["  Enter: full account and status details"]
+  else []
+
+let runtime_surface_listing_chrome ~rows ~cols state =
+  let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
+  runtime_surface_base_chrome ~cols state
+  + (if selection_rows = [] then 0 else List.length selection_rows + 1)
+
+(* The Runtime listing's bound. Its chrome depends on the viewport size, so
+   the caller passes the dimensions it drew at and the keys move through the same
    count the frame drew with. *)
 (* Enter/Right opens a listing row once. A detail has its own stable identity;
    a refresh can reorder the hidden listing without changing that identity. *)
@@ -11216,7 +11235,7 @@ let open_runtime_row_detail (state : state) =
         target
 ;;
 
-let runtime_scrolled ~cols (state : state) : scrolled option =
+let runtime_scrolled ~rows ~cols (state : state) : scrolled option =
   if Option.is_some state.runtime_detail_target then None
   else
     Some
@@ -11229,7 +11248,7 @@ let runtime_scrolled ~cols (state : state) : scrolled option =
            | Some s, Runtime_lanes -> List.length s.Tui_decode.rss_candidates
            | Some s, Runtime_all ->
                List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
-      ; sc_chrome = runtime_surface_listing_chrome ~cols state
+      ; sc_chrome = runtime_surface_listing_chrome ~rows ~cols state
       ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }

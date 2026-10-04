@@ -9751,10 +9751,10 @@ let render_runtime (state : state) =
           probe_status probe_read timestamp (connection_badge state)
   in
   let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
-  let selection_rows = runtime_selection_summary_lines ~cols state in
+  let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
   (* One measured status width for the whole reading, shared by the header and
      every row. A report that has several independent limits can still exceed
-     the pane; the selected account's wrapped evidence above stays complete. *)
+     the pane; full evidence stays in the selected summary or Enter's detail. *)
   let status_cells =
     let statuses = match state.runtime_mode with
       | Runtime_lanes -> List.map (fun row -> runtime_route_probe_text state
@@ -9766,7 +9766,7 @@ let render_runtime (state : state) =
     List.fold_left (fun width text -> max width (Message_layout.display_width text)) 0 statuses in
   (* The budget counts the rows this screen draws, so it comes from the same
      call the drawing reads rather than a fixed one. *)
-  let chrome_rows = runtime_surface_listing_chrome ~cols state in
+  let chrome_rows = runtime_surface_listing_chrome ~rows ~cols state in
   let content_height = max 0 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in

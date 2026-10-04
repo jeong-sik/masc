@@ -4,7 +4,8 @@ type t
 
 val create : base_dir:string -> max_bytes:int -> t
 (** Nonpositive [max_bytes] keeps all records. A positive target rotates the
-    current file and prunes oldest completed files after an append. The newest
+    current file at half the target (at least one byte), leaving room for a
+    completed segment, and prunes oldest completed files after an append. The newest
     row is preserved even when that one row exceeds the target. Cleanup is
     best effort under the underlying Dated_jsonl I/O contract. *)
 

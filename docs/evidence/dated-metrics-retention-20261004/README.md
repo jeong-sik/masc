@@ -8,8 +8,9 @@ turn/heartbeat metrics store. The new typed registry setting
 once when a Keeper's cached store opens; TOML changes require restart.
 
 Turn and heartbeat producers call one `append_keeper_metrics` operation.
-Its storage owner gives Dated_jsonl the same byte target for current-file
-rotation and oldest-first completed-file pruning. Existing metric readers
+Its storage owner derives a half-target file size from the captured total
+byte target, leaving space for a completed segment alongside the current one.
+Dated_jsonl handles rotation and oldest-first completed-file pruning. Existing metric readers
 use the same cached store and continue reading retained segments. The new
 setting is independent of auxiliary log backup counts.
 
@@ -31,7 +32,7 @@ refusals raise Sys_error and reach the existing metrics failure handling.
   loader and registry: unset keeps all, TOML affects actual rotation/readback,
   process env overrides TOML, and negative TOML is rejected.
 - Eleven changed OCaml files pass parser checks. The broader Keeper typecheck
-  attempt stops at a cached Workspace/Fs_compat interface mismatch inherited
+  attempt (before the segment-size refinement) stops at a cached Workspace/Fs_compat interface mismatch inherited
   from the parent's added filesystem API. Earlier scratch attempts first
   exposed that missing API; rebuilding its immediate interfaces reaches the
   same stale-cache boundary. Do not treat this as a complete caller typecheck.

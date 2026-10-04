@@ -21,7 +21,7 @@ let test_rotation_keeps_accepting_rows () = with_dir @@ fun dir ->
   List.iter (fun i -> Storage.append store (row i)) [1; 2; 3; 4];
   check (list int) "full completed file is pruned and new rows remain" [3; 4] (values store);
   Storage.append store (row 5);
-  check (list int) "next rotation still accepts the new row" [5] (values store)
+  check (list int) "next rotation keeps a preceding row alongside the new one" [4; 5] (values store)
 
 let test_prunes_old_days () = with_dir @@ fun dir ->
   let old_path = Filename.concat dir "2000-01/01.jsonl" in

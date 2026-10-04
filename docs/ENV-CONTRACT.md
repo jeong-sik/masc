@@ -128,8 +128,10 @@ separate per-Keeper byte target for date-sharded turn and heartbeat metrics.
 The default `0` preserves every record. A positive value is captured when
 the store opens, so changing this setting requires restart.
 
-Both producers use the same writer and store mutex. A positive target rotates
-the current day file when the next record would exceed it, then removes the
+Both producers use the same writer and store mutex. File segments use half
+the target (at least one byte), leaving room for a preceding segment alongside
+the current one. When the next record would exceed that segment size, the
+writer rotates the current day file and appends the record, then removes the
 oldest completed files until the store fits. Retention removes whole files;
 it does not promise an exact number of historical records. The latest record
 always lands, even if that single record exceeds the byte target, and cleanup

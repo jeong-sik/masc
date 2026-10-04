@@ -113,8 +113,9 @@ let encode_sampling_reply ~request_id ~max_bytes reply =
 
 let bound_refusal ~max_bytes message =
   let json_len s = String.length (Yojson.Safe.to_string (`String s)) in
-  if String.length message <= max_bytes
-     && (String.length message = 0 || message.[0] = '{' || json_len message <= max_bytes) then message
+  (* MCP serializes every refusal as a JSON string, including a structured
+     receipt carried inside that string. Its quotes must fit too. *)
+  if String.length message <= max_bytes && json_len message <= max_bytes then message
   else
     let refusal = "sampling failed; outcome retained" in
     if json_len refusal <= max_bytes then refusal

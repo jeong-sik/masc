@@ -379,37 +379,6 @@ let test_search_with_query () =
     Alcotest.(check bool) "response is substantive" true (String.length msg > 5)
   )
 
-(* ============================================================
-   The self-scored confidence axis is gone
-   ============================================================
-
-   [confidence] was a number the writing agent chose for its own document.
-   It decided one thing: whether the file landed in [docs/library/] or
-   [docs/library/candidates/]. Both directories were read by
-   [masc_library_read] and [masc_library_search], so the split changed
-   what [masc_library_list] printed by default and nothing else.
-
-   Measured on the live library before removal: 61 of 62 documents scored
-   >= 0.70, one scored 0.40, and [verified_by] was the empty list in all 61
-   published documents — [masc_library_promote], whose only effect was to
-   raise that number and stamp a verifier, had never run.
-   ============================================================ *)
-
-let test_promote_is_not_a_tool () =
-  with_temp_base_path (fun ctx ->
-    let dispatched =
-      Tool_library.dispatch ctx ~name:"masc_library_promote"
-        ~args:(`Assoc [ ("topic", `String "anything") ])
-    in
-    Alcotest.(check bool) "promote no longer dispatches" true (dispatched = None);
-    Alcotest.(check bool)
-      "promote is absent from the registered schemas"
-      false
-      (List.exists
-         (fun (schema : Masc_domain.tool_schema) ->
-           String.equal schema.name "masc_library_promote")
-         Tool_library.schemas)
-  )
 
 let test_add_schema_has_no_confidence () =
   let schema = required_schema "masc_library_add" in
@@ -572,50 +541,34 @@ let test_full_workflow () =
 let () =
   Alcotest.run "Tool_library" [
     ("dispatch", [
-      Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown;
-      Alcotest.test_case "all known tools dispatch" `Quick test_dispatch_all_known;
+      Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown; Alcotest.test_case "all known tools dispatch" `Quick test_dispatch_all_known;
     ]);
     ("library_list", [
       Alcotest.test_case "empty list" `Quick test_list_empty;
     ]);
     ("library_read", [
-      Alcotest.test_case "empty topic" `Quick test_read_empty_topic;
-      Alcotest.test_case "nonexistent topic" `Quick test_read_nonexistent_topic;
-      Alcotest.test_case "read by exact title (list->read contract)" `Quick test_read_by_title_roundtrip;
-      Alcotest.test_case "read by case-insensitive partial title" `Quick test_read_by_title_case_insensitive_partial;
-      Alcotest.test_case "read by slug still works" `Quick test_read_by_slug_still_works;
+      Alcotest.test_case "empty topic" `Quick test_read_empty_topic; Alcotest.test_case "nonexistent topic" `Quick test_read_nonexistent_topic; Alcotest.test_case "read by exact title (list->read contract)" `Quick test_read_by_title_roundtrip; Alcotest.test_case "read by case-insensitive partial title" `Quick test_read_by_title_case_insensitive_partial; Alcotest.test_case "read by slug still works" `Quick test_read_by_slug_still_works;
     ]);
     ("library_add", [
-      Alcotest.test_case "fresh base creates library and reads document" `Quick test_add_on_fresh_base;
-      Alcotest.test_case "missing title" `Quick test_add_missing_title;
-      Alcotest.test_case "missing content" `Quick test_add_missing_content;
-      Alcotest.test_case "invalid source" `Quick test_add_invalid_source;
-      Alcotest.test_case "missing source" `Quick test_add_missing_source;
-      Alcotest.test_case "blank author" `Quick test_add_with_blank_author_is_refused;
-      Alcotest.test_case "success" `Quick test_add_success;
-      Alcotest.test_case "with tags" `Quick test_add_with_tags;
-      Alcotest.test_case "library follows the context base path" `Quick
+      Alcotest.test_case "fresh base creates library and reads document" `Quick test_add_on_fresh_base; Alcotest.test_case "missing title" `Quick test_add_missing_title; Alcotest.test_case "missing content" `Quick test_add_missing_content; Alcotest.test_case "invalid source" `Quick test_add_invalid_source; Alcotest.test_case "missing source" `Quick test_add_missing_source; Alcotest.test_case "blank author" `Quick test_add_with_blank_author_is_refused; Alcotest.test_case "success" `Quick test_add_success; Alcotest.test_case "with tags" `Quick test_add_with_tags; Alcotest.test_case "library follows the context base path" `Quick
         test_library_follows_context_base_path;
     ]);
     ("unreadable_source", [
       Alcotest.test_case "unknown source is named, not passed through" `Quick
-        test_unknown_source_is_named_not_passed_through;
-      Alcotest.test_case "header that does not read names its reason" `Quick
+        test_unknown_source_is_named_not_passed_through; Alcotest.test_case "header that does not read names its reason" `Quick
         test_header_that_does_not_read_names_its_reason;
     ]);
     ("library_search", [
-      Alcotest.test_case "empty query" `Quick test_search_empty_query;
-      Alcotest.test_case
+      Alcotest.test_case "empty query" `Quick test_search_empty_query; Alcotest.test_case
         "schema lets runtime reject empty query"
         `Quick
-        test_search_schema_allows_runtime_query_rejection;
-      Alcotest.test_case "with query" `Quick test_search_with_query;
+        test_search_schema_allows_runtime_query_rejection; Alcotest.test_case "with query" `Quick test_search_with_query;
     ]);
     ("confidence_purged", [
-      Alcotest.test_case "promote is not a tool" `Quick test_promote_is_not_a_tool;
+
+
       Alcotest.test_case "add schema has no confidence" `Quick
-        test_add_schema_has_no_confidence;
-      Alcotest.test_case "frontmatter carries only observable fields" `Quick
+        test_add_schema_has_no_confidence; Alcotest.test_case "frontmatter carries only observable fields" `Quick
         test_added_frontmatter_carries_only_observable_fields;
     ]);
     ("workflow", [

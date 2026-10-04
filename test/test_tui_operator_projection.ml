@@ -228,8 +228,7 @@ let test_approval_flow_rejects_stale_results () =
      again while that action is still open reads the action's own
      generation back -- there is nothing left for a caller to suppress at
      the [Flow] level; that decision (skip the read while an action is
-     open) lives at each call site via [action_inflight], which the AST
-     checks in [test_tui_http_ast.ml] cover. *)
+     open) lives at each call site via [action_inflight]. *)
   let old_generation = Projection.Flow.observe Projection.Flow.initial in
   let flow, action_generation =
     match Projection.Flow.begin_action Projection.Flow.initial with

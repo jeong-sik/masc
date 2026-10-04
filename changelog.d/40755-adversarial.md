@@ -1,1 +1,0 @@
-Add an explicit synthetic Librarian preflight evaluation command and bilingual attack corpus. It detects false no-change decisions on corrections, constraints and unfinished obligations without mutating Memory or consuming ranges.

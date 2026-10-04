@@ -49,9 +49,10 @@ type bucket_metric = {
     (** error_count / entry_count; 0.0 when bucket is empty. *)
   b_total_cost_usd : float option;
   b_cache_hit_ratio : float option;
-    (** cache_read_tokens / (cache_read_tokens + input_tokens); [Some 0.0]
-        when the denominator is explicitly zero, [None] when no bucket entry
-        reported either field. *)
+    (** Sum of cache reads divided by inclusive input tokens from the same
+        successful entries reporting both fields, with positive input and
+        cache reads between zero and input. [None] when no such pair exists;
+        [Some 0.0] when valid pairs report zero cache reads. *)
 }
 
 type model_bucketed = {
@@ -64,6 +65,14 @@ type latency_bucket = {
   lo_ms : int;
   hi_ms : int option;
   count : int;
+}
+
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
 }
 
 type model_stats = {
@@ -91,6 +100,7 @@ type model_stats = {
   total_input_tokens : int option;
   total_output_tokens : int option;
   total_cache_read_tokens : int option;
+  cached_input : cached_input option;
   total_cache_creation_tokens : int option;
   total_reasoning_tokens : int option;
   usage_sample_count : int;
@@ -120,6 +130,15 @@ type cost_read_diagnostics = {
 type cost_read_result =
   (cost_read_diagnostics, Dated_jsonl.read_error) result
 
+type decision_read_error =
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+
+type read_error =
+  | Decisions_unavailable of decision_read_error
+  | Costs_unavailable of Dated_jsonl.read_error
+
 type aggregate = {
   window_minutes : int;
   bucket_minutes : int;
@@ -130,10 +149,15 @@ type aggregate = {
   cost_read : cost_read_result;
 }
 
-val compute : base_path:string -> window_minutes:int -> aggregate
+val read_error_to_string : read_error -> string
+
+val compute : base_path:string -> window_minutes:int -> (aggregate, read_error) result
 (** [compute ~base_path ~window_minutes] reads all keeper decisions.jsonl
     files, filters entries within the last [window_minutes], and returns
-    per-model aggregate statistics sorted by entry count descending.
+    per-model aggregate statistics sorted by entry count descending. An unreadable
+    decision store or invalid decision rows return [Decisions_unavailable], so a
+    cache can retain its last complete snapshot. Cost diagnostics remain in the
+    successful aggregate's [cost_read].
     Error turns (outcome="error") are counted separately per model.
 
     The returned [model_stats] record carries an empty [buckets] list and
@@ -144,7 +168,7 @@ val compute_with_buckets :
   base_path:string ->
   window_minutes:int ->
   bucket_minutes:int ->
-  aggregate
+  (aggregate, read_error) result
 (** Same as {!compute} but each returned [model_stats] additionally carries
     a [buckets] list produced by {!aggregate_buckets}. *)
 
@@ -152,7 +176,7 @@ val aggregate_buckets :
   base_path:string ->
   window_min:int ->
   bucket_min:int ->
-  (model_bucketed list * cost_read_diagnostics, Dated_jsonl.read_error) result
+  (model_bucketed list * cost_read_diagnostics, read_error) result
 (** [aggregate_buckets ~base_path ~window_min ~bucket_min] splits the last
     [window_min] minutes into [bucket_min]-minute buckets, groups entries
     per model, and for each non-empty bucket computes:
@@ -161,10 +185,10 @@ val aggregate_buckets :
     - Buckets are keyed by [floor(ts_unix / (bucket_min * 60))].
     - Only buckets with at least one entry are emitted.
     - Buckets are returned oldest-first within each model.
-    - [cache_hit_ratio] is [0.0] when the denominator is zero (never NaN).
+    - [cache_hit_ratio] is [None] when no valid positive-input/cache pair is reported.
     - A non-positive [bucket_min] is treated as [1].
-    - Cost-store read failures are returned instead of being projected as an
-      empty successful cost stream. *)
+    - Decision and cost-store read failures are returned instead of being
+      projected as successful partial or empty samples. *)
 
 val to_json : aggregate -> Yojson.Safe.t
 (** Serialize [aggregate] to JSON for API responses. [model_id] is a public
@@ -179,10 +203,10 @@ val render_keeper_prompt_feedback : aggregate -> string
     are observation-only and are never included in this planning input. *)
 
 val compute_cost_latency_json :
-  base_path:string -> window_minutes:int -> Yojson.Safe.t
+  base_path:string -> window_minutes:int -> (Yojson.Safe.t, read_error) result
 (** [compute_cost_latency_json ~base_path ~window_minutes] reads all
-    raw telemetry entries once and returns the composed O4 cost-latency
-    payload consumed by [GET /api/v1/dashboard/cost-latency]:
+    raw telemetry entries once and returns [Decisions_unavailable] if the decision
+    read is incomplete, otherwise the composed O4 cost-latency payload consumed by [GET /api/v1/dashboard/cost-latency]:
 
     {[
       {
@@ -206,3 +230,11 @@ val compute_cost_latency_json :
     lane labels rather than concrete provider/model axes.
 
     @since 2.300.0 *)
+
+(** Operator-only runtime history. Groups by the exact executed runtime from
+    decision records; unpaired cost observations and records without an answerer
+    remain unattributed. The window and store diagnostics accompany the samples.
+    A failed decision-log read returns an unavailable history, never empty or
+    partial totals labelled as ready.
+    Call this from an asynchronous cached producer, never on a request's I/O path. *)
+val compute_runtime_metrics_json : base_path:string -> window_minutes:int -> Yojson.Safe.t

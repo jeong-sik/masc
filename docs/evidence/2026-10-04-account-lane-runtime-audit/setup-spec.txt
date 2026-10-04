@@ -1,0 +1,117 @@
+contract.000.output
+ASSERT same native scope groups only its own providers
+ASSERT both context variants retain their original runtime IDs
+ASSERT public inventory retains all runtime rows
+ASSERT public runtime variants retain context
+ASSERT public account identities expose no account home
+
+contract.001.output
+ASSERT image declaration survives save
+ASSERT context is preserved
+ASSERT image declaration survives save
+ASSERT context is preserved
+ASSERT image declaration survives save
+ASSERT context is preserved
+
+contract.002.output
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+ASSERT selected API model survives rendering
+ASSERT declared context survives rendering
+ASSERT binding uses the account connection
+ASSERT rendered identity resolves to its binding
+
+contract.003.output
+ASSERT equivalent IEEE number has one native identity
+ASSERT equivalent number renders the same configuration
+ASSERT native fractional output parses as configuration
+
+contract.004.output
+ASSERT invalid specification refused
+ASSERT invalid specification refused
+ASSERT invalid specification refused
+ASSERT invalid specification refused
+ASSERT messages cannot disguise OpenAI wire semantics
+
+contract.005.output
+ASSERT a dialect written as its own default is the same connection
+ASSERT an empty credential name is no credential, not another one
+ASSERT a different dialect is a different connection
+ASSERT a different endpoint is a different connection
+ASSERT a different model is a different connection
+ASSERT a different window is a different connection
+
+contract.006.output
+ASSERT the provider names the client
+ASSERT the model key names the model
+ASSERT each Hangul syllable becomes one '-'
+ASSERT a short hash follows the client
+ASSERT a model declaration has its own identity
+ASSERT the rendered connection parses as configuration
+
+contract.007.output
+ASSERT selected account differs from ambient identity
+ASSERT different selected accounts cannot overwrite each other
+ASSERT account home survives rendering
+ASSERT selected account differs from ambient identity
+ASSERT different selected accounts cannot overwrite each other
+ASSERT account home survives rendering
+
+contract.008.output
+ASSERT explicit empty account is refused
+ASSERT explicit empty account is refused
+
+contract.009.output
+ASSERT account_home is required
+ASSERT Muse protocol
+ASSERT selected account
+ASSERT no byte budget is invented for the model
+
+contract.010.output
+ASSERT saved provider keeps the discovered account home
+ASSERT different account homes are different connections
+ASSERT a declared home leaves the ambient identity
+ASSERT a relative account home is refused
+ASSERT an HTTP connection cannot carry an account home

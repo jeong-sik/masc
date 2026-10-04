@@ -16,26 +16,26 @@ remains an explicit external evidence boundary.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from dataclasses import dataclass, field
 import importlib.util
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 
 from playwright.sync_api import Browser, sync_playwright
 
-
 WORKTREE = Path(__file__).resolve().parents[1]
 REPOSITORY = "jeong-sik/masc"
 SUPPORT_PATH = WORKTREE / "scripts/capture-tui-keeper-chat.py"
-KEYBOARD_PATH = WORKTREE / "test/test_tui_keyboard_input.py"
+KEYBOARD_PATH = WORKTREE / "test/tui_keyboard_harness.py"
+SCHEDULE_PATH = WORKTREE / "test/tui_keyboard_schedule.py"
 KEEPER = "alpha"
 EXECUTION_ID = "exec-inline-diff-42"
 PROVIDER_CALL_ID = "provider-call-decoy-42"
@@ -60,7 +60,9 @@ def load_module(name: str, path: Path) -> Any:
 
 
 support = load_module("tui_capture_support", SUPPORT_PATH)
+sys.path.insert(0, str(KEYBOARD_PATH.parent))
 keyboard = load_module("tui_keyboard_support", KEYBOARD_PATH)
+schedule = load_module("tui_schedule_support", SCHEDULE_PATH)
 
 
 def require(condition: bool, detail: str) -> None:
@@ -334,7 +336,7 @@ def fixtures(
                 {
                     "status": "ok",
                     # The TUI refuses a list without the runner's status word.
-                    "schedule_runner": keyboard.SCHEDULE_RUNNER_OK,
+                    "schedule_runner": schedule.SCHEDULE_RUNNER_OK,
                     "schedule_store_read_error": None,
                     "request_count": 0,
                     "truncated": False,

@@ -10,6 +10,7 @@ let every_text_target =
   ; ("preset name", Text_preset_name)
   ; ("runtime lane name", Text_runtime_lane_name)
   ; ("runtime param", Text_runtime_param)
+  ; ("runtime model form", Text_runtime_model_form)
   ; ("runtime account form", Text_runtime_account_form)
   ; ("voice wizard", Text_voice_wizard)
   ; ("command palette", Text_palette)

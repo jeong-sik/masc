@@ -1146,7 +1146,7 @@
 (library
  (name masc_tui_model_runtime_table)
  (wrapped false)
- (libraries masc_tui_message_layout masc.runtime_toml_namespace)
+ (libraries masc_tui_message_layout masc.runtime masc.runtime_toml_namespace masc.agent_core.llm_provider)
  (modules masc_tui_model_runtime_table))
 
 (library
@@ -1368,6 +1368,12 @@
  (libraries yojson masc_tui_message_layout masc_tui_sgr_text))
 
 (library
+ (name masc_tui_runtime_evidence)
+ (wrapped false)
+ (modules masc_tui_runtime_evidence)
+ (libraries yojson unix))
+
+(library
  (name masc_tui_sgr_text)
  (wrapped false)
  (modules masc_tui_sgr_text)
@@ -1383,7 +1389,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1407,6 +1413,7 @@
   masc_tui_usage_trend
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
+  masc_tui_model_form
   masc_tui_frame
   masc_tui_image_preview
   masc
@@ -1621,6 +1628,7 @@
  (wrapped false)
  (modules masc_tui_render_memory)
  (libraries
+  masc_tui_roster_pane
   masc_tui_press
   masc
   masc_types
@@ -1868,7 +1876,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle
@@ -1969,6 +1977,7 @@
   masc_tui_runtime_config_view
   masc.runtime_toml_namespace
   masc_tui_runtime_account_form
+  masc_tui_model_form
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.
   masc.toml_line_editor
@@ -2296,7 +2305,8 @@
  (name masc_tui_queue_inspection)
  (wrapped false)
  (modules masc_tui_queue_inspection)
- (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity masc_tui_message_layout unix yojson))
+ (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity
+  masc.masc_schedule masc.masc_types masc_tui_message_layout unix yojson))
 
 ;; Offline replay of the Librarian read rules over a live workspace (RFC
 ;; librarian-lifecycle §9). Reads the turn-boundary logs and the checkpoints
@@ -2393,6 +2403,12 @@
  (wrapped false)
  (modules masc_tui_render_github)
  (libraries masc_tui_ansi masc))
+
+(library
+ (name masc_tui_model_form)
+ (wrapped false)
+ (modules masc_tui_model_form)
+ (libraries masc_tui_model_runtime_table masc_tui_message_layout masc.runtime masc.runtime_toml_namespace masc.toml_line_editor masc.agent_core.llm_provider otoml))
 (executable
  (name masc_librarian_preflight_eval)
  (modules masc_librarian_preflight_eval)
@@ -2400,4 +2416,4 @@
  (package masc)
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_log masc.fs_compat
-  masc.agent_core masc.prompt_registry digestif eio eio_main yojson))
+  masc.agent_core masc.prompt_registry masc.time_compat masc.masc_types digestif eio eio_main yojson))

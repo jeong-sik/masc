@@ -8,24 +8,14 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import zlib
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The palette row this types ("go Browser Lane") is masc_tui_types.ml's.
-# masc_tui_render.ml is named for the surface rather than for a word: the
-# page text this follows is fixture content the lane draws, and
-# render_browser_lane is where that drawing lives.
-SOURCE_MODULES = (
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-)
+
 
 
 def run(binary):

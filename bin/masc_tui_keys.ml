@@ -62,7 +62,7 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under System", None
   ; b Act "e" "edit"
-      ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
     (* One item, because they are one action: on params [e] and [Enter] both
        open the same type-aware field ([handle_runtime_param_edit_open]
@@ -71,6 +71,8 @@ let config_bindings =
        80 cells, the only other thing the pane does. A reader left with
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
+  ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
+  ; b Act "o" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]
@@ -573,9 +575,10 @@ let for_surface = function
           ~help:"open this lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a candidate to this lane's walk order"
-      ; b Act "s" "providers"
-          ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
-                 J/K reorders within each group, Enter/d opens the selected \
+      ; b Act "s" "models"
+          ~help:"edit the model order: r replaces the selected model/effort, \
+                 a adds a fallback, 1 makes it first within its HTTP/CLI group, \
+                 x removes, J/K reorders, Enter/d opens the selected \
                  slot's config table, e opens the lane table, Esc closes; \
                  HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
@@ -1183,7 +1186,8 @@ let patch_review_bindings =
   ]
 
 let runtime_detail_bindings =
-  [ b Navigate "j/k" "scroll"
+  [ b Act "e" "model settings"
+  ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
   ; b Navigate "Home/End" "edges"
   ; b Act "Left / Esc" "list"

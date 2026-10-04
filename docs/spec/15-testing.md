@@ -27,7 +27,7 @@ MASC MCP의 검증 전략을 정의한다. 테스트는 3개 계층(Hermetic Req
 1. **Hermetic first**: 외부 DB, 네트워크, LLM 런타임 없이 재현 가능한 테스트가 CI 필수 게이트.
 2. **Env-gated 분리**: PostgreSQL, live network, local LLM 등 환경 의존 테스트는 별도 계층으로 분리. CI 기본 green과 동일시하지 않는다.
 3. **실험은 실험**: benchmark, swarm proof, TRPG workload는 pass/fail이 아니라 proof artifact와 함께 해석한다.
-4. **Anti-fake 검증**: `assert true` 같은 허위 테스트를 자동 탐지하고 점수화한다.
+4. **기능 검증**: 제품의 입력·출력·상태 변화를 검사한다. 테스트 등록·CI 구성·검사기·증거 판정기의 자체 동작을 검사하는 테스트는 두지 않는다.
 5. **Agent harness**: Keeper 에이전트의 행동 품질은 시나리오 기반 eval harness로 측정한다.
 
 ### 2.2 테스트 환경 격리
@@ -46,17 +46,17 @@ ZAI_API_KEY=""                   (ZAI API 비활성화)
 
 ### 3.1 Layer 1: Hermetic Required
 
-CI 필수 게이트. 외부 의존성 없이 재현 가능.
+외부 의존성 없이 재현 가능한 기능 검증. 실행 시점과 범위는 헌법의 `execution_protocol`을 따른다.
 
 | 항목 | 실행 방법 | 범위 |
 |------|----------|------|
-| 단위/통합 테스트 묶음 | `dune test --root .` / `make test` | 40+ 테스트 바이너리 |
+| 단위/통합 테스트 묶음 | `dune test --root .` / `make test` | `test/dune`에 등록된 기능 테스트 |
 | SSE Storm E2E | `MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e` | SSE reconnect 시나리오 |
 | Contract Harness | `make test-contract` | Streamable HTTP and Golden Path contracts |
 
 Contract harness는 서버가 이미 떠 있다고 가정하지 않고 hermetic bootstrap 경로로 실행된다.
 
-**판정 기준**: main 브랜치가 green이면 core MCP/HTTP/keeper/operator 계약이 깨지지 않았다.
+**판정 기준**: 실행한 기능 시나리오의 결과를 해당 커밋과 범위로 기록한다.
 
 ### 3.2 Layer 2: Optional Env-Gated
 
@@ -96,10 +96,14 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 
 `test/dune`은 다음 구조로 테스트를 구성한다:
 
-1. **Pure synchronous tests** (최대 묶음, `(tests ...)` 블록): 44개 테스트를 단일 `(libraries masc alcotest ...)` 의존으로 묶음
+1. **Pure synchronous tests**: 순수 동기 기능 검증을 `(tests ...)` 블록과 개별 `(test ...)`로 선언한다.
 2. **Eio-dependent tests** (개별 `(test ...)` 블록): Eio.Mutex, Session.with_lock 등을 사용하는 테스트는 `eio eio_main` 의존으로 개별 빌드
 3. **agent core bridge tests**: `agent_core` 의존
-4. **Product script tests**: 설치·업그레이드·실행 스크립트의 사용자 동작을 검증한다. CI 러너·리뷰 가드·PTY fixture 자체 테스트는 전체 기능 검증에 포함하지 않는다.
+4. **Product script tests**: 설치·업그레이드·실행 스크립트의 사용자 동작을 검증한다. CI 러너·리뷰 가드·PTY fixture·증거 수집기·빌드 검사기의 자체 테스트는 두지 않는다.
+
+테스트는 입력에 대한 제품의 출력·상태 변화·저장·복구를 검증한다. 소스의 함수 호출
+횟수, 문구·파일명·구현 형태를 고정하는 검사, 과거 호환만 유지하는 검사와 폐기한 기능의 부재 검사는 두지 않는다.
+기능 검증에 필요한 프로토콜·권한·자원 경계는 실제 입력과 결과로 확인한다.
 
 ---
 

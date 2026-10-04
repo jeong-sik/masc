@@ -1725,6 +1725,7 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_quota_scope_id : string option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
 }
@@ -1904,7 +1905,7 @@ let decode_runtime_context_source = function
   | "binding_override_clamped_by_capability" -> Ok Runtime_context_binding_clamped
   | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
 
-let decode_runtime_option ~default_id json =
+let decode_runtime_option ~usage ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
   let* ro_provider_id = required_string_field json "provider_id" in
@@ -1951,6 +1952,16 @@ let decode_runtime_option ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
+  let ro_quota_scope_id =
+    match usage, ro_quota_scope with
+    | Error _, _ | Ok _, None -> None
+    | Ok usage, Some scope ->
+        (match List.filter (fun account ->
+           String.equal account.Tui_decode_usage.pua_scope scope)
+           usage.Tui_decode_usage.puws_accounts with
+         | [account] -> Some account.pua_scope_id
+         | [] | _ :: _ :: _ -> None)
+  in
   let* ro_rate_limited = required_bool_field json "rate_limited" in
   let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
@@ -1969,6 +1980,7 @@ let decode_runtime_option ~default_id json =
     ; ro_quota_exhausted
     ; ro_quota_resets_at
     ; ro_quota_scope
+    ; ro_quota_scope_id
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
     }
@@ -2041,10 +2053,13 @@ let decode_runtime_resolved_snapshot json =
   let* default_json, rrs_default_runtime_id =
     decode_runtime_default_member json
   in
+  (* Capture the credential/quota scope before catalogue/surface projections split.
+     quota_scope itself is only an ordinal within this response. *)
+  let rrs_usage = Tui_decode_usage.decode_provider_usage_windows json in
   let* runtime_items = required_list_field json "runtimes" in
   let* rrs_runtimes =
     decode_list "runtimes"
-      (decode_runtime_option ~default_id:rrs_default_runtime_id)
+      (decode_runtime_option ~usage:rrs_usage ~default_id:rrs_default_runtime_id)
       runtime_items
   in
   let runtime_by_id = Hashtbl.create (max 1 (List.length rrs_runtimes)) in
@@ -2066,7 +2081,7 @@ let decode_runtime_resolved_snapshot json =
     | None -> Ok None
     | Some value ->
         let* runtime =
-          decode_runtime_option ~default_id:rrs_default_runtime_id value
+          decode_runtime_option ~usage:rrs_usage ~default_id:rrs_default_runtime_id value
         in
         Ok (Some runtime)
   in
@@ -2115,7 +2130,7 @@ let decode_runtime_resolved_snapshot json =
     loop rrs_lanes
   in
   Ok
-    { rrs_usage = Tui_decode_usage.decode_provider_usage_windows json
+    { rrs_usage
     ; rrs_generated_at_iso
     ; rrs_config_path
     ; rrs_default_runtime_id
@@ -5514,6 +5529,8 @@ let decode_librarian_preflight_attempt json =
     | "http_response" ->
       let* status = required_int_field refusal "status" in
       let* destination_uri = required_string_field refusal "destination_uri" in
+      let* () = if String.equal destination_uri destination.sljd_destination_uri
+        then Ok () else Error "preflight HTTP refusal destination differs from attempted destination" in
       let* body = required_member refusal "body" in
       let* body = match body with
         | `String body -> Ok body
@@ -5547,7 +5564,10 @@ let preflight_fields_absent json fields =
 let decode_librarian_preflight output =
   let ( let+ ) result f = Result.map f result in
   match Json_util.assoc_member_opt "jev_preflight" output with
-  | None -> Ok None
+  | None ->
+    let* () = preflight_fields_absent output
+      ["generation_path"; "full_llm_skipped"; "preflight_domain_rejection"] in
+    Ok None
   | Some preflight ->
     let* status = required_string_field preflight "status" in
     let* lp_status = match status with
@@ -5758,6 +5778,39 @@ let decode_lane_run_detail json =
     | None | Some (Exact_lane_run_registry.Not_loaded
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
+  let* answer_succeeded =
+    match summary.lrs_status with
+    | Lane_run_succeeded -> Ok true
+    | (Lane_run_completion_persistence_failed
+      | Lane_run_completion_durability_unknown)
+      when summary.lrs_lane = Standalone_lane.Board_attention
+           || summary.lrs_lane = Standalone_lane.Librarian ->
+      (* The run's intended outcome, read with the same decoder as its
+         status. Only a run that meant to succeed, fail or be cancelled
+         reaches this record; any other word is a producer the reader does
+         not know, and says so. *)
+      let* intended = required_string_field run "intended_status" in
+      (match lane_run_status_of_string intended with
+       | Lane_run_succeeded -> Ok true
+       | Lane_run_cancelled | Lane_run_failed -> Ok false
+       | Lane_run_running | Lane_run_completion_persistence_failed
+       | Lane_run_completion_durability_unknown | Lane_run_approved
+       | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+       | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+       | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+       | Lane_run_commit_failed | Lane_run_raised
+       | Lane_run_other _ ->
+         Error (Printf.sprintf "unknown intended lane run status %S" intended))
+    | Lane_run_completion_persistence_failed
+    | Lane_run_completion_durability_unknown
+    | Lane_run_running | Lane_run_cancelled | Lane_run_failed
+    | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
+    | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
+    | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
+    | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
+    | Lane_run_other _ ->
+      Ok false
+  in
   let* lrd_answer_source =
     (* The answer-source rule below is about the Board-attention lane. *)
     let is_board_attention =
@@ -5770,38 +5823,6 @@ let decode_lane_run_detail json =
       | Standalone_lane.Verifier
       | Standalone_lane.Browser_stagehand ->
         false
-    in
-    let* answer_succeeded =
-      match summary.lrs_status with
-      | Lane_run_succeeded -> Ok true
-      | (Lane_run_completion_persistence_failed
-        | Lane_run_completion_durability_unknown)
-        when is_board_attention ->
-        (* The run's intended outcome, read with the same decoder as its
-           status. Only a run that meant to succeed, fail or be cancelled
-           reaches this record; any other word is a producer the reader does
-           not know, and says so. *)
-        let* intended = required_string_field run "intended_status" in
-        (match lane_run_status_of_string intended with
-         | Lane_run_succeeded -> Ok true
-         | Lane_run_cancelled | Lane_run_failed -> Ok false
-         | Lane_run_running | Lane_run_completion_persistence_failed
-         | Lane_run_completion_durability_unknown | Lane_run_approved
-         | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
-         | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
-         | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
-         | Lane_run_commit_failed | Lane_run_raised
-         | Lane_run_other _ ->
-           Error (Printf.sprintf "unknown intended lane run status %S" intended))
-      | Lane_run_completion_persistence_failed
-      | Lane_run_completion_durability_unknown
-      | Lane_run_running | Lane_run_cancelled | Lane_run_failed
-      | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
-      | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
-      | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
-      | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
-      | Lane_run_other _ ->
-        Ok false
     in
     match is_board_attention, answer_succeeded, lrd_output with
     | true, true, Some output ->
@@ -5838,6 +5859,14 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
     | _, _ -> Ok None
   in
+  let* () = match lrd_librarian_preflight, answer_succeeded with
+    | Some {lp_generation_path = Generation_not_entered; _}, true ->
+      Error "successful Librarian run cannot await preflight without entering generation"
+    | _, _ -> Ok () in
+  let* () = match lrd_librarian_preflight, answer_succeeded, summary.lrs_selected_slot with
+    | Some {lp_generation_path = Generation_full_lane; _}, true, None ->
+      Error "successful Librarian generation requires its selected slot"
+    | _, _, _ -> Ok () in
   let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
     | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
       Error "run without generation must not have a selected generation slot"

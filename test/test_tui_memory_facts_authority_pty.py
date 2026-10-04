@@ -7,6 +7,7 @@ regression holds A's facts response, walks the identity to B, releases
 A's answer, and proves only a fresh B read owns the display.
 """
 
+import json
 import os
 import sys
 import threading
@@ -24,11 +25,12 @@ A_CLAIM = b"workspace-a-held-fact"
 B_CLAIM = b"workspace-b-fresh-fact"
 
 
-def facts_payload(claim: str):
+def facts_payload(claim: str, keeper: str = "alpha"):
     fixtures = _keyboard_memory.memory_facts_http_fixtures()
     fixture = fixtures["/api/v1/keepers/alpha/memory-facts"]
     assert isinstance(fixture, tuple) and isinstance(fixture[1], dict)
     body = fixture[1]
+    body["keeper"] = keeper
     # The snapshot nests each store's facts under its own key; the claim is
     # the field the pane renders, so rewriting it makes the authority leak --
     # A's rows landing in B's browser -- visible as a byte on the screen.
@@ -40,26 +42,49 @@ def facts_payload(claim: str):
     return 200, body
 
 
-def run(executable: str) -> None:
+def run(executable: str, *, detail: bool = False) -> None:
     fixtures = _keyboard_memory.memory_facts_http_fixtures()
     roster = fixtures[ROSTER_PATH]
     assert isinstance(roster, tuple) and isinstance(roster[1], dict)
     wire = WorkspaceWire(roster[1])
     release_a = threading.Event()
     a_read_started = threading.Event()
-    facts_reads: list[tuple[str, bool]] = []
+    facts_reads: list[tuple[str, bool, str]] = []
+    b_keeper = "beta" if detail else "alpha"
+    a_reads = 0
+    requests: _keyboard_harness.HttpRequests = []
 
-    def facts():
+    def facts(keeper: str):
+        nonlocal a_reads
         with wire.lock:
             phase = wire.phase
-        facts_reads.append((phase, release_a.is_set()))
+            if phase == "a":
+                a_reads += 1
+        facts_reads.append((phase, release_a.is_set(), keeper))
         if phase == "a":
+            if detail and a_reads == 1:
+                return facts_payload("workspace-a-prior-fact")
             a_read_started.set()
             assert release_a.wait(timeout=30), "held A facts read was never released"
             return facts_payload("workspace-a-held-fact")
-        return facts_payload("workspace-b-fresh-fact")
+        return facts_payload("workspace-b-fresh-fact", keeper)
 
-    fixtures["/api/v1/keepers/alpha/memory-facts"] = facts
+    def memory_health():
+        with wire.lock:
+            phase = wire.phase
+        payload = _keyboard_memory.memory_facts_http_fixtures()[
+            "/api/v1/dashboard/keeper-memory-health"]
+        assert isinstance(payload, tuple) and isinstance(payload[1], dict)
+        body = payload[1]
+        keepers = body["keepers"]
+        assert isinstance(keepers, list) and keepers and isinstance(keepers[0], dict)
+        keepers[0]["source_revision"] = 47 if phase == "b" else 2
+        keepers[0]["keeper_id"] = b_keeper if phase == "b" else "alpha"
+        return 200, body
+
+    fixtures["/api/v1/dashboard/keeper-memory-health"] = memory_health
+    fixtures["/api/v1/keepers/alpha/memory-facts"] = lambda: facts("alpha")
+    fixtures["/api/v1/keepers/beta/memory-facts"] = lambda: facts("beta")
     fixtures[ROSTER_PATH] = wire.roster
     fixtures["/health"] = wire.health
     fixtures["/health?full=1"] = wire.health
@@ -71,60 +96,50 @@ def run(executable: str) -> None:
         # Enter on the keeper row starts its facts read; the held response is
         # what the authority boundary must place on the right workspace.
         os.write(fd, b"\r")
+        if detail:
+            _keyboard_harness.wait_for_output(process, fd, output,
+                b"workspace-a-prior-fact", start=0, timeout=10)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"FACT DETAIL")
+            os.write(fd, b"r")
         assert _keyboard_harness.wait_for_fixture_event(
             process, fd, output, a_read_started, timeout=10
         ), "workspace A's facts read never started"
-        # The identity walks to workspace B while A's facts answer is held.
-        # The footer spelling differs per surface, so the proof is the wire:
-        # a B-phase reading means the TUI asked with workspace B's identity.
+        # Publishing B and observing its GET callbacks precede the reducer.
+        # The mismatch badge is drawn from the applied workspace authority;
+        # it must be visible before A is allowed to complete.
         wire.publish("b")
-
-        def b_observed():
-            # Two B-phase health observations: the first is the fixture
-            # being called mid-pass, before the reading has applied; the
-            # second proves the pass completed, the identity applied, and
-            # the workspace authority advanced -- the boundary the late A
-            # response must be dropped at, and the one the fresh B read has
-            # to be launched under to survive its own delivery.
-            with wire.lock:
-                return (
-                    sum(
-                        1
-                        for event in wire.events
-                        if event.get("event") == "health"
-                        and str(event.get("phase", "")).startswith("b")
-                    )
-                    >= 2
-                )
-
-        assert _keyboard_harness.wait_for_fixture_state(
-            process, fd, output, b_observed, timeout=10
-        ), "workspace B's identity was never read"
-        # A's answer arrives after the switch: it must not populate B's view.
-        release_a.set()
+        try:
+            assert _keyboard_harness.wait_for_fixture_state(
+                process, fd, output,
+                lambda: b"[workspace mismatch]" in _keyboard_harness.screen_text(bytes(output)),
+                timeout=10,
+            ), f"workspace B identity not applied: {_keyboard_harness.screen_text(bytes(output))!r}"
+            assert _keyboard_harness.wait_for_fixture_state(
+                process, fd, output,
+                lambda: b"r47 i1" in _keyboard_harness.screen_text(bytes(output))
+                and b_keeper.encode() in _keyboard_harness.screen_text(bytes(output)),
+                timeout=10,
+            ), f"workspace B health did not replace A's facts navigation: {_keyboard_harness.screen_text(bytes(output))!r}"
+        finally:
+            # Release the owned server gate even when the applied-state check
+            # fails, so fixture teardown cannot strand A's response handler.
+            release_a.set()
+        # A's answer arrives after the applied switch, never just after a GET.
         _keyboard_harness.drain_until_quiet(process, fd, output, cap=2)
         folded = _keyboard_harness.screen_text(bytes(output))
-        if A_CLAIM in folded:
+        if A_CLAIM in folded or b"workspace-a-prior-fact" in folded:
             raise AssertionError(
                 f"workspace A's held facts populated workspace B's browser: {folded!r}"
             )
-        # A fresh B read owns the result: the proof is the wire, because the
-        # pane a claim renders in is a view question, not an authority one.
-        # The withdraw may have left another surface in front, so re-enter
-        # Memory through the palette and select alpha again.
-        reentry = len(output)
-        _keyboard_harness.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
-        _keyboard_harness.wait_for_output(
-            process, fd, output, b"MASC Memory", start=reentry, timeout=10)
-        # Enter is a no-op while a keeper browser is already open; r is the
-        # reload gesture that must own a fresh workspace-B read.
+        # The applied B health row, not a retained A browser selection, owns
+        # Enter. No refresh key is used to hide an inherited unread browser.
         start = len(output)
-        os.write(fd, b"r")
+        os.write(fd, b"\r")
 
         def b_read_after_release():
             return [
-                call for call, after_release in facts_reads
-                if call == "b" and after_release
+                call for call, after_release, keeper in facts_reads
+                if call == "b" and after_release and keeper == b_keeper
             ] != []
 
         assert _keyboard_harness.wait_for_fixture_state(
@@ -137,22 +152,30 @@ def run(executable: str) -> None:
             process, fd, output, B_CLAIM, start=start, timeout=10)
         _keyboard_harness.drain_until_quiet(process, fd, output, cap=1)
         folded = _keyboard_harness.screen_text(bytes(output))
-        if A_CLAIM in folded:
+        if A_CLAIM in folded or b"workspace-a-prior-fact" in folded:
             raise AssertionError(
                 f"workspace A's claim survived into workspace B's view: {folded!r}"
             )
+        writes = [(path, body) for path, body in requests
+                  if path != "/mcp" or json.loads(body).get("method") != "initialize"]
+        if writes:
+            raise AssertionError(f"facts navigation sent a domain write: {writes!r}")
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(
         executable,
-        description="held workspace-A facts cannot populate workspace-B's browser",
+        description="held workspace-A facts cannot populate workspace-B's " + ("detail" if detail else "browser"),
         interact=interact,
         prepare_workspace=wire.prepare,
         http_fixtures=fixtures,
+        http_requests=requests,
         refresh=0.5,
+        terminal_cols=160,
     )
 
 
 if __name__ == "__main__":
-    run(os.path.abspath(sys.argv[1]))
-    print("Memory facts authority PTY: PASS (1 scenario)")
+    executable = os.path.abspath(sys.argv[1])
+    run(executable)
+    run(executable, detail=True)
+    print("Memory facts authority PTY: PASS (2 scenarios)")

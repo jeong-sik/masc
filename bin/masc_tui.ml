@@ -4352,15 +4352,14 @@ let launch_repositories_load state ~mailbox =
   end
 
 let launch_memory_health_load state ~mailbox =
-  if state.memory_health_inflight then ()
+  if state.memory_health_inflight
+     || not (same_workspace_identity state.server_identity state.server_identity) then ()
   else begin
     state.memory_health_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> state.memory_health_inflight <- false)
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Memory_loaded result))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Memory_loaded result)
       (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
@@ -10119,7 +10118,24 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   (* The facts browser reads a workspace's keepers. The key names a Keeper,
      so without this clear a held A read's late completion would still match
      B's pending request and populate B's browser with A's facts (#41163). *)
+  if state.view = Memory && Option.is_some state.memory_facts_keeper then begin
+    state.search <- None;
+    state.search_last <- ""
+  end;
   state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
+  state.memory_facts_keeper <- None;
+  state.memory_fact_detail_open <- false;
+  state.memory_fact_detail_scroll <- 0;
+  state.memory_facts_cursor <- 0;
+  state.memory_facts_scroll <- 0;
+  state.memory_fact_claim_wrap <- None;
+  state.memory_facts_category <- Category_all;
+  (* Enter must select a newly read B health row, never A's retained row. *)
+  state.memory_health <- None;
+  state.memory_health_error <- None;
+  state.memory_health_inflight <- false;
+  state.memory_health_cursor <- 0;
+  state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
   state.preset_restore_armed <- None;
   state.preset_report <- None;

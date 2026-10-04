@@ -1,0 +1,4 @@
+START partial roster initially_present= False
+PASS False
+START partial roster initially_present= True
+PASS True

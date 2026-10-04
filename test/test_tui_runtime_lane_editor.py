@@ -570,7 +570,7 @@ def run_exact(executable: str) -> None:
         # longer offered and the cursor opens on runtime-b.
         mark = mark_output(fd, output)
         _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
-        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-b default", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
         # A pick sends only the slot it adds. A whole order built from the
@@ -622,12 +622,13 @@ def run_cli_editor(executable: str) -> None:
     def exact_posts() -> list[dict]:
         return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
 
-    def wait_for_posts(count: int) -> list[dict]:
-        deadline = time.monotonic() + 5.0
-        while len(exact_posts()) < count:
-            if time.monotonic() > deadline:
-                raise AssertionError(f"exact posts: {exact_posts()!r}")
-            time.sleep(0.05)
+    def wait_for_posts(process, fd, output, count: int) -> list[dict]:
+        # Repainting can fill the PTY before the write starts. Drain it while
+        # waiting for the actual routing request, within the existing deadline.
+        if not _keyboard_harness.wait_for_fixture_state(
+            process, fd, output, lambda: len(exact_posts()) >= count, timeout=5.0,
+        ):
+            raise AssertionError(f"exact posts: {exact_posts()!r}")
         return exact_posts()
 
     def interact(process, fd, _slave, output, _base):
@@ -649,7 +650,7 @@ def run_cli_editor(executable: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"j", b"[CLI] claude_code.claude-sonnet-5")
         mark = mark_output(fd, output)
         os.write(fd, b"K")
-        posted = wait_for_posts(1)
+        posted = wait_for_posts(process, fd, output, 1)
         expected = [{"lane": "exact/librarian_exact", "action": "move",
                      "runtime_id": "claude_code.claude-sonnet-5", "direction": "up"}]
         if posted != expected:
@@ -673,7 +674,7 @@ def run_cli_editor(executable: str) -> None:
                           b"[HTTP tail] model-a default", start=mark, timeout=5.0)
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        posted = wait_for_posts(2)
+        posted = wait_for_posts(process, fd, output, 2)
         if posted[1] != {"lane": "exact/librarian_exact", "action": "append",
                          "runtime_id": new_cli}:
             raise AssertionError(f"CLI append posted {posted[1]!r}")
@@ -726,11 +727,10 @@ def run_empty_cli_group(executable: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        deadline = time.monotonic() + 5.0
-        while not exact_posts():
-            if time.monotonic() > deadline:
-                raise AssertionError("the CLI pick on the Librarian posted nothing")
-            time.sleep(0.05)
+        if not _keyboard_harness.wait_for_fixture_state(
+            process, fd, output, lambda: bool(exact_posts()), timeout=5.0,
+        ):
+            raise AssertionError("the CLI pick on the Librarian posted nothing")
         expected = [{"lane": "exact/librarian_exact", "action": "append",
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
@@ -798,16 +798,17 @@ def run_curator_takes_cli(executable: str) -> None:
         time.sleep(0.5)
         if exact_posts():
             raise AssertionError(f"a schema-less pick posted: {exact_posts()!r}")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", "7 of 7 · / filter".encode())
+        if b"Add fallback candidate" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("clearing the rejected candidate filter closed the picker")
         _keyboard_harness.send_and_wait(process, fd, output, b"/", b"filter:")
         _keyboard_harness.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        deadline = time.monotonic() + 5.0
-        while not exact_posts():
-            if time.monotonic() > deadline:
-                raise AssertionError("the CLI pick on the curator posted nothing")
-            time.sleep(0.05)
+        if not _keyboard_harness.wait_for_fixture_state(
+            process, fd, output, lambda: bool(exact_posts()), timeout=5.0,
+        ):
+            raise AssertionError("the CLI pick on the curator posted nothing")
         expected = [{"lane": "exact/workspace_curator_exact", "action": "append",
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
@@ -831,7 +832,7 @@ def model_settings_config(*, cli_context=272000):
     return status, {**config, "source_text": config["source_text"] + '\n'.join([
         "", '[providers."glm-coding"] # request window',
         'protocol = "openai-compatible-http"', 'kind = "openai_compat"',
-        'endpoint = "https://usage.invalid/v1"', 'exact-body-timeout-s = 1200',
+        'endpoint = "https://usage.invalid/v1"', 'exact-body-timeout-s = 1200.0',
         '[models."glm-5-turbo"]', 'max-context = 131072',
         '["glm-coding"."glm-5-turbo"]', 'max-context = 65536', 'max-tokens = 4096',
         '[providers.codex_subscription]', 'protocol = "codex-app-server"',
@@ -849,6 +850,14 @@ def assert_model_form(output, *, provider, model, context):
     for needle in expected:
         if needle not in screen:
             raise AssertionError(f"shared model form omitted {needle!r}: {screen!r}")
+
+
+def close_model_form(process, fd, output) -> None:
+    # The Models heading is already behind the form and need not redraw.
+    os.write(fd, b"\x1b")
+    screen_lacks(process, fd, output, b"Edit model", timeout=3.0)
+    if b"MASC Models" not in _keyboard_harness.screen_text(bytes(output)):
+        raise AssertionError("cancelling model settings lost the Models table")
 
 
 def run_provider_jump(executable: str) -> None:
@@ -875,17 +884,19 @@ def run_provider_jump(executable: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Librarian")
         _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Model order")
         _keyboard_harness.wait_for_output(process, fd, output,
-                          b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
+                          b"> 1/1  [HTTP] glm-5-turbo default", start=0, timeout=5.0)
         _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         # The picker owns focus: [d] neither jumps nor closes it, so the
-        # Esc after it lands on the picker and returns to the slot rows.
+        # first Esc clears its filter; the second returns to the slot rows.
         os.write(fd, b"d")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", "6 of 6 · / filter".encode())
+        if b"Add fallback candidate" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("clearing the provider filter closed the picker")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b",
-                        b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
+                        b"> 1/1  [HTTP] glm-5-turbo default")
         _keyboard_harness.send_and_wait(process, fd, output, b"d", "Edit model · glm-coding".encode())
         assert_model_form(output, provider="glm-coding", model="glm-5-turbo", context="65536_")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Models")
+        close_model_form(process, fd, output)
         if any(path in (ROUTING_PATH, _keyboard_runtime.RUNTIME_CONFIG_RAW_PATH)
                for path, _body in requests):
             raise AssertionError("opening or cancelling model settings posted a write")
@@ -940,7 +951,7 @@ def run_cli_binding_jump(executable: str, *, missing_binding: bool = False) -> N
         _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=80,
                           needle=b"Context tokens", controls=(_keyboard_harness.FULL_REDRAW,))
         assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Models")
+        close_model_form(process, fd, output)
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(
@@ -1025,7 +1036,7 @@ def run_model_settings_read_isolation(executable: str, *, old_fails: bool) -> No
             _keyboard_harness.release_and_wait_for_frame(process, fd, output, newer,
                 "Edit model · codex_subscription".encode())
             assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Models")
+            close_model_form(process, fd, output)
             if any(path in (ROUTING_PATH, _keyboard_runtime.RUNTIME_CONFIG_RAW_PATH)
                    for path, _ in requests):
                 raise AssertionError("cancelled settings posted a write")
@@ -1357,10 +1368,13 @@ def run_replace_and_promote(executable: str) -> None:
                           needle=b"gpt-6-luna medium", controls=(_keyboard_harness.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
         screen = _keyboard_harness.screen_text(bytes(output))
-        if screen.count(b"context") <= 3:
-            raise AssertionError("a tall terminal still shows only three model choices")
-        if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
-            raise AssertionError("expanded model choices are not visible")
+        # Check every offered model; adjacent context metadata can be clipped.
+        choices = [f"model-{name} default".encode() for name in "abcde"] + [
+            b"gpt-6-sol low", b"gpt-6-sol high", b"gpt-6-luna medium",
+        ]
+        missing = [choice for choice in choices if choice not in screen]
+        if missing:
+            raise AssertionError(f"expanded model choices are not visible: {missing!r}")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"> 1/2  [CLI] gpt-6-luna medium")
         if b"Model order" not in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError("closing the picker lost the model order editor")

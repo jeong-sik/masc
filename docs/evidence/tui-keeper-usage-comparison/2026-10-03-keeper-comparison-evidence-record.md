@@ -1,6 +1,6 @@
 # Keeper usage comparison evidence
 
-Historical evidence only: these frames precede the unread-turn decoder and partial-window comparison repair. Their bars and recorded hashes describe the old candidate. No new binary, PTY or browser replay verifies the corrected source.
+Historical evidence only: these frames precede the unread-turn decoder and partial-window comparison repair. Their bars and recorded hashes describe the old candidate. This record contains no binary, PTY or browser replay of the corrected source. The later integration execution is recorded separately in [the PR40936 integration logs](../2026-10-04-pr40936-integration/README.md); it does not replace these historical frames.
 
 
 ## 공통 헤더

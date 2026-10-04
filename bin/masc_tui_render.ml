@@ -12043,6 +12043,9 @@ let render_config_models (state : state) =
        let lines = Masc_tui_model_form.rows ~width:(max 1 (cols - 6)) ~height:content_height form in
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
+   | None when Option.is_some state.runtime_model_jump ->
+       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings… Esc cancels" ^ Ansi.reset);
+       for _ = 2 to content_height do box_empty buf cols done
    | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols

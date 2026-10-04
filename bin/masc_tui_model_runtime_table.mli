@@ -53,3 +53,6 @@ val detail_lines : row -> string list
 (** Selected-binding explanation for the Models pane. It names the effective
     API model and the exact TOML sections that own each knob. A model name that
     is not a bare TOML key is quoted in the section path. *)
+
+val find_runtime : runtime_id:string -> row list -> (int * row) option
+(** Exact account/binding lookup for Runtime and Lane settings. *)

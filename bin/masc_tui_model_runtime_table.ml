@@ -250,3 +250,8 @@ let render ~width ?pane rows =
     (match pane with
      | Some pane when not (fits ~width:pane rows) -> stacked_lines ~pane rows
      | _ -> header :: List.map line rows)
+
+let find_runtime ~runtime_id rows =
+  List.find_mapi (fun index (row : row) ->
+    if String.equal (row.provider ^ "." ^ row.model) runtime_id
+    then Some (index, row) else None) rows

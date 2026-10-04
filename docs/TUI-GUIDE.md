@@ -643,6 +643,14 @@ HTTP candidates always run before CLI candidates. `J/K` move within a group,
 message appears after the saved order is read back; a failed read is shown as
 unverified rather than successful.
 
+Standalone Lane model settings use the same form as Config → Models. In the
+Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's
+context, output and sampling fields. Runtime detail's `e` opens the same form.
+These entries reread the saved source and resolve the full runtime ID,
+including the account. Leaving the screen or pane cancels a pending settings
+entry; an older read cannot open a newer selection. Saving refreshes Runtime,
+Lane and model inventories. `o` in Config → Models opens the source reading.
+
 ### Clients
 
 Everyone attached to this workspace in one reading: directory agents,
@@ -1941,17 +1949,22 @@ The `runtime.toml` view keeps comments and section headings on screen, while
 by a visible page and land on the nearest assignment. The selected row is a
 full-width band, so navigation always has a visible position.
 
-Models is a read-only index over the same file. It puts each binding's
-`reasoning-effort`, `temperature`, and provider `max-tokens` beside the model
-name; `-` means the key is genuinely absent, not that an empty value was
-loaded. The selected-row detail names the effective API model and the exact
-owning sections: effort and temperature belong in `[models.NAME]`, while the
-token cap belongs in `[PROVIDER.NAME]`. Thus adding only an effort is a
-one-line change under the named model section; copying a sibling block is not
-required. `e` returns to that `[models.NAME]` section in `runtime.toml`, whose
-preview-checked editor remains the one write path. Params are different: they
-come from the typed live registry, and
-`Enter` edits one value while `x` restores its registered default.
+Models groups saved model bindings by account/provider and shows the API model,
+declared context, reasoning effort, temperature, and output cap. `e` opens the
+selected binding's settings; `c` copies it into an independently named variant
+on the same account; `o` opens its source section in `runtime.toml`. In the form,
+Tab or arrows select a field, Ctrl-U clears it, Enter advances and saves from
+the last field, and Esc cancels. Save failures preserve the draft and show the
+error. Add a saved copy to a Lane to use it.
+
+Context and output edits belong to the selected account/model binding.
+Reasoning effort and temperature belong to `[models.NAME]` and affect every
+account sharing that model; use Copy for independent settings. The detail names
+each owning section and whether declared context comes from the binding,
+provider, or model. `-` means a setting is absent; undeclared context directs
+you to Runtime's resolved value. Typed parse errors remain visible instead of
+inventing values for unsupported settings. Params come from the typed live
+registry, and `Enter` edits one value while `x` restores its registered default.
 
 Prompt overrides open as a reduced operator catalog: the six complete prompts
 for Keeper, Librarian, verification, and judges are visible by default. The

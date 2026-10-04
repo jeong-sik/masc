@@ -351,6 +351,26 @@ let apply_runtime_config_jump state =
     Some (runtime_config_path_text path, Option.is_some found)
   | None, _ | Some _, None -> None
 
+let open_runtime_model_source state runtime_id =
+  state.runtime_model_form <- None;
+  state.config_pane <- Config_runtime;
+  state.runtime_config_status_open <- false;
+  state.runtime_config_view_error <- None;
+  state.config_scroll <- 0;
+  state.runtime_config_cursor <- 0;
+  let paths = match String.index_opt runtime_id '.' with
+    | None -> []
+    | Some index ->
+        let provider = String.sub runtime_id 0 index in
+        let model = String.sub runtime_id (index + 1)
+            (String.length runtime_id - index - 1) in
+        [[provider; model]; ["models"; model]; ["providers"; provider]] in
+  state.runtime_config_jump_section <-
+    (match state.runtime_config_view with
+     | None -> None
+     | Some {rcv_rows; _} -> List.find_opt
+         (fun path -> Option.is_some (runtime_config_section_line ~path rcv_rows)) paths)
+
 let move_runtime_config_cursor state ~delta =
   let direction = if delta >= 0 then 1 else -1 in
   set_runtime_config_cursor_near state ~direction
@@ -3388,15 +3408,16 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
   | `Loading pending ->
       state.runtime_config_read <- `Loading (pending || force)
   | `Idle ->
-      (* Cadence ticks share a single read. A write or explicit refresh queues
-         one follow-up so its source cannot be older than the triggering edit. *)
+      (* Cadence ticks share a single read. Only an explicit new intent or a
+         write queues another read, whose source must be newer than this one. *)
       state.runtime_config_read <- `Loading false;
       state.runtime_config_generation <- state.runtime_config_generation + 1;
       let generation = state.runtime_config_generation in
+      let requested_model = state.runtime_model_jump in
       let host = server_peer_host in
       let port = state.port in
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Runtime_config_view_loaded (generation, result))
+        ~deliver:(fun result -> Runtime_config_view_loaded (generation, requested_model, result))
         (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
 let launch_runtime_params_load state ~mailbox =
@@ -5671,6 +5692,7 @@ let enter_theme_filter state filter =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
+  state.runtime_model_jump <- None;
   state.detail_focus_recovery <- None;
   (* The browser reader owns Connectors; refocusing it keeps the reader.
      The transport-list palette hides it explicitly before arriving here.
@@ -10070,6 +10092,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_jump_section <- None;
   state.runtime_config_status_open <- false;
   state.runtime_account_form <- None;
+  state.runtime_model_jump <- None;
+
   state.presets_snapshot <- None;
   state.presets_error <- None;
   state.presets_cursor <- 0;
@@ -10738,6 +10762,7 @@ let enter_keeper_detail_tab state ~mailbox tab =
    strip. Everything below is what arriving at a pane asks for; the key and
    the press differ only in which pane they name. *)
 let enter_config_pane state ~mailbox pane =
+  state.runtime_model_jump <- None;
   state.config_pane <- pane;
   state.prompts_cursor <- 0;
   state.config_scroll <- 0;
@@ -14264,7 +14289,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
            state.runtime_params_notice <- Some (true, notice);
            launch_runtime_params_load state ~mailbox)
-  | Runtime_config_view_loaded (generation, result) -> (
+  | Runtime_config_view_loaded (generation, requested_model, result) -> (
       if generation = state.runtime_config_generation then
       let pending = match state.runtime_config_read with
         | `Loading pending -> pending
@@ -14296,10 +14321,31 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            | Ok rows ->
              state.config_models_rows <- rows;
              state.config_models_cursor <- min state.config_models_cursor (max 0 (List.length rows - 1));
-             state.config_models_error <- None
+             state.config_models_error <- None;
+             (match requested_model with
+              | Some runtime_id when state.runtime_model_jump = requested_model
+                    && state.view = Config && state.config_pane = Config_models ->
+                (match Masc_tui_model_runtime_table.find_runtime ~runtime_id rows with
+                 | Some (index, row) ->
+                   state.config_models_cursor <- index;
+                   state.config_scroll <- 0;
+                   state.runtime_model_form <- Some (Masc_tui_model_form.create Edit row)
+                 | None ->
+                   open_runtime_model_source state runtime_id;
+                   report_action state "info"
+                     ("Binding unavailable; edit runtime.toml for " ^ Terminal_text.single_line runtime_id))
+              | Some _ | None -> ());
+             state.runtime_model_jump <- None
            | Error detail ->
              state.config_models_rows <- [];
-             state.config_models_error <- Some detail);
+             state.config_models_error <- Some detail;
+             (match requested_model with
+              | Some runtime_id when state.runtime_model_jump = requested_model
+                    && state.view = Config && state.config_pane = Config_models ->
+                  open_runtime_model_source state runtime_id;
+                  report_action state "error" ("Model settings unreadable; edit runtime.toml: " ^ detail)
+              | Some _ | None -> ());
+             state.runtime_model_jump <- None);
           set_runtime_config_cursor_near state ~direction:1
             ~target:state.runtime_config_cursor;
           (match apply_runtime_config_jump state with
@@ -14311,6 +14357,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              report_action state "error"
                (Printf.sprintf "runtime.toml has no [%s] section" section))
       | Error detail ->
+          state.runtime_model_jump <- None;
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (request, result) ->
@@ -17488,7 +17535,9 @@ let main
     scan 0 rows
   in
   let handle_config_models_open_source () =
-    match List.nth_opt state.config_models_rows state.config_models_cursor with
+    if Option.is_some state.runtime_model_jump then
+      report_action state "info" "Loading the selected binding; Esc cancels"
+    else match List.nth_opt state.config_models_rows state.config_models_cursor with
     | None -> report_action state "error" "no model row is selected"
     | Some row -> (
       match state.runtime_config_view with
@@ -17597,7 +17646,9 @@ let main
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
   let handle_model_form_open mode () =
-    match selected_config_model state with
+    if Option.is_some state.runtime_model_jump then
+      report_action state "info" "Loading the selected binding; Esc cancels"
+    else match selected_config_model state with
     | Ok row -> state.runtime_model_form <- Some (Masc_tui_model_form.create mode row)
     | Error detail -> report_action state "error" detail
   in
@@ -17612,57 +17663,26 @@ let main
       | Ok form -> state.runtime_account_form <- Some form
       | Error reason -> report_action state "error" reason)
   in
+  let open_runtime_model_settings runtime_id =
+    state.runtime_model_form <- None;
+    state.runtime_model_jump <- Some runtime_id;
+    state.runtime_config_jump_section <- None;
+    state.view <- Config;
+    state.config_pane <- Config_models;
+    state.config_scroll <- 0;
+    (* Read the authoritative source before choosing the exact account/binding;
+       a pending catalogue or stale cursor cannot select a neighbour's model. *)
+    launch_runtime_config_load ~force:true state ~mailbox:async_messages
+  in
   let open_selected_slot_config () =
     match Masc_tui_types.slot_editor_cursor_row state with
     | None -> show_lanes_action_error state "No slot is selected"
     | Some { sr_kind = Masc_tui_types.Media_route_slot; _ } ->
       show_lanes_action_error state "Select an exact lane provider slot"
     | Some { sr_slot; sr_kind = (Masc_tui_types.Catalog_slot
-                             | Masc_tui_types.Official_client_slot) as kind; _ } ->
-      (* Runtime.toml validates provider ids as dot-free and runtime ids as
-         <provider>.<model>; model ids may contain dots. Read the declared
-         slot itself so a dropped slot can still open the table that needs
-         repair, even before the catalogue's asynchronous read finishes. *)
-      let path =
-        match String.index_opt sr_slot '.' with
-        | Some boundary
-          when boundary > 0 && boundary < String.length sr_slot - 1 ->
-          let provider_id = String.sub sr_slot 0 boundary in
-          let model_id =
-            String.sub sr_slot (boundary + 1)
-              (String.length sr_slot - boundary - 1)
-          in
-          (match kind with
-           | Masc_tui_types.Catalog_slot ->
-             Some [ Runtime_toml_namespace.(key Providers); provider_id ]
-           | Masc_tui_types.Official_client_slot -> Some [ provider_id; model_id ]
-           | Masc_tui_types.Media_route_slot -> None)
-        | Some _ | None -> None
-      in
-      (match path with
-       | None ->
-         show_lanes_action_error state
-           (Printf.sprintf "%s has no runtime binding table" sr_slot)
-       | Some path ->
-           let section = runtime_config_path_text path in
-           state.lanes_action_error <- None;
-           state.view <- Config;
-           state.config_pane <- Config_runtime;
-           state.runtime_config_jump_section <- Some path;
-           (match state.runtime_config_view, state.runtime_config_view_error with
-            | (None | Some _), Some _ | None, None ->
-              add_event state "info"
-                (Printf.sprintf "loading runtime.toml for [%s]" section);
-              launch_runtime_config_load state ~mailbox:async_messages
-            | Some _, None ->
-              (match apply_runtime_config_jump state with
-               | Some (_, true) ->
-                 add_event state "info"
-                   (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
-               | Some (_, false) ->
-                 report_action state "error"
-                   (Printf.sprintf "runtime.toml has no [%s] section" section)
-               | None -> ())))
+                             | Masc_tui_types.Official_client_slot); _ } ->
+      state.lanes_action_error <- None;
+      open_runtime_model_settings sr_slot
   in
   let selected_runtime_param () =
     List.nth_opt state.runtime_params state.runtime_params_cursor
@@ -19805,7 +19825,9 @@ and is loaded on demand through keeper_skill.
                   save_runtime_config_text ~authority ~identity draft in
                 (match result with
                  | Ok summary -> state.runtime_model_form <- None;
-                   state.runtime_catalog_reading <- Runtime_catalog_unread;
+                   launch_runtime_catalog_load state ~mailbox:async_messages;
+                   launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
+                   launch_lanes_reread state ~mailbox:async_messages;
                    report_action state "system" ("Model saved · " ^ summary ^ " · choose it in Runtime / Lanes")
                  | Error detail -> state.runtime_model_form <- Some (Masc_tui_model_form.refused form detail)))
        | Some k
@@ -23882,7 +23904,7 @@ and is loaded on demand through keeper_skill.
             | Tools ->
                 (* Off-ring child: back to the parent that opened it. *)
                 goto_surface state ~mailbox:async_messages Config
-            | Config -> state.view <- Overview)
+            | Config -> state.runtime_model_jump <- None; state.view <- Overview)
        | Some "left" when state.repository_changes_open ->
            if Option.is_some state.repository_changes_diff_path then
              close_repository_changes_diff state
@@ -25932,11 +25954,17 @@ and is loaded on demand through keeper_skill.
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
            handle_connector_edit ()
+       | Some "e"
+         when state.view = Runtime && Option.is_some state.runtime_detail_target ->
+           (match state.runtime_detail_target with
+            | Some (Runtime_lane_candidate { runtime_id; _ }
+                  | Runtime_catalog_entry { runtime_id }) -> open_runtime_model_settings runtime_id
+            | Some Runtime_routes -> report_action state "info" "Select a runtime to edit its model settings"
+            | None -> ())
        | Some "d"
          when state.view = Lanes && state.lanes_mode = Lanes_overview
               && Option.is_some state.slot_editor ->
-           (* The picker owns focus while it is open. A selected HTTP slot
-              opens its provider deadline; a CLI slot opens its own binding. *)
+           (* The picker owns focus while it is open. *)
            if Option.is_none state.runtime_lane_pick then
              open_selected_slot_config ()
        | Some "o" when state.view = Config && state.config_pane = Config_models ->

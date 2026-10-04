@@ -909,6 +909,8 @@ let fork_recovery ~sw m ~id ~on_failure work =
   (* Cancellation can occur while scheduling, before the child starts. Keep
      the same retry obligation as a cancellation inside its work. *)
   try fork_isolated ~sw work with
+  | Eio.Cancel.Cancelled _ as exn ->
+      Hashtbl.replace m.recovering id (on_failure (Printexc.to_string exn)); raise exn
   | exn -> Hashtbl.replace m.recovering id (on_failure (Printexc.to_string exn)); raise exn
 let historical_detach ~sw m fields =
   let* id = text fields "instance_id" in

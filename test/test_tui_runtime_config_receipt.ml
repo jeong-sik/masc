@@ -288,11 +288,29 @@ let test_lane_notice_retains_application_and_durability () =
     (Receipt.lane_summary unpublished)
 ;;
 
+let test_lane_notice_reports_environment_preemption () =
+  List.iter (fun (status, applied, expected) ->
+    let keeper = `Assoc ["status", `String status; "configured_count", `Int (1 + List.length applied);
+      "requires_restart", `Bool false; "pending_keys", `List [];
+      "applied_keys", `List (List.map (fun key -> `String key) applied);
+      "preempted_keys", `List [`String "turn.temperature"]; "applied_at", `Null] in
+    let value = decoded (receipt ~keeper ()) in
+    check bool "environment preemption needs attention without restart" true
+      (Receipt.lane_needs_attention value);
+    check string "lane summary retains preemption and affected keys"
+      ("File saved · exact lanes applied · routing applied · " ^ expected)
+      (Receipt.lane_summary value))
+    ["preempted_by_env", [], "Keeper settings overridden by environment: turn.temperature";
+     "mixed", ["turn.max_tokens"],
+       "Keeper settings partially applied; overridden by environment: turn.temperature"]
+;;
+
 let () =
   run
     "tui runtime config receipt"
     [ ( "decode"
-      , [ test_case "lane notices preserve application and durability" `Quick
+      , [ test_case "lane preemption is visible without restart" `Quick test_lane_notice_reports_environment_preemption;
+          test_case "lane notices preserve application and durability" `Quick
             test_lane_notice_retains_application_and_durability
         ; test_case "valid receipt preserves typed outcomes" `Quick
             test_valid_receipt_preserves_typed_outcomes

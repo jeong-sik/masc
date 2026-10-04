@@ -203,7 +203,12 @@ with a focused build. Request these only when needed. The constitution's
 threshold. A cold dependency cache can take longer; only an actual successful
 completion is build evidence.
 
-There is no PR, general push or scheduled CI. At `release/vX.Y.Z`, explicitly
+There is no automatic PR or general push CI. The operator-authorized
+`main-minimal-build.yml` checks main every 30 minutes and builds four operator
+executables only when non-documentation inputs lack a successful build receipt.
+It reuses opam/Dune caches and records actual build SHA versus skipped scope;
+it does not change ordinary review or Release/Tag requirements.
+At `release/vX.Y.Z`, explicitly
 request [release-candidate.yml](../../.github/workflows/release-candidate.yml)
 for full builds, type checks, behavior tests and installation verification on
 that head. Tag publication also requires full checks and tests. See the

@@ -453,11 +453,24 @@ let summary receipt =
     exact_output_registry
 ;;
 
+let keeper_lane_warning application =
+  let keys = String.concat ", " application.keeper_preempted_keys in
+  match application.keeper_status, application.keeper_preempted_keys with
+  | Keeper_mixed, _ ->
+      Some ("Keeper settings partially applied"
+            ^ (if keys = "" then "" else "; overridden by environment: " ^ keys))
+  | Keeper_preempted_by_env, _ | _, _ :: _ ->
+      Some ("Keeper settings overridden by environment"
+            ^ (if keys = "" then "" else ": " ^ keys))
+  | (Keeper_not_configured | Keeper_pending_restart | Keeper_applied), [] -> None
+;;
+
 let lane_needs_attention receipt =
   receipt.durability = Durability_unconfirmed
   || receipt.lock_warnings <> []
   || receipt.application.routing_requires_restart
   || receipt.application.keeper_requires_restart
+  || Option.is_some (keeper_lane_warning receipt.application)
   || (match receipt.application.exact_output_registry with
       | Exact_output_registry_applied _ -> false
       | Exact_output_registry_unpublished | Exact_output_registry_kept _ -> true)
@@ -481,6 +494,7 @@ let lane_summary receipt =
      @ (if receipt.application.keeper_requires_restart then
           ["Keeper settings await restart: " ^ String.concat ", " receipt.application.keeper_pending_keys]
         else [])
+     @ Option.to_list (keeper_lane_warning receipt.application)
      @ List.map (fun warning -> warning.detail) receipt.lock_warnings)
 ;;
 

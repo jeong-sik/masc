@@ -1,0 +1,131 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-audit-ide-inlay-hints-20261004/dashboard
+
+ ↓ src/components/ide/ide-lsp-client.test.ts > resolveLspDiagnosticFilePath > keeps safe relative diagnostic URIs as IDE file paths
+ ↓ src/components/ide/ide-lsp-client.test.ts > resolveLspDiagnosticFilePath > maps absolute diagnostic URIs only when they match the current IDE file suffix
+ ↓ src/components/ide/ide-lsp-client.test.ts > resolveLspDiagnosticFilePath > ignores missing or unsafe diagnostic URIs instead of falling back to the current file
+ ↓ src/components/ide/ide-lsp-client.test.ts > clearLspDiagnosticSnapshot > clears only the normalized diagnostic snapshot for the previous file
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > publishes typed masc/lspStatus notifications
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > rejects malformed masc/lspStatus payloads without mutating the snapshot
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > clears the rejection once a readable payload arrives
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > settles pending requests when the socket closes
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > ignores stale socket events after reconnecting
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > cancels scheduled reconnect when disposed
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > uses exponential reconnect delays while the LSP socket stays down
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > recovers diagnostics after a prolonged transport outage
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > does not reconnect after terminal LSP close codes
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > notifies readiness after initial connect and reconnect initialize
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > declares the repository scope on the connection URL
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > declares a keeper workspace without fabricating an overlay scope
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > declares no scope when none is published
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > carries the dashboard bearer as a query token, since a WebSocket cannot send headers
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > names documents with an absolute URI under the advertised root
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/masc, src/hash#part.ml)
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/masc, src/percent%20name.ml)
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/space #?%/한글, src/한글 ?name.ml)
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/unused, /workspace/masc/src/hash#part.ml)
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > sends no document request before the workspace root is known
+ ↓ src/components/ide/ide-lsp-client.test.ts > LspConnection > routes notification send failures through reconnect instead of throwing
+ × src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > places unsorted same-line hints at their own offsets and keeps ties in response order 30ms
+   → expected [ 'later', 'first', 'second', …(1) ] to deeply equal [ 'first', 'second', 'later', …(1) ]
+ × src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > renders composite labels and safely displays whole-hint and per-part markup tooltips 8ms
+   → expected '' to be ': <int>' // Object.is equality
+ × src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":-1},"label":"invalid offset"} 1ms
+   → expected 1 to be +0 // Object.is equality
+ × src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":1.5},"label":"fractional offset"} 0ms
+   → expected 1 to be +0 // Object.is equality
+ × src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":{"value":"not an array"}} 0ms
+   → expected 1 to be +0 // Object.is equality
+ × src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":[{"value":""}]} 0ms
+   → expected 1 to be +0 // Object.is equality
+ × src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":"type","tooltip":{"kind":"html","value":"<b>bad</b>"}} 0ms
+   → expected 1 to be +0 // Object.is equality
+ ↓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > sends actual source on open and monotonic full changes on store updates
+ ↓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > discards a delayed old-version pull and distinguishes failed diagnostics from true empty
+ ↓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > rejects mismatched URI/version and keeps unversioned server reports explicitly unconfirmed
+ ↓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > changes repository scope even without a CodeMirror transaction and rejects old socket evidence
+ ↓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > does not report degraded empty responses as clean diagnostics
+ ↓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > synchronizes the full CM document including lines beyond the display inventory
+ ↓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > uses the proxy server language for JSX status and old editor cleanup cannot erase its successor
+ ↓ src/components/ide/ide-lsp-client.test.ts > remounts the actual editor for a fresh same-path workspace snapshot even when null is batched away
+ ↓ src/components/ide/ide-lsp-client.test.ts > hover contents > reads every Hover.contents shape the protocol defines
+ ↓ src/components/ide/ide-lsp-client.test.ts > hover contents > renders a fenced block as code with its line breaks
+ ↓ src/components/ide/ide-lsp-client.test.ts > hover contents > shows nothing for an empty or unknown hover
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > places unsorted same-line hints at their own offsets and keeps ties in response order
+AssertionError: expected [ 'later', 'first', 'second', …(1) ] to deeply equal [ 'first', 'second', 'later', …(1) ]
+
+- Expected
++ Received
+
+  [
++   "later",
+    "first",
+    "second",
+-   "later",
+    "line end",
+  ]
+
+ ❯ src/components/ide/ide-lsp-client.test.ts:629:51
+    627|     ], async view => {
+    628|       const hints = [...view.dom.querySelectorAll('.cm-inlayHint')]
+    629|       expect(hints.map(hint => hint.textContent)).toEqual(['first', 's…
+       |                                                   ^
+    630|       expect(hints.map(hint => view.posAtDOM(hint))).toEqual([3, 3, 12…
+    631|     })
+ ❯ withHints src/components/ide/ide-lsp-client.test.ts:608:13
+ ❯ src/components/ide/ide-lsp-client.test.ts:622:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > renders composite labels and safely displays whole-hint and per-part markup tooltips
+AssertionError: expected '' to be ': <int>' // Object.is equality
+
+- Expected
++ Received
+
+- : <int>
+
+ ❯ src/components/ide/ide-lsp-client.test.ts:641:32
+    639|     await withHints(hints, async (view, socket) => {
+    640|       const hint = view.dom.querySelector('.cm-inlayHint')!
+    641|       expect(hint.textContent).toBe(': <int>')
+       |                                ^
+    642|       expect(hint.getAttribute('title')).toBe('inferred type')
+    643|       expect(hint.querySelector('int')).toBeNull()
+ ❯ withHints src/components/ide/ide-lsp-client.test.ts:608:13
+ ❯ src/components/ide/ide-lsp-client.test.ts:639:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":-1},"label":"invalid offset"}
+ FAIL  src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":1.5},"label":"fractional offset"}
+ FAIL  src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":{"value":"not an array"}}
+ FAIL  src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":[{"value":""}]}
+ FAIL  src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":"type","tooltip":{"kind":"html","value":"<b>bad</b>"}}
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/components/ide/ide-lsp-client.test.ts:669:36
+    667|       const pending = conn.requestInlayHints('current.ml', 1)
+    668|       socket.message({ id: wire(socket, 'textDocument/inlayHint').at(-…
+    669|       expect((await pending).size).toBe(0)
+       |                                    ^
+    670|     } finally { conn.dispose() }
+    671|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 36 skipped (43)
+   Start at  02:36:41
+   Duration  1.03s (transform 33%, environment 27%, setup 26%, import 8%, tests 4%, worker 1%)
+

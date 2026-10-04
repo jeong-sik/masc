@@ -144,7 +144,7 @@ decides whether launching one is worth it.
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
 | Keeper Automation | unavailable | `GET /api/v1/dashboard/scheduled-automation`, filtered to the selected Keeper |
 | Keeper Runs | unavailable | `GET /api/v1/dashboard/fusion-runs`, filtered to the selected Keeper |
-| Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` |
+| Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` + authenticated `GET /api/v1/runtime/metrics` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
 
@@ -646,7 +646,17 @@ configuration is kept, correct the reported configuration problem before
 restarting. The notice also names pending Keeper settings and lock warnings.
 A subsequent list refresh does not turn a held application into success. If
 that read fails, the commit result remains visible beside the stale-list warning.
-Long result messages wrap to the terminal width.
+Long result messages wrap to the terminal width. Navigation dismisses the notice;
+a delayed reread does not restore it. Keeper values overridden by environment
+settings remain visible as warnings even when no restart is required.
+
+Standalone Lane model settings use the same form as Config → Models. In the
+Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's
+context, output and sampling fields. Runtime detail's `e` opens the same form.
+These entries reread the saved source and resolve the full runtime ID,
+including the account. Leaving the screen or pane cancels a pending settings
+entry; an older read cannot open a newer selection. Saving refreshes Runtime,
+Lane and model inventories. `o` in Config → Models opens the source reading.
 
 ### Clients
 
@@ -1364,6 +1374,14 @@ hands back the line that is waiting rather than stepping over it into what was
 already delivered. The draft is put aside on the first step back and returned
 on the way forward past the newest.
 
+`/queue` reads the selected Keeper's server inventory. Its counts separate
+pending inputs, running work, future schedules, due schedules and unavailable
+sources. An aggregated chat row counts every queued request. Future schedules
+show their due instant instead of treating their creation age as waiting time.
+Pending events are durable sources not yet acknowledged; they may already be
+part of the current turn. This inventory does not prove individual admission
+or completion of an external effect.
+
 A failed roster read blocks sending. When `.masc/keepers/` cannot be read
 reliably, a stale entry may still name the target, so membership alone does not
 authorize an external effect - the surface renders
@@ -1887,6 +1905,23 @@ the one the lane walks: `head`, `fallback #n`, or `single candidate`.
 metadata-endpoint reachability reading. It does not send a completion, execute a CLI
 runtime, or report runtime candidate order history.
 
+Runtime detail also reads the authenticated `GET /api/v1/runtime/metrics`.
+It shows the last and recent recorded successes within a 24-hour window,
+successful/error sample counts, reported usage and telemetry coverage, and
+cache reads as a share of inclusive input tokens from the same valid pairs.
+Zero cache reads and missing reports remain distinct. Only the decision's
+observed executed runtime ID attributes a sample; API model names, the selected
+lane, and unpaired cost rows do not identify an account. Records without an
+answerer and unavailable cost-store reads are shown separately. These are
+recorded samples, not a claim that every call was logged. Snapshot age and
+staleness accompany the history; a cold cache shows loading until refreshed.
+
+The same detail lists current catalog context/output limits separately from
+model, provider and binding context declarations. Official-client catalog
+limits that the runtime does not expose remain unreported. These current
+specifications do not describe earlier calls. Bound Keeper totals are labelled
+as lifetime activity across all runtimes, separate from this runtime's history.
+
 `CLI not probed` is neutral, and a candidate absent from a stale probe is
 `unobserved`, not unhealthy. Green is limited to the `reachable` token; model,
 provider, and ordinary row text use the terminal foreground. A blocked route,
@@ -1929,17 +1964,22 @@ The `runtime.toml` view keeps comments and section headings on screen, while
 by a visible page and land on the nearest assignment. The selected row is a
 full-width band, so navigation always has a visible position.
 
-Models is a read-only index over the same file. It puts each binding's
-`reasoning-effort`, `temperature`, and provider `max-tokens` beside the model
-name; `-` means the key is genuinely absent, not that an empty value was
-loaded. The selected-row detail names the effective API model and the exact
-owning sections: effort and temperature belong in `[models.NAME]`, while the
-token cap belongs in `[PROVIDER.NAME]`. Thus adding only an effort is a
-one-line change under the named model section; copying a sibling block is not
-required. `e` returns to that `[models.NAME]` section in `runtime.toml`, whose
-preview-checked editor remains the one write path. Params are different: they
-come from the typed live registry, and
-`Enter` edits one value while `x` restores its registered default.
+Models groups saved model bindings by account/provider and shows the API model,
+declared context, reasoning effort, temperature, and output cap. `e` opens the
+selected binding's settings; `c` copies it into an independently named variant
+on the same account; `o` opens its source section in `runtime.toml`. In the form,
+Tab or arrows select a field, Ctrl-U clears it, Enter advances and saves from
+the last field, and Esc cancels. Save failures preserve the draft and show the
+error. Add a saved copy to a Lane to use it.
+
+Context and output edits belong to the selected account/model binding.
+Reasoning effort and temperature belong to `[models.NAME]` and affect every
+account sharing that model; use Copy for independent settings. The detail names
+each owning section and whether declared context comes from the binding,
+provider, or model. `-` means a setting is absent; undeclared context directs
+you to Runtime's resolved value. Typed parse errors remain visible instead of
+inventing values for unsupported settings. Params come from the typed live
+registry, and `Enter` edits one value while `x` restores its registered default.
 
 Prompt overrides open as a reduced operator catalog: the six complete prompts
 for Keeper, Librarian, verification, and judges are visible by default. The

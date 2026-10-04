@@ -11,12 +11,13 @@
 
     Typed non-verdicts (evaluator unavailable, malformed reply after all
     slots failed, verdict without a stated reason, refused commit) leave the
-    pending row durable and stop — a pending row is never consumed on
-    failure, nothing re-runs the same review on a clock, and there is no
-    wall-clock expiry. *)
+    pending row durable. Typed retryable evaluator errors retry the same
+    request after candidate rest; other deferrals need an explicit wake.
+    A pending row is never consumed on failure and has no wall-clock expiry. *)
 
 val start :
   sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Workspace_utils_backend_setup.config ->
   unit
 
@@ -32,6 +33,7 @@ val unreconciled_to_yojson : Goal_store.goal -> Yojson.Safe.t
     stored, so it names the goals stuck in Verifying now. *)
 
 module For_testing : sig
+  val retry_pending : goal_id:string -> bool
   val scan_active_once : unit -> bool
   (** Consume one pending scan on the real active runtime for deterministic
       wake/ownership race tests. False means no runtime is active. *)
@@ -45,6 +47,7 @@ module For_testing : sig
         { gate : string
         ; detail : string
         ; evaluator_runtime : string option
+      ; retryable_runtimes : string list
         }
     | Verdict_without_reason
     | Commit_refused of { detail : string }

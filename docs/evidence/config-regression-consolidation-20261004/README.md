@@ -89,3 +89,5 @@ runtime validity 144/144 evidence may be reused only because their source and
 production dependencies are unchanged; those suites were not rerun here. The
 historical cache harness was not rerun. No full build/suite, provider activation,
 installed runtime, deployment or release proof is claimed.
+
+The subsequent parent contract correction at `7ecd2f4489af7b873613aa1718643f7b70e4100d` was integrated without changing product behavior. Its schema/RFC clarification and supported-healthcheck/unsupported-log regression are retained. The namespace target was rebuilt and all16 cases passed (0.005s). The55 boot-override cases above were not rerun: their source and runtime implementation remain unchanged.

@@ -3094,17 +3094,8 @@ let render_repository_changes_diff (state : state) ~path =
    provider-stated deadline; its absence means a hard-quota rejection that
    claimed no reset -- cleared by the next success on the scope. *)
 let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
-  if not runtime.ro_quota_exhausted then None
-  else
-    Some
-      ( (Theme.warn ())
-        ^ (match runtime.ro_quota_resets_at with
-           | Some resets_at ->
-             let tm = Unix.localtime resets_at in
-             Printf.sprintf "quota exhausted (resets %02d:%02d)"
-               tm.Unix.tm_hour tm.Unix.tm_min
-           | None -> "quota exhausted (no reset stated)")
-        ^ Ansi.reset )
+  Option.map (fun label -> Theme.warn () ^ label ^ Ansi.reset)
+    (runtime_quota_label runtime)
 
 (* The other half of "alive on paper": this process saw a 429 on the runtime
    whose provider wait has not ended and no successful answer has cleared.
@@ -3112,17 +3103,8 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
    window above, so a runtime can carry both. [resets_at] is the provider's
    own Retry-After and is present only while it is still ahead. *)
 let runtime_rate_limit_badge (runtime : Masc.Tui_decode.runtime_option) =
-  if not runtime.ro_rate_limited then None
-  else
-    Some
-      ( (Theme.warn ())
-        ^ (match runtime.ro_rate_limit_resets_at with
-           | Some resets_at ->
-             let tm = Unix.localtime resets_at in
-             Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour
-               tm.Unix.tm_min
-           | None -> "rate limited")
-        ^ Ansi.reset )
+  Option.map (fun label -> Theme.warn () ^ label ^ Ansi.reset)
+    (runtime_rate_limit_label runtime)
 
 
 (* Which lanes list this runtime among their candidates, in the order the

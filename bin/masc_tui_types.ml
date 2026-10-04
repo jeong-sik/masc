@@ -10769,6 +10769,38 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 
+let runtime_quota_label (runtime : Tui_decode.runtime_option) =
+  if not runtime.ro_quota_exhausted then None
+  else Some (match runtime.ro_quota_resets_at with
+    | Some at -> let tm = Unix.localtime at in
+        Printf.sprintf "quota exhausted (resets %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
+    | None -> "quota exhausted (no reset stated)")
+
+let runtime_rate_limit_label (runtime : Tui_decode.runtime_option) =
+  if not runtime.ro_rate_limited then None
+  else Some (match runtime.ro_rate_limit_resets_at with
+    | Some at -> let tm = Unix.localtime at in
+        Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
+    | None -> "rate limited")
+
+let runtime_usage_label state runtime =
+  match state.runtime_surface with
+  | None -> Some "usage unknown"
+  | Some snapshot ->
+      match runtime_spent_usage snapshot.rss_resolved runtime with
+      | Error _ -> Some "usage unknown"
+      | Ok [] -> None
+      | Ok (_ :: _) -> Some "account limit spent"
+
+let runtime_route_probe_text state runtime probe =
+  let route = match List.filter_map Fun.id
+      [ runtime_quota_label runtime; runtime_rate_limit_label runtime; runtime_usage_label state runtime ] with
+    | [] -> "no refusal"
+    | parts -> String.concat " " parts in
+  route ^ " / " ^ (match probe with
+    | None -> "unobserved"
+    | Some probe -> runtime_probe_status_label probe.Masc.Tui_decode_runtime_probe.rpp_status)
+
 let runtime_pick_facts = function
   | Pick_lane (lane, candidates) ->
     let hops =
@@ -11105,7 +11137,32 @@ let runtime_authority_rows ~cols (state : state) : string list =
   Masc_tui_message_layout.pack_clauses ~max_cells:room clauses
   |> List.map (fun line -> indent ^ line)
 
+let runtime_selection_summary_lines ~cols state =
+  let selected = match state.runtime_surface, state.runtime_mode with
+    | None, _ -> None
+    | Some snapshot, Runtime_lanes ->
+        List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor
+        |> Option.map (fun row -> row.Tui_decode.rcr_runtime, row.rcr_probe)
+    | Some snapshot, Runtime_all ->
+        List.nth_opt snapshot.Tui_decode.rss_resolved.rrs_runtimes state.runtime_cursor
+        |> Option.map (fun runtime -> runtime,
+            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.ro_id) in
+  match selected with
+  | None -> []
+  | Some (runtime, probe) ->
+      let width = max 1 (Masc_tui_frame.inner_width ~cols - 2) in
+      [ "Selected " ^ runtime.ro_id ^ " · Account " ^ runtime.ro_provider_id
+          ^ " · " ^ runtime.ro_provider ^ " / " ^ runtime.ro_model
+      ; runtime_route_probe_text state runtime probe ]
+      |> List.concat_map (fun line ->
+          Masc_tui_message_layout.wrap_words ~max_cells:width
+            (Masc.Tui_terminal_text.sanitize_terminal_text line))
+      |> List.map (fun line -> "  " ^ line)
+
 let runtime_surface_listing_chrome ~cols state =
+  let selection_rows = runtime_selection_summary_lines ~cols state in
+  (if selection_rows = [] then 0 else List.length selection_rows + 1)
+  +
   runtime_listing_chrome
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
     ~error:state.runtime_surface_error

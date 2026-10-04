@@ -9293,8 +9293,9 @@ type runtime_table_column =
   | Runtime_status_column
   | Runtime_detail_column
 
-let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
-  let lane_width, candidate_width, identity_width, status_width = runtime_column_widths cols in
+let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+  let lane_width, candidate_width, identity_width, minimum_status_width = runtime_column_widths cols in
+  let status_width = max minimum_status_width status_cells in
   let inner_width = max 1 (framed_inner_width cols - 2) in
   let candidate_heading =
     match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"
@@ -9750,12 +9751,31 @@ let render_runtime (state : state) =
           probe_status probe_read timestamp (connection_badge state)
   in
   let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
+  let selection_rows = runtime_selection_summary_lines ~cols state in
+  (* One measured status width for the whole reading, shared by the header and
+     every row. A report that has several independent limits can still exceed
+     the pane; the selected account's wrapped evidence above stays complete. *)
+  let status_cells =
+    let statuses = match state.runtime_mode with
+      | Runtime_lanes -> List.map (fun row -> runtime_route_probe_text state
+          row.Tui_decode.rcr_runtime row.rcr_probe) candidates
+      | Runtime_all -> List.map (fun (runtime, _) ->
+          let probe = Option.bind state.runtime_surface (fun snapshot ->
+            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.Tui_decode.ro_id) in
+          runtime_route_probe_text state runtime probe) all_runtimes in
+    List.fold_left (fun width text -> max width (Message_layout.display_width text)) 0 statuses in
   (* The budget counts the rows this screen draws, so it comes from the same
      call the drawing reads rather than a fixed one. *)
   let chrome_rows = runtime_surface_listing_chrome ~cols state in
   let content_height = max 0 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
+  let scroll =
+    if content_height = 0 then scroll
+    else if state.runtime_cursor < scroll then max 0 state.runtime_cursor
+    else if state.runtime_cursor >= scroll + content_height
+    then min max_scroll (state.runtime_cursor - content_height + 1)
+    else scroll in
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
   let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
   let scroll_hint =
@@ -9775,6 +9795,10 @@ let render_runtime (state : state) =
   in
   List.iter (fun row -> c.push_styled ~style:authority_style row) authority_rows;
   c.push_divider ();
+  if selection_rows <> [] then begin
+    List.iter c.push selection_rows;
+    c.push_divider ()
+  end;
   (* The two routes that are not lanes. They hold runtime ids and nothing
      dispatches a keeper turn to them, so they sit above the lane table rather
      than among its rows, where the lane count and the lane-editing keys would
@@ -9836,7 +9860,7 @@ let render_runtime (state : state) =
             (runtime_column runtime_candidate_width media_text)
             (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
        c.push_divider ());
-  let table_cells = runtime_table_cells ~cols ~mode:state.runtime_mode in
+  let table_cells = runtime_table_cells ~cols ~status_cells ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row
       (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""));

@@ -1426,9 +1426,46 @@ let test_credit_cap_removal_clears_spent_warning () =
   record 100.5 {|{"data":{"limit":20,"limit_remaining":0}}|};
   expect "late older snapshot cannot resurrect the removed cap" 0 (snd (reading ()))
 
+let test_selected_status_wraps_and_reserves_rows () =
+  let open Masc.Tui_decode_usage in
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let account = { pua_scope = "account:status"; pua_scope_id = "status"; pua_providers = [];
+    pua_state = Account_reported ({ puw_limit_id = None; puw_kind = Window_five_hour;
+      puw_role = Role_gates_model_calls; puw_utilization = Utilization_percent 100;
+      puw_resets_at = None; puw_observed_at = 0. }, []) } in
+  let observed = { (runtime "a") with
+    ro_provider_id = "codex-account-two"; ro_provider = "Account Two";
+    ro_quota_exhausted = true; ro_rate_limited = true; ro_quota_scope = Some "account:status" } in
+  let resolved = { snapshot.rss_resolved with
+    rrs_usage = Ok { puws_since = 0.; puws_accounts = [account] };
+    rrs_runtimes = [observed; runtime "b"; runtime "c"] } in
+  state.runtime_surface <- Some (match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  List.iter (fun cols ->
+    let lines = runtime_selection_summary_lines ~cols state in
+    let text = String.concat " " (List.map String.trim lines) in
+    List.iter (fun fact -> Alcotest.(check bool) ("complete selected fact: " ^ fact) true
+        (Astring.String.is_infix ~affix:fact text))
+      [ "Account codex-account-two"; "Account Two / model";
+        "quota exhausted (no reset stated)"; "rate limited"; "account limit spent / unobserved" ];
+    List.iter (fun line -> Alcotest.(check bool) "wrapped status fits frame" true
+        (Masc_tui_message_layout.display_width line <= Masc_tui_frame.inner_width ~cols)) lines;
+    let chrome = runtime_surface_listing_chrome ~cols state in
+    state.runtime_cursor <- 99;
+    let without_selection = runtime_surface_listing_chrome ~cols state in
+    state.runtime_cursor <- 0;
+    expect "render and navigation reserve the full selected block"
+      (without_selection + List.length lines + 1) chrome)
+    [80;132]
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [ Alcotest.test_case "account usage survives reset until new report" `Quick
         test_account_usage_stays_spent_until_new_report;
+        Alcotest.test_case "selected status wraps with shared scroll geometry" `Quick
+          test_selected_status_wraps_and_reserves_rows;
         Alcotest.test_case "credit cap removal reaches runtime warning" `Quick
           test_credit_cap_removal_clears_spent_warning;
         Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;

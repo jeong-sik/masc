@@ -34,7 +34,10 @@ JEV judgment and a new full generation; the pending range remains unconsumed.
 A pass already in JEV retains its acquired candidates for generation fallback
 and can finish normally. Verifier refuses new implicit reviews, while an accepted
 review retains its declared CLI execution constraint. An explicit single-runtime
-evaluator override remains independent of the Verifier lane's activity.
+evaluator override remains independent of the Verifier lane's activity. The
+acquired Verifier candidate kind survives a publication fence and later
+declaration changes. This does not freeze a removed or reconfigured runtime
+binding for execution.
 
 TUI and Web observations show `off` separately from unavailable/unconfigured.
 Declared candidates and retained run evidence remain visible, including accepted
@@ -47,6 +50,11 @@ remains follow-up work. Enabling a lane allows its next request; this does not s
 Workspace Curator owner. Its next owner request resumes processing.
 
 ## Upgrade notes
+
+Prompt presets capture and restore lane activity with their candidate lists;
+the autosave records the activity before restoration. Saved preset lane entries
+require a Boolean `enabled`. Presets lacking that field are refused explicitly;
+recapture the desired state rather than assigning a default to an old snapshot.
 
 Existing declarations with no `enabled` keep their behavior. Install a binary
 that accepts the key before adding it to a live configuration. This change does

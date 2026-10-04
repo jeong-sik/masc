@@ -14,6 +14,8 @@ type t = {
 }
 
 let no_report_mark = "\xc2\xb7"
+let empty_report_mark = "\xe2\x97\x8b"
+type day_report = Measured of Masc.Tui_decode_usage.provider_usage_utilization | Reported_no_windows
 
 let seconds_per_day = 86400.0
 
@@ -56,11 +58,21 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
           (fun known ->
             let known = Option.value ~default:Day_map.empty known in
             if day >= first_day && day <= last_day then
-              Some (Day_map.add day point.puhp_unit known)
+              Some (Day_map.add day (Measured point.puhp_unit) known)
             else Some known)
           acc)
       Key_map.empty history.puh_points
   in
+  let by_key = List.fold_left (fun rows (report : Masc.Tui_decode_usage.provider_usage_empty_report) ->
+    let day = utc_day report.puhe_observed_at in
+    if day < first_day || day > last_day then rows else
+    let matching = Key_map.exists (fun (scope, _, _) _ -> scope = report.puhe_scope_id) rows in
+    let rows = if matching then rows
+      else Key_map.add (report.puhe_scope_id, "account report", None) Day_map.empty rows in
+    Key_map.mapi (fun (scope, _, _) days ->
+      if scope <> report.puhe_scope_id || Day_map.mem day days then days
+      else Day_map.add day Reported_no_windows days) rows)
+      by_key history.puh_reported_no_windows in
   let rows =
     Key_map.bindings by_key
     |> List.map (fun ((scope_id, kind, limit_id), reported) ->
@@ -68,7 +80,8 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
              List.init history.puh_days (fun offset ->
                  match Day_map.find_opt (first_day + offset) reported with
                  | None -> no_report_mark
-                 | Some value -> mark (share value))
+                 | Some Reported_no_windows -> empty_report_mark
+                 | Some (Measured value) -> (match share value with Some share -> mark share | None -> "$"))
              |> String.concat ""
            in
            { scope_id; kind; limit_id; marks;

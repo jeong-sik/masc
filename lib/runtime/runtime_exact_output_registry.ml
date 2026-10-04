@@ -175,6 +175,9 @@ let admit_lane_slots resolver_snapshot admitted_by_id
       then Error (Blank_lane_slot { lane_id = lane.id; position })
       else if String_set.mem slot_id seen
       then Error (Duplicate_lane_slot { lane_id = lane.id; position; slot_id })
+      else if not lane.enabled then
+        loop (position + 1) (String_set.add slot_id seen) admitted_by_id
+          admitted_slots rejected_slots rest
       else
         let admitted = String_map.find_opt slot_id admitted_by_id in
         (match admitted with

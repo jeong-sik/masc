@@ -90,21 +90,22 @@ type append_outcome =
       (** The row landed in today's current [DD.jsonl]. *)
   | Appended_after_rotation of { segment : string }
       (** Today's file reached the cap and was renamed to the completed
-          segment [DD.NNN.jsonl] named here; the row landed in a fresh
+          segment [DD.SEQUENCE.jsonl] named here; the row landed in a fresh
           current file. *)
   | Skipped_rotation_exhausted of { sequence_limit : int }
-      (** The day already holds [sequence_limit] rotated segments — the
-          [NNN] name space is spent — so the row was dropped. *)
+      (** The highest segment sequence has reached [sequence_limit] ([max_int]);
+          another integer identity cannot be represented. No file is replaced. *)
   | Skipped_by_append_guard
       (** The installed {!set_append_guard} declined to run the append. *)
 
 val append_rotating :
   t -> max_current_file_bytes:int -> Yojson.Safe.t -> append_outcome
 (** Append [json] to today's current [DD.jsonl], rotating the file to a
-    completed [DD.NNN.jsonl] segment first when the row would push it
+    completed [DD.SEQUENCE.jsonl] segment first when the row would push it
     over [max_current_file_bytes] (a non-positive cap never rotates).
     Rotated segments are ordinary completed files: readers include them
-    in day order, and the [?max_bytes] byte-budget prune from {!create}
+    in day and numeric sequence order (sequences have at least three digits,
+    and grow past 999), and the [?max_bytes] byte-budget prune from {!create}
     removes the oldest of them first while the current file survives —
     so a capped store keeps the newest records and sheds the oldest,
     instead of dropping new rows for the rest of the day.

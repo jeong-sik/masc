@@ -130,8 +130,9 @@ val publish
     unless it is in [excused_lane_ids] (a lane rule 3 emptied): that lane is
     unavailable alone. The registry keeps [required_lane_ids] whole, so a
     replacement requires an excused lane again unless it excuses it too.
-    Disabled declarations retain their candidates and may be empty. Thinking
-    capability checks apply when enabled. A required lane cannot be disabled,
+    Disabled declarations retain their candidates and may be empty. Blank
+    and duplicate candidates are still rejected; live target and thinking
+    capability admission apply only when enabled. A required lane cannot be disabled,
     even through [excused_lane_ids].
     Returns [Publication_busy] while a replacement reservation is active. *)
 

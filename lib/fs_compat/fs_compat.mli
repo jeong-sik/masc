@@ -294,6 +294,14 @@ val save_file_atomic_strict_staged
     owners must converge any dependent in-memory publication before
     propagating an [After_rename] failure. *)
 
+val write_file_atomic_strict_staged_blocking
+  : string
+  -> write:(out_channel -> unit)
+  -> (unit, atomic_replace_failure) Result.t
+(** Strict streaming replacement on the calling worker, without a thread hop.
+    Only use in an existing blocking job. The callback and syncs obey the
+    same staged publication contract as {!write_file_atomic_strict_staged}. *)
+
 val write_file_atomic_strict_staged
   :  string
   -> write:(out_channel -> unit)
@@ -816,6 +824,11 @@ val rename_noreplace : string -> string -> unit
     via typed catches ([Eio.Fs.Not_found] / verified [Sys.file_exists])
     rather than substring matching on the libc message. *)
 val rename_if_exists : src:string -> dst:string -> bool
+
+val unlink_if_exists : string -> bool
+(** Remove a single file or symlink without following it. Returns [false]
+    only for a missing path, [true] after removal. Directories are refused;
+    other I/O failures propagate as [Sys_error]. *)
 
 (** Remove a file, symlink, or directory tree without invoking a shell.
     Missing paths are ignored.  Symlinks are unlinked, not followed. *)

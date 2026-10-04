@@ -2,25 +2,19 @@
 
 import json
 import os
+import sys
 import threading
 import urllib.parse
-import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_observer as _keyboard_observer
+import tui_keyboard_workspace as _keyboard_workspace
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_chat_log.ml",
-    "bin/masc_tui_observer.ml",
-    "bin/masc_tui_sse_lines.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_gate_text.ml",
-)
+
 
 
 def run(executable: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     argument = "GATE_CLICK " + "long-argument " * 16 + "GATE_TAIL"
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [{
         "id": "results-gate", "role": "system", "content": argument,
@@ -33,58 +27,58 @@ def run(executable: str) -> None:
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
         200, {"keeper": "alpha", "count": 0, "health": "ok", "entries": []},
     )
-    changes = h.GatedHttpResponse((200, {
+    changes = _keyboard_harness.GatedHttpResponse((200, {
         "keeper": "alpha", "window_hours": 24.0, "calls_in_window": 0,
         "changes": [], "over_budget": 0, "malformed": 0,
     }))
-    fixtures[h.FILE_CHANGES_ALPHA_PATH] = changes
+    fixtures[_keyboard_workspace.FILE_CHANGES_ALPHA_PATH] = changes
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
-            h.resize_and_wait(process, master_fd, output, rows=30, columns=120,
+            _keyboard_harness.resize_and_wait(process, master_fd, output, rows=30, columns=120,
                               needle=b"MASC Dashboard")
             # Palette Keeper entries come from the asynchronous roster; the
             # Dashboard title alone can arrive before alpha is selectable.
-            h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
-            h.select_keeper_row(process, master_fd, output, b"alpha")
-            h.palette_go(process, master_fd, output, b"keeper alpha", b"GATE_CLICK")
-            h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
-            h.drain_until_quiet(process, master_fd, output)
-            before = h.screen_text(bytes(output))
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, master_fd, output, b"alpha")
+            _keyboard_harness.palette_go(process, master_fd, output, b"keeper alpha", b"GATE_CLICK")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
+            before = _keyboard_harness.screen_text(bytes(output))
             if b"GATE_TAIL" in before or changes.calls:
                 raise AssertionError(f"results mode prematurely expanded details: {before!r}")
-            h.wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
-            h.drain_until_quiet(process, master_fd, output)
-            row = h.screen_row_of(h.screen_rows(bytes(output)), b"GATE_CLICK")
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
+            row = _keyboard_harness.screen_row_of(_keyboard_harness.screen_rows(bytes(output)), b"GATE_CLICK")
             if row < 0:
                 raise AssertionError(f"folded Gate row missing: {before!r}")
             roster_click = b"\x1b[<0;6;%dM\x1b[<0;6;%dm" % (row, row)
             os.write(master_fd, roster_click)
-            h.drain_until_quiet(process, master_fd, output)
-            if b"tools:results" not in h.screen_text(bytes(output)) or changes.calls:
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
+            if b"tools:results" not in _keyboard_harness.screen_text(bytes(output)) or changes.calls:
                 raise AssertionError("roster click opened chat Gate details")
-            h.send_and_wait(process, master_fd, output,
+            _keyboard_harness.send_and_wait(process, master_fd, output,
                             b"\x1b[<0;40;%dM\x1b[<0;40;%dm" % (row, row),
                             b"tools:full")
-            if not h.wait_for_fixture_event(process, master_fd, output,
+            if not _keyboard_harness.wait_for_fixture_event(process, master_fd, output,
                                             changes.requested, timeout=3.0):
                 raise AssertionError("Gate click did not request file-change details")
             response_start = len(output)
             changes.release.set()
-            h.wait_for_output(process, master_fd, output, b"diffs 24h",
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"diffs 24h",
                               start=response_start, timeout=5.0)
-            h.drain_until_quiet(process, master_fd, output)
-            after = h.screen_text(bytes(output))
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
+            after = _keyboard_harness.screen_text(bytes(output))
             if b"GATE_TAIL" not in after or b"diffs pending" in after:
                 raise AssertionError(f"Gate click did not settle full details: {after!r}")
             # Palette chat returns to the roster, retaining its selected row.
-            h.send_and_wait(process, master_fd, output, b"\x1b",
-                            h.keeper_row_selected(b"alpha"))
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b",
+                            _keyboard_harness.keeper_row_selected(b"alpha"))
             os.write(master_fd, b"q")
         finally:
             changes.release.set()
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable, description="Results Gate click loads full details",
         interact=interact, http_fixtures=fixtures,
     )
@@ -94,8 +88,8 @@ def run_observer_results(executable: str) -> None:
     # No pane-owned POST, chat-appended event or run-finished event is sent.
     # Only observer frames can cause the journal reads below; the long cadence
     # makes a result that only appears on the next poll fail the scenario.
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures.update(h.observer_http_fixtures())
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures.update(_keyboard_observer.observer_http_fixtures())
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     releases = [threading.Event() for _ in range(5)]
     connected = threading.Event()
@@ -166,10 +160,10 @@ def run_observer_results(executable: str) -> None:
             yield frame(seq)
         releases[4].wait(timeout=15)
 
-    fixtures["/mcp?sse_kind=observer"] = h.StreamingHttpResponse(chunks)
-    fixtures["/api/v1/keepers/alpha/chat/events"] = h.PathHttpResponse(journal)
+    fixtures["/mcp?sse_kind=observer"] = _keyboard_harness.StreamingHttpResponse(chunks)
+    fixtures["/api/v1/keepers/alpha/chat/events"] = _keyboard_harness.PathHttpResponse(journal)
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = calls
-    fixtures[h.FILE_CHANGES_ALPHA_PATH] = (200, {
+    fixtures[_keyboard_workspace.FILE_CHANGES_ALPHA_PATH] = (200, {
         "keeper": "alpha", "window_hours": 24.0, "calls_in_window": 0,
         "changes": [], "over_budget": 0, "malformed": 0,
     })
@@ -177,61 +171,61 @@ def run_observer_results(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         nonlocal durable_ready
         try:
-            h.resize_and_wait(process, master_fd, output, rows=36, columns=120,
+            _keyboard_harness.resize_and_wait(process, master_fd, output, rows=36, columns=120,
                               needle=b"MASC Dashboard")
-            if not h.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
+            if not _keyboard_harness.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
                 raise AssertionError("observer stream never opened")
-            h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
-            h.select_keeper_row(process, master_fd, output, b"alpha")
-            h.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")
-            h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
-            if not h.wait_for_fixture_event(process, master_fd, output, calls_requested, timeout=5):
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, master_fd, output, b"alpha")
+            _keyboard_harness.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
+            if not _keyboard_harness.wait_for_fixture_event(process, master_fd, output, calls_requested, timeout=5):
                 raise AssertionError("results view never loaded initial call snapshot")
-            h.drain_until_quiet(process, master_fd, output)
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
             baseline = calls_count
             releases[0].set()
-            h.wait_for_output(process, master_fd, output, b"OBSERVER_STARTED", start=0, timeout=5)
-            h.drain_until_quiet(process, master_fd, output)
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"OBSERVER_STARTED", start=0, timeout=5)
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
             if calls_count != baseline:
                 raise AssertionError("journal without a result requested call-log refresh")
             durable_ready = True
             result_start = len(output)
             releases[1].set()
-            h.wait_for_output(process, master_fd, output, b"OBSERVER_DURABLE_RESULT",
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"OBSERVER_DURABLE_RESULT",
                               start=result_start, timeout=5)
-            h.drain_until_quiet(process, master_fd, output)
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
             if calls_count != baseline + 1:
                 raise AssertionError(f"expected one result refresh, got {calls_count - baseline}")
             releases[2].set()
-            h.wait_for_output(process, master_fd, output, b"REPLAY_FOLDED", start=0, timeout=5)
-            h.drain_until_quiet(process, master_fd, output)
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"REPLAY_FOLDED", start=0, timeout=5)
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
             if calls_count != baseline + 1:
                 raise AssertionError("replayed result requested another call-log refresh")
-            h.send_and_wait(process, master_fd, output, b"\x04", b"tools:full")
-            h.drain_until_quiet(process, master_fd, output)
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x04", b"tools:full")
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
             # Unchanged transcript rows need not be emitted by a diff frame.
             # Wait for the transition's frame, then inspect the composed view.
             compact_start = len(output)
-            h.write_all(master_fd, output, b"\x04")
-            h.wait_for_output(process, master_fd, output, h.FRAME_END,
+            _keyboard_harness.write_all(master_fd, output, b"\x04")
+            _keyboard_harness.wait_for_output(process, master_fd, output, _keyboard_harness.FRAME_END,
                               start=compact_start, timeout=3.0)
-            h.drain_until_quiet(process, master_fd, output)
-            compact = h.screen_text(bytes(output))
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
+            compact = _keyboard_harness.screen_text(bytes(output))
             if b"tools:full" in compact or b"tools:results" in compact:
                 raise AssertionError(f"Ctrl-D did not reach compact mode: {compact!r}")
             compact_baseline = calls_count
             releases[3].set()
-            h.wait_for_output(process, master_fd, output, b"COMPACT_FOLDED", start=0, timeout=5)
-            h.drain_until_quiet(process, master_fd, output)
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"COMPACT_FOLDED", start=0, timeout=5)
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
             if calls_count != compact_baseline or journal_count != 4:
                 raise AssertionError("compact journal result refreshed calls or journal cursor drifted")
-            h.send_and_wait(process, master_fd, output, b"\x1b", h.keeper_row_selected(b"alpha"))
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", _keyboard_harness.keeper_row_selected(b"alpha"))
             os.write(master_fd, b"q")
         finally:
             for release in releases:
                 release.set()
 
-    h.run_terminal_scenario(executable, description="Observer journal refreshes live tool results",
+    _keyboard_harness.run_terminal_scenario(executable, description="Observer journal refreshes live tool results",
                             interact=interact, http_fixtures=fixtures, refresh=3600.0)
 
 
@@ -240,8 +234,8 @@ def run_coverage_gap_results(executable: str) -> None:
     # read as an incomplete log, not as a definitively missing row. Another
     # exact row retained in that same gapped snapshot must still preview.
     # A later complete snapshot restores the formerly missing preview too.
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures.update(h.observer_http_fixtures())
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures.update(_keyboard_observer.observer_http_fixtures())
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     releases = [threading.Event() for _ in range(3)]
     connected = threading.Event()
@@ -316,10 +310,10 @@ def run_coverage_gap_results(executable: str) -> None:
             yield frame(seq)
         releases[2].wait(timeout=15)
 
-    fixtures["/mcp?sse_kind=observer"] = h.StreamingHttpResponse(chunks)
-    fixtures["/api/v1/keepers/alpha/chat/events"] = h.PathHttpResponse(journal)
+    fixtures["/mcp?sse_kind=observer"] = _keyboard_harness.StreamingHttpResponse(chunks)
+    fixtures["/api/v1/keepers/alpha/chat/events"] = _keyboard_harness.PathHttpResponse(journal)
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = calls
-    fixtures[h.FILE_CHANGES_ALPHA_PATH] = (200, {
+    fixtures[_keyboard_workspace.FILE_CHANGES_ALPHA_PATH] = (200, {
         "keeper": "alpha", "window_hours": 24.0, "calls_in_window": 0,
         "changes": [], "over_budget": 0, "malformed": 0,
     })
@@ -327,43 +321,43 @@ def run_coverage_gap_results(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         nonlocal gap_open
         try:
-            h.resize_and_wait(process, master_fd, output, rows=36, columns=120,
+            _keyboard_harness.resize_and_wait(process, master_fd, output, rows=36, columns=120,
                               needle=b"MASC Dashboard")
-            if not h.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
+            if not _keyboard_harness.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
                 raise AssertionError("observer stream never opened")
-            h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
-            h.select_keeper_row(process, master_fd, output, b"alpha")
-            h.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")
-            h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
-            if not h.wait_for_fixture_event(process, master_fd, output, calls_requested, timeout=5):
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, master_fd, output, b"alpha")
+            _keyboard_harness.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
+            if not _keyboard_harness.wait_for_fixture_event(process, master_fd, output, calls_requested, timeout=5):
                 raise AssertionError("results view never loaded initial call snapshot")
             releases[0].set()
-            h.wait_for_output(process, master_fd, output, b"GAP_STARTED", start=0, timeout=5)
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"GAP_STARTED", start=0, timeout=5)
             releases[1].set()
-            h.wait_for_output(process, master_fd, output, b"call log incomplete", start=0, timeout=5)
-            h.wait_for_output(process, master_fd, output, b"GAP_RETAINED_RESULT", start=0, timeout=5)
-            h.drain_until_quiet(process, master_fd, output)
-            gap_screen = h.screen_text(bytes(output))
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"call log incomplete", start=0, timeout=5)
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"GAP_RETAINED_RESULT", start=0, timeout=5)
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
+            gap_screen = _keyboard_harness.screen_text(bytes(output))
             if (b"call log incomplete" not in gap_screen
                     or b"GAP_RETAINED_RESULT" not in gap_screen
                     or b"no call-log row" in gap_screen):
                 raise AssertionError(f"gapped log lost its retained result or missing-row uncertainty: {gap_screen!r}")
             gap_open = False
             releases[2].set()
-            h.wait_for_output(process, master_fd, output, b"GAP_DURABLE_RESULT",
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"GAP_DURABLE_RESULT",
                               start=0, timeout=5)
-            h.drain_until_quiet(process, master_fd, output)
-            healed = h.screen_text(bytes(output))
+            _keyboard_harness.drain_until_quiet(process, master_fd, output)
+            healed = _keyboard_harness.screen_text(bytes(output))
             if (b"call log incomplete" in healed or b"GAP_DURABLE_RESULT" not in healed
                     or b"GAP_RETAINED_RESULT" not in healed):
                 raise AssertionError(f"complete log did not retain both previews: {healed!r}")
-            h.send_and_wait(process, master_fd, output, b"\x1b", h.keeper_row_selected(b"alpha"))
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", _keyboard_harness.keeper_row_selected(b"alpha"))
             os.write(master_fd, b"q")
         finally:
             for release in releases:
                 release.set()
 
-    h.run_terminal_scenario(executable, description="Coverage gap reads incomplete, exact row still previews",
+    _keyboard_harness.run_terminal_scenario(executable, description="Coverage gap reads incomplete, exact row still previews",
                             interact=interact, http_fixtures=fixtures, refresh=3600.0)
 
 

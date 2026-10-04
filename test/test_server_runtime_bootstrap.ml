@@ -1942,7 +1942,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2034,7 +2034,7 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
           { running = 0; failing = 0; recovering = 0 }
@@ -2158,7 +2158,7 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2237,7 +2237,7 @@ let test_health_json_reports_paused_keeper_active_task_owner_as_advisory () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2310,7 +2310,7 @@ let test_health_json_reports_unreadable_keeper_profile_as_scan_error () =
           ]
         in
         Workspace.write_backlog config
-          { Types.tasks; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2373,7 +2373,7 @@ let test_health_json_owner_rows_answer_from_each_keepers_own_reads () =
           ]
         in
         Workspace.write_backlog config
-          { Types.tasks; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
           { running = 1; failing = 0; recovering = 0 }
@@ -2454,7 +2454,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
           { running = 0; failing = 0; recovering = 0 }
@@ -2521,7 +2521,7 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
         Workspace.write_backlog config
           {
             Types.tasks = [];
-            task_deletion_receipts = []; pending_completion_rejections = [];
+            task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
             last_updated = "2026-08-03T00:00:00Z";
             version = 1;
           };

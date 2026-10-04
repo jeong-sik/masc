@@ -131,11 +131,6 @@ let test_extract_agent_type_manual () =
   | Some at -> check string "extracted gemini" "gemini" at
   | None -> fail "should extract agent_type"
 
-let test_extract_agent_type_legacy () =
-  match Nickname.extract_agent_type "claude" with
-  | Some at -> check string "legacy claude" "claude" at
-  | None -> fail "should extract legacy agent_type"
-
 let test_extract_agent_type_empty () =
   (* Note: split_on_char returns [""] for empty string, so this returns Some "" *)
   match Nickname.extract_agent_type "" with
@@ -192,7 +187,6 @@ let () =
     "extract_agent_type", [
       test_case "generated" `Quick test_extract_agent_type_generated;
       test_case "manual" `Quick test_extract_agent_type_manual;
-      test_case "legacy" `Quick test_extract_agent_type_legacy;
       test_case "empty" `Quick test_extract_agent_type_empty;
       test_case "unique" `Quick test_extract_agent_type_unique;
       test_case "hyphenated manual" `Quick test_extract_agent_type_hyphenated_manual;

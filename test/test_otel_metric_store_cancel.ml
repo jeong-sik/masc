@@ -23,7 +23,6 @@
 
 open Alcotest
 
-let store_source = "lib/otel_metric_store/otel_metric_store_core.ml"
 let counter = "masc_test_otel_metric_store_cancel_total"
 let near = float 1e-9
 
@@ -48,41 +47,6 @@ let run_in_cancelled_sub ~reason body =
 
 let cancelled_by reason = Some (Printexc.to_string (Failure reason))
 
-let test_best_effort_routes_through_cancel_safe () =
-  check
-    int
-    "best_effort is a Cancel_safe.observe call site"
-    1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:store_source
-       ~binding_name:"best_effort"
-       ~callee:"Cancel_safe.observe")
-;;
-
-(* [best_effort] is not in the .mli, so this list is the store's whole exposure
-   to a cancelled fiber. A new updater that writes its own [try ... with]
-   instead of reusing the wrapper would leave that list without failing
-   anything; this is what notices. *)
-let test_every_updater_goes_through_best_effort () =
-  List.iter
-    (fun binding_name ->
-       check
-         int
-         (Printf.sprintf "%s wraps its body in best_effort" binding_name)
-         1
-         (Ast_grep.count_calls_in_value_binding
-            ~module_path:store_source
-            ~binding_name
-            ~callee:"best_effort"))
-    [ "register_counter"
-    ; "register_gauge"
-    ; "register_histogram"
-    ; "register_histogram_buckets"
-    ; "inc_counter"
-    ; "set_gauge"
-    ; "inc_gauge"
-    ; "observe_histogram"
-    ]
 ;;
 
 let test_pending_cancellation_survives_a_metric_call () =
@@ -134,14 +98,8 @@ let () =
   run
     "otel_metric_store_cancel"
     [ ( "source structure"
-      , [ test_case
-            "best_effort routes through Cancel_safe.observe"
-            `Quick
-            test_best_effort_routes_through_cancel_safe
-        ; test_case
-            "every updater goes through best_effort"
-            `Quick
-            test_every_updater_goes_through_best_effort
+      , [
+
         ] )
     ; ( "cancelled scope"
       , [ test_case

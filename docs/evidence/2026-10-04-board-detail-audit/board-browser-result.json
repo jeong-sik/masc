@@ -1,0 +1,143 @@
+{
+  "scope": "production source PostDetail and API decoder/loader with synthetic HTTP; not installed/production runtime",
+  "source_commit": "49e434b7327adc69f363529d3cd40683a5d6a934",
+  "data": {
+    "post": {
+      "id": "detail-evidence",
+      "author": "thread-owner",
+      "author_identity": null,
+      "post_kind": null,
+      "pinned": false,
+      "classification_reason": null,
+      "title": "원본과 연결된 Board 상세",
+      "body": "첨부된 증거와 이 글을 만든 턴을 확인하세요.",
+      "meta": {
+        "attachments": [
+          {
+            "kind": "external_link",
+            "url": "https://example.test/trace"
+          }
+        ]
+      },
+      "attachments": [
+        {
+          "ok": true,
+          "attachment": {
+            "kind": "external_link",
+            "source": {
+              "kind": "url",
+              "url": "https://example.test/trace"
+            }
+          }
+        }
+      ],
+      "tags": [],
+      "votes": 1,
+      "vote_balance": 0,
+      "current_vote": "up",
+      "has_voted": true,
+      "comment_count": 0,
+      "created_at": "2026-10-03T00:00:00Z",
+      "updated_at": "2026-10-03T00:00:00Z",
+      "flair": null,
+      "hearth": null,
+      "visibility": null,
+      "expires_at": null,
+      "hearth_count": 0,
+      "reactions": [
+        {
+          "emoji": "👍",
+          "count": 2,
+          "reacted": true,
+          "recent_user_ids": [
+            "viewer"
+          ]
+        }
+      ],
+      "supported_reaction_emojis": [
+        "👍"
+      ],
+      "origin": {
+        "turn_ref": "trace-board#5",
+        "source": "dashboard"
+      },
+      "closed": null
+    },
+    "feedCount": 0,
+    "buttons": [
+      {
+        "text": "← 게시판으로 돌아가기",
+        "title": "",
+        "aria": null,
+        "pressed": null
+      },
+      {
+        "text": "",
+        "title": "링크 복사",
+        "aria": "게시글 링크 복사: detail-evidence",
+        "pressed": null
+      },
+      {
+        "text": "",
+        "title": "트랙백 복사",
+        "aria": "트랙백 링크 복사: detail-evidence",
+        "pressed": null
+      },
+      {
+        "text": "",
+        "title": "맥락 추론을 실행할 등록된 keeper 없음",
+        "aria": "맥락 추론 요청: detail-evidence",
+        "pressed": null
+      },
+      {
+        "text": "thread-owner",
+        "title": "",
+        "aria": "작성자 thread-owner 프로필로 이동",
+        "pressed": null
+      },
+      {
+        "text": "🔎 턴",
+        "title": "이 글을 만든 원본 턴 검사 (trace-board#5)",
+        "aria": "원본 턴 검사",
+        "pressed": null
+      },
+      {
+        "text": "▲ 추천",
+        "title": "",
+        "aria": null,
+        "pressed": "true"
+      },
+      {
+        "text": "▼ 비추천",
+        "title": "",
+        "aria": null,
+        "pressed": "false"
+      },
+      {
+        "text": "👍2",
+        "title": "",
+        "aria": "👍 리액션 2개",
+        "pressed": "true"
+      },
+      {
+        "text": "Write",
+        "title": "",
+        "aria": null,
+        "pressed": null
+      },
+      {
+        "text": "Preview",
+        "title": "",
+        "aria": null,
+        "pressed": null
+      },
+      {
+        "text": "등록",
+        "title": "",
+        "aria": null,
+        "pressed": null
+      }
+    ]
+  },
+  "errors": []
+}

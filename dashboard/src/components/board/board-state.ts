@@ -361,36 +361,11 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
       ? await fetchBoardPost(postId, undefined, undefined, focus)
       : await fetchBoardPost(postId)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
-    detailPost.value = {
-      id: data.id,
-      author: data.author,
-      author_identity: data.author_identity,
-      title: data.title,
-      body: data.body,
-      meta: data.meta,
-      tags: data.tags,
-      votes: data.votes,
-      vote_balance: data.vote_balance,
-      comment_count: data.comment_count,
-      created_at: data.created_at,
-      updated_at: data.updated_at,
-      post_kind: data.post_kind,
-      pinned: data.pinned,
-      classification_reason: data.classification_reason,
-      flair: data.flair,
-      hearth: data.hearth,
-      visibility: data.visibility,
-      expires_at: data.expires_at,
-      hearth_count: data.hearth_count,
-      // task-1758/#39356 completion criterion 4: the detail view must show
-      // closed state and successor, not just the list -- this field is
-      // hand-picked from `data` like the others above, so it was silently
-      // dropped here even after the wire/list-normalization fix landed.
-      closed: data.closed,
-    }
+    const { comments: initialComments, commentPage: initialPage, ...post } = data
+    detailPost.value = post
     detailReadPhase.value = 'loaded'
-    let comments = data.comments
-    let page = data.commentPage
+    let comments = initialComments
+    let page = initialPage
     // Refresh only the range the operator already loaded. Focus resolution
     // and ancestor lookup are part of the server's single thread read.
     while (retainedOffset !== undefined && page.offset > retainedOffset) {

@@ -91,7 +91,11 @@ let encode_bounded ~max_bytes json =
   | Stack_overflow -> Error "sampling evidence nesting exceeds encoder capacity"
   | Yojson.Json_error _ | Invalid_argument _ -> Error "sampling evidence cannot be serialized"
 
-let package_response (answer : S.create_message_result) = answer
+let package_response (answer : S.create_message_result) = {answer with _meta=None}
+
+let response_with_references (answer : S.create_message_result) references =
+  let answer = package_response answer in
+  {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])}
 
 let bound_refusal ~max_bytes message =
   let json_len s = String.length (Yojson.Safe.to_string (`String s)) in
@@ -160,7 +164,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Invocation_exception (Printexc.to_string exn) in
     (* No yielding operation may separate the returned outcome from protection. *)
-    let outcome, retained = Eio.Cancel.protect (fun () ->
+    let retained = Eio.Cancel.protect (fun () ->
     let outcome = match outcome with
       | Answer answer ->
           (match Eio_unix.run_in_systhread (fun () ->
@@ -172,6 +176,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       | outcome -> outcome in
     let fields = ["kind",`String "model_outcome";"instance_id",`String instance_id;
       "route",`String route;"request",Types.evidence_to_json request] in
+    let identity = fields in
     let fields = fields @ (match outcome with
       | Answer answer -> ["status",`String "answered";"response",S.create_message_result_to_yojson answer]
       | Host_error detail -> ["status",`String "host_error";"error",`String detail]
@@ -181,12 +186,38 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     (* Once invocation has returned, cancellation must not orphan a known
        result between its immutable blob and the durable recovery index. *)
     let retained = Eio_unix.run_in_systhread (fun () ->
-        let bytes = match encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) with
-          | Ok bytes -> Ok bytes
-          | Error detail -> encode_bounded ~max_bytes:package.resources.max_reply_bytes
-              (`Assoc ["kind",`String "model_outcome";"status",`String "retention_error";
-                "request",Types.evidence_to_json request;"error",`String detail]) in
+        let outcome, bytes = match encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) with
+          | Ok bytes -> outcome, Ok bytes
+          | Error detail ->
+              let outcome = match outcome with
+                | Answer answer -> Invalid_response (answer, detail)
+                | outcome -> outcome in
+              let status = match outcome with
+                | Answer _ -> "answered" | Host_error _ -> "host_error"
+                | Invalid_response _ -> "invalid_response"
+                | Invocation_exception _ -> "outcome_unknown" in
+              outcome, encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                (`Assoc (identity @ ["status",`String status;"error",`String detail])) in
         let* bytes = Result.map_error (fun _ -> "sampling outcome could not be retained") bytes in
+        let* outcome, bytes = match outcome with
+          | Answer answer ->
+              let references = `Assoc ["request",Types.evidence_to_json request;
+                "outcome",Types.evidence_to_json (Store.blob_reference bytes)] in
+              (match encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                  (S.create_message_result_to_yojson (response_with_references answer references)) with
+               | Ok _ -> Ok (outcome, bytes)
+               | Error detail ->
+                   let invalid_fields = identity @
+                     ["status",`String "invalid_response";"error",`String detail] in
+                   let bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                     (`Assoc (invalid_fields @
+                       ["response",S.create_message_result_to_yojson answer])) in
+                   let* bytes = match bytes with
+                     | Ok bytes -> Ok bytes
+                     | Error _ -> encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                         (`Assoc invalid_fields) in
+                   Ok (Invalid_response (answer, detail), bytes))
+          | Host_error _ | Invalid_response _ | Invocation_exception _ -> Ok (outcome, bytes) in
         let evidence = Store.blob_reference bytes in
         let terminal = match record (Finished evidence) with
           | `Assoc fields -> `Assoc (("outcome_bytes",`String bytes)::fields)
@@ -203,24 +234,13 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         let compact = record (Finished evidence) in
         ignore (Store.save_sampling_outcome store ~instance_id ~request_id compact);
         ignore (Store.save_sampling_request store ~instance_id ~request_id compact);
-        Ok (`Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence])) in
-    outcome, retained) in
+        Ok (outcome, `Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence])) in
+    retained) in
     Eio.Fiber.check ();
-    let* references = retained in
+    let* outcome, references = retained in
     match outcome with
     | Answer answer ->
-        let answer = package_response answer in
-        let metadata = match answer._meta with
-          | Some (`Assoc fields) -> List.filter (fun (key, _) ->
-              key = "masc.lane_provider" || key = "masc.lane_host") fields
-          | Some _ | None -> [] in
-        let response = {answer with _meta=Some (`Assoc
-          (("masc.lane_sampling",references) :: List.remove_assoc "masc.lane_sampling" metadata))} in
-        let* () = Eio_unix.run_in_systhread (fun () ->
-          encode_bounded ~max_bytes:package.resources.max_reply_bytes
-            (S.create_message_result_to_yojson response) |> Result.map (fun _ -> ()))
-          |> Result.map_error (fun _ -> "sampling response exceeds package byte envelope; retained outcome remains indexed") in
-        Ok response
+        Ok (response_with_references answer references)
     | Host_error _ | Invalid_response _ | Invocation_exception _ ->
         let status = match outcome with
           | Host_error _ -> "host_error" | Invalid_response _ -> "invalid_response"

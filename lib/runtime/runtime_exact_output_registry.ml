@@ -174,8 +174,9 @@ let lane_publication registry lane_id =
       | Some lane -> List.map (fun (slot : admitted_slot) ->
           slot.slot_id,
           (Exact_output.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
-           |> Result.map (fun candidate ->
-             Exact_output.target_identity_fingerprint candidate.Exact_output.identity.target_identity))) lane.slots in
+           |> Result.map (fun (candidate : Exact_output.flow_candidate) ->
+             Exact_output.target_identity_fingerprint
+               (Exact_output.flow_candidate_identity candidate).target_identity))) lane.slots in
     declaration, targets
 ;;
 

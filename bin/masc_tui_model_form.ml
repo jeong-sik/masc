@@ -128,10 +128,13 @@ let apply t current =
   let draft = if t.mode = Edit && context = Option.map snd t.source.context then draft
     else set_int draft "max-context" context in
   let draft = if output = t.source.max_tokens then draft else set_int draft "max-tokens" output in
-  let draft = match Runtime_schema.provider_of_id config t.source.provider, context with
-    | Some { api_format = Runtime_schema.Ollama_api; _ }, Some value
+  let draft = match Runtime_schema.provider_of_id config t.source.provider with
+    | Some ({ api_format = Runtime_schema.Ollama_api; _ } as provider)
       when t.mode = Copy || context <> Option.map snd t.source.context ->
-      Edit_text.edit_table_int draft ~path:binding_path ~key:"num-ctx" ~value
+      let requested = match context, provider.max_context with
+        | Some value, _ | None, Some value -> Some value
+        | None, None -> source.max_context in
+      set_int draft "num-ctx" requested
     | _ -> draft in
   let draft = if effort = Option.value ~default:"" t.source.reasoning_effort then draft else
     Edit_text.edit_table_scalar draft ~path:model_path ~key:"reasoning-effort" ~value:(if effort = "" then None else Some effort) in

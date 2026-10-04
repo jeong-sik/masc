@@ -91,7 +91,12 @@ num-ctx = 272000
   let form = F.create F.Copy (row source) |> fun f -> edit f "tab" |> fun f -> set f "500000" in
   let c = config (apply form source) in
   let copied = List.find (fun (b:Runtime_schema.binding) -> b.model_id="a-copy") c.bindings in
-  check (option int) "Ollama serving context changes with variant" (Some 500000) copied.num_ctx
+  check (option int) "Ollama serving context changes with variant" (Some 500000) copied.num_ctx;
+  let source = source ^ "max-context = 128000\n" in
+  let form = F.create F.Edit (row source) |> fun f -> set f "" in
+  let c = config (apply form source) in
+  check (option int) "clearing context inherits the model serving context" (Some 272000) (List.hd c.bindings).num_ctx;
+  check (option int) "clearing context removes the override" None (List.hd c.bindings).max_context
 
 let () = run "Account model variants" ["model editing", [
   test_case "copy retains account, API model and settings" `Quick test_copy_variant;

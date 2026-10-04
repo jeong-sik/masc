@@ -232,14 +232,15 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
   (* Freeze the wizard's already resolved choice before adding candidates.
      A sole enabled binding (or the provider-owned workspace default) was a
      real choice without a flag; expansion must not make it ambiguous. *)
-  let preserved = List.fold_left (fun text (provider:Runtime_schema.provider) ->
-    if not (List.mem provider.id added_providers) then text else
+  let* preserved = List.fold_left (fun result (provider:Runtime_schema.provider) ->
+    let* text = result in
+    if not (List.mem provider.id added_providers) then Ok text else
     match Runtime_wizard_inventory.binding_for_provider parsed provider with
     | Ok binding when not binding.wizard_default ->
-        let path = Toml_line_editor.render_key binding.provider_id ^ "."
-          ^ Toml_line_editor.render_key binding.model_id in
-        Toml_line_editor.edit_table_bool text ~path ~key:"wizard-default" ~value:true
-    | Ok _ | Error _ -> text) (content first) parsed.providers in
+        Toml_line_editor.edit_nested_bool text ~path:[binding.provider_id; binding.model_id]
+          ~key:"wizard-default" ~value:true
+        |> Result.map_error (fun _ -> Invalid_configuration)
+    | Ok _ | Error _ -> Ok text) (Ok (content first)) parsed.providers in
   let runtime_text = preserved ^ (if added="" then "" else "\n" ^ added) in
   let runtime_text = match default_lane_id with
     | None -> runtime_text

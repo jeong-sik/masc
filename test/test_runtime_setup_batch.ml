@@ -149,7 +149,7 @@ wizard-default = true
     (List.exists (fun (binding:Runtime_schema.binding) ->
        Runtime_schema.binding_key binding=id && binding.provider_id="operator_account") after.bindings))
 let test_existing_provider_wizard_default_survives_expansion () =
-  List.iter (fun (name, old_binding, extra, expected_model) ->
+  List.iter (fun (name, provider_fields, declaration, expected_model, expected_context) ->
     fixture (fun base runtime binary spec _original ->
       let configured = {|
 [runtime]
@@ -162,6 +162,7 @@ is-non-interactive = true
 protocol = "codex-app-server"
 command = "codex"
 is-non-interactive = true
+|} ^ provider_fields ^ {|
 [models.main]
 api-name = "primary-model"
 max-context = 1024
@@ -172,9 +173,7 @@ max-context = 1024
 tools-support = true
 [primary.main]
 wizard-default = true
-[operator_account.old]
-# retain this binding's operator settings
-|} ^ old_binding ^ extra in
+|} ^ declaration in
       save runtime configured;
       fake base binary "pass";
       let parsed = Runtime_toml.parse_file runtime |> Result.get_ok in
@@ -192,6 +191,8 @@ wizard-default = true
         | None -> added.runtime_id in
       Alcotest.(check string) (name ^ ": wizard keeps the prior unambiguous choice")
         expected (Runtime_schema.binding_key chosen);
+      Alcotest.(check (option int)) (name ^ ": binding context stays unchanged")
+        expected_context chosen.max_context;
       let bindings = List.filter (fun (binding:Runtime_schema.binding) ->
         binding.enabled && binding.provider_id=provider.id) after.bindings in
       Alcotest.(check int) (name ^ ": exactly one enabled wizard default") 1
@@ -201,16 +202,21 @@ wizard-default = true
       Alcotest.(check bool) (name ^ ": prior binding comment survives") true
         (List.mem "# retain this binding's operator settings"
           (String.split_on_char '\n' (text runtime)))))
-    ["sole implicit", "", "", Some "old";
+    ["sole implicit", "", "[operator_account.old]\n# retain this binding's operator settings\n", Some "old", None;
      "explicit other model", "", {|
+[operator_account.old]
+# retain this binding's operator settings
 [models.preferred]
 api-name = "preferred-model"
 max-context = 1024
 tools-support = true
 [operator_account.preferred]
 wizard-default = true
-|}, Some "preferred";
-     "disabled-only prior binding", "enabled = false\n", "", None]
+|}, Some "preferred", None;
+     "disabled-only prior binding", "", "[operator_account.old]\n# retain this binding's operator settings\nenabled = false\n", None, None;
+     "inline binding", "", "[operator_account]\n# retain this binding's operator settings\nold = { max-context = 8192, price-input = 0.075 }\n", Some "old", Some 8192;
+     "dotted binding", "", "[operator_account]\n# retain this binding's operator settings\nold.max-context = 8192\n", Some "old", Some 8192;
+     "implicit model set", "model-set = \"single\"\n", "# retain this binding's operator settings\n[model_sets.single]\nmodels = [\"old\"]\n", Some "old", None]
 
 let test_named_default_lane () = fixture (fun base runtime binary spec original ->
   let first = (Runtime_setup_spec.render (spec "old-model")).runtime_id in

@@ -1,0 +1,10 @@
+[
+  {
+    "description": "workspace change suspends complete unsent inputs until explicit resume in A",
+    "status": "PASS"
+  },
+  {
+    "description": "MASC-root-only change suspends complete unsent inputs until explicit resume in A",
+    "status": "PASS"
+  }
+]

@@ -1,0 +1,40 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+   현재 대화 · alpha              
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            Keepers ▸ alpha ▸ chat                                                                   
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀          ────────────────────────────────────────────────────────────────────────────────────────── 
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀           ┄┄ 2026-08-22 · 06:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                06:41 ● alpha          workspace-a-current-history-after-return                      
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀           ┄┄ 2026-10-04 · 04:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                04:19 ▶ YOU            first-workspace-a-request                                     
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                      ▶ YOU            retained-workspace-a-queued-payload                           
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                      › LOCAL        │ Local unsent messages: 1 (same Keeper input joins: off)       
+                                                              │ tui-01a10335-71f1-7000-a0f8-22d24cbb1157                      
+┌────────────────────────────────┐                            │ retained-workspace-a-queued-payload                           
+│  KEEPERS           Ctrl-B HIDE │                            │ Reading server queue…                                         
+├────────────────────────────────┤             ›              │ Queue snapshot (refresh with /queue)                          
+│  ● alpha                       │                            │ Server confirmed queue resume                                 
+│  · beta                        │                            │ Queue consumption: open; server work: busy · 1 pending in 1   
+│                                │                            │ group                                                         
+│                                │                            │ Accepted messages waiting for the held turn                   
+│                                │                            │ Read unavailable: HTTP 503: fixture endpoint unavailable      
+│                                │                            │ /queue pause · /queue resume · /queue cancel ID · /queue      
+│                                │                            │ edit ID message · /queue last ID                              
+│                                │                            │ Events: /queue cancel-event REF INCARNATION reason · /queue   
+│                                │                            │ priority-event REF INCARNATION immediate|normal|low           
+│                                │                            │ Enter queues your line in arrival order; Esc stops the        
+│                                │                            │ current turn and pauses queue consumption.                    
+│                                │             ● alpha          진행 중 · autonomous · 최근 출력 발췌                         
+│                                │                              Atomic fixture ready                                          
+│                                │                                                                                            
+│                                │                                                                                            
+│                                │                                                                                            
+│                                │                                                                                            
+│                                │                                                                                            
+│                                │                                                                                            
+│                                │                                                                                            
+│                                │ ────────────────────────────────────────────────────────────────────────────────────────── 
+│                                │    기존 작업 처리 중 · 내 메시지 1건 대기 · 접수됨 · Esc:중단                              
+└────────────────────────────────┘    >                                                                                       
+                                                                                                                              
+ alpha · ● healthy AUTO · gate: not loaded · running · configured: a.returned  Context unavailable · Ctrl-X                   
+  Ctrl-C: press again to quit, or any other key to stay  Enter:send (0 local)  Ctrl-T:queue  Esc:stop current turn  …?

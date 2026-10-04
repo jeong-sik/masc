@@ -478,8 +478,9 @@ let install_stagehand_executor executor = Atomic.set stagehand_executor executor
 type backend_observation = Live_clients of int | Executor_registered of bool
 type inventory_observation = { activity : activity; backend : backend_observation }
 (* Reading inventory must not prune clients or resolve their waiting requests. *)
-let inventory_observation lane =
-  let activity = activity lane in
+let inventory_observation ?observed_activity lane =
+  let activity = match observed_activity with
+    | Some value -> value | None -> activity lane in
   let backend = match lane with
   | Lane_name.Live -> Live_clients (Eio.Mutex.use_ro clients_mutex (fun () ->
       Hashtbl.fold (fun _ client count -> if connected client then count+1 else count) clients 0))

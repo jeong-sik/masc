@@ -155,7 +155,18 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
    the pointers it does not know. A read failure keeps the previous
    always-ready behavior: the row may still be readable inside the turn,
    and an unreadable store must not silence newly arrived readable
-   messages. *)
+   messages.
+
+   The cooperative-yield probe runs after every completed tool, and the
+   store is an append-only log the batch call reparses in full, so the
+   scan is memoized against the store file's (mtime, size): an append
+   changes the size, and the same version answers every boundary of a
+   long turn with one scan. *)
+let attention_present_memo :
+    (string * float * int * (string, unit) Hashtbl.t) ref =
+  ref ("", 0., 0, Hashtbl.create 16)
+;;
+
 let drop_missing_connector_pointers ~base_path ~keeper_name (pending : Keeper_event_queue.t) =
   let event_ids =
     Keeper_event_queue.to_list pending
@@ -167,24 +178,53 @@ let drop_missing_connector_pointers ~base_path ~keeper_name (pending : Keeper_ev
   match event_ids with
   | [] -> pending
   | event_ids ->
-    (match
-       Keeper_external_attention.recorded_items_by_event_ids
-         ~base_path ~keeper_name ~event_ids
-     with
-     | Error _ -> pending
-     | Ok recorded ->
-       let known event_id =
-         List.exists
-           (fun (recorded_id, _) -> String.equal recorded_id event_id)
-           recorded
-       in
-       Keeper_event_queue.to_list pending
-       |> List.filter (fun (s : Keeper_event_queue.stimulus) ->
-              match s.Keeper_event_queue.payload with
-              | Keeper_event_queue.Connector_attention { event_id; _ } ->
-                known event_id
-              | _ -> true)
-       |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty)
+    let present () =
+      let store_path =
+        Keeper_external_attention.attention_path
+          ~base_path ~keeper_name
+      in
+      let version =
+        match Unix.stat store_path with
+        | exception Unix.Unix_error _ -> None
+        | stat -> Some (stat.Unix.st_mtime, stat.Unix.st_size)
+      in
+      let memo_hit () =
+        match (version, !attention_present_memo) with
+        | Some (mtime, size), (path, memo_mtime, memo_size, table)
+          when String.equal path store_path
+               && memo_mtime = mtime
+               && memo_size = size -> Some table
+        | _ -> None
+      in
+      match memo_hit () with
+      | Some table -> Some table
+      | None ->
+        (match
+           Keeper_external_attention.recorded_items_by_event_ids
+             ~base_path ~keeper_name ~event_ids
+         with
+        | Error _ -> None
+        | Ok recorded ->
+          let table = Hashtbl.create (List.length recorded) in
+          List.iter
+            (fun (recorded_id, _) -> Hashtbl.replace table recorded_id ())
+            recorded;
+          (match version with
+           | Some (mtime, size) ->
+             attention_present_memo := (store_path, mtime, size, table)
+           | None -> ());
+          Some table)
+    in
+    match present () with
+    | None -> pending
+    | Some table ->
+      Keeper_event_queue.to_list pending
+      |> List.filter (fun (s : Keeper_event_queue.stimulus) ->
+             match s.Keeper_event_queue.payload with
+             | Keeper_event_queue.Connector_attention { event_id; _ } ->
+               Hashtbl.mem table event_id
+             | _ -> true)
+      |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
 ;;
 
 let autonomous_yield_request ~base_path ~keeper_name =

@@ -298,6 +298,7 @@ let saved t json =
   | Some saved -> t.result_scroll <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let refresh_saved t saved result =
+  t.result_scroll <- 0;
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
   t.result_scroll <- 0;
   t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};

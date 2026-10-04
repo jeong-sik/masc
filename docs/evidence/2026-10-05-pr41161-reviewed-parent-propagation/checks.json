@@ -1,0 +1,22 @@
+{
+  "head": "c2e74cc3318a666d461164d23fcbec9089854069",
+  "parent": "0415c1cd17c082436a9d205f9b27f6fbf77de832",
+  "handle": 39862,
+  "exit": 0,
+  "tests": 184,
+  "suites": 5,
+  "logs": {
+    "web.log": {
+      "source": "/tmp/pr41161-propagate-final-web.log",
+      "sha256": "38eee11a9f8a9f9f1b4ae8390aba873f5b64dbabf199698ebf9fd88da4eb99ff"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41161-propagate-final-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41161-propagate-final-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+[
+  {
+    "source": "lib/config/env_config_keeper.ml",
+    "sha256": "c3a544ab640fec6fbd285e6990bb86d3c3eeb50e3a76ba1de41c84b47f0cee40",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/config/env_config_keeper.mli",
+    "sha256": "4a257a8eec52348f0bbc194e6343e01b2f597308f431bdee10b135615bd2e20a",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/config/keeper_runtime_setting_registry.ml",
+    "sha256": "2b4332836fb71cf9c40b906d10eb29fa777efa886a5b66b5de09898e161a8623",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/keeper/keeper_metrics_storage.ml",
+    "sha256": "78e92c401511aab3e9a69d8ac477a787fe2ee3b5e91907cdda77e21bc97f43e7",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/keeper/keeper_metrics_storage.mli",
+    "sha256": "0ac403b1cb46a4d6705d061de198387d3e4e0351476fdbe814454b5507c6c282",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/keeper/keeper_types_support.ml",
+    "sha256": "7b83a151a8626b2ede5d6a0da3c118184f0be94ec58b339e0fe82388080cb747",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/keeper/keeper_types_support.mli",
+    "sha256": "d23ce11783ded2d3db1706d030d7205598a5265067230b66855cb2c352bcd6be",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/keeper/keeper_heartbeat_snapshot.ml",
+    "sha256": "faa1809ecd7243d9c5dcf31417e1a0a66872571f7f33bf67d17333320796a48e",
+    "exit_code": 0
+  },
+  {
+    "source": "lib/keeper/keeper_unified_metrics_snapshot.ml",
+    "sha256": "9190a11816264d76f1002a6cbbe61ae290701226af25f4a4c6342eadc14f668c",
+    "exit_code": 0
+  },
+  {
+    "source": "test/test_keeper_metrics_storage.ml",
+    "sha256": "c3c12b9d89df8e05332cba18a5b6664fc50bb70c5d771efdd4f1c59c3184abcb",
+    "exit_code": 0
+  },
+  {
+    "source": "test/test_runtime_toml_overrides.ml",
+    "sha256": "ebdaab9188e13adbc3361f2712f0ca98b80d0ad0488f3920f7ed7110793ed8b4",
+    "exit_code": 0
+  }
+]

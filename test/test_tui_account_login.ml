@@ -897,6 +897,53 @@ let already_bound_model_is_not_offered () =
        | _ -> fail "expected Save"))
     [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
+let disabled_login_templates_and_existing_accounts () =
+  let disabled={provider with enabled=false} in
+  let state () =
+    let t=Login.create "codex" in
+    t.providers <- [disabled]; (* configured codex suppresses the catalog row *)
+    t.phase <- Login.Providers (Login.Accounts Codex);
+    t.provider <- Some disabled; t.account_ref <- Some account;
+    t in
+  let t=state () in
+  check bool "new-account row permits a supported disabled client template" true
+    (Login.key t "enter"=Login.Start {provider=disabled;existing=false});
+  check bool "new-account shortcut permits a supported disabled client template" true
+    (Login.key t "n"=Login.Start {provider=disabled;existing=false});
+  check (option string) "fresh login never reuses the disabled account reference" None
+    (Login.begin_attempt t disabled ~existing:false);
+  let t=state () in t.cursor <- 1;
+  List.iter (fun key -> check bool ("disabled existing account refuses "^key) true
+    (Login.key t key=Login.Nothing)) ["enter";"e"];
+  check (option string) "refusal cannot change the existing account reference" (Some account) t.account_ref;
+  check bool "disabled-account refusal explains fresh-account alternative" true
+    (contains t.notice "별도의 새 계정");
+  List.iter (fun phase ->
+    t.phase <- phase;
+    check bool "existing relogin remains refused outside the account list" true (Login.key t "e"=Login.Nothing);
+    check bool "fresh account remains possible outside the list" true
+      (Login.key t "n"=Login.Start {provider=disabled;existing=false}))
+    [Login.Models;Login.Failed;
+     Login.Finished {saved=Login.Saved_verified;activation=Login.Active {exact_output_available=true};refresh_failed=false}];
+  let unsupported={disabled with enabled=true;setup_supported=false} in
+  t.providers <- [unsupported]; t.provider <- Some unsupported;
+  t.phase <- Login.Providers (Login.Accounts Codex); t.cursor <- 0;
+  List.iter (fun key -> check bool ("unsupported account list refuses "^key) true
+    (Login.key t key=Login.Nothing)) ["enter";"n";"e"];
+  t.phase <- Login.Failed;
+  List.iter (fun key -> check bool ("unsupported retry refuses "^key) true
+    (Login.key t key=Login.Nothing)) ["n";"e"];
+  let supported={disabled with id="supported-template"} in
+  t.providers <- [unsupported;supported];
+  t.account_groups <- [{group_id="account";provider_ids=[unsupported.id;supported.id];runtime_ids=[]}];
+  t.phase <- Login.Providers (Login.Accounts Codex);t.cursor <- 0;
+  check bool "fresh login can use a supported hidden group member" true
+    (Login.key t "enter"=Login.Start {provider=supported;existing=false});
+  let available={provider with enabled=true;setup_supported=true} in
+  t.providers <- [available];t.account_groups <- [];t.provider <- Some available;t.cursor <- 1;
+  check bool "enabled existing account can explicitly reauthenticate" true
+    (Login.key t "e"=Login.Start {provider=available;existing=true})
+
 let grouped_existing_accounts () =
   let provider id = `Assoc ["id", `String id; "display_name", `String ("Model provider " ^ id);
     "protocol", `String "codex-app-server"; "origin", `String "runtime_config"] in
@@ -973,6 +1020,7 @@ let grouped_existing_accounts () =
     (t.phase=Login.Providers (Login.Account_providers (Codex,["a1";"b"])))
 
 let () = run "TUI account login" ["workflow",[
+  test_case "disabled client templates stay distinct from existing-account login" `Quick disabled_login_templates_and_existing_accounts;
   test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;
   test_case "multi-model selection submits ordered models" `Quick multi_model_selection;
   test_case "reopening shows connected models without adding them" `Quick already_bound_model_is_not_offered;

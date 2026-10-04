@@ -119,9 +119,10 @@ let member_rows t ids = List.filter_map (fun id ->
    when runtime.toml declares a provider with the same id, and then one of the
    client's accounts carries the new login. *)
 let new_account_provider t client =
-  match List.find_opt (fun (p:provider) -> p.client = client && p.origin = Catalog) t.providers with
+  let templates = List.filter (fun (p:provider) -> p.client=client && p.setup_supported) t.providers in
+  match List.find_opt (fun (p:provider) -> p.origin = Catalog) templates with
   | Some _ as catalog -> catalog
-  | None -> List.nth_opt (accounts t client) 0
+  | None -> List.nth_opt templates 0
 let account_rows t client =
   (match new_account_provider t client with Some p -> [New_account p] | None -> [])
   @ List.map (fun p -> Account p) (accounts t client)
@@ -610,6 +611,18 @@ let toggle_model t (model:model) =
     | None, None -> Nothing
 let selected_models t =
   List.filter (fun (model:model) -> List.mem model.id t.selected_models) t.models
+let unavailable_account t (provider:provider) =
+  t.notice <- (if not provider.setup_supported then
+    "이 연결은 계정 설정을 지원하지 않습니다. 지원되는 공급자 연결을 선택하세요."
+    else "이 기존 연결은 비활성 상태입니다. 활성화한 뒤 새로고침하세요. n으로 별도의 새 계정을 추가할 수 있습니다.");
+  Nothing
+let start_login t (provider:provider) ~existing =
+  (* A fresh login uses a new isolated account home, so a disabled connection
+     may supply its supported client command without enabling the old account.
+     Reauthentication targets the existing home and requires a usable binding. *)
+  if provider.setup_supported && (not existing || provider_selectable provider)
+  then Start {provider;existing}
+  else unavailable_account t provider
 let key t key =
   if key="esc" then (match t.phase with
     (* Esc steps back to the list rather than closing /login: the removal is
@@ -697,21 +710,21 @@ let key t key =
       (match t.phase with
        | Providers _ ->
          (match Option.bind (focused_client t) (new_account_provider t) with
-          | Some provider -> Start {provider; existing = false}
+          | Some provider -> start_login t provider ~existing:false
           | None -> Nothing)
        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
          (match t.provider with
-          | Some provider -> Start {provider; existing = false}
+          | Some provider -> start_login t provider ~existing:false
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
     else if key="e" then
       (match t.phase with
        | Providers _ ->
          (match focused_row t with
-          | Some (Account provider) -> Start {provider; existing = true}
+          | Some (Account provider) -> start_login t provider ~existing:true
           | Some (New_account _) | None -> Nothing)
        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
          (match t.provider with
-          | Some provider -> Start {provider; existing = true}
+          | Some provider -> start_login t provider ~existing:true
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
     else if key="\r" || key="\n" || key="enter" then
       (match t.phase with
@@ -721,10 +734,9 @@ let key t key =
           | None -> Nothing)
        | Providers (Accounts _) ->
          (match focused_row t with
-          | Some (New_account provider) -> Start {provider; existing = false}
+          | Some (New_account provider) -> start_login t provider ~existing:false
           | Some (Account provider) when provider_selectable provider -> Select_existing provider
-          | Some (Account _) ->
-              t.notice <- "이 계정에 사용 가능한 연결이 없습니다. 공급자 설정에서 활성화한 뒤 새로고침하세요."; Nothing
+          | Some (Account provider) -> unavailable_account t provider
           | None -> Nothing)
        | Providers (Account_providers (_, ids)) ->
          (match List.nth_opt (member_rows t ids) t.cursor with

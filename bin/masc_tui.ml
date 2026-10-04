@@ -5049,12 +5049,14 @@ let launch_machine_activity_read state ~mailbox owner =
      | Some (session, request) ->
        Masc_tui_types.put_machine_activity state session;
        let host = server_peer_host and port = state.port in
+       let check = capture_workspace_check state ~mailbox in
        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
          ~deliver:(fun result -> Machine_activity_read (request,result)) (fun () ->
            let document = Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;
               source_text=reading.source_text;source_revision=reading.metadata.source_revision})
              (Masc_tui_loader.load_runtime_config_view ~host ~port) in
+           Result.bind (check ()) (fun () ->
            let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
              (fun snapshot ->
                match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
@@ -5065,7 +5067,8 @@ let launch_machine_activity_read state ~mailbox owner =
                      | Machine_disabled -> Machine_configuration.Disabled
                      | Machine_unobserved -> Machine_configuration.Unobserved)
                | None | Some _ -> Error "The selected machine is absent from the server reading.") in
-           Ok Masc_tui_machine_activity.{document;activity}))
+           Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
+             (check ()))))
 
 let launch_machine_activity_save state ~mailbox session =
   let module Activity = Masc_tui_machine_activity in

@@ -134,10 +134,11 @@ let test_a_wide_name_is_padded_by_cells_not_bytes () =
     ; "[local.abcd]"
     ; "max-tokens = 100"
     ; ""
-    ; "[models.\"\xed\x95\x9c\xea\xb8\x80\"]"
+    ; "[models.wide]"
+    ; "api-name = \"한글\""
     ; "temperature = 0.7"
     ; ""
-    ; "[local.\"\xed\x95\x9c\xea\xb8\x80\"]"
+    ; "[local.wide]"
     ; "max-tokens = 100"
     ]
   in
@@ -154,10 +155,11 @@ let test_a_wide_name_is_padded_by_cells_not_bytes () =
 let test_a_clipped_wide_name_keeps_its_scalars_whole () =
   let long = String.concat "" (List.init 30 (fun _ -> "\xed\x95\x9c")) in
   let lines =
-    [ "[models.\"" ^ long ^ "\"]"
+    [ "[models.wide]"
+    ; "api-name = \"" ^ long ^ "\""
     ; "temperature = 0.7"
     ; ""
-    ; "[local.\"" ^ long ^ "\"]"
+    ; "[local.wide]"
     ; "max-tokens = 100"
     ]
   in

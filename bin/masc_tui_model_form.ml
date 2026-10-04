@@ -6,6 +6,7 @@ type field = Name | Context | Effort | Temperature | Output
 let fields = [Name; Context; Effort; Temperature; Output]
 type t = { mode : mode; source : Table.row; values : (field * string) list;
            selected : int; error : string option }
+type outcome = Editing of t | Cancelled | Submit of t
 let text = function None -> "" | Some n -> string_of_int n
 let create mode (source : Table.row) =
   { mode; source; selected = (match mode with Copy -> 0 | Edit -> 1); error = None;
@@ -50,9 +51,8 @@ let rows ~width ~height t =
   let notes = (match t.mode with
     | Copy -> "Same account and API model; independent settings. Add the saved variant to a Lane to use it."
     | Edit -> "Context/output apply to this account. Effort/temperature affect every account sharing this model; use Copy for independent settings.") in
-  let content = wrap heading @ List.concat_map wrap field_rows
-    @ wrap notes @ (match t.error with None -> [] | Some error -> wrap ("Error: " ^ error)) in
-  let footer = wrap hint in
+  let content = wrap heading @ List.concat_map wrap field_rows @ wrap notes in
+  let footer = (match t.error with None -> [] | Some error -> wrap ("Error: " ^ error)) @ wrap hint in
   let room = max 1 (height - List.length footer) in
   (* A short terminal follows the active field; errors remain nearest the footer. *)
   let selected_line = List.length (wrap heading) + List.fold_left (fun n row -> n + List.length (wrap row)) 0 (List.take t.selected field_rows) in
@@ -113,7 +113,11 @@ let apply t current =
         ~into:[Runtime_toml_namespace.(key Models); name] in
       if copied_model = [] then Error "This model uses inline TOML; expand its model table before copying" else
       let copied_binding = copy_tables lines ~from:[t.source.provider; source.id] ~into:[t.source.provider; name] in
-      let copied_binding = if copied_binding = [] then ["[" ^ binding_path ^ "]"] else copied_binding in
+      let* copied_binding = if copied_binding <> [] then Ok copied_binding else
+        let* toml = Otoml.Parser.from_string_result current in
+        match Otoml.find_opt toml Fun.id [t.source.provider; source.id] with
+        | Some _ -> Error "This binding uses inline TOML; expand its binding table before copying"
+        | None -> Ok ["[" ^ binding_path ^ "]"] in
       let draft = current ^ "\n" ^ String.concat "\n" (copied_model @ copied_binding) ^ "\n" in
       let draft = Edit_text.edit_table_scalar draft ~path:model_path ~key:"api-name" ~value:(Some source.api_name) in
       let draft = Edit_text.edit_table_bool draft ~path:binding_path ~key:"is-default" ~value:false in
@@ -124,6 +128,11 @@ let apply t current =
   let draft = if t.mode = Edit && context = Option.map snd t.source.context then draft
     else set_int draft "max-context" context in
   let draft = if output = t.source.max_tokens then draft else set_int draft "max-tokens" output in
+  let draft = match Runtime_schema.provider_of_id config t.source.provider, context with
+    | Some { api_format = Runtime_schema.Ollama_api; _ }, Some value
+      when t.mode = Copy || context <> Option.map snd t.source.context ->
+      Edit_text.edit_table_int draft ~path:binding_path ~key:"num-ctx" ~value
+    | _ -> draft in
   let draft = if effort = Option.value ~default:"" t.source.reasoning_effort then draft else
     Edit_text.edit_table_scalar draft ~path:model_path ~key:"reasoning-effort" ~value:(if effort = "" then None else Some effort) in
   let draft = if value t Temperature = Option.value ~default:"" t.source.temperature then draft else match temperature with

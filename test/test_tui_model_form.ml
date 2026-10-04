@@ -60,6 +60,41 @@ let test_edit_and_cancel () =
   check bool "bad integer refused" true (Result.is_error (F.apply bad source));
   let rendered = F.rows ~width:48 ~height:12 form in
   check bool "fits narrow form" true (List.for_all (fun s -> Masc_tui_message_layout.display_width s <= 48) rendered)
+let test_inline_refusal_and_visible_error () =
+  let inline = {|
+[providers.codex1]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models.a]
+max-context = 272000
+[codex1]
+a = {max-tokens=8192, price-input=0.075}
+|} in
+  let form = F.create F.Copy (row inline) in
+  check bool "inline values cannot silently disappear" true (Result.is_error (F.apply form inline));
+  let form = F.refused form "Context must be a positive integer" in
+  let lines = F.rows ~width:48 ~height:12 form in
+  check bool "failure visible on short terminal" true
+    (List.exists (fun line -> String.starts_with ~prefix:"Error: Context" line) lines)
+
+let test_ollama_context () =
+  let source = {|
+[providers.local]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+[models.a]
+max-context = 272000
+[local.a]
+num-ctx = 272000
+|} in
+  let form = F.create F.Copy (row source) |> fun f -> edit f "tab" |> fun f -> set f "500000" in
+  let c = config (apply form source) in
+  let copied = List.find (fun (b:Runtime_schema.binding) -> b.model_id="a-copy") c.bindings in
+  check (option int) "Ollama serving context changes with variant" (Some 500000) copied.num_ctx
+
 let () = run "Account model variants" ["model editing", [
   test_case "copy retains account, API model and settings" `Quick test_copy_variant;
-  test_case "edit context and cancel" `Quick test_edit_and_cancel]]
+  test_case "edit context and cancel" `Quick test_edit_and_cancel;
+  test_case "inline copy refusal is visible" `Quick test_inline_refusal_and_visible_error;
+  test_case "Ollama requested context follows variant" `Quick test_ollama_context]]

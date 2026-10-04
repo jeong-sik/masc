@@ -4,9 +4,9 @@ type row =
   ; api_name : string option
   ; reasoning_effort : string option
   ; temperature : string option
-  ; max_tokens : int option
   ; context : (string * int) option
   ; model_context : int option
+  ; max_tokens : int option
   }
 
 let models_table = Runtime_toml_namespace.(key Models)

@@ -68,7 +68,7 @@ export class ExactLaneActivitySession {
     if (generation !== this.generation) {
       this.generation = generation
       if (this.authority === authority && before.draft !== null) this.update({ current: null,
-        notice: '다른 설정 저장이 관측되었습니다. 초안은 그대로입니다. 현재 설정을 다시 읽으세요.' })
+        notice: '다른 화면의 설정 변경 요청으로 현재 파일 확인이 필요합니다. 초안은 그대로입니다. 현재 설정을 다시 읽으세요.' })
     }
   }
   private owns(authority: ExecutionWorkspaceAuthority, version: number) {

@@ -1,6 +1,6 @@
 {
   "passed": true,
-  "checked_at": "2026-10-04T16:22:03.446Z",
+  "checked_at": "2026-10-04T16:50:17.012Z",
   "browser": "149.0.7827.55",
   "scope": "Actual Settings/workspace store/router/API and synthetic HTTP. No production/backend/native execution; held A read may be transport-aborted. Unit tests also deliver late responses ignoring cancellation.",
   "checks": [
@@ -8,9 +8,11 @@
     "workspace B replaces A options; late A request cannot restore them",
     "late B receipt neither resumes A nor replaces its Settings",
     "sent same-workspace save survives navigation; remounted Settings refreshes after resume",
+    "remounted Settings shares the pending write and keeps new typed writes disabled",
+    "lost dispatched response stays uncertain after remount until a subsequent file-inclusive refresh",
     "unknown workspace withdraws Runtime options and disables writes",
     "mobile has no horizontal overflow",
-    "only two explicit routing writes and one matching resume, zero page errors/unexpected routes"
+    "only three explicit routing writes and one matching resume, zero page errors/unexpected routes"
   ],
   "reads": [
     {
@@ -130,6 +132,18 @@
       "owner": "B"
     },
     {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
       "path": "/api/v1/dashboard/shell",
       "owner": "B"
     },
@@ -142,11 +156,39 @@
       "owner": "B"
     },
     {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    },
+    {
       "path": "/api/v1/dashboard/execution",
       "owner": "B"
     },
     {
       "path": "/api/v1/dashboard/keepers/deletions",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/tools",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
       "owner": "B"
     },
     {
@@ -187,6 +229,14 @@
       "path": "/api/v1/runtime/setup/resume",
       "owner": "B",
       "body": {}
+    },
+    {
+      "path": "/api/v1/runtime/config/routing",
+      "owner": "B",
+      "body": {
+        "lane": "default",
+        "runtime_id": "B.first"
+      }
     }
   ],
   "errors": [],

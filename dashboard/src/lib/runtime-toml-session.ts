@@ -74,7 +74,7 @@ export class RuntimeTomlSession {
       this.generation = generation
       if (state.config !== null) this.update({ needsRead: true, currentSource: null,
         projectionRevision: state.projectionRevision + 1,
-        error: 'runtime.toml 이 다른 화면에서 저장되었습니다. 초안은 유지됩니다. 현재 파일을 읽고 비교한 뒤 저장 기준을 선택하세요.' })
+        error: '다른 화면의 설정 변경 요청으로 현재 파일 확인이 필요합니다. 초안은 유지됩니다. 현재 파일을 읽고 비교한 뒤 저장 기준을 선택하세요.' })
     }
   }
   private changedAuthority() {
@@ -99,7 +99,7 @@ export class RuntimeTomlSession {
       if (!this.admits(authority)) { this.changedAuthority(); return }
       if (sourceGeneration !== runtimeTomlSourceGeneration.peek()) {
         this.update({ needsRead: true, currentSource: null,
-          error: '읽는 동안 다른 설정이 저장됐습니다. 초안은 유지했습니다. 현재 파일을 다시 읽으세요.' })
+          error: '읽는 동안 다른 설정 변경 요청이 발생했습니다. 초안은 유지했습니다. 현재 파일을 다시 읽으세요.' })
         return
       }
       if (mode !== 'reload' && (current.path === null || current.path !== before.config?.path)) {

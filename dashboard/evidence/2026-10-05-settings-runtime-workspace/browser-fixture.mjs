@@ -46,7 +46,10 @@ await page.route('**/api/**', async route => {
     const body = request.postDataJSON()
     assert.equal(body.lane, 'default')
     state[owner].file = body.runtime_id
-    if (saveGate) { const gate = saveGate; saveGate = null; gate.started.resolve(); await gate.promise }
+    if (saveGate) {
+      const gate = saveGate; saveGate = null; gate.started.resolve(); await gate.promise
+      if (gate.fail) return route.abort('failed')
+    }
     const receipt = committedRuntimeTomlConfigFixture(raw(owner))
     receipt.source_revision = raw(owner).source_revision; receipt.commit.source_revision = receipt.source_revision
     receipt.application.skills.input_source_revision = receipt.source_revision
@@ -87,10 +90,25 @@ try {
   const pendingResume = gate(); resumeGate = pendingResume
   await select().selectOption('B.second'); await pendingResume.started.promise
   await click('Fixture leave'); await page.getByText('Settings unmounted', { exact: true }).waitFor()
-  await click('Fixture return'); await selected('B.first')
+  await click('Fixture return'); await select().waitFor()
+  assert.equal(await select().isDisabled(), true)
   pendingResume.resolve(); await selected('B.second')
   checks.push('sent same-workspace save survives navigation; remounted Settings refreshes after resume')
   await page.screenshot({ path: out + 'settings-resumed.png', animations: 'disabled', fullPage: true })
+  const uncertainSave = { ...gate(), fail: true }; saveGate = uncertainSave
+  await select().selectOption('B.first'); await uncertainSave.started.promise
+  await click('Fixture leave'); await page.getByText('Settings unmounted', { exact: true }).waitFor()
+  await click('Fixture return'); await select().waitFor()
+  assert.equal(await select().isDisabled(), true)
+  checks.push('remounted Settings shares the pending write and keeps new typed writes disabled')
+  uncertainSave.resolve()
+  await page.getByText(/저장 결과가 불확실합니다/).waitFor()
+  assert.equal(await select().isDisabled(), true)
+  await page.screenshot({ path: out + 'settings-remount-uncertain.png', animations: 'disabled', fullPage: true })
+  const readsBeforeRecovery = reads.filter(row => row.path.endsWith('/config/raw')).length
+  await page.getByTestId('settings-runtime-refresh').click(); await selected('B.second')
+  assert.ok(reads.filter(row => row.path.endsWith('/config/raw')).length > readsBeforeRecovery)
+  checks.push('lost dispatched response stays uncertain after remount until a subsequent file-inclusive refresh')
   await click('Fixture withdraw authority')
   await page.getByText('현재 작업공간을 확인한 뒤 Runtime 설정을 읽고 수정할 수 있습니다.', { exact: true }).waitFor()
   assert.equal(await select().isDisabled(), true)
@@ -101,10 +119,10 @@ try {
   await page.screenshot({ path: out + 'settings-mobile-withdrawn.png', animations: 'disabled' })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   checks.push('mobile has no horizontal overflow')
-  assert.equal(writes.filter(row => row.path.endsWith('/config/routing')).length, 2)
+  assert.equal(writes.filter(row => row.path.endsWith('/config/routing')).length, 3)
   assert.equal(writes.filter(row => row.path.endsWith('/setup/resume')).length, 1)
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])
-  checks.push('only two explicit routing writes and one matching resume, zero page errors/unexpected routes')
+  checks.push('only three explicit routing writes and one matching resume, zero page errors/unexpected routes')
   await writeFile(out + 'browser-result.json', JSON.stringify({ passed: true, checked_at: new Date().toISOString(), browser: browser.version(),
     scope: 'Actual Settings/workspace store/router/API and synthetic HTTP. No production/backend/native execution; held A read may be transport-aborted. Unit tests also deliver late responses ignoring cancellation.', checks, reads, writes, errors, unexpected }, null, 2) + '\n')
   console.log(JSON.stringify({ passed: true, checks, reads: reads.length, writes, errors, unexpected }))

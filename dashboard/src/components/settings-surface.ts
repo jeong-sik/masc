@@ -56,7 +56,7 @@ import { OnboardingSettings } from './onboarding-settings'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
-import { SettingsRuntimeSession } from '../lib/settings-runtime-session'
+import { settingsRuntimeSessionFor } from '../lib/settings-runtime-session'
 import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { getData } from '../lib/async-state'
 import { runtimeTomlSessionFor } from '../lib/runtime-toml-session'
@@ -1585,21 +1585,21 @@ export function SettingsSurface() {
   }
 
   const runtimeAuthority = executionWorkspaceAuthority.value
-  const runtimeSession = useMemo(() => runtimeAuthority ? new SettingsRuntimeSession(runtimeAuthority) : null, [runtimeAuthority])
+  const runtimeSession = runtimeAuthority ? settingsRuntimeSessionFor(runtimeAuthority) : null
   const runtimeState = runtimeSession?.state.value
   const sourceGeneration = runtimeTomlSourceGeneration.value
   const runtimeObservation = exactLaneObservationRevision(runtimeAuthority)
   // Raw editor writes finish independently of navigation. Observe its final
   // projection publication even after that editor has unmounted.
   const rawProjection = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).state.value.projectionRevision : 0
-  useLayoutEffect(() => () => runtimeSession?.dispose(), [runtimeSession])
+  useLayoutEffect(() => runtimeSession?.attach(), [runtimeSession])
   useEffect(() => {
     // This writer refreshes after setup resume; its own file notification must
     // not race that final reading. Other writes refresh an idle Settings view.
-    if (runtimeSession?.state.peek().write.phase !== 'saving') void runtimeSession?.refresh().catch(() => {})
+    void runtimeSession?.refreshOnObservation().catch(() => {})
   }, [runtimeSession, sourceGeneration, rawProjection, runtimeObservation])
   useEffect(() => {
-    if (sec === 'routing') void runtimeSession?.readSource().catch(() => {})
+    if (sec === 'routing' && runtimeSession?.state.peek().source.status !== 'loading') void runtimeSession?.readSource().catch(() => {})
   }, [runtimeSession, sec])
   const runtimeDefaults = runtimeState ? getData(runtimeState.defaults) ?? null : null
   const runtimeResolved = runtimeState ? getData(runtimeState.resolved) ?? null : null

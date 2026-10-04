@@ -25,7 +25,7 @@ type WriteState = { phase: 'idle' } | {
 }
 type State = { [K in keyof Readings]: AsyncState<Readings[K]> } & { write: WriteState; uncertain: { attempt: number } | null }
 const stale = () => new Error('작업공간 또는 설정 조회가 바뀌었습니다.')
-type Attachment = { controller: AbortController; observed: boolean; cancelUnsent: (() => void) | null }
+type Attachment = { controller: AbortController; observed: boolean }
 const sessions = new WeakMap<ExecutionWorkspaceAuthority, SettingsRuntimeSession>()
 
 /** The exact workspace authority owns writes and their uncertain outcomes across
@@ -45,13 +45,11 @@ export class SettingsRuntimeSession {
   }
   current() { return this.attached(this.attachment) }
   attach(): () => void {
-    this.attachment?.cancelUnsent?.()
     this.attachment?.controller.abort()
-    const attachment: Attachment = { controller: new AbortController(), observed: false, cancelUnsent: null }
+    const attachment: Attachment = { controller: new AbortController(), observed: false }
     this.attachment = attachment
     this.update({ defaults: idle, resolved: idle, providers: idle, source: idle })
     return () => {
-      attachment.cancelUnsent?.()
       attachment.controller.abort()
       if (this.attachment === attachment) this.attachment = null
     }
@@ -120,35 +118,21 @@ export class SettingsRuntimeSession {
     send: (options: RuntimeTomlRequestOptions) => Promise<CommittedRuntimeTomlConfig>): Promise<boolean> {
     if (!this.canWrite()) return false
     const attachment = this.attachment
-    if (!this.attached(attachment)) return false
     const attempt = ++this.writeAttempt
     const controller = new AbortController()
     // Leaving Settings cancels its reads and unsent intent. An already-sent
     // write still owns settlement/resume while the same workspace is current.
-    const owns = () => this.writeAttempt === attempt && !controller.signal.aborted && this.ownsAuthority()
-    let unwatch: (() => void) | null = effect(() => { if (executionWorkspaceAuthority.value !== this.authority) controller.abort() })
-    const stopWatching = () => { unwatch?.(); unwatch = null }
+    const owns = () => !controller.signal.aborted && executionWorkspaceAuthority.peek() === this.authority
+    const unwatch = effect(() => { if (executionWorkspaceAuthority.value !== this.authority) controller.abort() })
     let dispatched = false, receipt: CommittedRuntimeTomlConfig | null = null
-    const cancelUnsent = () => {
-      if (dispatched || this.writeAttempt !== attempt) return
-      controller.abort()
-      stopWatching()
-      attachment.cancelUnsent = null
-      this.update({ write: { phase: 'error', target, receipt: null,
-        message: '화면을 떠나 저장 요청을 전송하지 않았습니다.' } })
-    }
     const options = { beforeDispatch: () => {
-      if (!owns() || !this.attached(attachment)) throw stale()
+      if (!this.attached(attachment)) throw stale()
       dispatched = true
-      attachment.cancelUnsent = null
     } }
-    attachment.cancelUnsent = cancelUnsent
     this.update({ write: { phase: 'saving', target, message: '', receipt: null } })
     try {
       receipt = await send(options)
       if (!owns()) return false
-      // An acknowledged write is settled outside the attachment as well.
-      attachment.cancelUnsent = null
       this.update({ source: loaded(receipt), write: { phase: 'saving', target,
         message: `저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`, receipt } })
       announceRuntimeTomlWritten()
@@ -174,10 +158,7 @@ export class SettingsRuntimeSession {
         if (uncertain) announceRuntimeTomlWriteUncertain()
       }
       return false
-    } finally {
-      stopWatching()
-      if (attachment.cancelUnsent === cancelUnsent) attachment.cancelUnsent = null
-    }
+    } finally { unwatch() }
   }
 }
 

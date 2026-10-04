@@ -14,13 +14,18 @@ file revision and the same declared order that was displayed.
 If a dispatched save has no confirmed response, reread current Runtime settings
 before trying another write. Finishing an older read does not establish the
 result of that save. File replacement, runtime resume and observed application
-remain separate results. While Settings stays mounted, its saved receipt is
-retained alongside any follow-up refresh failure.
+remain separate results. Pending saves, uncertain results and saved receipts stay
+with the verified workspace connection across Settings navigation. A follow-up
+refresh failure does not discard a confirmed receipt. Browser reload or a new
+workspace connection starts a new Settings session.
 
 Leaving Settings cancels unsent actions and screen reads. An already-sent save
 continues its receipt/resume handling while its workspace stays current. Returning
+to Settings during a pending save keeps another typed write disabled. Returning
 to Settings or Runtime during resume is supported: both reread the observation
-when resume finishes. The raw Runtime editor keeps its independent unsaved draft.
+when resume finishes. An uncertain response also invalidates older file bases
+without claiming the file was saved. The raw Runtime editor keeps its independent
+unsaved draft; compare it with the current file before choosing a save basis.
 Changing workspace stops further effects from the old operation; it cannot undo
 an earlier server-side write.
 

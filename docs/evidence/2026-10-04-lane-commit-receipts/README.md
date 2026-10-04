@@ -1,6 +1,6 @@
 # TUI Lane commit receipt evidence
 
-Relates to #41100, audit finding B4. Base: `1ca0e57699f5258484d9b77ea193e11ba893fca1`.
+Relates to #41100, audit finding B4. Audit baseline: `1ca0e57699f5258484d9b77ea193e11ba893fca1`. Review base: `a251e19115fa71dff59b2ce726be52e63ee0a073`. The main delta changes Board normalization and unrelated release/PTY fixtures; no receipt, state or renderer source changed.
 
 The routing client now returns its decoded receipt through the async lane-write result. The UI retains the receipt across successful and failed list rereads, separates applied/kept/unpublished from file durability, and wraps its notice at the same width used for list and picker geometry.
 

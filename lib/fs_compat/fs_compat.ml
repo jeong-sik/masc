@@ -311,6 +311,10 @@ let save_file_atomic_strict_staged path content =
   Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
+let write_file_atomic_strict_staged_blocking path ~write =
+  Atomic_write.write_file_atomic_strict_staged_blocking path ~write
+;;
+
 let write_file_atomic_strict_staged path ~write =
   Atomic_write.write_file_atomic_strict_staged path ~write
 ;;

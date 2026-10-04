@@ -1,3 +1,12 @@
+type share_rounding = Largest_remainder | Down
+type tie_break = Name_ascending | Name_descending
+type deduction_rounding = Floor | Ceil
+type distribution = {
+  share_rounding : share_rounding;
+  tie_break : tie_break;
+  deduction_rounding : deduction_rounding;
+}
+
 (** The integer arithmetic of a payout (RFC-goal-candle-ledger 3.3, 3.4).
 
     Amounts are whole milli-candle. Nothing here uses floating point, because a
@@ -29,14 +38,14 @@ val deduction_coefficient :
     Both must lie in [0, 1000]. The result is never above [1000], so finishing
     early never pays more. *)
 
-val split : total:int -> (string * int) list -> ((string * int) list, error) result
+val split : rounding:share_rounding -> tie_break:tie_break -> total:int -> (string * int) list -> ((string * int) list, error) result
 (** [split ~total weights] gives each name [total * weight / sum of weights],
-    rounded down. The milli-candle left over go one each to the names with the
-    largest remainders. Equal remainders go to the name that sorts first, so the
-    answer does not depend on the order the names are given in. The shares sum to
-    [total] exactly. Names come back in the order they were given. *)
+    rounded down. [Down] leaves the remainder unissued; [Largest_remainder]
+    gives the milli-candle left over one each to the names with the
+    largest remainders. Equal remainders follow the explicit [tie_break], so the
+    answer does not depend on the order the names are given in. With [Largest_remainder], the shares sum to [total] exactly. Names come back in the order they were given. *)
 
-val deduct : coefficient:int -> int -> (int, error) result
-(** [deduct ~coefficient share] is [share * coefficient / 1000], rounded down.
+val deduct : rounding:deduction_rounding -> coefficient:int -> int -> (int, error) result
+(** [deduct ~coefficient share] is [share * coefficient / 1000], rounded by the explicit policy.
     [coefficient] must lie in [0, 1000]. A negative share is refused before any
     multiplication, including when the coefficient is zero. *)

@@ -69,6 +69,15 @@ let enable_candle (config : Workspace.config) =
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 2000
@@ -718,10 +727,10 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
     check int "Candidates are durable before any model request" 1 (count_kind config "candidates");
     let decision = match request with
       | A.Grade goal ->
-        check string "grade reads the real Goal snapshot" "Ship the ledger" goal.title;
+        check string "grade reads the real Goal snapshot" "Ship the ledger" goal.goal.title;
         Eio.Promise.resolve signal_grade_started ();
         Eio.Promise.await grade_release;
-        A.Grade_decided Candle_grade.Small
+        A.Grade_decided (Option.get (Candle_grade.of_string "small"))
       | A.Relation task ->
         check string "relation reads the persisted linked Task" task_title task.task_title;
         A.Relation_decided A.Related

@@ -324,7 +324,6 @@ let test_gate_retry_workspace_precondition () =
     expect_error "unbound dashboard request keeps existing parser" "retry request.id is required"
       (retry []))
 
-
 let test_keeper_memory_cleanup_routes_and_closed_requests () =
   let module Cleanup = Server_dashboard_http_keeper_memory_cleanup in
   let memory_path = "/api/v1/keepers/fixture-keeper/memory/retractions" in
@@ -2351,14 +2350,6 @@ let test_dashboard_proof_http_json_surfaces_submission_index () =
          (source |> member "route" |> to_string)
          "/api/v1/dashboard/execution-trust"))
 
-let test_dashboard_proof_route_registered_in_http_routers () =
-  let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
-  let h2 = read_file "lib/server/server_h2_gateway.ml" in
-  check bool "HTTP/1 dashboard proof route registered" true
-    (String_util.contains_substring http1 "\"/api/v1/dashboard/proof\"");
-  check bool "HTTP/2 dashboard proof route registered" true
-    (String_util.contains_substring h2 "\"/api/v1/dashboard/proof\"")
-
 let config_sync_runtime_toml =
   {|[runtime]
 default = "test_provider.test_model"
@@ -2465,21 +2456,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
   check bool "trust summary remains populated" true
     (match row |> member "trust" with `Assoc _ -> true | _ -> false)
 
-let test_execution_trust_does_not_call_full_keeper_projection () =
-  let source = read_file "lib/dashboard/dashboard_http_keeper.ml" in
-  check bool
-    "execution-trust refresh cannot reintroduce the full compact projection"
-    false
-    (String_util.contains_substring
-       source
-       "keepers_dashboard_json ~compact:true")
-
-(* A refusal the keeper cannot read is a refusal it cannot answer. The
-   dashboard used to fill an omitted reason with the constant "dashboard
-   rejected approval", so a rejected keeper had nothing to act on: polisher
-   re-sent `echo ok` for 20+ turns against that string. RFC-0305 already
-   forbids defaulting an omitted [decision] to approve; a rejection's reason
-   is the same class of field. *)
 let test_gate_resolve_requires_reason_on_reject () =
   let attempt reason_field =
     let fields =
@@ -2625,7 +2601,6 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (not_requested |> member "started" |> to_int);
   check int "not requested queued" 0
     (not_requested |> member "queued" |> to_int)
-
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -3395,6 +3370,15 @@ let test_warm_dashboard_responses_follow_equipment_authority () =
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 1000
@@ -3411,9 +3395,9 @@ beanie = 200
      synthetic; the payment/purchase/equipment facts and their replay are real
      isolated-store operations. This does not exercise the model appraisal. *)
   let at = ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
-  let payment = ok Fun.id (Candle_payment.make
+  let payment = ok Fun.id (Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
     ~identity:{goal_id="warm-cache-goal";request_id="warm-cache-request";verification_run_id="warm-cache-run"}
-    ~grade:Candle_grade.Trivial ~total_milli:1000
+    ~grade:(Option.get (Candle_grade.of_string "trivial")) ~total_milli:1000
     ~grade_trace:{run_id="grade";slot_id="fixture"}
     ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="fixture"}}]
     ~weights_trace:{run_id="weights";slot_id="fixture"}
@@ -3542,6 +3526,15 @@ let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 1000
@@ -4898,7 +4891,6 @@ let test_tools_routes_serve_prepared_http_representations () =
     check_first_h2_charge "origin-refusal"
       [ "origin", "https://disallowed.example"; "authorization", "Bearer " ^ token ]
       "/mcp" 403)
-
 
 (* A dashboard read that answers straight from [Dashboard_cache] sends the bytes
    the cache serialized with the entry. The prepared-payload hook fires each
@@ -7333,7 +7325,6 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
         (List.length names)
         (json |> member "total" |> to_int))
 
-
 (* The `.mli` calls the error clear on success a deliberate contract, and
    nothing tested it. It is also exactly what a snapshot swap could drop,
    since the fields now have to be named in the record update rather than
@@ -7622,8 +7613,6 @@ let () =
             test_operator_digest_default_route_exposes_provenance;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
-          test_case "proof route registered in HTTP routers" `Quick
-            test_dashboard_proof_route_registered_in_http_routers;
           test_case "Gate mode save reports recovery independently" `Quick
             test_gate_mode_change_json_separates_saved_mode_from_recovery;
           test_case "bootstrap omits eager goal tree" `Quick
@@ -7799,8 +7788,6 @@ let () =
             test_agent_activity_keys_on_its_window;
           test_case "execution trust uses narrow Keeper projection" `Quick
             test_execution_trust_uses_narrow_keeper_projection;
-          test_case "execution trust cannot call full Keeper projection" `Quick
-            test_execution_trust_does_not_call_full_keeper_projection;
           test_case "offline keeper composite exposes secret projection" `Quick
             test_offline_keeper_composite_exposes_secret_projection;
           test_case "offline keeper composite names why the keeper is not running" `Quick

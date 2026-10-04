@@ -96,10 +96,14 @@ let read_blob_bounded ~budget t reference =
   match kind with
   | Sequence -> read (sequence_path hash)
   | Blob ->
-      (match read (blob_path hash) with
-       | Ok _ as result -> result
-       | Error Read_limit_exceeded as result -> result
-       | Error (Read_failed _) -> read (recovery_blob_path hash))
+      let canonical = blob_path hash in
+      let* kind = bounded_protect (fun () ->
+        Ok (Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root canonical))) in
+      (match kind with
+       | Fs_compat.Exact_kind Unix.S_REG -> read canonical
+       | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR -> read (recovery_blob_path hash)
+       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+           Error (Read_failed "retained evidence is not a regular file"))
 let read_blob ?(max_bytes=max_int) t reference =
   read_blob_bounded ~budget:(read_budget ~max_bytes) t reference
   |> Result.map_error (function
@@ -427,8 +431,10 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
                               | Fs_compat.Exact_missing ->
                                   (match Fs_compat.exact_path_kind ~follow:false
                                            (Filename.concat t.root (recovery_blob_path (digest bytes))) with
-                                   | Fs_compat.Exact_missing -> retain canonical
-                                   | _ -> retain (recovery_blob_path (digest bytes)))
+                                   | Fs_compat.Exact_kind Unix.S_REG ->
+                                       retain (recovery_blob_path (digest bytes))
+                                   | Fs_compat.Exact_missing | Fs_compat.Exact_kind _
+                                   | Fs_compat.Exact_unknown -> retain canonical)
                               | Fs_compat.Exact_kind Unix.S_DIR ->
                                   retain (recovery_blob_path (digest bytes))
                               | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->

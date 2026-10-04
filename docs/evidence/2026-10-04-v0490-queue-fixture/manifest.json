@@ -1,7 +1,22 @@
 {
-  "scope": "independent downstream diagnostic census, not official target PASS",
+  "scope": "historical two-scenario fixture execution; not current-head or official full-target PASS",
   "script_sha256": "435fce7f09ea9b57d0bb97fe802d40e767d655e8c2a04809fcc7fe5c0f4aa432",
   "binary_commit": "e4afdce8f0c4ba4cf02e4326ba423c4fe2207339",
   "binary_sha256": "64ea20854e47c3a5883c717303de468cbc7ed7b811b8fcea815f263ee8bc41d6",
-  "exit_code": 0
+  "exit_code": 0,
+  "source_commit": "6caed5065b341a75bebc72bb934cbb851ddaa864",
+  "source_path": "test/test_tui_remote_workspace_history_pty.py",
+  "source_commit_url": "https://github.com/jeong-sik/masc/commit/6caed5065b341a75bebc72bb934cbb851ddaa864",
+  "reviewed_head": "7d2fb4ff798134e8257b6d49955b5a22c8bd1e2d",
+  "reviewed_head_script_sha256": "285ad89e1bfd3ab5cfaa51f24c69a18b81f62a7bf349e98827442a4000f3b1b8",
+  "raw_artifacts": {
+    "raw/01.pty": "ec582e9003ca003eeb4a6e6e359fe14d74c7434e386250a376fc6afc6e350f39",
+    "raw/01.txt": "3277eee09baf34fcab159271ed55202cab928d33d07724fbfaa490dd0afd46ae",
+    "raw/02.pty": "17f429ebd162b9334bdf6e5c36b2d1ca00bea0d6cfda44b003362882c9822d1e",
+    "raw/02.txt": "c4390a7b5eda579227926e0cfc701aa24168d3d41651347658daf92f9d40dbb0",
+    "raw/manifest.json": "ca7e4f4e41ca64aa1fd8bcc12afe2735c9f60d91f72cdef26d2c37fa911134b7",
+    "raw/run.log": "2338cff25103c14e90f0e4434241e75887cbf99054e7c0cb9be187b5257fa627",
+    "raw/run.py": "2d64b52a38c22037c277597b556ccb0ae0842d073a39b5ea30d6b36c08c081a5",
+    "raw/scenarios.json": "627f4cc23c8c0460432ea80dfecc932809f58c7738818a2fd0149ff3fabdba0f"
+  }
 }

@@ -3557,7 +3557,7 @@ let context_split_width cols =
   min 62 (max 44 (available * 45 / 100))
 
 
-let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
+let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_note = false) ~cols ~scale
     (forecast : (Masc_tui_context_inspector.forecast, string) result) =
   let width = max 1 (framed_inner_width cols - 2) in
   let prose text =
@@ -3572,7 +3572,7 @@ let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
     ^ Context_bars.band ~width ~title:"NEXT REQUEST"
         ~caption:"what the next Agent Core request would carry, computed now"
   ]
-  @ Masc_tui_next_request_band.lines ~prose ~fact
+  @ Masc_tui_next_request_band.lines ~runtime_details ~prose ~fact
       ~safe:Keeper_chat.terminal_safe_text ~scale forecast
   @ (if show_scale_note
      then prose (Masc_tui_token_scale.note scale)
@@ -3584,7 +3584,7 @@ let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
    no-value mark both sit in it, so the rows line up on the same column. *)
 let token_cell_width = 7
 
-let context_composition_lines ~cols ~turn_back
+let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
@@ -4176,7 +4176,7 @@ let context_composition_lines ~cols ~turn_back
     ]
   @ history_lines
   @ [ "" ]
-  @ context_next_request_lines ~cols ~scale forecast
+  @ context_next_request_lines ~runtime_details ~cols ~scale forecast
   @ recent_turns_lines @ [ "" ]
   @ prose
       "Three measurements of one turn, not three views of one number: none of \
@@ -4843,6 +4843,18 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
    and a caller that guessed would scroll to the wrong row every time the
    header changed. *)
 let context_inspector_content_lines ~cols state : context_pane_body =
+  let runtime_details id =
+    match state.runtime_catalog_reading with
+    | Runtime_catalog_read ->
+      (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
+       | None -> ["Account/model configuration unavailable in the current catalogue"]
+       | Some runtime ->
+         [ Printf.sprintf "Account %s · %s" runtime.ro_provider_id runtime.ro_provider
+         ; Printf.sprintf "Configured context %d tokens (%s) · model %s"
+             runtime.ro_effective_max_context (Tui_decode.runtime_context_source_label runtime.ro_max_context_source) runtime.ro_model
+         ; "Current configuration; the captured turn above retains its own runtime and context." ])
+    | Runtime_catalog_loading -> ["Loading account/model configuration…"]
+    | Runtime_catalog_unread | Runtime_catalog_failed _ -> ["Account/model configuration unavailable; refresh to read it"] in
   match state.context_inspector_reading with
   | None ->
       Plain
@@ -4865,7 +4877,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                  ^ Ansi.reset
                ; ""
                ]
-               @ context_next_request_lines ~cols
+               @ context_next_request_lines ~runtime_details ~cols
                    ~scale:Masc_tui_token_scale.fleet
                    ~show_scale_note:true forecast
              , None )
@@ -4886,7 +4898,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            Plain
-             ( context_composition_lines ~cols
+             ( context_composition_lines ~runtime_details ~cols
                  ~turn_back:state.context_inspector_turn_back ~forecast selection
              , None )
        | Masc_tui_context_inspector.Exact_input ->

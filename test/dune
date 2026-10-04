@@ -9329,3 +9329,5 @@
  (name test_tui_model_form)
  (modules test_tui_model_form)
  (libraries alcotest masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
+
+(include stanzas/test_tui_context_catalog_scope.inc)

@@ -5965,6 +5965,18 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
          remembered, so a later load with a switch asks. *)
       ()
 
+let launch_runtime_catalog_load state ~mailbox =
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  let generation = state.runtime_catalog_generation in
+  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
+  let enqueue_async = workspace_enqueue state in
+  let host = server_peer_host in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Runtime_catalog_loaded (generation, result)))
+    (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
+
 let launch_context_inspector_load state ~mailbox ~keeper_name =
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
@@ -6010,6 +6022,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
                "Eio switch is unavailable" ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
+  launch_runtime_catalog_load state ~mailbox;
   state.context_inspector_open <- true;
   state.context_inspector_keeper <- Some keeper_name;
   (* A fresh Keeper target starts unread. Showing the previous Keeper's
@@ -6719,18 +6732,6 @@ let handle_slot_edit state ~mailbox edit =
             (* [plan_slot_edit] pairs each request with its target; this arm
                is the pairing the plan does not produce. *)
             Error "the slot editor built a write its target does not take")
-
-let launch_runtime_catalog_load state ~mailbox =
-  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
-  let generation = state.runtime_catalog_generation in
-  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
-  let enqueue_async = workspace_enqueue state in
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Runtime_catalog_loaded (generation, result)))
-    (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
 
 (* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
    what it does; each write sends the lane's whole order and the server decides
@@ -20332,6 +20333,9 @@ and is loaded on demand through keeper_skill.
             | "r" ->
                 Option.iter
                   (fun keeper_name ->
+                     (* The current catalogue changes independently of captured
+                        turns. Refresh it here, never for each history step. *)
+                     launch_runtime_catalog_load state ~mailbox:async_messages;
                      launch_context_inspector_load state
                        ~mailbox:async_messages ~keeper_name)
                   state.context_inspector_keeper

@@ -25,7 +25,7 @@ let guardingUnload = false
 const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
 function syncUnloadGuard() {
   const dirty = [...sessions.values()].some(session => session.modified() || session.state.peek().uncertain
-    || session.state.peek().phase === 'saving')
+    || session.state.peek().phase === 'saving' || session.state.peek().phase === 'followup')
   if (typeof window === 'undefined' || dirty === guardingUnload) return
   guardingUnload = dirty
   if (dirty) window.addEventListener('beforeunload', beforeUnload)

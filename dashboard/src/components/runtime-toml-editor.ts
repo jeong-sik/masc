@@ -356,13 +356,21 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     }
   }
 
-  function useCurrentSource(replaceDraft: boolean) {
+  async function useCurrentSource(replaceDraft: boolean) {
     if (config === null || currentSource === null || saving || readingCurrent) return
     setConfig({ ...config, path: currentSource.source_path,
       source_text: currentSource.source_text, source_revision: currentSource.source_revision })
     if (replaceDraft) {
+      setReadingCurrent(true)
+      setExactLanes(null)
+      setLaneRuntimes(null)
       setDraft(currentSource.source_text)
       setModelContextDrafts({})
+      try {
+        await refreshExactLanes()
+      } finally {
+        setReadingCurrent(false)
+      }
     }
     setCurrentSource(null)
     setError(null)

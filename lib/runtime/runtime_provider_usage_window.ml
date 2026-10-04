@@ -9,6 +9,7 @@ type window_kind =
 type utilization =
   | Fraction of float
   | Percent of int
+  | Usd of { used : float; limit : float option }
 
 type source =
   | Claude_code_rate_limit_event
@@ -348,7 +349,7 @@ let positive_int ~path value =
 ;;
 
 let positive_number ~path value =
-  if Float.compare value 0.0 > 0
+  if Float.is_finite value && Float.compare value 0.0 > 0
   then Ok value
   else Error (Unexpected_value { path; expected = greater_than_zero })
 ;;
@@ -399,14 +400,28 @@ let distinct_windows ~path (report : report) =
     Error (Duplicate_window { path; limit_id = window.limit_id; kind = window.kind })
 ;;
 
-(* OpenRouter, GET /api/v1/key (openrouter.ai/docs/api-reference/limits).
-   [limit] null means the key has no credit cap, so there is no credit
-   window.  The response states no reset time.  [limit_reset] is not read:
+(* OpenRouter, GET /api/v1/key (openrouter.ai/docs/api_reference/limits).
+   Credits are denominated in USD (openrouter.ai/support/). A null [limit]
+   states no key cap; [usage] is the all-time spend, not an empty meter.
+   The response states no reset time. [limit_reset] is not read:
    the label is part of the row key in {!record}, so a label carrying the
    reset period would leave the old row behind when the period changes. *)
 let openrouter_credit_window ~path fields =
   match List.assoc_opt "limit" fields with
-  | None | Some `Null -> Ok None
+  | None | Some `Null ->
+    let* usage = optional_as number_at ~path "usage" fields in
+    (match usage with
+     | None -> Ok None
+     | Some used when Float.is_finite used && used >= 0.0 ->
+       Ok (Some
+         { limit_id = None
+         ; kind = Provider_label "credit usage (all time)"
+         ; role = Counts_other_use
+         ; utilization = Usd { used; limit = None }
+         ; resets_at = None
+         })
+     | Some _ -> Error (Unexpected_value
+         { path = member_path path "usage"; expected = "a finite nonnegative USD amount" }))
   | Some limit_json ->
     let limit_path = member_path path "limit" in
     let* limit = number_at ~path:limit_path limit_json in
@@ -425,7 +440,7 @@ let openrouter_credit_window ~path fields =
          { limit_id = None
          ; kind = Provider_label "credit limit"
          ; role = Gates_model_calls
-         ; utilization = Fraction ((limit -. remaining) /. limit)
+         ; utilization = Usd { used = limit -. remaining; limit = Some limit }
          ; resets_at = None
          })
 ;;
@@ -796,6 +811,7 @@ type recorded =
 
 type scope_state =
   | Not_reported_since_start
+  | Reported_no_windows of { source : source; observed_at : float }
   | Reported of recorded * recorded list
 
 let recording_since = Time_compat.now ()
@@ -803,7 +819,12 @@ let recording_since = Time_compat.now ()
 (* scope -> (limit_id, kind) -> latest recorded.  Guarded by a
    [Stdlib.Mutex] like {!Runtime_quota_window}: nothing inside the lock
    suspends. *)
-let table : (Runtime_quota_window.scope, (string option * window_kind, recorded) Hashtbl.t) Hashtbl.t =
+type scope_observations =
+  { windows : (string option * window_kind, recorded) Hashtbl.t
+  ; snapshots : (source, float) Hashtbl.t
+  }
+
+let table : (Runtime_quota_window.scope, scope_observations) Hashtbl.t =
   Hashtbl.create 4
 ;;
 
@@ -831,20 +852,43 @@ let rec mark_record_observer_failure at =
      && not (Atomic.compare_and_set record_observer_failure held later)
   then mark_record_observer_failure at
 
+type report_shape = Complete_snapshot | Sparse_update
+
+let report_shape = function
+  | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
+  | Ollama_usage_read | Antigravity_usage_read -> Complete_snapshot
+  | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
+  | Codex_account_rate_limits_read -> Sparse_update
+
 let record ~scope ~observed_at (report : report) =
-  match report.windows with
-  | [] -> ()
-  | windows ->
+  let shape = report_shape report.source in
+  match shape, report.windows with
+  | Sparse_update, [] -> ()
+  | (Complete_snapshot | Sparse_update), windows ->
     let accepted = Stdlib.Mutex.protect mu (fun () ->
-      let by_window =
+      let observations =
         match Hashtbl.find_opt table scope with
-        | Some by_window -> by_window
+        | Some observations -> observations
         | None ->
-          let by_window = Hashtbl.create 4 in
-          Hashtbl.replace table scope by_window;
-          by_window
+          let observations = { windows = Hashtbl.create 4; snapshots = Hashtbl.create 2 } in
+          Hashtbl.replace table scope observations;
+          observations
       in
-      List.filter
+      match Hashtbl.find_opt observations.snapshots report.source with
+      | Some at when at >= observed_at -> None
+      | Some _ | None ->
+      let by_window = observations.windows in
+      (match shape with
+       | Sparse_update -> ()
+       | Complete_snapshot ->
+           Hashtbl.replace observations.snapshots report.source observed_at;
+           Hashtbl.filter_map_inplace (fun (limit_id, kind) held ->
+             if held.source = report.source && held.observed_at < observed_at
+                && not (List.exists (fun (window : window) ->
+                    Option.equal String.equal limit_id window.limit_id
+                    && equal_window_kind kind window.kind) windows)
+             then None else Some held) by_window);
+      let accepted_windows = List.filter
         (fun (window : window) ->
            let key = window.limit_id, window.kind in
            match Hashtbl.find_opt by_window key with
@@ -852,16 +896,18 @@ let record ~scope ~observed_at (report : report) =
            | Some _ | None ->
              Hashtbl.replace by_window key { window; source = report.source; observed_at };
              true)
-        windows)
+        windows in
+      match shape, accepted_windows with
+      | Sparse_update, [] -> None
+      | (Complete_snapshot | Sparse_update), windows -> Some { report with windows })
     in
-    if accepted <> [] then
-      (try (Atomic.get record_observer) ~scope ~observed_at
-             { report with windows = accepted }
+    Option.iter (fun accepted ->
+      try (Atomic.get record_observer) ~scope ~observed_at accepted
        with Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               mark_record_observer_failure observed_at;
               Log.Runtime.warn "provider usage history sink failed: %s"
-                (Printexc.to_string exn))
+                (Printexc.to_string exn)) accepted
 ;;
 
 let kind_rank = function
@@ -886,14 +932,21 @@ let compare_recorded (left : recorded) (right : recorded) =
 ;;
 
 let state ~scope =
-  let held =
+  let held, latest_snapshot =
     Stdlib.Mutex.protect mu (fun () ->
       match Hashtbl.find_opt table scope with
-      | None -> []
-      | Some by_window -> Hashtbl.fold (fun _ recorded acc -> recorded :: acc) by_window [])
+      | None -> [], None
+      | Some observations ->
+          let latest = Hashtbl.fold (fun source observed_at latest ->
+            match latest with
+            | Some (_, at) when at >= observed_at -> latest
+            | Some _ | None -> Some (source, observed_at)) observations.snapshots None in
+          Hashtbl.fold (fun _ recorded acc -> recorded :: acc) observations.windows [], latest)
   in
   match List.sort compare_recorded held with
-  | [] -> Not_reported_since_start
+  | [] -> (match latest_snapshot with
+      | None -> Not_reported_since_start
+      | Some (source, observed_at) -> Reported_no_windows { source; observed_at })
   | first :: rest -> Reported (first, rest)
 ;;
 

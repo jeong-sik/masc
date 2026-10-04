@@ -1,11 +1,12 @@
 name = "masc_keeper_delegate_status"
 description = """
-Read one Keeper chat operation by exact target and operation_id.
+Read your Keeper chat operation by exact target and operation_id.
 
-A Keeper \
-that submitted the operation does not need this to receive the answer: that \
-arrives on its own queue when the turn ends. Use this to see where an \
-operation stands before then."""
+For a succeeded operation, completed_reply returns the original full assistant \
+reply for its exact outcome_ref, or an explicit unavailable reason. Queue \
+completion previews may be shortened. Read the full reply here before acting \
+on a shortened review; do not delegate again or relay it through Board merely \
+to retrieve the existing answer."""
 additional_properties = false
 
 

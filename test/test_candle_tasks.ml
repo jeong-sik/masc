@@ -88,7 +88,7 @@ let write_backlog config tasks =
     config
     { Masc_domain.tasks
     ; task_deletion_receipts = []
-    ; pending_completion_rejections = []
+    ; pending_completion_approvals = []; pending_completion_rejections = []
     ; last_updated = "2026-09-29T00:00:00Z"
     ; version = 1
     }

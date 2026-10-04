@@ -6428,6 +6428,37 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
 
 (* Two raw editors read the same source; the first commit must survive the
    second editor's POST, which carries its original revision. *)
+let test_runtime_raw_save_rejects_changed_path_with_identical_source () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path in
+  mkdir_p (Filename.dirname original_path);
+  write_file original_path config_sync_runtime_toml;
+  let selected_dir = Filename.concat config.base_path "replacement-config" in
+  mkdir_p selected_dir;
+  let selected_path = Filename.concat selected_dir "runtime.toml" in
+  write_file selected_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:selected_path with
+   | Ok () -> () | Error detail -> fail ("runtime init: " ^ detail));
+  with_env "MASC_CONFIG_DIR" selected_dir @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let revision = Runtime.config_source_revision_to_string
+    (Runtime.config_observation ~path:original_path config_sync_runtime_toml).source_revision in
+  let audit_before = Lib.Audit_log.read_entries config in
+  let raw, json = post_to_handler ~target:"/api/v1/runtime/config/raw"
+    (fun request reqd body -> Server_routes_http_routes_dashboard.For_testing.handle_runtime_config_raw_post
+      state "path-editor-test" request reqd body)
+    (Yojson.Safe.to_string (`Assoc ["source_text", `String ("# must not write\n" ^ config_sync_runtime_toml);
+      "expected_source_revision", `String revision; "expected_source_path", `String original_path])) in
+  expect_http_status "identical bytes at a changed path must conflict" 409 raw;
+  let open Yojson.Safe.Util in
+  check string "conflict reports selected path" selected_path (json |> member "current" |> member "source_path" |> to_string);
+  check string "old path unchanged" config_sync_runtime_toml (read_file original_path);
+  check string "new path unchanged" config_sync_runtime_toml (read_file selected_path);
+  check bool "path conflict adds no write audit" true (Lib.Audit_log.read_entries config = audit_before)
+
 let test_runtime_raw_save_rejects_stale_source_without_write () =
   with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -6453,7 +6484,8 @@ let test_runtime_raw_save_rejects_stale_source_without_write () =
   let revision text = Runtime.config_source_revision_to_string
     (Runtime.config_observation ~path:runtime_path text).source_revision in
   let body source revision = Yojson.Safe.to_string
-    (`Assoc ["source_text", `String source; "expected_source_revision", `String revision]) in
+    (`Assoc ["source_text", `String source; "expected_source_revision", `String revision;
+      "expected_source_path", `String runtime_path]) in
   let original_revision = revision config_sync_runtime_toml in
   let winner = "# first editor\n" ^ config_sync_runtime_toml in
   let loser = "# second editor\n" ^ config_sync_runtime_toml in
@@ -6483,7 +6515,10 @@ let test_runtime_raw_save_rejects_stale_source_without_write () =
     let raw, _ = post invalid_body in
     expect_http_status label 400 raw;
     check string (label ^ " preserves source") winner (read_file runtime_path))
-    [ "missing revision", Yojson.Safe.to_string (`Assoc ["source_text", `String loser]);
+    [ "missing path", Yojson.Safe.to_string (`Assoc ["source_text", `String loser; "expected_source_revision", `String (revision winner)]);
+      "empty path", Yojson.Safe.to_string (`Assoc ["source_text", `String loser; "expected_source_revision", `String (revision winner); "expected_source_path", `String ""]);
+      "duplicate path", Yojson.Safe.to_string (`Assoc ["source_text", `String loser; "expected_source_revision", `String (revision winner); "expected_source_path", `String runtime_path; "expected_source_path", `String runtime_path]);
+      "missing revision", Yojson.Safe.to_string (`Assoc ["source_text", `String loser]);
       "malformed revision", body loser "bad";
       "uppercase revision", body loser (String.make 64 'A');
       "wrong revision type", Yojson.Safe.to_string
@@ -7900,6 +7935,8 @@ let () =
             test_direct_assignment_route_rejects_stale_revision_without_write;
           test_case "routing POST creates and removes a lane" `Quick
             test_runtime_routing_creates_and_removes_a_lane;
+          test_case "raw editors reject identical source at a changed config path" `Quick
+            test_runtime_raw_save_rejects_changed_path_with_identical_source;
           test_case "raw editors require a revision and stale source loses without a write" `Quick
             test_runtime_raw_save_rejects_stale_source_without_write;
           test_case "direct assignment fences stale Keeper config POST" `Quick

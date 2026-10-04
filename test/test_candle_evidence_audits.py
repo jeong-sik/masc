@@ -177,6 +177,14 @@ class CandleEvidenceAudits(unittest.TestCase):
                 self.run_audit(source/script_name, bundle, bundle)
                 original = runtime_path.read_text()
                 for before, after, error in [
+                    ('"max-concurrent" = 4', '"max-concurrent" = 0',
+                     'prepared binding settings disagree with frozen measurement'),
+                    ('"max-concurrent" = 4', '"max-concurrent" = 4.0',
+                     'prepared binding settings disagree with frozen measurement'),
+                    ('"context-high-water-tokens" = 100000', '"context-high-water-tokens" = 0',
+                     'prepared binding settings disagree with frozen measurement'),
+                    ('"context-low-water-tokens" = 70000', '"context-low-water-tokens" = 70000.0',
+                     'prepared binding settings disagree with frozen measurement'),
                     ('["providers"."glm-coding"]',
                      '["providers"."glm-coding"]\n"enabled" = false',
                      'prepared runtime is not enabled and bound'),

@@ -148,6 +148,10 @@ def validate_runtime(raw, plan):
     require(provider.get('enabled', True) is True and isinstance(binding, dict)
             and binding.get('enabled', True) is True,
             'prepared runtime is not enabled and bound')
+    require(same_json(binding, {'context-high-water-tokens': 100000,
+                                'context-low-water-tokens': 70000,
+                                'max-concurrent': 4}),
+            'prepared binding settings disagree with frozen measurement')
     # Both retained measurements used this concrete Z.AI HTTP destination.
     require(provider.get('protocol') == 'openai-compatible-http'
             and provider.get('endpoint') == 'https://api.z.ai/api/coding/paas/v4',

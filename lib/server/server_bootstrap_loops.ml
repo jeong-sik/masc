@@ -389,7 +389,7 @@ let append_workspace_message_to_recipient ~base_path ~sender_authority
   let appended=Eio_unix.run_in_systhread (fun () ->
     Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
       ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
-      ~speaker ()) in
+      ~speaker ~mention_policy:Keeper_chat_store.Passive_context ()) in
   (* Notify only after returning to the owner domain from transcript I/O. *)
   match appended with
   | Error detail -> Error detail

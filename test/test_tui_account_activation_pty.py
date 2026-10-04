@@ -45,6 +45,9 @@ def scenario(binary, outcome):
     pending = h.GatedHttpResponse((200, {"runtime_ready": True,
         "exact_output_authority_available": True, "model_setup": {"status": "available"}}),
         hold_seconds=30.0)
+    pending_save = h.GatedHttpResponse((200, {"configured": True, "readiness": "verified",
+        "runtime_ids": ["account-one.model"], "commit": {"durability": "durable", "warnings": []}}),
+        hold_seconds=30.0)
     refreshed = {name: threading.Event() for name in ("inventory", "config", "catalog", "surface")}
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
@@ -83,6 +86,8 @@ def scenario(binary, outcome):
         if outcome == "usage_limited":
             receipt.update(readiness="usage_limited", unverified=[{
                 "runtime_id": "account-one.model", "code": "quota_exhausted"}])
+        if outcome == "close_saving":
+            return pending_save()
         return 200, receipt
 
     fixtures[SAVE] = h.RequestHttpResponse(save)
@@ -154,7 +159,16 @@ def scenario(binary, outcome):
         h.send_and_wait(process, fd, output, b"\r", b"Account one model")
         start = len(output)
         os.write(fd, b"\r")
-        if outcome == "close_pending":
+        if outcome == "close_saving":
+            assert h.wait_for_fixture_event(process, fd, output, pending_save.requested, timeout=5.0)
+            h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
+            h.send_and_wait(process, fd, output, b"/login codex\r", "모델 1개 검증 중".encode())
+            assert len(saves) == 1 and not activations, "reopening repeated or bypassed the pending save"
+            h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
+            pending_save.release.set()
+            assert h.wait_for_fixture_event(process, fd, output, active, timeout=5.0), "closed save receipt never activated runtime"
+            h.send_and_wait(process, fd, output, b"/login codex\r", ACTIVE)
+        elif outcome == "close_pending":
             assert h.wait_for_fixture_event(process, fd, output, pending.requested, timeout=5.0)
             h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
             h.send_and_wait(process, fd, output, b"/login codex\r", "런타임 활성화 중입니다".encode())
@@ -201,6 +215,7 @@ def scenario(binary, outcome):
             interact_steps(process, fd, slave, output, base_path)
         finally:
             pending.release.set()
+            pending_save.release.set()
 
     h.run_terminal_scenario(binary, description=f"account save activation: {outcome}",
         interact=interact, http_fixtures=fixtures, http_requests=requests)
@@ -208,6 +223,6 @@ def scenario(binary, outcome):
 
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
-    for outcome in ("success", "refused", "lost", "incomplete", "usage_limited", "close_pending", "close_failed"):
+    for outcome in ("success", "refused", "lost", "incomplete", "usage_limited", "close_pending", "close_failed", "close_saving"):
         scenario(binary, outcome)
-    print("tui account activation: PASS (7 scenarios)")
+    print("tui account activation: PASS (8 scenarios)")

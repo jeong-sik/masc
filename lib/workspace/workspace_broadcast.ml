@@ -449,37 +449,13 @@ let reconcile_persisted_mention config message =
     None
 
 let outbox_filename_suffix = ".json"
-let workspace_request_prefix = "wmsg-"
-let workspace_request_hex_length = 32
-
 let current_request_id_of_filename name =
-  let is_safe_filename_char = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> true
-    | _ -> false
-  in
-  let is_lower_hex = function
-    | '0' .. '9' | 'a' .. 'f' -> true
-    | _ -> false
-  in
-  if not (String.for_all is_safe_filename_char name)
-     || not (Filename.check_suffix name outbox_filename_suffix)
-  then None
+  if not (Filename.check_suffix name outbox_filename_suffix) then None
   else
-    let request_id = Filename.chop_suffix name outbox_filename_suffix in
-      let prefix_length = String.length workspace_request_prefix in
-      let expected_length = prefix_length + workspace_request_hex_length in
-      if String.length request_id <> expected_length
-         || not (String.starts_with ~prefix:workspace_request_prefix request_id)
-      then None
-      else
-        let rec valid_hex index =
-          if index = expected_length
-          then true
-          else if is_lower_hex request_id.[index]
-          then valid_hex (index + 1)
-          else false
-        in
-      if valid_hex prefix_length then Some request_id else None
+    Filename.chop_suffix name outbox_filename_suffix
+    |> Workspace_request_id.of_string
+    |> Result.to_option
+    |> Option.map Workspace_request_id.to_string
 
 let authoritative_directory_names config directory =
   match key_of_path config directory with
@@ -860,7 +836,7 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
   let seq = Workspace_state.next_seq config in
   let request_id = match request_id with
     | Some request_id -> request_id
-    | None -> Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
+    | None -> Workspace_request_id.create () |> Workspace_request_id.to_string in
   let mention = pre_extract_mention in
   (* Stored as written. This used to HTML-escape the content, so a message
      containing a double quote was persisted as [&quot;] and every consumer

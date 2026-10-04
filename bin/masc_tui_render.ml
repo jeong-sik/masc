@@ -3462,13 +3462,13 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")));
-            let prefix = "      Account " in
+            let prefix = "      Quota scope " in
             let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
-            let account_width =
+            let scope_width =
               max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
-              (prefix ^ Masc_tui_message_layout.fit_middle account_width
-                 (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix));
+              (prefix ^ Masc_tui_message_layout.fit_middle scope_width
+                 (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
@@ -3557,13 +3557,13 @@ let render_exact_lane_provider_editor (state : state) editor =
             | None -> "") ^ "Selected " ^ row.sr_slot) in
         (match selected_runtime with
          | Some runtime ->
-           let prefix = "  Account " in
+           let prefix = "  Quota scope " in
            let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
-           let account_width =
+           let scope_width =
              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
-             (prefix ^ Masc_tui_message_layout.fit_middle account_width
-                (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix)
+             (prefix ^ Masc_tui_message_layout.fit_middle scope_width
+                (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
           ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6)) identity));
@@ -3862,7 +3862,7 @@ let render_lanes_overview (state : state) =
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset));
               box_line_styled buf cols ~style:(Theme.recede ())
-                ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
                   ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices);
@@ -9311,14 +9311,22 @@ let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidat
   let candidate_heading =
     match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"
   in
-  (* Reserve the candidate heading's measured width before allocating status.
-     A fixed status width left only an ellipsis for every identity at30 cols. *)
-  let status_width =
-    min status_width
-      (max 1 (inner_width - Message_layout.display_width candidate_heading
-              - Masc_tui_table.cell_gap))
+  (* Reserve the mode's identifying columns before allocating long status. *)
+  let status_width, candidate_floor, drop_order = match mode with
+    | Masc_tui_types.Runtime_lanes ->
+        (* Lane identity and candidate order stay visible even when another
+           row has a long combined status. Full status is in summary/detail. *)
+        let remaining = inner_width - lane_width - (2 * Masc_tui_table.cell_gap) in
+        let candidate_floor = min candidate_width (max 1 (remaining - 1)) in
+        min status_width (max 1 (remaining - candidate_floor)), candidate_floor,
+        [Runtime_detail_column; Runtime_identity_column]
+    | Runtime_all ->
+        let status_width = min status_width
+          (max 1 (inner_width - Message_layout.display_width candidate_heading
+                  - Masc_tui_table.cell_gap)) in
+        status_width, min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)),
+        [Runtime_detail_column; Runtime_identity_column; Runtime_lane_column]
   in
-  let candidate_floor = min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)) in
   let width = function
     | Runtime_lane_column -> lane_width
     | Runtime_candidate_column -> candidate_floor
@@ -9330,7 +9338,7 @@ let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidat
            - (4 * Masc_tui_table.cell_gap)) in
   let layout = Masc_tui_table.fit ~inner_width ~width
     ~flex:Runtime_candidate_column
-    ~drop_order:[Runtime_detail_column; Runtime_identity_column; Runtime_lane_column]
+    ~drop_order
     [Runtime_lane_column; Runtime_candidate_column; Runtime_identity_column;
      Runtime_status_column; Runtime_detail_column] in
   List.map (fun column ->
@@ -9465,7 +9473,9 @@ let runtime_detail_lines state target ~width =
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
-        @ runtime_detail_field ~width ~style:Ansi.reset "Account" (runtime_account_label runtime)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Quota scope" (runtime_quota_scope_label runtime)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Response-local quota scope"
+            (Option.value ~default:"not reported" runtime.ro_quota_scope)
         @ runtime_detail_field ~width ~style:Ansi.reset "Connection / provider ID" runtime.ro_provider_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
         @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"
@@ -10010,7 +10020,7 @@ let render_runtime (state : state) =
                     (Ansi.dim ^ note ^ Ansi.reset));
                (match picker.rlp_pick with
                 | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
-                    c.push ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                    c.push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
                       ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
                       ^ " · " ^ Terminal_text.single_line runtime.ro_id)
                 | _ -> ())) picker.rlp_choices;
@@ -10846,7 +10856,7 @@ let provider_history_lines ~cols (state : state) =
         @ [ Printf.sprintf "   %s  %d/%d UTC days reported" row.marks row.reported_days days; "" ]
       in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report · $ means uncapped USD use"
+         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report · ○ means reported no windows · $ means uncapped USD use"
          days
          (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
          as_of.Unix.tm_hour as_of.Unix.tm_min)

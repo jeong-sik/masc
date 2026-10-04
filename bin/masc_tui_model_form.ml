@@ -164,6 +164,8 @@ let apply t current =
       set_int draft "num-ctx" requested
     | _ -> draft in
   let draft = if effort = Option.value ~default:"" t.source.reasoning_effort then draft else
+    let draft = if effort = "" then draft else
+      Edit_text.edit_table_scalar draft ~path:model_path ~key:"reasoning-uncontrolled" ~value:None in
     Edit_text.edit_table_scalar draft ~path:model_path ~key:"reasoning-effort" ~value:(if effort = "" then None else Some effort) in
   let draft = if value t Temperature = Option.value ~default:"" t.source.temperature then draft else match temperature with
     | Some value -> Edit_text.edit_table_float draft ~path:model_path ~key:"temperature" ~value

@@ -41,7 +41,7 @@ type list_view = Clients | Accounts of client | Account_providers of client * st
 type activation = Activating | Activation_failed of string
   | Active of { exact_output_available : bool }
   (** Saving and owner activation are separate receipts. *)
-type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
+type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving | Removing
   | Finished of { saved : saved; activation : activation; refresh_failed : bool }
       (** [refresh_failed]: the list read after the save did not arrive. *)
   | Failed
@@ -134,14 +134,15 @@ val activated : t -> saved -> (Yojson.Safe.t, string) result -> bool
 (** Record the owner activation receipt; [true] only when runtime readiness and
     setup availability are confirmed. Failure keeps an activation-only retry. *)
 val activation_incomplete : t -> bool
-(** A saved receipt whose activation is pending or unconfirmed. Closing its
-    panel must retain the view and any request already in flight. *)
+(** A model save whose receipt is pending, a failed save awaiting reconciliation,
+    or a saved receipt whose activation is pending/unconfirmed. Closing retains
+    the view and any request already in flight. Account deletion is separate. *)
 val reopen_saved : requested:string -> t -> t option
-(** Reuse a detached saved view for a matching account/client request. The
+(** Reuse a detached saving or saved view for a matching account/client request. The
     same object retains its in-flight generation and full saved receipt;
-    [None] means it does not belong to this request or is no longer saved. *)
+    [None] means it does not belong to this request or has no save to recover. *)
 val retain_activation : t -> t list -> t list
-(** Retain an incomplete saved view without replacing another account's
+(** Retain an incomplete save/activation view without replacing another account's
     receipt. Repeated closure of the same view keeps one entry. *)
 val take_saved : requested:string -> t list -> t option * t list
 (** Take one matching saved view to reopen, preserving every other receipt. *)

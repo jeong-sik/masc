@@ -12,6 +12,7 @@
   workspace_backlog
   workspace_bootstrap
   workspace_broadcast
+  workspace_request_id
   workspace_hooks
   workspace_skill_publish
   workspace_telemetry_drop_event

@@ -129,60 +129,6 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
-(* A phase write is decided against the phase the caller read with
-   [Goal_store.find_goal] — outside the store lock. Writing that decision with
-   a plain overwrite lets a second concurrent transition (also decided on the
-   same earlier phase) land a state the FSM never validated, e.g. Dropped on
-   top of Verifying. The compare-and-update closes that window: when the
-   phase moved in between, the write refuses and the caller reports a
-   Conflict instead of inventing a transition. *)
-type phase_write_error =
-  | Store_unavailable of Goal_store.unavailable
-  | Goal_missing of string
-  | Store_error of string
-  | Concurrent_transition of { expected : Goal_phase.t; actual : Goal_phase.t }
-
-let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () :
-    (Goal_store.goal, phase_write_error) result =
-  let last_review_note, last_review_at =
-    match note with
-    | Some note -> Some note, Some (Masc_domain.now_iso ())
-    | None -> goal.last_review_note, goal.last_review_at
-  in
-  match
-    Goal_store.update_goal_if_phase ctx.config ~goal_id:goal.id
-      ~expected_phase:goal.phase
-      (fun current ->
-        { current with
-          phase
-        ; last_review_note
-        ; last_review_at
-        })
-  with
-  | Ok (Goal_store.Goal_updated updated) -> Ok updated
-  | Ok (Goal_store.Goal_phase_mismatch actual) ->
-    Error (Concurrent_transition { expected = goal.phase; actual })
-  | Error (Goal_store.Store_unavailable unavailable) -> Error (Store_unavailable unavailable)
-  | Error (Goal_store.Goal_not_found _ as error) ->
-    Error (Goal_missing (Goal_store.write_error_to_string error))
-  | Error (Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
-    Error (Store_error (Goal_store.write_error_to_string error))
-;;
-
-let phase_write_error_result ~tool_name ~start_time (error : phase_write_error) =
-  match error with
-  | Store_unavailable unavailable -> unavailable_result ~tool_name ~start_time unavailable
-  | Goal_missing msg -> error_result_typed ~tool_name ~start_time ~code:Not_found msg
-  | Store_error msg ->
-    error_result_typed ~tool_name ~start_time ~code:Internal_error msg
-  | Concurrent_transition { expected; actual } ->
-    error_result_typed ~tool_name ~start_time ~code:Conflict
-      (Printf.sprintf
-         "goal phase moved from %s to %s while this transition was being \
-          decided; re-read the goal and retry"
-         (Goal_phase.to_string expected) (Goal_phase.to_string actual))
-;;
-
 let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
   match Goal_store.append_audit_event_after_pending ctx.config
     (`Assoc
@@ -520,7 +466,7 @@ let proof_effects config (goal : Goal_store.goal) verdict : Goal_store.transitio
    notifications=[actor, proof_announcement ~goal verdict]}
 ;;
 
-let no_proof_effects : Goal_store.transition_effects = {events=[]; notifications=[]}
+let no_goal_effects : Goal_store.transition_effects = {events=[]; notifications=[]}
 
 let recorded_proof (record : Goal_verification.record) = match record.completion with
   | Goal_verification.Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict, _) -> Ok verdict
@@ -594,7 +540,7 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
   | Ok verification_run_id, Ok evidence ->
     let verdict = gate_verdict verdict_outcome ~verification_run_id ~request_id ~criterion ~evidence in
     let effects goal (_, changed, verdict) =
-      if changed then proof_effects config goal verdict else no_proof_effects in
+      if changed then proof_effects config goal verdict else no_goal_effects in
     let committed = Goal_store.transact_goal ~effects config ~goal_id (fun goal ->
       if not (Goal_store.criterion_equal criterion (Goal_store.criterion_of_goal goal)) then
         Error "proof criterion has been superseded"
@@ -647,7 +593,7 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
 
 let reconcile_committed_proof config ~goal_id =
   let effects goal (_, verdict) = match verdict with
-    | None -> no_proof_effects | Some verdict -> proof_effects config goal verdict in
+    | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
   let result = Goal_store.transact_goal ~effects config ~goal_id (fun goal ->
     if goal.phase <> Goal_phase.Verifying then
       Ok (goal, (Reconciliation_not_needed goal.phase, None))
@@ -733,7 +679,7 @@ let mark_proof_pending ?submitted_evidence config ~goal_id goal =
 let transact_or_refuse ?effects config ~goal_id decide =
   match
     Goal_store.transact_goal ?effects:(Option.map (fun make goal -> function
-      | Ok result -> make goal result | Error _ -> no_proof_effects) effects) config ~goal_id (fun goal ->
+      | Ok result -> make goal result | Error _ -> no_goal_effects) effects) config ~goal_id (fun goal ->
       match decide goal with
       | Ok (updated, result) -> Ok (updated, Ok result)
       | Error refusal -> Ok (goal, Error refusal))
@@ -785,7 +731,7 @@ let recover_current_proof config ~goal_id =
    exact ledger row without another model call. *)
 let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context) ~goal_id ~action _goal =
   let effects goal (_, reconciled) = match reconciled with
-    | None -> no_proof_effects
+    | None -> no_goal_effects
     | Some (verdict, _) -> proof_effects ctx.config goal verdict in
   let result = transact_or_refuse ~effects ctx.config ~goal_id (fun goal ->
     Result.bind
@@ -833,6 +779,50 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
              ; "noop", `Bool false; "reconciled", `Bool true; "effect_delivery", delivery
              ; "phase", Goal_phase.to_yojson goal.phase; "goal", Goal_store.goal_to_yojson goal
              ; "verification", Goal_verification.record_to_yojson_for_goal ~goal proof_record ])
+;;
+
+(* The cancellation and its audit intent share the Goal transaction. Decide
+   from the locked row, including its current review metadata, rather than
+   applying a phase calculated from the earlier tool-level read. Delivery is
+   retryable even when a subsequent call finds the Goal already dropped. *)
+let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~note =
+  let effects (goal : Goal_store.goal) changed : Goal_store.transition_effects =
+    if not changed then no_goal_effects
+    else
+      { events = [ Goal_store.Phase,
+          `Assoc [ "phase", Goal_phase.to_yojson goal.phase
+                 ; "actor", `String ctx.agent_name ] ]
+      ; notifications = [] }
+  in
+  match Goal_store.transact_goal ~effects ctx.config ~goal_id (fun goal ->
+    match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Drop with
+    | Error detail -> Error detail
+    | Ok (Goal_phase.Already _) -> Ok (goal, false)
+    | Ok (Goal_phase.Move_to phase) ->
+        let last_review_note, last_review_at = match note with
+          | None -> goal.last_review_note, goal.last_review_at
+          | Some value -> Some value, Some (Masc_domain.now_iso ()) in
+        Ok ({ goal with phase; last_review_note; last_review_at }, true)) with
+  | Error (Goal_store.Store_unavailable unavailable) ->
+      unavailable_result ~tool_name ~start_time unavailable
+  | Error (Goal_store.Goal_not_found _ as error) ->
+      error_result_typed ~tool_name ~start_time ~code:Not_found
+        (Goal_store.write_error_to_string error)
+  | Error (Goal_store.Rejected detail) ->
+      error_result_typed ~tool_name ~start_time ~code:Conflict detail
+  | Error (Goal_store.Persist_failed _ as error) ->
+      error_result_typed ~tool_name ~start_time ~code:Internal_error
+        (Goal_store.write_error_to_string error)
+  | Ok (goal, changed) ->
+      if changed then notify_goal_verification_abandoned ctx ~goal_id;
+      let delivery = deliver_goal_effects ctx.config in
+      ok_result ~tool_name ~start_time
+        [ "goal_id", `String goal_id
+        ; "action", `String (Goal_phase.action_to_string Goal_phase.Drop)
+        ; "noop", `Bool (not changed)
+        ; "phase", Goal_phase.to_yojson goal.phase
+        ; "goal", Goal_store.goal_to_yojson goal
+        ; "effect_delivery", delivery ]
 ;;
 
 let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
@@ -918,9 +908,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
            | Goal_phase.Public_action.Reopen ->
              finish_goal_reopen ~tool_name ~start_time ctx ~note goal
            | Goal_phase.Public_action.Drop ->
-             already_goal_response
-               ~tool_name ~start_time ~goal_id ~action ~phase goal None)
-        | Ok (Goal_phase.Move_to phase) ->
+             finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~note)
+        | Ok (Goal_phase.Move_to _) ->
           (match public_action with
            | Goal_phase.Public_action.Request_complete ->
                 (* Executing -> Verifying (RFC-0387 §4): persist the proof
@@ -947,27 +936,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
            | Goal_phase.Public_action.Reopen ->
                 finish_goal_reopen ~tool_name ~start_time ctx ~note goal
            | Goal_phase.Public_action.Drop ->
-                (match update_goal_phase ctx goal ~phase ?note () with
-                 | Error error ->
-                   phase_write_error_result ~tool_name ~start_time error
-                 | Ok updated_goal ->
-                   notify_goal_verification_abandoned ctx ~goal_id;
-                   emit_goal_event
-                     ctx
-                     ~goal_id
-                     ~event_type:"goal_phase"
-                     ~payload:
-                       (`Assoc
-                          [ "phase", Goal_phase.to_yojson updated_goal.phase
-                          ; "actor", `String ctx.agent_name
-                          ]);
-                   ok_result
-                     ~tool_name
-                     ~start_time
-                     [ "goal_id", `String goal_id
-                     ; "action", `String (Goal_phase.action_to_string action)
-                     ; "goal", Goal_store.goal_to_yojson updated_goal
-                     ]))))
+                finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~note)))
   | Ok _, Ok None ->
     validation_error_result
       ~tool_name

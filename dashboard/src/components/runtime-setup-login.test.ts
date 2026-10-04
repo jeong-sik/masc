@@ -170,7 +170,7 @@ it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('%s account 
   const grouped = {
     ...inventory(first, protocol),
     integrations: [first, sibling, other].map(id => ({ id, display_name: id, protocol, setup_support: 'existing_connection' })),
-    account_groups: [{ id: '1'.repeat(64), integration_ids: [first, sibling], runtime_ids: [`${first}.luna`, `${sibling}.luna`] }],
+    account_groups: [{ id: '1'.repeat(32), integration_ids: [first, sibling], runtime_ids: [`${first}.luna`, `${sibling}.luna`] }],
     runtimes: [first, sibling, other].map(id => ({ id: `${id}.luna`, provider_id: id, display_name: id, protocol, model: 'luna', endpoint: null })),
   }
   render(html`<${RuntimeSetupPicker} inventory=${grouped} onSaved=${vi.fn()} />`)

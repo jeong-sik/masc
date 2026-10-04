@@ -38,11 +38,12 @@ val account_home_matches : choice -> string option -> string option -> bool
 val for_provider : t -> Runtime_schema.provider -> t option
 (** Reuse a parsed, configured provider only when its protocol, transport,
     credential, request surface and account selection match this specification,
-    and it is enabled. A new account
+    and it is enabled. CLI providers must also declare [is-non-interactive=true]. A new account
     reference or changed connection returns [None]. This is not a JSON field. *)
 val resolve_provider : t -> Runtime_schema.provider list -> (t, error) result
 (** Bind to the matching enabled configured account before rendering. Refuse
-    disabled or ambiguous accounts; never enable or overwrite a provider. *)
+    disabled, interactive CLI or ambiguous accounts; never enable or overwrite
+    a provider. *)
 val render : ?include_provider:bool -> ?wizard_default:bool -> t -> rendered
 (** [include_provider=false] appends a model to an already declared connection.
     [wizard_default=false] avoids adding a second installation default on that

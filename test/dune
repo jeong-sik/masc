@@ -9345,3 +9345,7 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_runtime_evidence_pty)))
+
+(include stanzas/test_goal_drop_delivery.inc)
+
+(include stanzas/test_goal_notification_contract.inc)

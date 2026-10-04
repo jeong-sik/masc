@@ -1,4 +1,6 @@
-type recent = { timestamp : float; input : int option; output : int option }
+type timestamp = { epoch : float; local : Unix.tm }
+type successful_outcome = Completed | Checkpoint | Input_required
+type recent = { timestamp : timestamp; outcome : successful_outcome; input : int option; output : int option }
 type stats = {
   id : string; samples : int; successes : int; errors : int;
   usage_samples : int; telemetry_samples : int;
@@ -12,7 +14,7 @@ type history = Loading | Unavailable
   | Decision_directory_unavailable | Decision_files_unreadable of int
   | Decision_rows_invalid of { malformed : int; schema_invalid : int }
   | Observed of {
-  window : int; generated_at : float; stale : bool; refresh_failed : bool; unattributed : int;
+  window : int; generated_at : timestamp; stale : bool; refresh_failed : bool; unattributed : int;
   store_note : string; runtimes : stats list;
 }
 type t = { history : history; specifications : specification list }
@@ -26,6 +28,19 @@ let number = function
   | `Float n when Float.is_finite n && n >= 0. -> Ok n
   | `Int n when n >= 0 -> Ok (float_of_int n)
   | _ -> Error "runtime evidence has an invalid measurement"
+let time value =
+  let* epoch = number value in
+  match Unix.localtime epoch with
+  | local -> Ok { epoch; local }
+  | exception (Unix.Unix_error _ | Invalid_argument _) ->
+      Error "runtime evidence has an unrenderable timestamp"
+let successful_outcome = function
+  | `String "success" -> Ok Completed
+  | `String "checkpoint" -> Ok Checkpoint
+  | `String "input_required" -> Ok Input_required
+  | _ -> Error "runtime recent non-error turn has an unrecognized outcome"
+let outcome_label = function
+  | Completed -> "completed" | Checkpoint -> "checkpoint" | Input_required -> "input required"
 let optional parse = function `Null -> Ok None | value -> Result.map Option.some (parse value)
 let member parse name json = let* value = required name json in parse value
 let rec rows parse = function
@@ -34,12 +49,11 @@ let rec rows parse = function
 let list parse = function `List values -> rows parse values | _ -> Error "runtime evidence has an invalid list"
 let unique ids = List.length ids = List.length (List.sort_uniq String.compare ids)
 let recent json =
-  let* timestamp = member number "ts_unix" json in
-  let* outcome = member text "outcome" json in
+  let* timestamp = member time "ts_unix" json in
+  let* outcome = member successful_outcome "outcome" json in
   let* input = member (optional nat) "input_tokens" json in
   let* output = member (optional nat) "output_tokens" json in
-  if outcome = "success" then Ok {timestamp; input; output}
-  else Error "runtime recent success has an unrecognized outcome"
+  Ok {timestamp; outcome; input; output}
 let cached = function
   | `Null -> Ok None
   | json ->
@@ -62,7 +76,7 @@ let stats json =
      || (match cached with Some (_, _, count) -> count > successes | None -> false)
      || List.length recent > successes then Error "runtime evidence counts disagree"
   else Ok {id; samples; successes; errors; usage_samples; telemetry_samples; cached; cost;
-           recent = List.sort (fun a b -> Float.compare b.timestamp a.timestamp) recent}
+           recent = List.sort (fun a b -> Float.compare b.timestamp.epoch a.timestamp.epoch) recent}
 let specification json =
   let* id = member text "runtime_id" json in
   let* catalog = member (optional nat) "catalog_context" json in
@@ -100,7 +114,7 @@ let history json =
     let* unattributed = member nat "unattributed_entries" json in
     let* runtimes = member (list stats) "runtimes" json in
     let* cache_state = member text "state" cache in
-    let* generated_at = member number "observed_at" json in
+    let* generated_at = member time "observed_at" json in
     let* stale = match cache_state with
       | "fresh" -> Ok false | "stale_refreshing" -> Ok true
       | _ -> Error "runtime evidence has an unconfirmed cache state" in
@@ -126,7 +140,7 @@ let decode json =
   then Ok {history; specifications}
   else Error "runtime specifications repeat an identity"
 let timestamp ts =
-  let tm = Unix.localtime ts in
+  let tm = ts.local in
   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
@@ -161,18 +175,18 @@ let lines t ~runtime_id =
        "Store coverage", observed.store_note]
       @ (match List.find_opt (fun (row : stats) -> row.id = runtime_id) observed.runtimes with
         | None -> ["Runtime samples", "none attributed in this window";
-                   "Last success", "not observed in this window"; "Cache hit", "not reported"]
+                   "Last non-error turn", "not observed in this window"; "Cache hit", "not reported"]
         | Some row -> [
-            "Runtime samples", Printf.sprintf "%d recorded / %d successful / %d errors"
+            "Runtime samples", Printf.sprintf "%d recorded / %d non-error / %d errors"
               row.samples row.successes row.errors;
-            "Sample coverage", Printf.sprintf "usage %d/%d successes; telemetry %d/%d successes"
+            "Sample coverage", Printf.sprintf "usage %d/%d non-error; telemetry %d/%d non-error"
               row.usage_samples row.successes row.telemetry_samples row.successes;
-            "Last success", (match row.recent with first :: _ -> timestamp first.timestamp | [] -> "not observed in this window");
+            "Last non-error turn", (match row.recent with first :: _ -> timestamp first.timestamp ^ " · " ^ outcome_label first.outcome | [] -> "not observed in this window");
             "Cache hit", (match row.cached with
               | None -> "not reported; no valid input/cache pairs"
-              | Some (input, read, samples) -> Printf.sprintf "%.1f%% input tokens (%d/%d); %d/%d successful samples"
+              | Some (input, read, samples) -> Printf.sprintf "%.1f%% input tokens (%d/%d); %d/%d non-error samples"
                   (100. *. float_of_int read /. float_of_int input) read input samples row.successes);
             "Recorded cost", (match row.cost with None -> "not reported" | Some cost -> Printf.sprintf "$%.4f (recorded samples)" cost)]
-          @ List.map (fun row -> "Recent success", Printf.sprintf "%s · input %s / output %s tokens"
-              (timestamp row.timestamp) (count row.input) (count row.output)) row.recent) in
+          @ List.map (fun row -> "Recent non-error turn", Printf.sprintf "%s · %s · input %s / output %s tokens"
+              (timestamp row.timestamp) (outcome_label row.outcome) (count row.input) (count row.output)) row.recent) in
   specifications @ history

@@ -60,7 +60,7 @@ let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   ; ro_is_default = false
   ; ro_quota_exhausted = exhausted
   ; ro_quota_resets_at = resets
-  ; ro_account_scope_id = None
+  ; ro_quota_scope_id = None
   ; ro_quota_scope = Some scope
   ; ro_rate_limited = false
   ; ro_rate_limit_resets_at = None
@@ -413,7 +413,7 @@ let test_unknown_state_is_rejected () =
 
 let test_history_preserves_reported_days_and_units () =
   let json = Yojson.Safe.from_string
-    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","unreadable_reports":0,"points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
+    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","unreadable_reports":0,"reported_no_windows":[],"points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
   in
   match Masc.Tui_decode_usage.decode_provider_usage_history json with
   | Error detail -> fail detail
@@ -441,6 +441,7 @@ let test_trend_is_built_from_the_answer () =
   let day = 86400.0 in
   let history : Masc.Tui_decode_usage.provider_usage_history =
     { puh_days = 3; puh_generated_at = generated_at; puh_unreadable_reports = 1;
+      puh_reported_no_windows = [];
       puh_points =
         [ point ~scope_id:"s1" ~observed_at:(generated_at -. (2.0 *. day))
             (Masc.Tui_decode_usage.Utilization_fraction 0.0)
@@ -463,6 +464,33 @@ let test_trend_is_built_from_the_answer () =
        (fun (row : Masc_tui_usage_trend.row) ->
          (row.scope_id, row.marks, row.reported_days))
        trend.rows)
+
+let test_empty_history_report_reaches_trend () =
+  let module Decode = Masc.Tui_decode_usage in
+  let now = 1780000000. in
+  let payload = `Assoc ["days", `Int 7; "generated_at", `Float now;
+    "sampling", `String "latest_provider_report_per_utc_day"; "unreadable_reports", `Int 0;
+    "points", `List [`Assoc ["scope_id", `String "prior"; "kind", `String "five_hour";
+      "limit_id", `Null; "unit", `String "fraction"; "value", `Float 0.;
+      "observed_at", `Float (now -. 86400.)]];
+    "reported_no_windows", `List (List.map (fun scope -> `Assoc ["scope_id", `String scope;
+      "observed_at", `Float now]) ["prior"; "empty-only"])] in
+  let history = match Decode.decode_provider_usage_history payload with
+    | Ok history -> history | Error detail -> fail detail in
+  let trend = Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history in
+  let find scope = List.find (fun (row : Masc_tui_usage_trend.row) -> row.scope_id=scope) trend.rows in
+  let none = Masc_tui_usage_trend.no_report_mark and empty = Masc_tui_usage_trend.empty_report_mark in
+  check string "no-window day differs from measured zero and missing report"
+    (String.concat "" (List.init 5 (fun _ -> none)) ^ "\xe2\x96\x81" ^ empty) (find "prior").marks;
+  check int "empty day counts as reported alongside measured day" 2 (find "prior").reported_days;
+  check string "empty-only scope has a visible row"
+    (String.concat "" (List.init 6 (fun _ -> none)) ^ empty) (find "empty-only").marks;
+  check int "empty-only successful report counted" 1 (find "empty-only").reported_days;
+  let fields = match payload with `Assoc fields -> fields | _ -> assert false in
+  List.iter (fun fields -> check bool "missing or malformed daily empty state is a failed read" true
+    (Result.is_error (Decode.decode_provider_usage_history (`Assoc fields))))
+    [List.remove_assoc "reported_no_windows" fields;
+     ("reported_no_windows", `List [`Assoc ["scope_id", `String "bad"]]) :: List.remove_assoc "reported_no_windows" fields]
 
 (* The id the section names a scope by is the server's, carried on the row,
    so the trend's points and the current windows cannot disagree. *)
@@ -514,6 +542,7 @@ let () =
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ; test_case "history uses reported points" `Quick
             test_history_preserves_reported_days_and_units
+        ; test_case "empty reports remain observed in the trend" `Quick test_empty_history_report_reaches_trend
         ; test_case "trend is built from the answer" `Quick
             test_trend_is_built_from_the_answer
         ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers

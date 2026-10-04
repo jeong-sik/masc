@@ -6,7 +6,6 @@ module Keeper_status_runtime = Masc.Keeper_status_runtime
 module Keeper_snapshot_unread = Masc.Keeper_snapshot_unread
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
-module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail

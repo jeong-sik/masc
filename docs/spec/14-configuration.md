@@ -365,7 +365,11 @@ if activation is unconfirmed, `r` or Enter retries activation without repeating
 login or saving the connection again. The saved model verification results
 remain visible, including usage-limited models. A confirmed runtime activation
 also reports when the exact-output authority is still unavailable.
-Esc closes the panel while a pending activation continues. Within the same
+Esc closes the panel while a model save or pending activation continues. The
+original save receipt still triggers activation when it arrives; reopening a
+pending save does not resend it. A failed save remains available with its actual
+error for explicit reconciliation, without inferring a commit from the inventory.
+Account deletion is a separate operation. Within the same
 TUI session, `/login` or a matching account/client request reopens that saved
 result: a pending request is not restarted, and an unconfirmed result retains
 the activation-only retry. Withdrawing workspace authority cancels and clears

@@ -90,8 +90,8 @@ let redact_provider_history_cache_error = function
            fields)
   | json -> json
 
-let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
-  let now = Unix.gettimeofday () in
+let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeholder ~compute =
+  let now = clock () in
   let run_compute_and_store entry =
     let result =
       (* Offload via the Executor_pool, NOT [Eio_guard.run_in_systhread].
@@ -105,12 +105,12 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
          with a [Get_context] handler), so [use_rw] resolves normally; when no
          pool is set [submit_or_inline] runs inline in the calling fiber, which
          also carries an Eio context. *)
-      try Ok (Executor_pool_ref.submit_or_inline compute) with
+      try Executor_pool_ref.submit_or_inline compute with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Printexc.to_string exn)
     in
     (* NDT-OK: moved cache freshness timestamp; wall-clock metadata is boundary output. *)
-    let refreshed_at = Unix.gettimeofday () in
+    let refreshed_at = clock () in
     Stdlib.Mutex.lock dashboard_metrics_cache_mu;
     (match result with
      | Ok json ->
@@ -186,6 +186,16 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   in
   response
 
+let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
+  cached_dashboard_json_result ~now:Unix.gettimeofday
+    ~sync_first ~sw ~cache ~key ~placeholder ~compute:(fun () -> Ok (compute ()))
+
+module For_testing = struct
+  type cache = (string, dashboard_json_cache_entry) Hashtbl.t
+  let create_cache () : cache = Hashtbl.create 1
+  let cached_json = cached_dashboard_json_result
+end
+
 let empty_model_metrics_json ~window ~bucket_min =
   `Assoc
     [ "window_minutes", `Int window
@@ -231,7 +241,7 @@ let add_routes ~sw router =
              [ base_path; string_of_int window; string_of_int bucket_min ]
          in
          let json =
-           cached_dashboard_json ~sw ~sync_first:false
+           cached_dashboard_json_result ~now:Unix.gettimeofday ~sw ~sync_first:false
              ~cache:dashboard_model_metrics_cache ~key
              ~placeholder:(empty_model_metrics_json ~window ~bucket_min)
              ~compute:(fun () ->
@@ -243,7 +253,8 @@ let add_routes ~sw router =
                    Model_inference_metrics.compute
                      ~base_path ~window_minutes:window
                in
-               Model_inference_metrics.to_json agg)
+               Result.map Model_inference_metrics.to_json agg
+               |> Result.map_error Model_inference_metrics.read_error_to_string)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -363,13 +374,14 @@ let add_routes ~sw router =
          let window = int_query_param req "window" ~default:1440 in
          let base_path = (Mcp_server.workspace_config state).base_path in
          let json =
-           cached_dashboard_json ~sw ~sync_first:false
+           cached_dashboard_json_result ~now:Unix.gettimeofday ~sw ~sync_first:false
              ~cache:dashboard_cost_latency_cache
              ~key:(cache_key [ base_path; string_of_int window ])
              ~placeholder:(empty_cost_latency_json ~window)
              ~compute:(fun () ->
                Model_inference_metrics.compute_cost_latency_json
-                 ~base_path ~window_minutes:window)
+                 ~base_path ~window_minutes:window
+               |> Result.map_error Model_inference_metrics.read_error_to_string)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

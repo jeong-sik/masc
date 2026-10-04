@@ -1,0 +1,32 @@
+{
+  "base": "448e0e059941105bdcd055ab9a21002e0378cf8e",
+  "source_sha256": {
+    "lib/server/server_runtime_bootstrap.ml": "de15612e9df8e05013237c438579197fed741462c44cfcc6e73605917e4f7a05",
+    "lib/server/server_runtime_bootstrap.mli": "cca9cedfca2319c4adc0fcbb2d22cb6c7d9d9da7b4032ffc2998e041a57998f2",
+    "bin/main_stdio_eio.ml": "204de5485dc6709a9e935b8c45515c3553d0c96ecdfe6ce8ecf0af5b21e6d21d",
+    "test/test_lane_addon.ml": "fc1278df8745202d2a9e581bd1b306b5a75c466802c505b349762c267bee251f"
+  },
+  "artifacts_sha256": {
+    "build.log": "da1c45d96d8604906b2a3029c44ee7c5a5fa90bd341c9bf2760f7a14b1ce35ee",
+    "runtime-case.log": "d529f70205224e28b3584864b621e8c45a7f94f23c0e6c9eb71d58525371d423",
+    "runtime-list.log": "ec05c7128f0ccba5621022134ab70b7de70802234d9f8796aa82dd8aa098e5b1",
+    "source-order-before.json": "689a2e0fb30b3baeeac7fd76bb765fdca806a1654a7a6cad1499a0ab5a98fa63",
+    "source-order-after.json": "ce022f35d2ff4d288163a0b72885930e73dca07efd0f66405fd71840a76ece74",
+    "check-source-order.py": "3e6f188a4c5234710774771cdafaa0ebaf6c22e05b719d9e92d17d8a45d60818",
+    "source-order-ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "source-order-pyright.json": "35a0f8bee2bb4e92006ed0b483763f3f6f9677ad1ff4f404d4a940bc160659f4"
+  },
+  "binary_sha256": {
+    "_build/default/bin/main_stdio_eio.exe": "ad549c087f341a4ad61de8bcd8061bc321f143acea435573ce560695b8126fbb",
+    "_build/default/test/test_lane_addon.exe": "a96e13c0100e8c11c3c06de95427ae731920defe7c76e5b7e5312e0a40f8860e"
+  },
+  "results": {
+    "focused_build": "PASS",
+    "selected_existing_runtime_case": "1 PASS, 21 SKIP; 6.828s",
+    "source_order": "published shared-activation check false; repaired all six checks true",
+    "stdio_process_execution": "NOT RUN",
+    "whole_bootstrap_suite": "NOT RUN",
+    "history_scan_P1": "OPEN; unchanged",
+    "source_order_lint": "Ruff PASS, Pyright 0 errors/0 warnings"
+  }
+}

@@ -232,6 +232,8 @@ val activate_owner_state
 (** Shared HTTP/stdio commit protocol: restore the durable Gate, publish the
     lazy-task barrier under the exclusive BasePath lease, claim canonical
     persistence ownership, then immediately start the affine Keeper token.
+    Complete the initial sampling journal recovery attempt before returning;
+    incomplete records remain eligible for post-readiness maintenance retry.
     Current request writers use a disjoint staging namespace, so forensic
     cleanup cannot hold readiness. Readiness remains an explicit transport
     commit after its required surfaces are installed. [boot_stage] is the

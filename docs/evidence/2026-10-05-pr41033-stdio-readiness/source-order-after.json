@@ -1,0 +1,16 @@
+{
+  "kind": "source ordering check; not runtime stdio execution",
+  "revision": "working tree",
+  "checks": {
+    "shared_activation_finishes_recovery_before_return": true,
+    "http_awaits_activation_before_state_publication": true,
+    "http_awaits_activation_before_readiness": true,
+    "stdio_awaits_activation_before_readiness": true,
+    "stdio_readiness_precedes_protocol_loop": true,
+    "single_startup_recovery_call": true
+  },
+  "sha256": {
+    "bootstrap": "de15612e9df8e05013237c438579197fed741462c44cfcc6e73605917e4f7a05",
+    "stdio": "204de5485dc6709a9e935b8c45515c3553d0c96ecdfe6ce8ecf0af5b21e6d21d"
+  }
+}

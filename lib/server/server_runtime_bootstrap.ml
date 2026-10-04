@@ -1597,6 +1597,14 @@ let activate_owner_state
     ~proc_mgr
     state;
   boot_stage "keeper_persistence.end";
+  (* Both HTTP and stdio must finish this initial durable journal recovery
+     attempt before publishing readiness or admitting historical sampling
+     reads. Maintenance retries incomplete records after readiness. *)
+  boot_stage "sampling_recovery.begin";
+  (match Lane_addon_runtime.recover_sampling ~config:(Mcp_server.workspace_config state) with
+   | Ok () -> ()
+   | Error detail -> Log.Server.warn "Lane sampling startup recovery incomplete: %s" detail);
+  boot_stage "sampling_recovery.end";
   { state
   ; path_diagnostics = initialized.path_diagnostics
   ; domain_pool = initialized.domain_pool
@@ -1733,12 +1741,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
         initialized_owner
       in
       let state = activated_owner.state in
-      (* Historical sampling reads cannot be admitted until the initial
-         durable journal recovery attempt has finished. Maintenance retries
-         incomplete records after readiness. *)
-      (match Lane_addon_runtime.recover_sampling ~config:(Mcp_server.workspace_config state) with
-       | Ok () -> ()
-       | Error detail -> Log.Server.warn "Lane sampling startup recovery incomplete: %s" detail);
       (* Authentication wrappers treat [server_state = Some _] as the mutation
          capability boundary. Publish only after transport-neutral activation
          has restored Gate state and started the owner persistence lanes. *)

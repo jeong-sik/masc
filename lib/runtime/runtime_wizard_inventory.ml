@@ -67,6 +67,12 @@ let account_fields ~include_credential_references account_home =
      | Some home when include_credential_references -> ["account_home", `String home]
      | Some _ | None -> [])
 
+let provider_timeout_fields (provider : Runtime_schema.provider) =
+  match provider.antigravity_cli with
+  | Some options -> ["provider_timeout_s", `Float options.timeout_s]
+  | None -> []
+;;
+
 let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
@@ -86,7 +92,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
         ~verification_supported:true
-        (fields @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
+        (fields @ provider_timeout_fields provider @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
     List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
@@ -229,6 +235,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                     @ transport
                     @ account_fields ~include_credential_references provider.account_home
                     @ http_fields provider
+                    @ provider_timeout_fields provider
                     @ credential))
            | _ -> None))
       config.bindings

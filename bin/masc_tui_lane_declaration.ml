@@ -62,7 +62,7 @@ let failure json =
 let create file_name =
   if String.trim file_name = "" || file_name <> Filename.basename file_name
     || String.contains file_name '\\' || String.contains file_name '\000'
-    || String.length file_name <= String.length ".toml" || not (Filename.check_suffix file_name ".toml")
+    || String.length file_name < String.length ".toml" || not (Filename.check_suffix file_name ".toml")
   then Error "Choose one direct-child .toml filename"
   else Ok {file_name;base=None;current=None;text=template;message=None}
 let editable_source_path ~directory source_path =

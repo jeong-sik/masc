@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import {
   attachLaneAddon, detachLaneAddon, fetchLaneAddons, fetchLaneAddonSlice,
   observeLaneAddon, preserveLaneAddonEvidence,
@@ -18,18 +18,32 @@ const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transpare
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
+function rawFieldsText(fields: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(fields, null, 2)
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
+    return 'Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.'
+  }
+}
+
 function isDeclarationFile(directory: string, sourcePath: string): boolean {
   const fileName = sourcePath.slice(sourcePath.lastIndexOf('/') + 1)
   const expectedPath = `${directory}${directory.endsWith('/') ? '' : '/'}${fileName}`
-  return sourcePath === expectedPath && fileName.length > '.toml'.length
+  return sourcePath === expectedPath && fileName.length >= '.toml'.length
     && fileName.endsWith('.toml') && !fileName.includes('\\') && !fileName.includes('\0')
 }
 
 function staleRemoval(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
   const owner = item.configuration
-  return owner !== null && configuration !== null && configuration.declarations.some(current =>
-    current.id === owner.id && current.source_path === owner.source_path
-    && current.desired_revision !== owner.revision)
+  if (owner === null) return false
+  if (configuration === null || !configuration.complete) return true
+  const matches = configuration.declarations.filter(current => current.id === owner.id)
+  const conflicts = configuration.issues.filter(issue => issue.id === owner.id)
+  if (conflicts.length > 0 || matches.length > 1) return true
+  if (matches.length === 1) return matches[0]!.desired_revision !== owner.revision
+  return configuration.declarations.some(current => current.source_path === owner.source_path)
+    || configuration.issues.some(issue => issue.source_path === owner.source_path)
 }
 
 function hasCurrentDeclaration(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
@@ -158,10 +172,10 @@ export function LaneAddonsPanel() {
   function editToml(sourcePath: string | null) {
     if (session && authority) session.open(sourcePath, authority)
   }
-  const [snapshot, setSnapshot] = useState<LaneAddonSnapshot | null>(null)
-  const [slice, setSlice] = useState<LaneAddonSlice | null>(null)
+  const [snapshotValue, setSnapshot] = useState<LaneAddonSnapshot | null>(null)
+  const [sliceValue, setSlice] = useState<LaneAddonSlice | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [receipt, setReceipt] = useState<unknown>(null)
+  const [receiptValue, setReceipt] = useState<unknown>(null)
   const [reading, setReading] = useState(false)
   const [manifest, setManifest] = useState('')
   const [run, setRun] = useState('')
@@ -169,10 +183,22 @@ export function LaneAddonsPanel() {
   const [lane, setLane] = useState('')
   const [since, setSince] = useState('')
   const [until, setUntil] = useState('')
-  const [instance, setInstance] = useState('')
+  const [instanceValue, setInstance] = useState('')
   const [keeper, setKeeper] = useState('')
-  const [focusedRow, setFocusedRow] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string[]>([])
+  const [focusedRowValue, setFocusedRow] = useState<string | null>(null)
+  const [selectedValue, setSelected] = useState<string[]>([])
+  const [evidenceAuthority, setEvidenceAuthority] = useState(authority)
+  const evidenceCurrent = evidenceAuthority === authority
+  const snapshot = snapshotAuthority === authority ? snapshotValue : null
+  const slice = evidenceCurrent ? sliceValue : null
+  const instance = evidenceCurrent ? instanceValue : ''
+  const focusedRow = evidenceCurrent ? focusedRowValue : null
+  const selected = evidenceCurrent ? selectedValue : []
+  const receipt = evidenceCurrent ? receiptValue : null
+  useLayoutEffect(() => {
+    setEvidenceAuthority(authority)
+    setSlice(null); setInstance(''); setFocusedRow(null); setSelected([]); setReceipt(null)
+  }, [authority])
   const reads = useRef<AbortController | null>(null)
   const mounted = useRef(true)
 
@@ -214,17 +240,19 @@ export function LaneAddonsPanel() {
   }
 
   async function act(action: () => Promise<unknown>) {
+    const requestedAuthority = executionWorkspaceAuthority.peek()
     setError(null)
     try {
       const result = await action()
-      if (!mounted.current) return
+      if (!mounted.current || executionWorkspaceAuthority.peek() !== requestedAuthority) return
       setReceipt(result)
       await refresh()
     } catch (err) {
-      if (mounted.current) setError(message(err))
+      if (mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setError(message(err))
     }
   }
   async function query() {
+    const requestedAuthority = executionWorkspaceAuthority.peek()
     const from = since === '' ? undefined : Number(since)
     const to = until === '' ? undefined : Number(until)
     if ((from !== undefined && !Number.isFinite(from)) || (to !== undefined && !Number.isFinite(to))
@@ -239,11 +267,11 @@ export function LaneAddonsPanel() {
     setError(null)
     try {
       const result = await fetchLaneAddonSlice({ run_id: run, lane_id: lane, since: from, until: to }, controller.signal)
-      if (!controller.signal.aborted && mounted.current) { setSlice(result); setSelected([]) }
+      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) { setSlice(result); setSelected([]) }
     } catch (err) {
-      if (!controller.signal.aborted && mounted.current) setError(message(err))
+      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setError(message(err))
     } finally {
-      if (!controller.signal.aborted && mounted.current) setReading(false)
+      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setReading(false)
     }
   }
   const configuration = snapshot?.configuration ?? null
@@ -273,7 +301,7 @@ export function LaneAddonsPanel() {
       <p>${focused.lane_id} · ${formatLaneTime(focused.observed_at)}</p>
       <p>Actor: ${focused.actor ?? 'not recorded'} · Subject: ${focused.subject_id}</p>
       <${LaneAddonReadings} row=${focused} instances=${snapshot?.instances ?? []} />
-      <pre class="whitespace-pre-wrap break-all">${JSON.stringify(focused.fields, null, 2)}</pre>
+      <pre class="whitespace-pre-wrap break-all">${rawFieldsText(focused.fields)}</pre>
       <h4>Original evidence</h4>
       ${focused.evidence.length === 0 ? html`<p>No original evidence recorded.</p>` : focused.evidence.map(evidence => html`<p class="break-all" key=${evidence.uri}>${evidence.uri} · sha256 ${evidence.sha256 ?? 'not recorded'}</p>`)}
       ${focused.related_ids.length > 0 && html`<div>Recorded relationships: ${focused.related_ids.map(id => {
@@ -387,7 +415,7 @@ export function LaneAddonsPanel() {
       ${row.clock && html`<p>World time: ${row.clock.domain} ${row.clock.value}</p>`}
       <${LaneAddonReadings} row=${row} instances=${snapshot?.instances ?? []} />
       <details><summary>Fields and original evidence · ${row.id}</summary>
-        <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.fields, null, 2)}</pre>
+        <pre class="whitespace-pre-wrap break-all">${rawFieldsText(row.fields)}</pre>
         ${row.evidence.map(evidence => html`<p key=${evidence.uri} class="break-all">${evidence.uri} · sha256 ${evidence.sha256 ?? 'unknown'}</p>`)}
         ${row.related_ids.length > 0 && html`<p>Related: ${row.related_ids.join(', ')}</p>`}
       </details>

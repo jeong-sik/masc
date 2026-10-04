@@ -158,6 +158,11 @@ diag_dump() {
     | grep -v grep \
     || true
 
+  echo "[ci-diag] global process snapshot:"
+  ps -eo pid,ppid,pgid,etime,comm,args \
+    | grep -v grep \
+    || true
+
   if [[ -n "${ACTIVE_CMD_PID}" ]]; then
     echo "[ci-diag] active command process tree snapshot:"
     local tree_filter=""

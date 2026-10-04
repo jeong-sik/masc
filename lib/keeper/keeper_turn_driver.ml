@@ -1704,7 +1704,7 @@ let run_named
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
     ?approval_gate
-    ?raw_trace
+    ~raw_trace
     ?on_event
     ?on_yield
     ?on_resume

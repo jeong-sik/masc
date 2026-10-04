@@ -7,17 +7,18 @@ import os
 import sys
 from typing import Any, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
 
 
 
 def run(executable: str, status: str, persistence_state: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
     run_id = "jev-" + status
-    detail = cast(dict[str, Any], copy.deepcopy(h.hitl_lane_run_detail_response()[1]))
+    detail = cast(dict[str, Any], copy.deepcopy(_keyboard_keepers.hitl_lane_run_detail_response()[1]))
     run_record = cast(dict[str, Any], detail["run"])
     run_record.update(
         {
@@ -65,29 +66,29 @@ def run(executable: str, status: str, persistence_state: str) -> None:
         "persistence_state",
     }
     summary = {key: value for key, value in run_record.items() if key in summary_fields}
-    fixtures[h.lane_runs_path("board_attention_exact")] = (
+    fixtures[_keyboard_keepers.lane_runs_path("board_attention_exact")] = (
         200,
         {"runs": [summary], "has_more": False, "total": 1},
     )
     fixtures["/api/v1/dashboard/exact-lane-runs/" + run_id] = (200, detail)
 
     def interact(process, master, _slave, output, _base):
-        h.palette_go(process, master, output, b"go lanes", b"Board Attention")
-        h.send_and_wait(
+        _keyboard_harness.palette_go(process, master, output, b"go lanes", b"Board Attention")
+        _keyboard_harness.send_and_wait(
             process, master, output, b"\r", b"1 loaded / 1 retained \xc2\xb7 end"
         )
-        h.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7 RUN INPUT")
-        h.resize_and_wait(
+        _keyboard_harness.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7 RUN INPUT")
+        _keyboard_harness.resize_and_wait(
             process,
             master,
             output,
             rows=32,
             columns=180,
             needle=b"NO EXACT-FLOW RECEIPT",
-            controls=(h.FULL_REDRAW,),
+            controls=(_keyboard_harness.FULL_REDRAW,),
         )
-        h.read_available(master, output)
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.read_available(master, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
         assert ("RUN  " + status).encode() in screen, screen
         assert b"ANSWER  VENDOR SYSTEM ONE" in screen, screen
         assert b"jev-latest" in screen, screen
@@ -95,7 +96,7 @@ def run(executable: str, status: str, persistence_state: str) -> None:
         assert b"SLOT jev-latest" not in screen, screen
         os.write(master, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Board answer source: " + status,
         interact=interact,

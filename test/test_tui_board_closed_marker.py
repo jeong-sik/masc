@@ -2,7 +2,8 @@
 summary detail in the read pane (task-1758/#39356 completion criterion 4)."""
 import os
 import sys
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 
 

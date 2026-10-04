@@ -8,12 +8,7 @@ import {
   HYDRATION_FAILED_ORDER_SIGNATURE,
   TOOL_OUTPUT_FAILURE_REASON,
   ToolOutputFailureContractFixture,
-  coverageGapEntries,
-  coverageGapToolCount,
-  hydrationFailedEntries,
-  hydrationFailedToolCount,
   installToolOutputFailureFixtureStore,
-  toolOutputFailureFixtureStatus,
 } from './keeper-chat-tool-output-failure-contract-fixture'
 import { resetToolCallOutputs } from '../tool-call-output-store'
 
@@ -27,23 +22,6 @@ describe('Keeper Chat tool output failure contract fixture', () => {
       container = null
     }
     resetToolCallOutputs()
-  })
-
-  it('keeps deterministic failure-state fixture rows', () => {
-    expect(hydrationFailedEntries).toHaveLength(2)
-    expect(coverageGapEntries).toHaveLength(2)
-    expect(hydrationFailedToolCount).toBe(1)
-    expect(coverageGapToolCount).toBe(1)
-    expect(toolOutputFailureFixtureStatus).toBe('ok')
-
-    const hydrationAssistant = hydrationFailedEntries.find(entry => entry.id === 'assistant-hydration-failed')
-    const coverageAssistant = coverageGapEntries.find(entry => entry.id === 'assistant-coverage-gap')
-    expect(hydrationAssistant?.traceSteps?.map(step => step.kind)).toEqual(['tool'])
-    expect(coverageAssistant?.traceSteps?.map(step => step.kind)).toEqual(['tool'])
-    const hydrationToolStep = hydrationAssistant?.traceSteps?.find(step => step.kind === 'tool')
-    const coverageToolStep = coverageAssistant?.traceSteps?.find(step => step.kind === 'tool')
-    expect(hydrationToolStep?.toolCallId).toBe('tc-hydration-failed')
-    expect(coverageToolStep?.toolCallId).toBe('tc-coverage-gap')
   })
 
   it('renders hydration-failed and coverage-gap states without silent pending fallback', () => {

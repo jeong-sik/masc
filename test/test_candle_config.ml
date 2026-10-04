@@ -3,6 +3,15 @@ let valid_text = {|half_life = "off"
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 2000
@@ -32,11 +41,21 @@ let contains ~affix text =
 
 let test_explicit_policy () =
   ignore (disabled_reason (Candle_config.of_toml_string ""));
+  let lines = String.split_on_char '\n' valid_text in
+  List.iter (fun key ->
+    let missing = List.filter (fun line -> not (String.starts_with ~prefix:(key ^ " =") line)) lines in
+    ignore (disabled_reason (Candle_config.of_toml_string (String.concat "\n" missing))))
+    ["share_rounding";"remainder_tie_break";"deduction_rounding"];
+  List.iter (fun key ->
+    let unknown = List.map (fun line -> if String.starts_with ~prefix:(key ^ " =") line
+      then key ^ " = \"unknown\"" else line) lines in
+    ignore (disabled_reason (Candle_config.of_toml_string (String.concat "\n" unknown))))
+    ["share_rounding";"remainder_tie_break";"deduction_rounding"];
   match enabled with
   | Candle_config.Enabled policy ->
     List.iter2 (fun grade expected -> Alcotest.(check int) (Candle_grade.to_string grade)
-      expected (Candle_config.grade_amount_milli policy.payout grade))
-      Candle_grade.all [1000;2000;3000;4000;5000]
+      expected (Option.get (Candle_config.grade_amount_milli policy.payout grade)))
+      (List.map (fun name -> Option.get (Candle_grade.of_string name)) ["trivial";"small";"medium";"large";"epic"]) [1000;2000;3000;4000;5000]
   | Off | Disabled _ -> Alcotest.fail "complete payout policy was rejected"
 ;;
 
@@ -49,7 +68,7 @@ let test_optional_shop_prices () =
             (Candle_config.price policy item = Candle_config.Unpriced))
           Keeper_portrait_item.all;
         Alcotest.(check int) "payout remains enabled" 1000
-          (Candle_config.grade_amount_milli policy.payout Candle_grade.Trivial)
+          (Option.get (Candle_config.grade_amount_milli policy.payout (Option.get (Candle_grade.of_string "trivial"))))
     | Off | Disabled _ -> Alcotest.fail "omitting optional prices disabled payouts")
     [""; "[shop]\n"; "[shop.prices_milli]\n"];
   List.iter (fun suffix ->
@@ -83,14 +102,14 @@ let test_explicit_half_life () =
 
 let test_policy_boundaries () =
   let text ~weight ~amount = Printf.sprintf
-    "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %d\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight amount in
+    "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\nshare_rounding = \"largest_remainder\"\nremainder_tie_break = \"name_ascending\"\ndeduction_rounding = \"down\"\n[payout.grade_criteria]\ntrivial = \"Minor adjustment\"\nsmall = \"Bounded change\"\nmedium = \"Connected feature\"\nlarge = \"Cross-feature work\"\nepic = \"System outcome\"\n[payout.grades_milli]\ntrivial = %d\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight amount in
   List.iter (fun weight ->
     (match Candle_config.of_toml_string (text ~weight ~amount:max_int) with
-     | Enabled policy -> Alcotest.(check int) "largest representable amount" max_int policy.payout.trivial_milli
+     | Enabled policy -> Alcotest.(check (option int)) "largest representable amount" (Some max_int) (Candle_config.grade_amount_milli policy.payout (Option.get (Candle_grade.of_string "trivial")))
      | Off | Disabled _ -> Alcotest.fail "representable grade amount rejected");
     let beyond = Int64.(to_string (add (of_int Stdlib.max_int) 1L)) in
     let oversized = Printf.sprintf
-      "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %s\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight beyond in
+      "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\nshare_rounding = \"largest_remainder\"\nremainder_tie_break = \"name_ascending\"\ndeduction_rounding = \"down\"\n[payout.grade_criteria]\ntrivial = \"Minor adjustment\"\nsmall = \"Bounded change\"\nmedium = \"Connected feature\"\nlarge = \"Cross-feature work\"\nepic = \"System outcome\"\n[payout.grades_milli]\ntrivial = %s\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight beyond in
     ignore (disabled_reason (Candle_config.of_toml_string oversized)))
     [1; 1000; 1001; max_int];
   ignore (disabled_reason (Candle_config.of_toml_string (text ~weight:0 ~amount:1)));
@@ -98,7 +117,8 @@ let test_policy_boundaries () =
   let lines = String.split_on_char '\n' valid_text in
   List.iter (fun key ->
     let missing = List.filter (fun line -> not (String.starts_with ~prefix:(key ^ " =") line)) lines in
-    ignore (disabled_reason (Candle_config.of_toml_string (String.concat "\n" missing)));
+    if List.mem key ["weight_max";"deduction_rate";"deduction_floor"] then
+      ignore (disabled_reason (Candle_config.of_toml_string (String.concat "\n" missing)));
     List.iter (fun value ->
       let changed = List.map (fun line -> if String.starts_with ~prefix:(key ^ " =") line
           then key ^ " = " ^ value else line) lines in

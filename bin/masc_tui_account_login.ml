@@ -3,7 +3,8 @@ type client = Codex | Claude | Antigravity | Muse
    configuration declares one per account, and a catalog entry is the client's
    own way to add one. *)
 type origin = Configured | Catalog
-type provider = { id : string; label : string; client : client; origin : origin }
+type provider = { id : string; label : string; client : client; origin : origin;
+  enabled : bool; setup_supported : bool }
 type model = { id : string; label : string; context : int option; tools : bool option }
 (* What removing an account changes, as the setup API's removal preview lists it. *)
 type removal_change =
@@ -19,14 +20,19 @@ type removal =
    unmeasured because the provider declined for the account's usage. *)
 type unverified = { runtime_id : string; code : string }
 type saved =
+  | Saved_durability_unconfirmed of saved
+  | Saved_lock_release_unconfirmed of saved
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }
+type activation = Activating | Activation_failed of string
+  | Active of { exact_output_available : bool }
 (* The list opens on the clients; choosing one lists its accounts under a row
    that adds a new one. *)
-type list_view = Clients | Accounts of client
-type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
-  | Finished of { saved : saved; refresh_failed : bool } | Failed
+type account_group = { group_id : string; provider_ids : string list; runtime_ids : string list }
+type list_view = Clients | Accounts of client | Account_providers of client * string list
+type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving | Removing
+  | Finished of { saved : saved; activation : activation; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
@@ -43,16 +49,18 @@ type t = {
   mutable cursor : int;
   mutable result_scroll : int;
   mutable saved_scroll_max : int;
+  mutable saved_runtime_ids : string list;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
   mutable account_emails : account_emails;
+  mutable account_groups : account_group list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existing of provider
+type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry | Select_existing of provider
   | Start of { provider : provider; existing : bool }
   | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
@@ -61,14 +69,15 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existi
   | Refresh_removed of { client : client; notice : string }
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
-  selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
-  cursor=0; result_scroll=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0}; account_groups=[];
+  cursor=0; result_scroll=0; saved_scroll_max=0; saved_runtime_ids=[]; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
   t.provider <- Some provider;
   let previous = if existing then t.account_ref else None in
   t.login_id <- None; t.recovery <- Login_status; t.result_scroll <- 0;
+  t.saved_runtime_ids <- [];
   t.phase <- Logging; t.output <- ""; t.models <- []; t.selected_models <- []; t.connected_models <- [];
   t.draft <- ""; t.input_pending <- false;
   t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
@@ -90,15 +99,31 @@ let client_label = function
 let client_order = [Codex; Claude; Antigravity; Muse]
 let clients t = List.filter (fun client -> List.exists (fun (p:provider) -> p.client = client) t.providers) client_order
 type account_row = New_account of provider | Account of provider
-let accounts t client = List.filter (fun (p:provider) -> p.client = client && p.origin = Configured) t.providers
+let account_group t (provider:provider) =
+  List.find_opt (fun group -> List.mem provider.id group.provider_ids) t.account_groups
+let account_members t provider = match account_group t provider with
+  | None -> [provider]
+  | Some group -> List.filter (fun (p:provider) -> List.mem p.id group.provider_ids) t.providers
+let provider_selectable (provider:provider) = provider.enabled && provider.setup_supported
+let account_representative t provider =
+  let members = account_members t provider in
+  match List.find_opt provider_selectable members with
+  | Some provider -> Some provider
+  | None -> List.nth_opt members 0
+let accounts t client = List.filter (fun (p:provider) ->
+  p.client = client && p.origin = Configured
+  && match account_representative t p with Some first -> first.id=p.id | None -> false) t.providers
+let member_rows t ids = List.filter_map (fun id ->
+  List.find_opt (fun (p:provider) -> p.id=id) t.providers) ids
 (* A login without an account reference adds a new account through any of the
    client's rows. The catalog entry is the usual one; the server leaves it out
    when runtime.toml declares a provider with the same id, and then one of the
    client's accounts carries the new login. *)
 let new_account_provider t client =
-  match List.find_opt (fun (p:provider) -> p.client = client && p.origin = Catalog) t.providers with
+  let templates = List.filter (fun (p:provider) -> p.client=client && p.setup_supported) t.providers in
+  match List.find_opt (fun (p:provider) -> p.origin = Catalog) templates with
   | Some _ as catalog -> catalog
-  | None -> List.nth_opt (accounts t client) 0
+  | None -> List.nth_opt templates 0
 let account_rows t client =
   (match new_account_provider t client with Some p -> [New_account p] | None -> [])
   @ List.map (fun p -> Account p) (accounts t client)
@@ -180,18 +205,24 @@ let show_accounts ?on t client =
   let rows = account_rows t client in
   t.cursor <- (match on with
     | Some (target:provider) ->
-      (match List.find_index (function Account p -> p.id = target.id | New_account _ -> false) rows with
+      (match List.find_index (function Account p -> List.exists (fun (member:provider) -> member.id=target.id) (account_members t p) | New_account _ -> false) rows with
        | Some index -> index
        | None -> index_of (function New_account p -> p.id = target.id | Account _ -> false) rows)
     | None -> 0);
   t.notice <- accounts_notice ^ email_notice t.account_emails
+let show_account_providers t client ids =
+  t.phase <- Providers (Account_providers (client, ids));
+  t.cursor <- 0;
+  t.notice <- "이 계정의 공급자 연결을 고르세요. Enter/D로 선택한 연결만 지우는 내용을 확인합니다. 다른 연결과 로그인은 남습니다."
 let focused_row t = match t.phase with
   | Providers (Accounts client) -> List.nth_opt (account_rows t client) t.cursor
-  | Providers Clients | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> None
+  | Providers (Account_providers (_, ids)) -> Option.map (fun provider -> Account provider) (List.nth_opt (member_rows t ids) t.cursor)
+  | Providers Clients | Loading | Logging | Models | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> None
 let focused_client t = match t.phase with
   | Providers Clients -> List.nth_opt (clients t) t.cursor
   | Providers (Accounts client) -> Some client
-  | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ ->
+  | Providers (Account_providers (client, _)) -> Some client
+  | Loading | Logging | Models | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ ->
     Option.map (fun (p:provider) -> p.client) t.provider
 let requested_client = function
   | "codex" -> Some Codex | "claude" -> Some Claude
@@ -203,6 +234,61 @@ let requested_matches t (p:provider) =
   t.requested = "" || String.equal t.requested p.id
   || (not (List.exists (fun (row:provider) -> String.equal row.id t.requested) t.providers)
       && requested_client t.requested = Some p.client)
+let activation_incomplete t = match t.phase with
+  | Saving | Finished {activation = Activating | Activation_failed _; _} -> true
+  | Failed -> t.recovery = Refresh_configuration
+  | Finished {activation = Active _; _}
+  | Loading | Providers _ | Logging | Models | Documented_context _ | Removing | Removal _ -> false
+let reopen_saved ~requested t =
+  let recoverable = match t.phase with
+    | Saving | Finished _ -> true
+    | Failed -> t.recovery = Refresh_configuration
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Removing | Removal _ -> false in
+  if not recoverable then None else
+  let matches = match t.provider with
+    | Some provider ->
+      (* Catalog entries such as [codex] name a client, not a competing
+         configured account. Explicit configured IDs retain precedence. *)
+      let providers = List.filter (fun (row:provider) -> row.origin=Configured) t.providers in
+      requested_matches {t with requested; providers} provider
+    | None -> requested = "" || String.equal requested t.requested in
+  if matches then Some t else None
+let retain_activation t retained =
+  if activation_incomplete t then t :: List.filter (fun held -> held != t) retained
+  else retained
+let take_saved ~requested retained =
+  match List.find_map (reopen_saved ~requested) retained with
+  | None -> None, retained
+  | Some view -> Some view, List.filter (fun held -> held != view) retained
+let groups_of_inventory providers json =
+  let ( let* ) = Result.bind in
+  let invalid = Error "계정 그룹 목록을 확인하지 못했습니다. 새로고침하세요." in
+  let strings = function
+    | `List rows ->
+      let values = List.filter_map string rows in
+      if List.length values=List.length rows
+         && List.length values=List.length (List.sort_uniq String.compare values)
+      then Ok values else invalid
+    | _ -> invalid in
+  let rec parse seen = function
+    | [] -> Ok []
+    | row :: rest ->
+      let* group_id = match string (field "id" row) with Some id -> Ok id | None -> invalid in
+      let* provider_ids = strings (field "integration_ids" row) in
+      let* runtime_ids = strings (field "runtime_ids" row) in
+      let members = List.filter (fun (p:provider) -> List.mem p.id provider_ids) providers in
+      let* () = match members with
+        | first :: _ when List.length members=List.length provider_ids
+          && List.for_all (fun (p:provider) -> p.origin=Configured && p.client=first.client) members
+          && not (List.exists (fun id -> List.mem id seen) provider_ids) -> Ok ()
+        | _ -> invalid in
+      let* rest = parse (provider_ids @ seen) rest in
+      if List.exists (fun group -> group.group_id=group_id) rest then invalid
+      else Ok ({group_id;provider_ids;runtime_ids} :: rest) in
+  match field "account_groups" json with
+  | `Null -> Ok []
+  | `List rows -> parse [] rows
+  | _ -> invalid
 let inventory ?view t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
         field "default_runtime_selection" json with
@@ -221,8 +307,12 @@ let inventory ?view t json =
       match string (field "id" row), string (field "display_name" row), string (field "protocol" row),
             origin_of_json (field "origin" row) with
       | Some id, Some label, Some protocol, Some origin ->
-        Option.map (fun client -> {id;label;client;origin}) (client_of_protocol protocol)
+        let enabled = match field "enabled" row with `Bool value -> value | `Null -> true | _ -> false in
+        let setup_supported = field "setup_support" row <> `String "unsupported" in
+        Option.map (fun client -> {id;label;client;origin;enabled;setup_supported}) (client_of_protocol protocol)
       | _ -> None) rows in
+    let ( let* ) = Result.bind in
+    let* account_groups = groups_of_inventory providers json in
     (* [/login <client>] opens that client's accounts; [/login <id>] opens its
        client's accounts on that row. *)
     let requested = match List.find_opt (fun (p:provider) -> p.id=t.requested) providers, requested_client t.requested with
@@ -235,10 +325,14 @@ let inventory ?view t json =
       Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
       t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
+      t.account_groups <- account_groups;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       (match view, requested with
        | Some Clients, _ | None, None -> show_clients t
        | Some (Accounts client), _ -> show_accounts t client
+       | Some (Account_providers (client, _)), _ ->
+           show_accounts t client;
+           t.notice <- "계정 구성이 갱신되었습니다. 계정을 다시 고른 뒤 삭제할 연결을 확인하세요."
        | None, Some (client, on) -> show_accounts ?on t client);
       Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
@@ -255,6 +349,8 @@ let refresh_retry t result =
   | Ok () -> t.phase <- Models; t.notice <- "최신 설정을 읽었습니다. 선택한 모델을 확인하고 Enter로 다시 저장하세요."
   | Error _ -> t.result_scroll <- 0; t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
 let saved_notice = function
+  | Saved_durability_unconfirmed _ -> "설정은 현재 적용됐지만 디스크 저장 내구성을 확인하지 못했습니다. 재저장하지 말고 저장소 상태를 확인하세요."
+  | Saved_lock_release_unconfirmed _ -> "설정은 저장됐지만 설정 잠금 해제를 확인하지 못했습니다. 재저장하지 말고 서버의 잠금 상태를 확인하세요."
   | Saved_verified -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
   | Saved_unverified _ -> "저장했습니다. 아래 런타임은 사용 한도에 걸려 응답·도구 검증을 못 했습니다."
   | Saved_partly { unverified = []; _ } -> "저장했습니다. 기존 연결은 그대로 유지했습니다."
@@ -262,7 +358,8 @@ let saved_notice = function
     "저장했습니다. 기존 연결은 유지했습니다. 아래 모델은 사용 한도로 검증하지 못했습니다."
 (* A runtime id is two hashes and a model name, longer than what a notice row
    has left at 100 columns, so each unmeasured runtime gets its own row. *)
-let saved_rows = function
+let rec saved_rows = function
+  | Saved_durability_unconfirmed saved | Saved_lock_release_unconfirmed saved -> saved_notice saved :: saved_rows saved
   | Saved_verified -> []
   | Saved_unverified (first, rest) ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest)
@@ -278,7 +375,7 @@ let saved_of_json json =
       | Some runtime_id, Some code when List.mem runtime_id selected -> Some {runtime_id; code}
       | _ -> None) rows in
     if List.for_all Option.is_some parsed then Some (List.filter_map Fun.id parsed) else None in
-  match field "configured" json, field "readiness" json, field "unverified" json, field "not_rechecked" json with
+  let readiness = match field "configured" json, field "readiness" json, field "unverified" json, field "not_rechecked" json with
   | `Bool true, `String "verified", `Null, `Null -> Some Saved_verified
   | `Bool true, `String "usage_limited", `List rows, `Null ->
     (match unverified_rows rows with
@@ -292,16 +389,79 @@ let saved_of_json json =
          | None -> false) ids ->
        Some (Saved_partly { unverified; not_rechecked = List.filter_map Fun.id ids })
      | Some _ | None -> None)
+  | _ -> None in
+  let readiness = match field "warnings" (field "commit" json), readiness with
+    | `List [], saved -> saved
+    | `List rows, Some saved when List.for_all (fun row ->
+        field "code" row = `String "runtime_config_lock_release_unconfirmed") rows ->
+        Some (Saved_lock_release_unconfirmed saved)
+    | _ -> None in
+  match field "durability" (field "commit" json), readiness with
+  | `String "durable", Some saved -> Some saved
+  | `String "unconfirmed", Some saved -> Some (Saved_durability_unconfirmed saved)
   | _ -> None
 let saved t json =
   match saved_of_json json with
-  | Some saved -> t.result_scroll <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
+  | Some saved ->
+    t.saved_runtime_ids <- (match field "runtime_ids" json with
+      | `List ids ->
+        let parsed = List.map string ids in
+        if List.for_all Option.is_some parsed then
+          List.filter (fun id -> not (List.mem id t.existing)) (List.filter_map Fun.id parsed)
+        else []
+      | _ -> []);
+    t.cursor <- 0; t.result_scroll <- 0; t.phase <- Finished {saved; activation = Activating; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
+let activation_of_result = function
+  | Ok json ->
+    (match field "runtime_ready" json, field "exact_output_authority_available" json,
+           field "status" (field "model_setup" json) with
+     | `Bool true, `Bool exact_output_available, `String "available" -> Active {exact_output_available}
+     | _ -> Activation_failed "서버가 런타임 활성화를 확인하지 않았습니다.")
+  (* Activation errors can contain configuration details. Keep the failed
+     boundary visible without printing those details into the terminal. *)
+  | Error _ -> Activation_failed "런타임 활성화 요청을 확인하지 못했습니다. 서버 상태와 접근 권한을 확인하세요."
+let activating t saved =
+  t.result_scroll <- 0;
+  t.phase <- Finished {saved; activation = Activating; refresh_failed = false};
+  t.cursor <- 0; t.notice <- saved_notice saved
+let activated t saved result =
+  t.result_scroll <- 0;
+  let activation = activation_of_result result in
+  t.phase <- Finished {saved; activation; refresh_failed = false};
+  t.cursor <- 0; t.notice <- saved_notice saved;
+  match activation with Active _ -> true | Activating | Activation_failed _ -> false
+let reconcile_saved_account t json =
+  match t.provider, t.saved_runtime_ids, field "runtimes" json with
+  | Some original, (_ :: _ as ids), `List runtimes ->
+    (* The save carries the selected runtime IDs; inventory owns their
+       provider relationship. Never infer an account from an ID prefix,
+       email, list order, or another account retained as a default route. *)
+    let owners = List.map (fun id ->
+      match List.filter (fun row -> string (field "id" row) = Some id) runtimes with
+      | [row] ->
+        Option.bind (string (field "provider_id" row)) (fun provider_id ->
+          List.find_opt (fun (p:provider) -> p.id=provider_id && p.origin=Configured
+            && p.client=original.client) t.providers)
+      | [] | _ :: _ :: _ -> None) ids in
+    if List.for_all Option.is_some owners then
+      (match List.sort_uniq (fun (a:provider) (b:provider) -> String.compare a.id b.id)
+          (List.filter_map Fun.id owners) with
+       | [provider] -> t.provider <- Some provider
+       | [] | _ :: _ :: _ -> ())
+  | None, _, _ | Some _, [], _ | Some _, _ :: _, _ -> ()
 let refresh_saved t saved result =
-  t.result_scroll <- 0;
-  let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
-  t.result_scroll <- 0;
-  t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
+  let activation = match t.phase with
+    | Finished {activation; _} -> activation
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Removing | Failed | Removal _ ->
+      Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
+  let refreshed = match result with
+    | Ok json -> (match inventory t json with
+        | Ok () -> reconcile_saved_account t json; Ok ()
+        | Error _ as error -> error)
+    | Error _ as error -> error in
+  t.cursor <- 0; t.result_scroll <- 0;
+  t.phase <- Finished {saved; activation; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
 let input_response ~sequence t result =
   match result with
@@ -371,11 +531,11 @@ let removal_preview t (provider:provider) ~refused json =
   | `String id, Some revision, `String "refused" when id=provider.id ->
     (match string (field "reason" json) with
      | Some reason -> t.phase <- Removal {provider; revision; removal = Unremovable reason};
-       t.notice <- lead ^ "이 계정은 지금 지울 수 없습니다."; Ok ()
+       t.notice <- lead ^ "이 연결은 지금 지울 수 없습니다."; Ok ()
      | None -> Error "지울 수 없는 이유를 읽지 못했습니다.")
   | _ -> Error "지울 내용을 읽지 못했습니다."
 let removed_notice (provider:provider) login_store =
-  provider.label ^ " 계정을 지웠습니다."
+  provider.label ^ " 연결 (" ^ provider.id ^ ")을 설정에서 지웠습니다."
   ^ (match login_store with Some path -> " 로그인 정보는 남아 있습니다: " ^ path | None -> "")
 let source t = `Assoc (["integration_id", `String (match t.provider with Some p -> p.id | None -> "")]
   @ (match t.account_ref with Some r -> ["account_ref",`String r] | None -> []))
@@ -431,7 +591,7 @@ let paste t text = match t.phase with
     (match pasted_line text with
      | Some text -> append_draft t text
      | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
-  | Loading | Providers _ | Models | Saving | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
+  | Loading | Providers _ | Models | Saving | Removing | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
@@ -458,6 +618,18 @@ let toggle_model t (model:model) =
     | None, None -> Nothing
 let selected_models t =
   List.filter (fun (model:model) -> List.mem model.id t.selected_models) t.models
+let unavailable_account t (provider:provider) =
+  t.notice <- (if not provider.setup_supported then
+    "이 연결은 계정 설정을 지원하지 않습니다. 지원되는 공급자 연결을 선택하세요."
+    else "이 기존 연결은 비활성 상태입니다. 활성화한 뒤 새로고침하세요. n으로 별도의 새 계정을 추가할 수 있습니다.");
+  Nothing
+let start_login t (provider:provider) ~existing =
+  (* A fresh login uses a new isolated account home, so a disabled connection
+     may supply its supported client command without enabling the old account.
+     Reauthentication targets the existing home and requires a usable binding. *)
+  if provider.setup_supported && (not existing || provider_selectable provider)
+  then Start {provider;existing}
+  else unavailable_account t provider
 let key t key =
   if key="esc" then (match t.phase with
     (* Esc steps back to the list rather than closing /login: the removal is
@@ -465,8 +637,10 @@ let key t key =
     | Removal {provider; _} -> show_accounts ~on:provider t provider.client; Nothing
     (* Esc from a client's accounts goes back to the clients. *)
     | Providers (Accounts client) -> show_clients ~on:client t; Nothing
+    | Providers (Account_providers (client, ids)) ->
+        show_accounts ?on:(List.nth_opt (member_rows t ids) 0) t client; Nothing
     | Documented_context _ -> t.phase <- Models; t.draft <- ""; Nothing
-    | Loading | Providers Clients | Logging | Models | Saving | Finished _ | Failed -> Close) else
+    | Loading | Providers Clients | Logging | Models | Saving | Removing | Finished _ | Failed -> Close) else
   match t.phase with
   | Removal {provider; revision; removal = Removable {login_store; _}} ->
     if key="\r" || key="\n" || key="enter" then Remove {provider; revision; login_store} else Nothing
@@ -497,7 +671,7 @@ let key t key =
        | _ -> t.notice<-"확인한 한도를 양의 정수로 입력하세요."; Nothing)
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
-  | Loading | Saving -> Nothing
+  | Loading | Saving | Removing -> Nothing
   | Models when key=" " ->
     (match List.nth_opt t.models t.cursor with
      | Some model -> toggle_model t model
@@ -511,44 +685,53 @@ let key t key =
     t.result_scroll <- max 0 (t.result_scroll - 1); Nothing
   | (Finished _ | Failed) when key="down" || key="j" ->
     t.result_scroll <- min t.saved_scroll_max (t.result_scroll + 1); Nothing
+  | Finished {activation = Activating; _} -> Nothing
+  | Finished {saved; activation = Activation_failed _; _}
+    when List.mem key ["r"; "\r"; "\n"; "enter"] -> Activate_saved saved
+  | Finished {activation = Activation_failed _; _} -> Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
       let count = match t.phase with
         | Providers Clients -> List.length (clients t)
         | Providers (Accounts client) -> List.length (account_rows t client)
-        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ -> List.length t.models in
+        | Providers (Account_providers (_, ids)) -> List.length (member_rows t ids)
+        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ -> List.length t.models in
       t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
     else if key="r" then (match t.phase with
       | Models -> Discover
       | Finished {saved; _} -> Refresh_saved saved
       | Failed when t.recovery=Refresh_configuration -> Refresh_retry
       | Providers view when Option.is_none t.login_id -> Refresh_list view
-      | Providers _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+      | Providers _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
         if Option.is_some t.login_id then Recover else Inventory)
     else if key="D" then
       (match focused_row t with
-       | Some (Account provider) -> Preview_removal {provider; refused = None}
+       | Some (Account provider) ->
+         (match t.phase, account_members t provider with
+          | Providers (Accounts client), (_ :: _ :: _ as members) ->
+              show_account_providers t client (List.map (fun (p:provider) -> p.id) members); Nothing
+          | _ -> Preview_removal {provider; refused = None})
        | Some (New_account _) | None -> Nothing)
     else if key="n" then
       (match t.phase with
        | Providers _ ->
          (match Option.bind (focused_client t) (new_account_provider t) with
-          | Some provider -> Start {provider; existing = false}
+          | Some provider -> start_login t provider ~existing:false
           | None -> Nothing)
-       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
          (match t.provider with
-          | Some provider -> Start {provider; existing = false}
+          | Some provider -> start_login t provider ~existing:false
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
     else if key="e" then
       (match t.phase with
        | Providers _ ->
          (match focused_row t with
-          | Some (Account provider) -> Start {provider; existing = true}
+          | Some (Account provider) -> start_login t provider ~existing:true
           | Some (New_account _) | None -> Nothing)
-       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
          (match t.provider with
-          | Some provider -> Start {provider; existing = true}
+          | Some provider -> start_login t provider ~existing:true
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
     else if key="\r" || key="\n" || key="enter" then
       (match t.phase with
@@ -558,8 +741,13 @@ let key t key =
           | None -> Nothing)
        | Providers (Accounts _) ->
          (match focused_row t with
-          | Some (New_account provider) -> Start {provider; existing = false}
-          | Some (Account provider) -> Select_existing provider
+          | Some (New_account provider) -> start_login t provider ~existing:false
+          | Some (Account provider) when provider_selectable provider -> Select_existing provider
+          | Some (Account provider) -> unavailable_account t provider
+          | None -> Nothing)
+       | Providers (Account_providers (_, ids)) ->
+         (match List.nth_opt (member_rows t ids) t.cursor with
+          | Some provider -> Preview_removal {provider; refused=None}
           | None -> Nothing)
        | Models ->
          (match selected_models t with
@@ -567,7 +755,7 @@ let key t key =
               "이 계정의 모델은 모두 연결되어 있습니다. Esc로 닫으세요."
               else "선택한 모델이 없습니다. Space로 모델을 고르세요."); Nothing
           | models -> Save models)
-       | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> Nothing)
+       | Loading | Logging | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> Nothing)
     else Nothing
 let save_body t models =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
@@ -581,12 +769,17 @@ let hints t = match t.phase with
   | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
   | Documented_context _ -> "확인한 context 한도(tokens)  Enter:선택  Esc:모델 목록"
   | Providers Clients -> "↑↓:공급자  Enter:계정 보기  n:새 계정  Esc:닫기"
-  | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:지우기  Esc:공급자 목록"
+  | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:연결 삭제  Esc:공급자 목록"
+  | Providers (Account_providers _) -> "↑↓:공급자 연결  Enter/D:선택한 연결 삭제 미리보기  Esc:계정 목록"
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
-  | Finished _ | Failed -> "↑↓/j/k:결과 스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
-  | Loading | Saving -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Finished {activation = Activating; _} -> "j/k:스크롤  런타임 활성화 중  Esc:닫기"
+  | Finished {activation = Activation_failed _; _} -> "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기"
+  | Finished {activation = Active _; _} -> "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기"
+  | Saving -> "저장 결과 대기 중 · Esc:닫기 (백그라운드에서 계속)"
+  | Failed -> "↑↓/j/k:결과 스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Loading | Removing -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
@@ -605,9 +798,17 @@ let account_suffix t p = match email_state t p with Some state -> " · " ^ state
 (* The email says which account a row is, so it leads; the label says which
    provider entry holds it. *)
 let account_label t (p:provider) =
+  let label = match account_group t p with
+    | Some group when List.length group.provider_ids > 1 ->
+        Printf.sprintf "%s · %s · 연결 %d개 · 모델 설정 %d개"
+          (client_label p.client) (String.sub group.group_id 0 (min 8 (String.length group.group_id)))
+          (List.length group.provider_ids) (List.length group.runtime_ids)
+    | Some group -> p.label ^ " · " ^ String.sub group.group_id 0 (min 8 (String.length group.group_id))
+    | None -> p.label in
+  let label = label ^ (if not p.enabled then " · 비활성" else if not p.setup_supported then " · 설정 미지원" else "") in
   match email_state t p with
-  | Some state -> state ^ "  (" ^ p.label ^ ")"
-  | None -> p.label
+  | Some state -> state ^ "  (" ^ label ^ ")"
+  | None -> label
 let describe_change = function
   | Removed_table path -> "[" ^ path ^ "]"
   | Left_lane {lane; runtime} -> "lane " ^ lane ^ " 후보에서 " ^ runtime ^ " 를 뺍니다"
@@ -624,6 +825,8 @@ let body_rows t =
   | Providers (Accounts client) -> List.mapi (fun i row ->
       Text ((if i=t.cursor then "> " else "  ")
             ^ (match row with New_account _ -> "+ 새 계정" | Account p -> account_label t p))) (account_rows t client)
+  | Providers (Account_providers (_, ids)) -> List.mapi (fun i (p:provider) ->
+      Text ((if i=t.cursor then "> " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
   | Models -> List.mapi (fun i (m:model) ->
       let connected = is_connected t m in
       let mark = if connected then "[연결됨] " else if List.mem m.id t.selected_models then "[x] " else "[ ] " in
@@ -633,14 +836,23 @@ let body_rows t =
   | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
     @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
   | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
-  | Removal {provider; removal; _} -> Text ("지울 계정: " ^ provider.label ^ account_suffix t provider) ::
+  | Removal {provider; removal; _} -> Text ("지울 공급자 연결: " ^ provider.id ^ " · " ^ provider.label ^ account_suffix t provider) ::
     (match removal with
      | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
        @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
      | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
-  | Finished {saved; refresh_failed} -> List.map (fun row -> Text row) (saved_rows saved)
+  | Finished {saved; activation; refresh_failed} ->
+    (match activation with
+     | Activating -> [Text "저장 완료 · 런타임 활성화 중입니다."]
+     | Activation_failed detail ->
+       [Text "저장 완료 · 런타임 활성화 미확인"; Text detail;
+        Text "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다."]
+     | Active {exact_output_available} ->
+       Text "저장한 설정을 런타임에 활성화했습니다." ::
+       (if exact_output_available then [] else [Text "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."]))
+    @ List.map (fun row -> Text row) (saved_rows saved)
     @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
-  | Loading | Saving | Failed -> []
+  | Loading | Saving | Removing | Failed -> []
 let lines t = Text t.notice :: body_rows t
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 (* The notice wraps rather than being cut at the pane's edge: a refused
@@ -676,7 +888,7 @@ let visible_lines ~height ~width t =
     let skip = match t.phase with
       | Providers _ | Models -> max 0 (t.cursor + List.length notice + 1 - height)
       | Removal _ -> 0
-      | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed -> max 0 (List.length rows - height) in
+      | Loading | Logging | Documented_context _ | Saving | Removing | Finished _ | Failed -> max 0 (List.length rows - height) in
     List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 
 let decoder ~integration_id on_event =

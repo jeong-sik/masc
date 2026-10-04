@@ -3747,8 +3747,10 @@ let runtime_account_login_cmd =
 
 let runtime_setup_render_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in
+  let workspace = Arg.(value & opt (some string) None & info ["base-path"]
+    ~doc:"Resolve an existing account from this workspace before rendering its model identity.") in
   Cmd.v (Cmd.info "runtime-setup-render" ~doc:"Render a native runtime specification for local setup.")
-    Term.(const (fun spec_path -> Masc_cli_runtime_setup.render ~spec_path) $ spec)
+    Term.(const (fun base_path spec_path -> Masc_cli_runtime_setup.render ~base_path ~spec_path) $ workspace $ spec)
 
 let runtime_setup_inventory_cmd =
   Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read local setup choices and their configuration revision together.")

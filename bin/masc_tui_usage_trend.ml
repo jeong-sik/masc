@@ -1,8 +1,6 @@
-type sample = {
-  observed_at : float;
-  value : Masc.Tui_decode_usage.provider_usage_utilization;
-  share : float;
-}
+type day_report = Measured of Masc.Tui_decode_usage.provider_usage_utilization * float option | Reported_no_windows
+
+type sample = { observed_at : float; report : day_report }
 
 type row = {
   scope_id : string;
@@ -21,6 +19,7 @@ type t = {
 }
 
 let no_report_mark = "\xc2\xb7"
+let empty_report_mark = "\xe2\x97\x8b"
 
 let seconds_per_day = 86400.0
 
@@ -64,18 +63,31 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
           (fun known ->
             let known = Option.value ~default:Day_map.empty known in
             if day >= first_day && day <= last_day then
-              Some (Day_map.add day { observed_at = point.puhp_observed_at; value = point.puhp_unit; share = share point.puhp_unit } known)
+              Some (Day_map.add day { observed_at = point.puhp_observed_at; report = Measured (point.puhp_unit, share point.puhp_unit) } known)
             else Some known)
           acc)
       Key_map.empty history.puh_points
   in
+  let by_key = List.fold_left (fun rows (report : Masc.Tui_decode_usage.provider_usage_empty_report) ->
+    let day = utc_day report.puhe_observed_at in
+    if day < first_day || day > last_day then rows else
+    let matching = Key_map.exists (fun (scope, _, _) _ -> scope = report.puhe_scope_id) rows in
+    let rows = if matching then rows
+      else Key_map.add (report.puhe_scope_id, "account report", None) Day_map.empty rows in
+    Key_map.mapi (fun (scope, _, _) days ->
+      if scope <> report.puhe_scope_id || Day_map.mem day days then days
+      else Day_map.add day { observed_at = report.puhe_observed_at; report = Reported_no_windows } days) rows)
+      by_key history.puh_reported_no_windows in
   let rows =
     Key_map.bindings by_key
     |> List.map (fun ((scope_id, kind, limit_id), reported) ->
            let samples = List.init history.puh_days (fun offset ->
              Day_map.find_opt (first_day + offset) reported) in
-           let marks = List.map (function None -> no_report_mark | Some sample -> mark sample.share) samples
-             |> String.concat "" in
+           let marks = List.map (function
+             | None -> no_report_mark
+             | Some { report = Reported_no_windows; _ } -> empty_report_mark
+             | Some { report = Measured (_, None); _ } -> "$"
+             | Some { report = Measured (_, Some share); _ } -> mark share) samples |> String.concat "" in
            { scope_id; kind; limit_id; marks; samples;
              reported_days = Day_map.cardinal reported })
   in
@@ -95,10 +107,12 @@ let plot ~width trend row =
   else if days = 0 || width < axis_cells + (days * 2) then
     let marks = List.map (function
       | None -> no_report_mark
-      | Some sample when sample.share < 0.0 -> "↓"
-      | Some sample when sample.share = 0.0 -> "0"
-      | Some sample when sample.share > 1.0 -> "↑"
-      | Some sample -> mark sample.share) row.samples |> String.concat "" in
+      | Some {report = Measured (_, Some share); _} when share < 0.0 -> "↓"
+      | Some {report = Measured (_, Some share); _} when share = 0.0 -> "0"
+      | Some {report = Measured (_, Some share); _} when share > 1.0 -> "↑"
+      | Some {report = Measured (_, Some share); _} -> mark share
+      | Some {report = Measured (_, None); _} -> "$"
+      | Some {report = Reported_no_windows; _} -> empty_report_mark) row.samples |> String.concat "" in
     Masc_tui_message_layout.wrap_words ~max_cells:width (marks ^ " (daily levels; · no report)")
   else
     let step = min 4 ((width - axis_cells) / days) in
@@ -108,10 +122,11 @@ let plot ~width trend row =
       let band = height - index - 1 in
       let cells = List.map (function
         | None -> pad " "
-        | Some sample ->
-          let share = Float.max 0.0 (Float.min 1.0 sample.share) in
+        | Some {report = Measured (_, None) | Reported_no_windows; _} -> pad " "
+        | Some {report = Measured (_, Some original_share); _} ->
+          let share = Float.max 0.0 (Float.min 1.0 original_share) in
           let part = Float.max 0.0 (Float.min 1.0 (share *. float_of_int height -. float_of_int band)) in
-          let glyph = if sample.share > 1.0 && band = height - 1 then "↑"
+          let glyph = if original_share > 1.0 && band = height - 1 then "↑"
             else if part <= 0.0 then " "
             else Masc_tui_chart.sparkline ~min:0 ~max:7
               [max 0 (min 7 (int_of_float (floor (part *. 8.0)) - 1))] in
@@ -119,8 +134,10 @@ let plot ~width trend row =
       Printf.sprintf "%3d%% │ %s" ((band + 1) * 100 / height) cells) in
     let baseline = "  0% └ " ^ (List.map (function
       | None -> pad no_report_mark
-      | Some sample when sample.share < 0.0 -> pad "↓"
-      | Some sample when sample.share = 0.0 -> pad "0"
+      | Some {report = Measured (_, Some share); _} when share < 0.0 -> pad "↓"
+      | Some {report = Measured (_, Some share); _} when share = 0.0 -> pad "0"
+      | Some {report = Measured (_, None); _} -> pad "$"
+      | Some {report = Reported_no_windows; _} -> pad empty_report_mark
       | Some _ -> pad "─") row.samples |> String.concat "") in
     let first_day = utc_day trend.generated_at - days + 1 in
     let dates = List.init days (fun offset ->

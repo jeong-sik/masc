@@ -44,6 +44,7 @@ class Server:
                              'source_text': self.text, 'source_revision': revision(self.text)}
             request = json.loads(body)
             self.saves.append(request)
+            assert request['expected_source_path'] == PATH, 'save lost its observed configuration path'
             if request['expected_source_revision'] != revision(self.text):
                 return 409, {'code': 'revision_conflict', 'error': 'file changed', 'current': {
                     'source_path': PATH, 'source_text': self.text, 'source_revision': revision(self.text)}}

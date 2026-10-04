@@ -1,4 +1,4 @@
-"""Runtime rows retain complete status/probe values and selected account evidence."""
+"""Runtime rows retain complete status/probe values and selected quota scope evidence."""
 import os
 import sys
 import time
@@ -16,7 +16,7 @@ def fixtures(*, combined=False):
     observed.update({"quota_scope": "account:spent", "quota_exhausted": combined,
                      "quota_resets_at": None, "rate_limited": combined})
     resolved["provider_usage_windows"] = [{
-        "scope": "account:spent", "scope_id": "spent-account",
+        "scope": "account:spent", "scope_id": "spent-quota-scope",
         "providers": [{"id": observed["provider_id"], "display_name": observed["provider"]}],
         "state": "reported", "windows": [{
             "limit_id": None, "window": {"kind": "five_hour"},
@@ -39,10 +39,17 @@ def run(executable):
                     needle=b"MASC System / Runtime", controls=(h.FULL_REDRAW,),
                     final_cursor=b"\x1b[?25l")
                 rows = h.screen_rows(frame)
+                if not any(b"LANE" in line for line in rows.values()):
+                    raise AssertionError(f"Lane header disappeared at {columns}: {rows!r}")
+                for lane, candidate in ((b"primary", b"1/2 runtime-a"),
+                                        (b"degraded", b"1/1 runtime-c")):
+                    line = next((line for line in rows.values() if candidate in line), b"")
+                    if lane not in line:
+                        raise AssertionError(f"Lane identity lost at {columns}: {line!r}")
                 if combined:
                     screen = " ".join(" ".join(line.decode().strip(" │").split())
                                       for _, line in sorted(rows.items()))
-                    for value in ("Account spent-account", "Connection fixture-provider", "Resolved A / model-a",
+                    for value in ("Quota scope spent-quota-scope", "Connection fixture-provider", "Resolved A / model-a",
                                   "quota exhausted (no reset stated)", "rate limited",
                                   "account limit spent / reachable"):
                         if value not in screen:
@@ -81,7 +88,7 @@ def run(executable):
     selected = resolved["runtimes"][0]
     selected.update({"quota_scope": "account:1", "quota_exhausted": False})
     resolved["provider_usage_windows"].append({
-        "scope": "account:1", "scope_id": "stable-first-account",
+        "scope": "account:1", "scope_id": "first-credential-scope",
         "providers": [{"id": selected["provider_id"], "display_name": selected["provider"]}],
         "state": "not_reported_since_start", "windows": [],
     })
@@ -90,16 +97,35 @@ def run(executable):
         h.palette_go(process, fd, output, b"go Runtime", b"MASC System / Runtime")
         h.resize_and_wait(process, fd, output, rows=17, columns=132,
             needle=b"MASC System / Runtime", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-        frame = h.send_and_wait(process, fd, output, b"\r", b"stable-first-account")
+        frame = h.send_and_wait(process, fd, output, b"\r", b"first-credential-scope")
         screen = b" ".join(h.screen_rows(frame).values())
-        if b"Account:" not in screen or b"stable-first-account" not in screen:
-            raise AssertionError(f"Enter detail lost the non-exhausted account: {screen!r}")
+        if b"Quota scope:" not in screen or b"first-credential-scope" not in screen:
+            raise AssertionError(f"Enter detail lost the non-exhausted quota scope: {screen!r}")
+        if b"Response-local quota scope:" not in screen or b"account:1" not in screen:
+            raise AssertionError(f"Enter detail lost response-local correlation: {screen!r}")
         if b"Connection / provider ID:" not in screen or b"fixture-provider" not in screen:
-            raise AssertionError(f"Enter detail conflated connection and account: {screen!r}")
+            raise AssertionError(f"Enter detail conflated connection and quota scope: {screen!r}")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable, description="Runtime short detail preserves stable account",
+    h.run_terminal_scenario(executable, description="Runtime short detail preserves quota scope",
         interact=detail_interact, http_fixtures=detail_fixture)
+
+    # A malformed Usage payload must not erase the Runtime response's local
+    # correlation label or present that ordinal as a provider account ID.
+    resolved["provider_usage_windows"] = None
+
+    def missing_usage_interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go Runtime", b"MASC System / Runtime")
+        frame = h.send_and_wait(process, fd, output, b"\r", b"Response-local quota scope:")
+        screen = b" ".join(h.screen_rows(frame).values())
+        for fact in (b"Quota scope:", b"unavailable; response-local scope account:1",
+                     b"Response-local quota scope:", b"account:1"):
+            if fact not in screen:
+                raise AssertionError(f"Failed Usage join lost {fact!r}: {screen!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Runtime missing Usage retains local quota correlation",
+        interact=missing_usage_interact, http_fixtures=detail_fixture)
 
 
 if __name__ == "__main__":

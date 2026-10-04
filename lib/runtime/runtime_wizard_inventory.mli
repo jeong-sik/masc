@@ -14,9 +14,11 @@
     or unsupported status. Catalog endpoint credentials are also redacted.
 
     [account_groups] groups configured official-client providers by the same
-    typed quota identity their runtime uses. Its opaque [id], [integration_ids]
-    and [runtime_ids] preserve every declared provider/binding; groups are
-    presentation identities, never mutation targets or email-based guesses. *)
+    typed credential-location quota scope their runtime uses. Its opaque [id]
+    is [Runtime_quota_window.scope_id], shared with Runtime and Usage history.
+    [integration_ids] and [runtime_ids] preserve every declared provider/binding.
+    Groups are presentation identities, never mutation targets, provider account
+    IDs or email-based guesses; credentials changing in place retain the scope. *)
 val to_json : ?include_credential_references:bool -> Runtime_schema.config -> Yojson.Safe.t
 (** [include_credential_references] is for the local setup CLI only. It adds
     file references, never secret values, so new model bindings can preserve

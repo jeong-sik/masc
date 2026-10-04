@@ -1057,7 +1057,17 @@ let grouped_existing_accounts () =
   check bool "reopening removal uses newly joined and excludes departed members" true
     (t.phase=Login.Providers (Login.Account_providers (Codex,["a1";"b"])))
 
+let quota_scope_group_id_is_opaque () =
+  let scope_id = String.make 32 'd' in
+  let json = `Assoc ["account_groups", `List [`Assoc ["id", `String scope_id;
+    "integration_ids", `List [`String provider.id]; "runtime_ids", `List []]]] in
+  match Login.groups_of_inventory [provider] json with
+  | Ok [group] -> check string "32-character history scope ID is retained unchanged" scope_id group.group_id
+  | Ok _ | Error _ -> fail "quota scope group was lost or rejected"
+
+
 let () = run "TUI account login" ["workflow",[
+  test_case "quota scope group ID remains an opaque string" `Quick quota_scope_group_id_is_opaque;
   test_case "disabled client templates stay distinct from existing-account login" `Quick disabled_login_templates_and_existing_accounts;
   test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;
   test_case "multi-model selection submits ordered models" `Quick multi_model_selection;

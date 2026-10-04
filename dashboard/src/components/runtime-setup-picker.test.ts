@@ -14,8 +14,8 @@ it('groups legacy providers by account while preserving both context variants in
     ...inventory,
     integrations: ['first', 'first-wide', 'second'].map(id => ({ id, display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'existing_connection' })),
     account_groups: [
-      { id: '1'.repeat(64), integration_ids: ['first', 'first-wide'], runtime_ids: ['first.luna', 'first-wide.luna'] },
-      { id: '2'.repeat(64), integration_ids: ['second'], runtime_ids: ['second.luna'] },
+      { id: '1'.repeat(32), integration_ids: ['first', 'first-wide'], runtime_ids: ['first.luna', 'first-wide.luna'] },
+      { id: '2'.repeat(32), integration_ids: ['second'], runtime_ids: ['second.luna'] },
     ],
     runtimes: [
       { id: 'first.luna', provider_id: 'first', display_name: 'Codex', protocol: 'codex-app-server', model: 'gpt-6-luna', endpoint: null, max_context: 272000 },
@@ -50,7 +50,7 @@ it.each([{ enabled: false, setup_support: 'new_connection' }, { enabled: true, s
       { id: 'unavailable', display_name: 'Codex', protocol: 'codex-app-server', ...unavailable },
       { id: 'available', display_name: 'Codex', protocol: 'codex-app-server', enabled: true, setup_support: 'new_connection' },
     ],
-    account_groups: [{ id: 'a'.repeat(64), integration_ids: ['unavailable', 'available'], runtime_ids: [] }],
+    account_groups: [{ id: 'a'.repeat(32), integration_ids: ['unavailable', 'available'], runtime_ids: [] }],
   }
   vi.mocked(post).mockImplementation(async path => path.endsWith('/accounts/select')
     ? { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref: 'b'.repeat(64) }
@@ -68,7 +68,7 @@ it('requires a new selection after refresh disables the selected account connect
   const grouped = {
     ...inventory,
     integrations: ['first', 'second'].map(id => ({ id, display_name: 'Codex', protocol: 'codex-app-server', enabled: true, setup_support: 'new_connection' })),
-    account_groups: [{ id: 'a'.repeat(64), integration_ids: ['first', 'second'], runtime_ids: [] }],
+    account_groups: [{ id: 'a'.repeat(32), integration_ids: ['first', 'second'], runtime_ids: [] }],
   }
   const view = render(html`<${RuntimeSetupPicker} inventory=${grouped} onSaved=${vi.fn()} />`)
   fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'first' } })
@@ -456,8 +456,8 @@ it('identifies grouped accounts by reported email and keeps duplicate runtime co
     ...inventory,
     integrations: ['personal-a', 'personal-b', 'work'].map(id => ({ id, display_name: id, protocol: 'codex-app-server', setup_support: 'existing_connection' })),
     account_groups: [
-      { id: '1'.repeat(64), integration_ids: ['personal-a', 'personal-b'], runtime_ids: ['personal-a.luna', 'personal-b.luna'] },
-      { id: '2'.repeat(64), integration_ids: ['work'], runtime_ids: ['work.luna'] },
+      { id: '1'.repeat(32), integration_ids: ['personal-a', 'personal-b'], runtime_ids: ['personal-a.luna', 'personal-b.luna'] },
+      { id: '2'.repeat(32), integration_ids: ['work'], runtime_ids: ['work.luna'] },
     ],
     account_emails: [
       { integration_id: 'personal-a', state: 'read', email: 'personal@example.test' },

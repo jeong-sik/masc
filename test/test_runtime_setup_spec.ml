@@ -338,7 +338,12 @@ max-context = 500000
     (json |> member "runtimes" |> to_list |> List.length);
   Alcotest.check (Alcotest.list Alcotest.int) "public runtime variants retain context" [272000;500000;272000]
     (json |> member "runtimes" |> to_list |> List.map (fun row -> row |> member "max_context" |> to_int));
-  Alcotest.check Alcotest.bool "public account identities expose no account home" false
+  Alcotest.check (Alcotest.list Alcotest.string) "Setup group IDs match Runtime and persisted Usage scope IDs"
+    (List.map (fun home -> Runtime_quota_window.scope_id
+      (Runtime_quota_window.scope_of_codex_home (Some home)))
+      ["/fixture/account-one";"/fixture/account-two"])
+    (List.map (fun group -> group |> member "id" |> to_string) groups);
+  Alcotest.check Alcotest.bool "public quota scope IDs expose no account home" false
     (String_util.contains_substring (Yojson.Safe.to_string (`List groups)) "/fixture/")
 
 let test_cli_reuse_requires_non_interactive () =

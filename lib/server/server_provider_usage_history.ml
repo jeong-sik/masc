@@ -8,8 +8,7 @@ let store config =
   in
   Dated_jsonl.create ~base_dir ~retention_days:16 ()
 
-let scope_id scope =
-  Digest.to_hex (Digest.string (Runtime_quota_window.scope_to_string scope))
+let scope_id = Runtime_quota_window.scope_id
 
 let kind_json = function
   | Usage.Five_hour -> `String "five_hour"

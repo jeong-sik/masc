@@ -1725,7 +1725,7 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
-  ro_account_scope_id : string option;
+  ro_quota_scope_id : string option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
 }
@@ -1952,7 +1952,7 @@ let decode_runtime_option ~usage ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
-  let ro_account_scope_id =
+  let ro_quota_scope_id =
     match usage, ro_quota_scope with
     | Error _, _ | Ok _, None -> None
     | Ok usage, Some scope ->
@@ -1980,7 +1980,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_quota_exhausted
     ; ro_quota_resets_at
     ; ro_quota_scope
-    ; ro_account_scope_id
+    ; ro_quota_scope_id
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
     }
@@ -2053,7 +2053,7 @@ let decode_runtime_resolved_snapshot json =
   let* default_json, rrs_default_runtime_id =
     decode_runtime_default_member json
   in
-  (* Capture the stable identity before catalogue/surface projections split.
+  (* Capture the credential/quota scope before catalogue/surface projections split.
      quota_scope itself is only an ordinal within this response. *)
   let rrs_usage = Tui_decode_usage.decode_provider_usage_windows json in
   let* runtime_items = required_list_field json "runtimes" in

@@ -124,6 +124,12 @@ let observed_state_is_separate () =
   let pending,request=A.start_read ~generation:2 session |> some in
   let session=A.finish_read request (Ok A.{document=doc source;activity=Error "inventory offline"}) pending in
   shows "Server activity read failed: inventory offline" session;
+  let pending,request=A.start_read ~generation:3 session |> some in
+  let invalid=doc "[machines.msx\nenabled = true\n" in
+  let invalid_session=A.finish_read request (Ok A.{document=invalid;activity=Ok Machine_configuration.Disabled}) pending in
+  shows "Current file: unverified" invalid_session;
+  shows "Server activity: Off" invalid_session;
+  rejected (A.start_save ~generation:4 invalid_session);
   let pending,request,_=A.start_save ~generation:3 (A.toggle session) |> ok in
   shows "Server activity: not read" pending;
   let saved=A.finish_save request (A.Saved (receipt ())) pending in

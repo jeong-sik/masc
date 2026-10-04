@@ -516,6 +516,7 @@ def run(executable: str) -> None:
                 break
             time.sleep(0.05)
         typed_posts = [post for post in posted if isinstance(post, dict)]
+        assert len(typed_posts) == len(posted), f"non-object routing post: {posted!r}"
         if without_checked_revision(typed_posts) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         primary = store.lane_candidates("primary")

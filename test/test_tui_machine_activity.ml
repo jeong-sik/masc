@@ -10,7 +10,7 @@ let doc ?(path="/workspace/runtime.toml") ?(revision="original") source_text =
   {Masc_tui_runtime_config_edit.path;source_text;source_revision=revision}
 let read ?(generation=1) document session =
   let pending,request=A.start_read ~generation session |> some in
-  A.finish_read request (Ok A.{document;activity=Ok Machine_configuration.Enabled}) pending
+  A.finish_read request (Ok A.{document=Ok document;activity=Ok Machine_configuration.Enabled}) pending
 let loaded ?(machine=Masc.Machine_lane.Msx) document = read document (A.create (owner ~machine "A"))
 let receipt ?(durability=R.Durable) ?(registry=R.Exact_output_registry_applied R.Targets_runtime_bindings) () = R.{
   source_revision="saved";order="9";durability;lock_warnings=[];
@@ -119,19 +119,26 @@ let independent_machines () =
 let observed_state_is_separate () =
   let initial=A.create (owner "A") in
   let pending,request=A.start_read ~generation:1 initial |> some in
-  let session=A.finish_read request (Ok A.{document=doc source;activity=Ok Machine_configuration.Disabled}) pending in
+  let session=A.finish_read request (Ok A.{document=Ok (doc source);activity=Ok Machine_configuration.Disabled}) pending in
   shows "Current file: On" session; shows "Server activity: Off" session;
   let pending,request=A.start_read ~generation:2 session |> some in
-  let session=A.finish_read request (Ok A.{document=doc source;activity=Error "inventory offline"}) pending in
+  let session=A.finish_read request (Ok A.{document=Ok (doc source);activity=Error "inventory offline"}) pending in
   shows "Server activity read failed: inventory offline" session;
   let pending,request=A.start_read ~generation:3 session |> some in
   let invalid=doc "[machines.msx\nenabled = true\n" in
-  let invalid_session=A.finish_read request (Ok A.{document=invalid;activity=Ok Machine_configuration.Disabled}) pending in
+  let invalid_session=A.finish_read request (Ok A.{document=Ok invalid;activity=Ok Machine_configuration.Disabled}) pending in
   shows "Current file: unverified" invalid_session;
   shows "Server activity: Off" invalid_session;
   rejected (A.start_save ~generation:4 invalid_session);
+  let unavailable=A.finish_read request (Ok A.{document=Error "file unavailable";
+    activity=Ok Machine_configuration.Enabled}) pending in
+  shows "Current file: unverified" unavailable;
+  shows "Server activity: On" unavailable;
+  rejected (A.start_save ~generation:4 unavailable);
   let pending,request,_=A.start_save ~generation:3 (A.toggle session) |> ok in
-  shows "Server activity: not read" pending;
+  shows "Server activity read failed: inventory offline" pending;
+  let refused=A.finish_save request (A.Refused "preview rejected") pending in
+  shows "Server activity read failed: inventory offline" refused;
   let saved=A.finish_save request (A.Saved (receipt ())) pending in
   shows "Server activity: not read" saved
 
@@ -149,9 +156,9 @@ let workspace_roundtrip () =
   let pending,old_read=A.start_read ~generation:2 (A.toggle (loaded (doc source))) |> some in
   let suspended=A.suspend pending in
   let pending,new_read=A.start_read ~generation:3 suspended |> some in
-  let ignored=A.finish_read old_read (Ok A.{document=doc ~revision:"old" off;activity=Ok Machine_configuration.Disabled}) pending in
+  let ignored=A.finish_read old_read (Ok A.{document=Ok (doc ~revision:"old" off);activity=Ok Machine_configuration.Disabled}) pending in
   Alcotest.(check bool) "old read ignored" true (A.matches new_read ignored);
-  let session=A.finish_read new_read (Ok A.{document=doc source;activity=Ok Machine_configuration.Enabled}) ignored in
+  let session=A.finish_read new_read (Ok A.{document=Ok (doc source);activity=Ok Machine_configuration.Enabled}) ignored in
   shows "Activity draft: Off" session;
   let pending,old_save,_=A.start_save ~generation:4 session |> ok in
   let pending,new_read=A.start_read ~generation:5 (A.suspend pending) |> some in
@@ -159,7 +166,7 @@ let workspace_roundtrip () =
   Alcotest.(check bool) "old save ignored" true (A.matches new_read ignored);
   let other=A.create (owner "B") in
   Alcotest.(check bool) "workspace identity differs" false (A.same_owner (A.owner other) (A.owner ignored));
-  shows "Current file: unverified" (A.finish_read new_read (Ok A.{document=doc source;activity=Ok Machine_configuration.Enabled}) other)
+  shows "Current file: unverified" (A.finish_read new_read (Ok A.{document=Ok (doc source);activity=Ok Machine_configuration.Enabled}) other)
 
 let ambiguous_write_and_refusal () =
   let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in

@@ -8,7 +8,7 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
-    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None;
+    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_account_scope_id = None;
     ro_rate_limited = false; ro_rate_limit_resets_at = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -1437,7 +1437,8 @@ let test_selected_status_wraps_and_reserves_rows () =
       puw_resets_at = None; puw_observed_at = 0. }, []) } in
   let observed = { (runtime "a") with
     ro_provider_id = "codex-account-two"; ro_provider = "Account Two";
-    ro_quota_exhausted = true; ro_rate_limited = true; ro_quota_scope = Some "account:status" } in
+    ro_quota_exhausted = true; ro_rate_limited = true; ro_quota_scope = Some "account:status";
+    ro_account_scope_id = Some "status" } in
   let resolved = { snapshot.rss_resolved with
     rrs_usage = Ok { puws_since = 0.; puws_accounts = [account] };
     rrs_runtimes = [observed; runtime "b"; runtime "c"] } in
@@ -1449,7 +1450,7 @@ let test_selected_status_wraps_and_reserves_rows () =
     let text = String.concat " " (List.map String.trim lines) in
     List.iter (fun fact -> Alcotest.(check bool) ("complete selected fact: " ^ fact) true
         (Astring.String.is_infix ~affix:fact text))
-      [ "Account account:status"; "Connection codex-account-two"; "Account Two / model";
+      [ "Account status"; "Connection codex-account-two"; "Account Two / model";
         "quota exhausted (no reset stated)"; "rate limited"; "account limit spent / unobserved" ];
     List.iter (fun line -> Alcotest.(check bool) "wrapped status fits frame" true
         (Masc_tui_message_layout.display_width line <= Masc_tui_frame.inner_width ~cols)) lines;
@@ -1463,15 +1464,15 @@ let test_selected_status_wraps_and_reserves_rows () =
 
 let test_account_label_tracks_quota_scope () =
   let first = { (runtime "a") with ro_provider_id = "connection-a";
-    ro_quota_scope = Some "account:shared" } in
+    ro_quota_scope = Some "account:1"; ro_account_scope_id = Some "stable-first" } in
   let sibling = { first with ro_provider_id = "connection-b" } in
-  Alcotest.(check string) "connections sharing quota share account label"
+  Alcotest.(check string) "account label uses retained Usage identity" "stable-first"
+    (runtime_account_label first);
+  Alcotest.(check string) "connections sharing quota share account identity"
     (runtime_account_label first) (runtime_account_label sibling);
-  Alcotest.(check string) "switching account under same connection changes label"
-    "account:changed" (runtime_account_label {first with ro_quota_scope = Some "account:changed"});
-  Alcotest.(check string) "unreported account does not claim connection is an account"
-    "unreported (connection connection-a)"
-    (runtime_account_label {first with ro_quota_scope = None})
+  Alcotest.(check string) "ordinal is never used as account identity"
+    "unknown (Usage account identity unavailable)"
+    (runtime_account_label {first with ro_account_scope_id = None})
 
 let test_short_viewport_preserves_selected_list_row () =
   let state = lane_state () in

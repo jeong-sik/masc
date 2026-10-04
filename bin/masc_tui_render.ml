@@ -9453,7 +9453,8 @@ let runtime_detail_lines state target ~width =
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
-        @ runtime_detail_field ~width ~style:Ansi.reset "Account / provider ID" runtime.ro_provider_id
+        @ runtime_detail_field ~width ~style:Ansi.reset "Account" (runtime_account_label runtime)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Connection / provider ID" runtime.ro_provider_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
         @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"
             (Printf.sprintf "%d tokens" runtime.ro_effective_max_context)
@@ -9484,17 +9485,13 @@ let runtime_detail_lines state target ~width =
         match runtime_quota_badge runtime with
         | None -> []
         | Some _ ->
-            (match runtime.ro_quota_scope with
-             | None -> []
-             | Some scope ->
-               runtime_detail_field ~width ~style:(Theme.warn ()) "Quota"
-                 (match runtime.ro_quota_resets_at with
-                  | Some resets_at ->
-                    let tm = Unix.localtime resets_at in
-                    Printf.sprintf "exhausted, resets %02d:%02d (%s)"
-                      tm.Unix.tm_hour tm.Unix.tm_min scope
-                  | None ->
-                    Printf.sprintf "exhausted, no reset stated (%s)" scope))
+            runtime_detail_field ~width ~style:(Theme.warn ()) "Quota"
+              (match runtime.ro_quota_resets_at with
+               | Some resets_at ->
+                 let tm = Unix.localtime resets_at in
+                 Printf.sprintf "exhausted, resets %02d:%02d"
+                   tm.Unix.tm_hour tm.Unix.tm_min
+               | None -> "exhausted, no reset stated")
       in
       let rate_limit =
         match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with

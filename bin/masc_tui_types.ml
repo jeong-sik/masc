@@ -9983,6 +9983,13 @@ let prev_memory_category (current : memory_category_filter)
       in
       before rev
 
+(* The decoder retains the account identity from the same response as this
+   runtime row. Catalogue and surface refreshes cannot cross-join ordinals. *)
+let runtime_account_label (runtime : Tui_decode.runtime_option) =
+  match runtime.ro_account_scope_id with
+  | Some scope_id -> scope_id
+  | None -> "unknown (Usage account identity unavailable)"
+
 type runtime_picker_projection = {
   rlp_lane : string;
   rlp_pick : runtime_lane_pick;
@@ -11136,13 +11143,6 @@ let runtime_authority_rows ~cols (state : state) : string list =
   in
   Masc_tui_message_layout.pack_clauses ~max_cells:room clauses
   |> List.map (fun line -> indent ^ line)
-
-(* The resolved response owns this scope label. It is shared with its Usage
-   rows, but is not a persistent account id or a configuration edit key. *)
-let runtime_account_label (runtime : Tui_decode.runtime_option) =
-  match runtime.ro_quota_scope with
-  | Some scope -> scope
-  | None -> "unreported (connection " ^ runtime.ro_provider_id ^ ")"
 
 let runtime_selection_summary_lines ~cols state =
   let selected = match state.runtime_surface, state.runtime_mode with

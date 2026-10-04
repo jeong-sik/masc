@@ -42,7 +42,7 @@ def run(executable):
                 if combined:
                     screen = " ".join(" ".join(line.decode().strip(" │").split())
                                       for _, line in sorted(rows.items()))
-                    for value in ("Account account:spent", "Connection fixture-provider", "Resolved A / model-a",
+                    for value in ("Account spent-account", "Connection fixture-provider", "Resolved A / model-a",
                                   "quota exhausted (no reset stated)", "rate limited",
                                   "account limit spent / reachable"):
                         if value not in screen:
@@ -75,6 +75,31 @@ def run(executable):
         h.run_terminal_scenario(executable,
             description="Runtime complete combined status" if combined else "Runtime aligned complete status cells",
             interact=interact, http_fixtures=fixtures(combined=combined))
+
+    detail_fixture = fixtures()
+    _, resolved = detail_fixture[h.RUNTIME_RESOLVED_PATH]
+    selected = resolved["runtimes"][0]
+    selected.update({"quota_scope": "account:1", "quota_exhausted": False})
+    resolved["provider_usage_windows"].append({
+        "scope": "account:1", "scope_id": "stable-first-account",
+        "providers": [{"id": selected["provider_id"], "display_name": selected["provider"]}],
+        "state": "not_reported_since_start", "windows": [],
+    })
+
+    def detail_interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go Runtime", b"MASC System / Runtime")
+        h.resize_and_wait(process, fd, output, rows=17, columns=132,
+            needle=b"MASC System / Runtime", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+        frame = h.send_and_wait(process, fd, output, b"\r", b"stable-first-account")
+        screen = b" ".join(h.screen_rows(frame).values())
+        if b"Account:" not in screen or b"stable-first-account" not in screen:
+            raise AssertionError(f"Enter detail lost the non-exhausted account: {screen!r}")
+        if b"Connection / provider ID:" not in screen or b"fixture-provider" not in screen:
+            raise AssertionError(f"Enter detail conflated connection and account: {screen!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Runtime short detail preserves stable account",
+        interact=detail_interact, http_fixtures=detail_fixture)
 
 
 if __name__ == "__main__":

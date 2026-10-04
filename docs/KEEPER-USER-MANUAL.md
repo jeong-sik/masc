@@ -127,6 +127,12 @@ That table is the only place Keeper-to-runtime routing is decided. A lane with
 the same name takes precedence over a plain runtime id, so check whether a lane
 by that name exists before assuming the id you wrote is the one that runs.
 
+The seed includes an opt-in `reviewer-failover` lane with Codex, Z.AI and
+Antigravity candidates on separate providers. Existing workspaces retain their
+own configuration: adding the lane to the seed does not change a running
+Keeper's assignment. See [reviewer quota recovery](operations/reviewer-quota-recovery.md)
+for safe application and verification.
+
 ### Give a lane more than one candidate
 
 On the runtime measured above, 27,136 turns settled during August. 21,365

@@ -1,0 +1,12 @@
+[
+  {
+    "case": "unknown mode",
+    "exit_code": 2,
+    "diagnostic": "check-config-tests.py: error: argument mode: invalid choice: 'providers' (choose from provider, boot)"
+  },
+  {
+    "case": "mismatched owner",
+    "exit_code": 1,
+    "diagnostic": "cache source mismatch: lib/config/env_config_keeper_supervisor.ml"
+  }
+]

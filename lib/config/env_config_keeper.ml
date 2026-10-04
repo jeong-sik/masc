@@ -135,14 +135,18 @@ module KeeperSpawn = struct
 end
 
 module KeeperMetrics = struct
-  (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
+  (** Auxiliary Keeper JSONL logs: maximum file size before rotation
+      (default: 10MB). Date-sharded metrics use a separate Dated_jsonl store. *)
   let max_file_bytes () = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
 
-  (** Rotation retains at least one backup; disable rotation with max_bytes=0. *)
-  let max_rotated_files_min = 1
+  (** Zero discards old versions at rotation; max_bytes=0 disables rotation. *)
+  let max_rotated_files_min = 0
   let max_rotated_files () =
     Int.max max_rotated_files_min
       (get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED")
+
+  let store_max_bytes () =
+    get_int_nonneg ~default:0 "MASC_KEEPER_METRICS_STORE_MAX_BYTES"
 end
 
 (** {1 Keeper Wire Capture Configuration} *)

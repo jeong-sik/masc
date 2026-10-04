@@ -73,6 +73,7 @@ export class RuntimeTomlSession {
     if (authority?.workspaceRoot === this.workspaceRoot && generation !== this.generation) {
       this.generation = generation
       if (state.config !== null) this.update({ needsRead: true, currentSource: null,
+        projectionRevision: state.projectionRevision + 1,
         error: 'runtime.toml 이 다른 화면에서 저장되었습니다. 초안은 유지됩니다. 현재 파일을 읽고 비교한 뒤 저장 기준을 선택하세요.' })
     }
   }
@@ -91,10 +92,16 @@ export class RuntimeTomlSession {
   async read(authority: ExecutionWorkspaceAuthority, mode: 'reload' | 'compare' | 'revalidate') {
     if (!this.admits(authority) || this.state.peek().phase !== 'idle') return
     const before = this.state.peek()
+    const sourceGeneration = runtimeTomlSourceGeneration.peek()
     this.update({ phase: mode === 'reload' ? 'loading' : 'reading', error: null, notice: null })
     try {
       const current = await fetchRuntimeTomlConfig(this.requestOptions(authority))
       if (!this.admits(authority)) { this.changedAuthority(); return }
+      if (sourceGeneration !== runtimeTomlSourceGeneration.peek()) {
+        this.update({ needsRead: true, currentSource: null,
+          error: '읽는 동안 다른 설정이 저장됐습니다. 초안은 유지했습니다. 현재 파일을 다시 읽으세요.' })
+        return
+      }
       if (mode !== 'reload' && (current.path === null || current.path !== before.config?.path)) {
         this.update({ needsRead: true, currentSource: null })
         throw new Error('현재 파일 경로가 편집 중인 runtime.toml과 다릅니다. 초안을 복사하거나 명시적으로 다시 불러오세요.')

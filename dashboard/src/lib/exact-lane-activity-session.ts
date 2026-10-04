@@ -1,0 +1,195 @@
+import { effect, signal } from '@preact/signals'
+import {
+  fetchRuntimeTomlConfig, previewRuntimeTomlConfig, saveRuntimeTomlConfig,
+  RuntimeTomlRevisionConflict, type RuntimeTomlCurrentSource, type RuntimeTomlConfig,
+  type CommittedRuntimeTomlConfig,
+} from '../api/dashboard-runtime'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
+import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { readExactActivity, writeExactActivity, type ExactActivityLane } from './exact-lane-activity'
+import { errorToString } from './format-string'
+import { resumeSavedModelSetup } from './model-setup-resume'
+import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
+
+type Document = RuntimeTomlCurrentSource
+type Draft = { base: Document; enabled: boolean }
+type State = {
+  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving';
+  error: string | null; notice: string | null; followupError: string | null;
+  receipt: CommittedRuntimeTomlConfig | null; uncertain: boolean;
+}
+const sessions = new Map<string, ExactLaneActivitySession>()
+let guardingUnload = false
+const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+function syncUnloadGuard() {
+  const dirty = [...sessions.values()].some(session => session.modified() || session.state.peek().uncertain
+    || session.state.peek().phase === 'saving')
+  if (typeof window === 'undefined' || dirty === guardingUnload) return
+  guardingUnload = dirty
+  if (dirty) window.addEventListener('beforeunload', beforeUnload)
+  else window.removeEventListener('beforeunload', beforeUnload)
+}
+function document(config: RuntimeTomlConfig): Document {
+  if (!config.ok || config.path === null || config.path === '' || !/^[0-9a-f]{64}$/.test(config.source_revision))
+    throw new Error('현재 runtime.toml 파일과 저장 기준을 확인하지 못했습니다.')
+  return { source_path: config.path, source_text: config.source_text, source_revision: config.source_revision }
+}
+
+/** An activity draft owns only a boolean. It never adopts or overwrites the
+ * full raw editor's independent draft, including when that editor is hidden. */
+export class ExactLaneActivitySession {
+  readonly state = signal<State>({ draft: null, current: null, phase: 'idle', error: null, notice: null, followupError: null, receipt: null, uncertain: false })
+  private authority: ExecutionWorkspaceAuthority | null = null
+  private version = 0
+  private generation = runtimeTomlSourceGeneration.peek()
+  private resumeController: AbortController | null = null
+  constructor(readonly workspaceRoot: string, readonly lane: ExactActivityLane) {}
+  private update(change: Partial<State>) { this.state.value = { ...this.state.peek(), ...change }; syncUnloadGuard() }
+  admits(authority: ExecutionWorkspaceAuthority) {
+    return authority.workspaceRoot === this.workspaceRoot && executionWorkspaceAuthority.peek() === authority
+  }
+  ready(authority: ExecutionWorkspaceAuthority) {
+    return this.admits(authority) && this.authority === authority && this.state.peek().phase === 'idle'
+      && this.state.peek().current !== null
+  }
+  modified() {
+    const draft = this.state.peek().draft
+    return draft !== null && readExactActivity(draft.base.source_text, this.lane).enabled !== draft.enabled
+  }
+  invalidate(authority: ExecutionWorkspaceAuthority | null, generation: number) {
+    const before = this.state.peek()
+    if (this.authority !== null && this.authority !== authority) {
+      ++this.version; this.authority = null; this.resumeController?.abort()
+      this.update({ phase: 'idle', current: null, uncertain: before.uncertain || before.phase === 'saving',
+        error: '작업공간 연결이 바뀌었습니다. 초안은 보관했습니다. 현재 설정을 다시 읽으세요.' })
+    }
+    if (generation !== this.generation) {
+      this.generation = generation
+      if (this.authority === authority && before.draft !== null) this.update({ current: null,
+        notice: '다른 설정 저장이 관측되었습니다. 초안은 그대로입니다. 현재 설정을 다시 읽으세요.' })
+    }
+  }
+  private owns(authority: ExecutionWorkspaceAuthority, version: number) {
+    return this.admits(authority) && this.authority === authority && this.version === version
+  }
+  private options(authority: ExecutionWorkspaceAuthority, version: number) {
+    return { beforeDispatch: () => {
+      if (!this.owns(authority, version)) throw new Error('작업공간 또는 요청이 바뀌어 전송을 중지했습니다.')
+    } }
+  }
+  async read(authority: ExecutionWorkspaceAuthority): Promise<void> {
+    if (!this.admits(authority) || this.state.peek().phase !== 'idle') return
+    this.authority = authority
+    const version = ++this.version
+    const sourceGeneration = runtimeTomlSourceGeneration.peek()
+    let superseded = false
+    this.update({ phase: 'reading', current: null, error: null, notice: null })
+    try {
+      const current = document(await fetchRuntimeTomlConfig(this.options(authority, version)))
+      if (!this.owns(authority, version)) return
+      if (sourceGeneration !== runtimeTomlSourceGeneration.peek()) { superseded = true; return }
+      const activity = readExactActivity(current.source_text, this.lane)
+      const before = this.state.peek()
+      const retainDraft = before.draft !== null && (this.modified() || before.uncertain
+        || before.draft.base.source_path !== current.source_path)
+      this.generation = runtimeTomlSourceGeneration.peek()
+      this.update({ current, uncertain: false,
+        draft: retainDraft ? before.draft : { base: current, enabled: activity.enabled } })
+    } catch (error) {
+      if (this.owns(authority, version)) this.update({ error: errorToString(error) })
+    } finally {
+      if (this.owns(authority, version)) {
+        this.update({ phase: 'idle' })
+        if (superseded) await this.read(authority)
+      }
+    }
+  }
+  toggle(authority: ExecutionWorkspaceAuthority) {
+    const { draft, current } = this.state.peek()
+    if (!this.ready(authority) || !draft || !current) return
+    try {
+      if (draft.base.source_path !== current.source_path) throw new Error('파일 경로가 바뀌었습니다. 초안을 버린 뒤 새 파일을 편집하세요.')
+      writeExactActivity(draft.base.source_text, this.lane, !draft.enabled)
+      this.update({ draft: { ...draft, enabled: !draft.enabled }, error: null, notice: null, receipt: null })
+    } catch (error) { this.update({ error: errorToString(error) }) }
+  }
+  reapply(authority: ExecutionWorkspaceAuthority) {
+    const { draft, current } = this.state.peek()
+    if (!this.ready(authority) || !draft || !current) return
+    try {
+      if (draft.base.source_path !== current.source_path) throw new Error('다른 파일에는 기존 초안을 재적용할 수 없습니다. 먼저 초안을 버리세요.')
+      writeExactActivity(current.source_text, this.lane, draft.enabled)
+      this.update({ draft: { ...draft, base: current }, uncertain: false, error: null,
+        notice: '활동 값만 현재 설정에 다시 적용했습니다. 저장 버튼으로 확정하세요.' })
+    } catch (error) { this.update({ error: errorToString(error) }) }
+  }
+  discard(authority: ExecutionWorkspaceAuthority) {
+    if (!this.admits(authority) || this.state.peek().phase !== 'idle') return
+    const current = this.state.peek().current
+    this.update({ draft: current ? { base: current, enabled: readExactActivity(current.source_text, this.lane).enabled } : null,
+      uncertain: current === null && this.state.peek().uncertain,
+      error: null, notice: '초안을 버렸습니다. 파일은 변경하지 않았습니다.' })
+  }
+  async save(authority: ExecutionWorkspaceAuthority): Promise<boolean> {
+    const { draft, current } = this.state.peek()
+    if (!this.ready(authority) || !draft || !current || !this.modified()) return false
+    if (draft.base.source_path !== current.source_path || draft.base.source_revision !== current.source_revision) {
+      this.update({ error: '파일이 바뀌었습니다. 활동 값만 다시 적용하거나 초안을 버리세요.' }); return false
+    }
+    let source: string
+    try { source = writeExactActivity(draft.base.source_text, this.lane, draft.enabled) }
+    catch (error) { this.update({ error: errorToString(error) }); return false }
+    const version = ++this.version, options = this.options(authority, version)
+    let sent = false, committed = false
+    this.update({ phase: 'saving', error: null, notice: null, followupError: null })
+    try {
+      const preview = await previewRuntimeTomlConfig(source, options)
+      if (!this.owns(authority, version)) return false
+      if (!preview.ok || !preview.can_save) throw new Error('설정 검증에서 저장을 거절했습니다. Runtime 설정에서 원문과 오류를 확인하세요.')
+      sent = true
+      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, options)
+      if (!this.owns(authority, version)) return false
+      const saved = document(receipt)
+      if (saved.source_path !== draft.base.source_path || saved.source_text !== source || receipt.commit.source_revision !== saved.source_revision)
+        throw new Error('저장 응답이 제출한 파일과 일치하지 않습니다. 현재 설정을 다시 읽으세요.')
+      committed = true
+      announceRuntimeTomlWritten()
+      this.update({ receipt, current: null, uncertain: receipt.commit.durability !== 'durable',
+        draft: receipt.commit.durability === 'durable' ? { ...draft, base: saved } : draft,
+        notice: '파일 저장 응답을 받았습니다. 현재 설정과 적용 상태를 다시 확인합니다.' })
+      const controller = new AbortController(); this.resumeController = controller
+      const resumed = await resumeSavedModelSetup({ signal: controller.signal })
+      if (!this.owns(authority, version)) return false
+      if (resumed.kind === 'failed') this.update({ followupError: '설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.' })
+      try { await refreshRuntimeConfigConsumers() }
+      catch (error) { if (this.owns(authority, version)) this.update({ followupError:
+        [this.state.peek().followupError, `설정 저장 후 목록 갱신 실패: ${errorToString(error)}`].filter(Boolean).join(' ') }) }
+    } catch (error) {
+      if (this.owns(authority, version)) {
+        if (error instanceof RuntimeTomlRevisionConflict && error.current.source_path === draft.base.source_path) {
+          try {
+            readExactActivity(error.current.source_text, this.lane)
+            this.update({ current: error.current, error: '파일이 바뀌어 저장하지 않았습니다. 초안은 보관했습니다.' })
+          } catch (cause) { this.update({ current: null, error: errorToString(cause) }) }
+        } else this.update({ current: sent ? null : current, uncertain: sent || this.state.peek().uncertain,
+          error: errorToString(error) + (sent ? ' 저장 결과가 불확실합니다. 현재 설정을 다시 읽으세요.' : '') })
+      }
+    } finally {
+      if (this.owns(authority, version)) { this.resumeController = null; this.update({ phase: 'idle' }) }
+    }
+    if (committed && this.owns(authority, version)) await this.read(authority)
+    return committed && this.admits(authority)
+  }
+}
+
+export function exactLaneActivitySessionFor(authority: ExecutionWorkspaceAuthority, lane: ExactActivityLane) {
+  const key = JSON.stringify([authority.workspaceRoot, lane.laneId])
+  let session = sessions.get(key)
+  if (!session) { session = new ExactLaneActivitySession(authority.workspaceRoot, lane); sessions.set(key, session) }
+  return session
+}
+effect(() => {
+  const authority = executionWorkspaceAuthority.value, generation = runtimeTomlSourceGeneration.value
+  for (const session of sessions.values()) session.invalidate(authority, generation)
+})
+export function resetExactLaneActivitySessionsForTesting() { sessions.clear(); syncUnloadGuard() }

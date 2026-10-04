@@ -2352,8 +2352,9 @@ export async function saveRuntimeTomlConfig(
   }
 }
 
-export async function previewRuntimeTomlConfig(sourceText: string): Promise<RuntimeConfigPreview> {
+export async function previewRuntimeTomlConfig(sourceText: string, options: RuntimeTomlRequestOptions = {}): Promise<RuntimeConfigPreview> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   const raw = await post<unknown>('/api/v1/runtime/config/raw/preview', {
     source_text: sourceText,
   })

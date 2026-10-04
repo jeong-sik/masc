@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts src/components/lane-inventory-panel.test.ts src/lib/runtime-toml-config.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  123 passed (123)
+   Start at  21:13:36
+   Duration  2.81s (import 38%, transform 21%, environment 17%, setup 14%, tests 10%)
+
+    Isolate  3 workers spawned · ~236ms startup each (spawn + environment, per file)
+             at least ~473ms faster with isolate: false — reuses workers across files instead of one per file
+

@@ -42,8 +42,8 @@ work still finishing. `running_count` describes retained observation coverage,
 not an atomic census of all processes. Browser Stagehand has no standalone run
 history. The inventory read never starts or stops work.
 
-The TUI provides the activity draft described below. Web activity control
-remains follow-up work. Enabling a lane allows its next request; this does not send a new wake to a parked
+The TUI and Web provide the activity drafts described below. Enabling a lane
+allows its next request; this does not send a new wake to a parked
 Workspace Curator owner. Its next owner request resumes processing.
 
 ## Upgrade notes
@@ -88,3 +88,30 @@ Activity editing handles a lane's own TOML table, including quoted headers.
 Inline or dotted lane declarations can be changed with the existing source
 editor (**e** on Lanes). If the server changes the configuration path, discard
 the old activity draft before editing the newly read file.
+
+## Web activity draft
+
+Open an Exact row under **All Lanes**, then choose **활동 설정 열기**. The same
+control is available in **Runtime → Lane 후보**. Opening reads the current
+file; the activity switch edits a local draft. **활동 설정 저장** previews the
+result and saves only after checking the source revision on which it was based.
+
+The activity draft is separate from a raw runtime.toml editor draft. Saving
+activity retains that raw draft and withdraws its old save basis; compare the
+current file before saving the raw text. Both drafts survive navigation and
+workspace roundtrips within the page session. Reloading the browser page is not
+a draft recovery mechanism.
+
+**현재 설정 읽기** preserves unsaved activity changes. If no activity change
+is pending, it follows the newly read file. After a conflict, **활동 값만 다시
+적용** keeps the desired on/off value over the latest file and its candidate
+order; a subsequent explicit save commits it. **초안 버리기** discards the
+activity draft without writing. A changed file path requires an explicit discard.
+Quoted, dotted and inline TOML lane declarations are edited by parsed ranges.
+
+Required lanes cannot be switched off; a Required lane already declared off in
+an invalid file can be corrected to on. An optional empty lane needs a candidate
+before on can be saved. The screen separately shows the file setting, observed
+Lane state and the commit's durability/application result. A kept registry or
+failed setup resume is not reported as successful Lane activation. Saving
+rereads the file and observations; it does not prove a model has executed.

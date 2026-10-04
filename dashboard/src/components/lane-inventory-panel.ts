@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchLaneInventory, type LaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { RouteLink } from './common/route-link'
+import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
 function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
@@ -35,11 +36,14 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   }
 }
 
-function LaneDetails({ row, snapshot }: { row: LaneInventoryRow; snapshot: LaneInventory }) {
+function LaneDetails({ row, snapshot, onSaved }: { row: LaneInventoryRow; snapshot: LaneInventory; onSaved: () => void }) {
   const selection = row.selection
+  const exactLane = selection.kind === 'exact'
+    ? snapshot.exact_snapshot.lanes.find(lane => lane.laneId === selection.lane_id) : undefined
   return html`<section aria-label=${`Details for ${row.label}`} class="rounded border border-[var(--color-border-default)] p-4 space-y-3">
     <h3 class="font-semibold">${row.label}</h3><p>${row.purpose}</p><code class="break-all">${row.id}</code>
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
+    ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} onSaved=${onSaved} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
       <${RouteLink} tab="monitoring" params=${{ section: 'internal-agents' }}>Exact runs and diagnostics<//>
       <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Runtime settings · Lane candidates<//>
@@ -66,6 +70,8 @@ export function LaneInventoryPanel() {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const request = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const details = useRef<HTMLDivElement | null>(null)
   const snapshot = received?.authority === authority ? received.value : null
   async function verifyWorkspace() {
@@ -77,6 +83,7 @@ export function LaneInventoryPanel() {
     } finally { setVerifying(false) }
   }
   async function refresh() {
+    if (!mounted.current) return
     request.current?.abort()
     const requestedAuthority = executionWorkspaceAuthority.peek()
     if (requestedAuthority === null) return
@@ -120,7 +127,7 @@ export function LaneInventoryPanel() {
     </div>` : null}
     <label class="block">Find a Lane<input class="block w-full rounded border bg-transparent p-2" type="search" value=${query}
       onInput=${(event: Event) => setQuery((event.currentTarget as HTMLInputElement).value)} /></label>
-    ${snapshot && detail ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} /></div>`
+    ${snapshot && detail ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} onSaved=${refresh} /></div>`
       : selected && snapshot ? html`<p role="status">The selected Lane is absent from this reading.</p>` : null}
     ${snapshot && !rows.length ? html`<p>No Lanes match this search.</p>` : null}
     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

@@ -5,6 +5,7 @@ import type { StandaloneLaneSnapshotRow } from '../api/dashboard-standalone-lane
 import type { RuntimeExactSlotAction, RuntimeExactSlotDirection } from '../api/dashboard-runtime'
 import { getRuntimeTomlKey } from '../lib/runtime-toml-config'
 import { ActionButton } from './common/button'
+import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 
 export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisabled, deadlineDisabled,
   onSlotAction, onDeadlineChange }: {
@@ -37,6 +38,7 @@ export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisab
       Exact-output Lane은 HTTP slots를 위에서 아래로 시도한 뒤 CLI slots를 시도합니다.
       후보 변경은 서버 routing API가 즉시 기록하고, 후보 종류와 허용 여부도 서버가 판정합니다.
       HTTP 본문 deadline 변경은 이 페이지의 저장 버튼으로 기록되며 서버 재시작 후 적용됩니다.
+      활동 설정은 각 Lane에서 별도 초안을 만들고 저장합니다.
     </p>
     ${slotsDisabled && !deadlineDisabled ? html`<p role="status" class="text-xs">현재 편집 중인 설정을 저장한 뒤 후보를 변경하세요.</p>` : null}
     ${orderedLanes.map(lane => {
@@ -53,6 +55,7 @@ export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisab
           <h2 class="font-semibold">${lane.laneId === 'librarian_exact' ? 'Librarian' : lane.label}</h2>
           <code class="text-2xs">runtime.exact_output_lanes.${lane.laneId}</code>
         </header>
+        <${ExactLaneActivityPanel} lane=${lane} />
         ${lane.admissionError ? html`<p role="alert">${lane.admissionError}</p>` : null}
         ${groups.map(group => html`<div key=${group.kind} class="space-y-1">
           <h3 class="text-xs font-semibold">${group.label}</h3>

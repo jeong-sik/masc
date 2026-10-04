@@ -4553,6 +4553,19 @@ describe('runtime.toml raw config API', () => {
     await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64))).rejects.toThrow(/적용 영수증/)
   })
 
+  it('rechecks workspace admission after token setup before sending a preview', async () => {
+    let release!: () => void
+    devTokenMock.ensureDevToken.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock)
+    let admitted = true
+    const pending = previewRuntimeTomlConfig('[runtime]\n', { beforeDispatch: () => {
+      if (!admitted) throw new Error('workspace changed')
+    } })
+    const refused = expect(pending).rejects.toThrow('workspace changed')
+    admitted = false; release(); await refused
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('previews Keeper setting validation before raw save', async () => {
     const sourceText = '[keeper_settings]\nschema_version = 1\n[turn]\ntemperatur = 0.4\n'
     const fetchMock = vi.fn().mockResolvedValue(

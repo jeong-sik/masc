@@ -1,0 +1,32 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+   현재 대화 · alpha                                                                                                                                                                                                                                │[Recent] Changes · 2 keepers · feed closed: MCP initial
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            Keepers ▸ alpha ▸ chat                                                                                                                                                                                         │                   state     tool        calls  new tok
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀          ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀           ┄┄ 2026-08-22 · 06:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │· beta             no events
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                06:41 ● alpha               workspace-a-visible-history                                                                                                                                                    │───────────────────────────────────────────────────────
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                                                                                                                                           │alpha · no events on this feed yet
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+┌────────────────────────────────┐
+│  KEEPERS           Ctrl-B HIDE │
+├────────────────────────────────┤
+│  ● alpha                       │
+│  · beta                        │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+│                                │    현재 작업 확인 불가
+└────────────────────────────────┘    > unsent-draft-owned-by-workspace-a
+ alpha · ● healthy AUTO · gate: not loaded · running · configured: a.current  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:newline  /:commands  Esc:list  PgUp:scroll back  Ctrl-G:next Keeper  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image  Ctrl-U:clear  Ctrl-W:word  | Port: 64971

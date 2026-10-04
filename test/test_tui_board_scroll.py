@@ -252,6 +252,7 @@ def run_independent_windows(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Comment row 000")
         h.resize_and_wait(process, fd, output, rows=30, columns=SIDE_COLUMNS,
                           needle=b"Comment row 000", controls=(h.FULL_REDRAW,))

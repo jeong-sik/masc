@@ -27,7 +27,11 @@ import test_tui_keyboard_input as h
 
 COLUMNS = 150  # Roster fits; the separate Activity pane does not open.
 TALL_ROWS = 30
-SHORT_ROWS = 20  # Usable chat height below the portrait-plus-roster requirement.
+# The captured fixture's three unavailable-status rows leave fewer than the
+# required three history rows at 15. Eighteen fits chat but not portrait+roster.
+COMPACT_ROWS = 15
+SHORT_ROWS = 18
+COMPACT_NOTICE = b"Keeper chat needs a larger terminal"
 ROSTER_COLUMNS = 34
 CAPTION = "대화 · ".encode()
 IMAGE_ID = b"42"
@@ -261,6 +265,12 @@ def mosaic_resizes(binary: str) -> None:
             assert_chat_intact(rows, b"alpha")
 
         visible()
+        h.resize_and_wait(process, fd, output, rows=COMPACT_ROWS, columns=COLUMNS,
+                          needle=COMPACT_NOTICE, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+        compact = screen(output)
+        assert COMPACT_NOTICE in b"\n".join(compact.values()), "tiny viewport lost its explicit refusal"
+        assert_hidden(compact)
+        assert not any(b"  > " in row for row in compact.values()), "unreadable viewport kept a composer"
         h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=chat_title(b"alpha"), controls=(h.FULL_REDRAW,))
         h.drain_until_quiet(process, fd, output)
         assert_hidden(screen(output))

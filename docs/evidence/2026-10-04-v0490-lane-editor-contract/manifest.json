@@ -1,0 +1,12 @@
+{
+  "binary_commit": "fd7e6c37e006af09b1dba65fb2b3b55249104c7f",
+  "binary_sha256": "f3531778d03b6b2bfd68ae86ba47507cb653bcffd62cd543b2720c4e918b882d",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-v0490-lane-editor-contract-20261004",
+  "file_sha256": {
+    "lib/server/server_dashboard_runtime_request.ml": "1bba73c054bdc7bcf552fa6fd17dce8db2d5711a630bb3578000181b12493fe4",
+    "test/test_dashboard_routing_body.ml": "afd89b2964c8be17fc67e35cde5c2b7476bf1ccd47af948c0d9c946216de8a9c",
+    "test/test_tui_keys.ml": "c7b2f8fd22ff7c46e36f09c2fc0d86dc42b0d1689f3355ac8e5fc51e2f3d638e",
+    "test/test_tui_runtime_lane_editor.py": "7494323b657d7b45bacfd33b45152147456c2ea65fc09dccd92a489df6771eda"
+  },
+  "scope": "actual worktree focused fixture PTY diagnostic, not new candidate binary or full suite validation"
+}

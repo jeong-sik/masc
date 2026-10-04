@@ -14,6 +14,7 @@ vi.mock('../api/lane-addons', async original => ({
   ...await original<typeof import('../api/lane-addons')>(), ...api,
 }))
 import { LaneAddonsPanel } from './lane-addons-panel'
+import { LaneAddonReadings } from './lane-addon-readings'
 
 const row = {
   id: 'external-evidence-1', lane_id: 'unregistered-domain', kind: 'relation',
@@ -50,6 +51,16 @@ const actionReceipt = {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
+  it('offers the editor for the loader-supported suffix-only TOML filename', async () => {
+    const sourcePath = '/config/.toml'
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete: true, issues: [], declarations: [
+        { id: 'suffix-only', source_path: sourcePath, desired_revision: 'r1', applied_revision: null, instance_id: null },
+      ] }, instances: [],
+    }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    expect(await view.findByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeTruthy()
+  })
   it('renders the owning package display contract in order while retaining raw fields and binding schema', async () => {
     const bindingSchema = { type: 'object', properties: { sources: { type: 'array' } }, required: ['sources'] }
     const readings = [
@@ -147,6 +158,69 @@ describe('optional Lane Add-on surface', () => {
       '{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}',
     ])
   })
+  it('renders deeply nested valid JSON readings without recursive validation overflow', async () => {
+    const raw = '['.repeat(12000) + '{"count":7}' + ']'.repeat(12000)
+    const fields = JSON.parse('{"deep":' + raw + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect(group.querySelector('dd')?.textContent).toBe(raw)
+    expect(screen.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText('Deep')).toBeTruthy()
+    expect(detail.getByText(raw)).toBeTruthy()
+    expect(detail.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+  })
+  it('keeps the panel usable when the browser compact formatter rejects a deep valid reading', async () => {
+    const fields = JSON.parse('{"deep":' + '['.repeat(12000) + '7' + ']'.repeat(12000) + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    const deep = decoded.rows[0]!.fields.deep
+    const stringify = JSON.stringify
+    const formatter = vi.spyOn(JSON, 'stringify').mockImplementation((...args: Parameters<typeof JSON.stringify>) => {
+      if (args[0] === deep) throw new RangeError('fixture browser compact formatter limit')
+      return stringify(...args)
+    })
+    try {
+      api.fetchLaneAddons.mockResolvedValue(decoded)
+      const screen = render(html`<${LaneAddonsPanel} />`)
+      const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+      expect(group.textContent).toContain('Unavailable · JSON nesting exceeds this browser’s formatter capacity')
+      expect(group.textContent).not.toContain('field does not match declared display format')
+      fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+      const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+      expect(detail.getByText('Unavailable · JSON nesting exceeds this browser’s formatter capacity')).toBeTruthy()
+      expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+    } finally { formatter.mockRestore() }
+  })
+  it.each([
+    ['{"first":[9007199254740993],"second":1e400}', 'integer exceeds JavaScript’s exact range'],
+    ['{"first":[1e400],"second":9007199254740993}', 'field does not match declared display format'],
+  ])('preserves first invalid JSON number in display order: %s', (raw, reason) => {
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields: JSON.parse('{"value":' + raw + '}') }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['value'], label: 'Value', format: 'json', unit: null },
+        ] } } }],
+    })
+    const view = render(html`<${LaneAddonReadings} row=${decoded.rows[0]!} instances=${decoded.instances} />`)
+    expect(view.getByText(`Unavailable · ${reason}`)).toBeTruthy()
+  })
   it('rejects malformed package display contracts instead of discarding them', () => {
     const reading = { lane_id: 'quality', path: ['count'], label: 'Count', unit: null, format: 'number' }
     for (const invalid of [{ ...reading, path: [] }, { ...reading, format: 'status' }, { ...reading, unit: 7 }]) {
@@ -240,6 +314,36 @@ describe('optional Lane Add-on surface', () => {
     expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
     expect(api.attachLaneAddon).not.toHaveBeenCalled()
     expect(api.observeLaneAddon).not.toHaveBeenCalled()
+  })
+  it.each([
+    ['partial inventory', false, [], []],
+    ['invalid owned file', true, [], [{ source_path: '/config/site.toml', id: null, message: 'invalid TOML' }]],
+    ['same ID issue elsewhere', true, [], [{ source_path: '/config/other.toml', id: 'website', message: 'duplicate ID' }]],
+    ['owned file renamed to another ID', true, [{ id: 'renamed', source_path: '/config/site.toml', desired_revision: 'r2', applied_revision: null, instance_id: null }], []],
+    ['duplicate ID declarations', true, [
+      { id: 'website', source_path: '/config/site.toml', desired_revision: 'r1', applied_revision: 'r1', instance_id: 'instance-1' },
+      { id: 'website', source_path: '/config/other.toml', desired_revision: 'r1', applied_revision: null, instance_id: null },
+    ], []],
+  ] as const)('blocks removal for backend refusal: %s', async (_name, complete, declarations, issues) => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete, declarations, issues },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Resolve TOML before removal' })
+    expect((removal as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(removal)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+  })
+  it.each([false, true])('allows configured cleanup when its file is absent (unrelated issue=%s)', async unrelated => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete: true, declarations: [],
+        issues: unrelated ? [{ source_path: '/config/other.toml', id: null, message: 'invalid TOML' }] : [] },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Remove TOML + worker' })
+    expect((removal as HTMLButtonElement).disabled).toBe(false)
   })
   it('keeps the previous instance visible while a changed declaration and parse errors remain unresolved', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,

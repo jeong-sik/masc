@@ -1,0 +1,85 @@
+{
+  "head": "4650e496523f97f306382b37e9f549506891ac1d",
+  "results": {
+    "validator_red": {
+      "handle": 78992,
+      "exit_code": 1,
+      "cause": "jsonNumberError recursive RangeError"
+    },
+    "whole_panel_red": {
+      "handle": 31990,
+      "exit_code": 1,
+      "cause": "raw-fields JSON.stringify with indentation RangeError after iterative validator fix"
+    },
+    "prior_green": {
+      "handle": 96985,
+      "exit_code": 0,
+      "matched_suites": 1,
+      "tests": 31,
+      "command": "pnpm test src/components/lane-addons-panel.test.ts src/components/lane-inventory-panel.test.ts",
+      "unmatched_selector": "src/components/lane-inventory-panel.test.ts"
+    },
+    "prior_checkers": {
+      "handle": 33164,
+      "exit_code": 0,
+      "commands": [
+        "pnpm exec tsc --noEmit --pretty false",
+        "pnpm exec eslint src/components/lane-addon-readings.ts src/components/lane-addons-panel.ts src/components/lane-addons-panel.test.ts"
+      ]
+    },
+    "green": {
+      "handle": 11938,
+      "exit_code": 0,
+      "matched_suites": 1,
+      "tests": 32,
+      "command": "pnpm --dir dashboard test src/components/lane-addons-panel.test.ts"
+    },
+    "checkers": {
+      "handle": 61661,
+      "exit_code": 0,
+      "commands": [
+        "pnpm exec tsc --noEmit --pretty false",
+        "pnpm exec eslint src/components/lane-addon-readings.ts src/components/lane-addons-panel.ts src/components/lane-addons-panel.test.ts"
+      ]
+    }
+  },
+  "files": {
+    "validator-red.log": {
+      "source": "/tmp/pr41121-recursion-validator-red.log",
+      "sha256": "ff9b29c2c8e2209be775a6d8741f850f2413368708fbecbcdb5a5187dcd4f697"
+    },
+    "panel-red.log": {
+      "source": "/tmp/pr41121-recursion-panel-red.log",
+      "sha256": "7d2d4f5321b44c283d8d5bd02b34ec574d6720eee2fc417dfaef75f7f6df9ee3"
+    },
+    "tests.log": {
+      "source": "/tmp/pr41121-recursion-final-suites.log",
+      "sha256": "3764216f1f879dc7cabe0fd3b46c04031c200111281edd2d389275202cb014e9"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41121-recursion-final-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41121-recursion-final-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "engine-tests.log": {
+      "source": "/tmp/pr41121-recursion-engine-green.log",
+      "sha256": "7fb6c8485e12aa2ffa0bcac3ce3914812550cfd2ba91f1d85aa89b83daae0e0c"
+    },
+    "engine-tsc.log": {
+      "source": "/tmp/pr41121-recursion-engine-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "engine-eslint.log": {
+      "source": "/tmp/pr41121-recursion-engine-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "source_sha256": {
+    "dashboard/src/components/lane-addon-readings.ts": "3bcc2bf1fb853ecb24417047f95459ceaff01c1bf1600973c744079c0df6284a",
+    "dashboard/src/components/lane-addons-panel.ts": "e334867b4a26e179b495ec409a8c984827ef442f98ef697f6c1d91b06b8e40c8",
+    "dashboard/src/components/lane-addons-panel.test.ts": "e25ecd54491a28268fae50710b26fb543e69ed25261d5b7d2e5215a8949e41f4"
+  }
+}

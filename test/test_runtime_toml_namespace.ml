@@ -278,10 +278,68 @@ codex = "sol"
 |}
     ]
 
+let test_provider_request_path_survives_unknown_key_validation () =
+  let config field = shared_model ^ Printf.sprintf {|[providers.first]
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid"
+%s = "/v1/messages"
+[first.sol]
+|} field in
+  let valid = parse_config (config "request-path") in
+  Alcotest.(check (option string)) "valid provider request path reaches its decoder"
+    (Some "/v1/messages") (List.hd valid.providers).Runtime_schema.request_path;
+  match Runtime_toml.parse_string (config "request_path") with
+  | Ok _ -> Alcotest.fail "misspelled provider request path was silently accepted"
+  | Error errors -> Alcotest.(check bool) "request path typo identifies its provider field"
+      true (refused_at "providers.first.request_path" errors)
+
+let test_provider_fields_are_declared_and_healthcheck_is_retained () =
+  let config extra = shared_model ^ provider_named "first" ^
+    "[providers.first.healthcheck]\npath = \"/health\"\n" ^ extra ^ "[first.sol]\n" in
+  let valid = parse_config (config "") in
+  Alcotest.(check (option string)) "healthcheck remains retained provider metadata"
+    (Some "/health") (List.hd valid.providers).Runtime_schema.healthcheck_path;
+  match Runtime_toml.parse_string (config "[providers.first.log]\nlevel = \"debug\"\n") with
+  | Ok _ -> Alcotest.fail "undeclared provider log table was accepted"
+  | Error errors -> Alcotest.(check bool) "unsupported table has its exact provider path"
+      true (refused_at "providers.first.log" errors)
+
+let test_provider_typos_do_not_hide_behind_explicit_bindings () =
+  let config field = shared_model ^ Printf.sprintf {|[providers.first]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-first"
+%s = "codex"
+[models.next]
+api-name = "next-sol"
+max-context = 272000
+[model_sets.codex]
+models = ["sol", "next"]
+[first.sol]
+enabled = true
+|} field in
+  let valid = parse_config (config "model-set") in
+  Alcotest.(check (list string)) "declared shared models augment explicit bindings"
+    ["first.next"; "first.sol"]
+    (List.sort String.compare (List.map Runtime_schema.binding_key valid.bindings));
+  List.iter (fun key ->
+    match Runtime_toml.parse_string (config key) with
+    | Ok _ -> Alcotest.failf "provider typo %s was silently accepted" key
+    | Error errors -> Alcotest.(check bool) "refusal identifies the exact provider key"
+        true (refused_at ("providers.first." ^ key) errors))
+    ["model_set"; "model-sets"]
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
-      , [ Alcotest.test_case "no provider takes a table another reader owns" `Quick
+      , [ Alcotest.test_case "provider request path retains its decoder" `Quick
+            test_provider_request_path_survives_unknown_key_validation
+        ; Alcotest.test_case "provider fields retain supported healthcheck metadata" `Quick
+            test_provider_fields_are_declared_and_healthcheck_is_retained
+        ; Alcotest.test_case "provider typos cannot hide behind explicit bindings" `Quick
+            test_provider_typos_do_not_hide_behind_explicit_bindings
+        ; Alcotest.test_case "no provider takes a table another reader owns" `Quick
             test_no_provider_takes_a_table_another_reader_owns
         ; Alcotest.test_case "the names that loaded as providers are refused" `Quick
             test_the_names_that_loaded_as_providers_are_refused

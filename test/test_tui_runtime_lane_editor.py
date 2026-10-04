@@ -544,7 +544,7 @@ def run_exact(executable: str) -> None:
         # longer offered and the cursor opens on runtime-b.
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a", picker)
-        h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        h.wait_for_output(process, fd, output, b"> model-b default", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
         # A pick sends only the slot it adds. A whole order built from the
@@ -596,12 +596,13 @@ def run_cli_editor(executable: str) -> None:
     def exact_posts() -> list[dict]:
         return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
 
-    def wait_for_posts(count: int) -> list[dict]:
-        deadline = time.monotonic() + 5.0
-        while len(exact_posts()) < count:
-            if time.monotonic() > deadline:
-                raise AssertionError(f"exact posts: {exact_posts()!r}")
-            time.sleep(0.05)
+    def wait_for_posts(process, fd, output, count: int) -> list[dict]:
+        # The editor can repaint while the write is starting. Keep consuming
+        # its terminal output so the fixture wait cannot block that write.
+        if not h.wait_for_fixture_state(
+            process, fd, output, lambda: len(exact_posts()) >= count, timeout=5.0,
+        ):
+            raise AssertionError(f"exact posts: {exact_posts()!r}")
         return exact_posts()
 
     def interact(process, fd, _slave, output, _base):
@@ -623,7 +624,7 @@ def run_cli_editor(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"[CLI] claude_code.claude-sonnet-5")
         mark = mark_output(fd, output)
         os.write(fd, b"K")
-        posted = wait_for_posts(1)
+        posted = wait_for_posts(process, fd, output, 1)
         expected = [{"lane": "exact/librarian_exact", "action": "move",
                      "runtime_id": "claude_code.claude-sonnet-5", "direction": "up"}]
         if posted != expected:
@@ -647,7 +648,7 @@ def run_cli_editor(executable: str) -> None:
                           b"[HTTP tail] model-a default", start=mark, timeout=5.0)
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        posted = wait_for_posts(2)
+        posted = wait_for_posts(process, fd, output, 2)
         if posted[1] != {"lane": "exact/librarian_exact", "action": "append",
                          "runtime_id": new_cli}:
             raise AssertionError(f"CLI append posted {posted[1]!r}")
@@ -700,11 +701,10 @@ def run_empty_cli_group(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        deadline = time.monotonic() + 5.0
-        while not exact_posts():
-            if time.monotonic() > deadline:
-                raise AssertionError("the CLI pick on the Librarian posted nothing")
-            time.sleep(0.05)
+        if not h.wait_for_fixture_state(
+            process, fd, output, lambda: bool(exact_posts()), timeout=5.0,
+        ):
+            raise AssertionError("the CLI pick on the Librarian posted nothing")
         expected = [{"lane": "exact/librarian_exact", "action": "append",
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
@@ -772,16 +772,17 @@ def run_curator_takes_cli(executable: str) -> None:
         time.sleep(0.5)
         if exact_posts():
             raise AssertionError(f"a schema-less pick posted: {exact_posts()!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        h.send_and_wait(process, fd, output, b"\x1b", "7 of 7 · / filter".encode())
+        if b"Add fallback candidate" not in h.screen_text(bytes(output)):
+            raise AssertionError("clearing the rejected candidate filter closed the picker")
         h.send_and_wait(process, fd, output, b"/", b"filter:")
         h.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        deadline = time.monotonic() + 5.0
-        while not exact_posts():
-            if time.monotonic() > deadline:
-                raise AssertionError("the CLI pick on the curator posted nothing")
-            time.sleep(0.05)
+        if not h.wait_for_fixture_state(
+            process, fd, output, lambda: bool(exact_posts()), timeout=5.0,
+        ):
+            raise AssertionError("the CLI pick on the curator posted nothing")
         expected = [{"lane": "exact/workspace_curator_exact", "action": "append",
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
@@ -836,14 +837,16 @@ def run_provider_jump(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
         h.send_and_wait(process, fd, output, b"s", b"Model order")
         h.wait_for_output(process, fd, output,
-                          b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
+                          b"> 1/1  [HTTP] glm-5-turbo default", start=0, timeout=5.0)
         h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         # The picker owns focus: [d] neither jumps nor closes it, so the
-        # [e] after it lands on the picker and returns to the slot rows.
+        # first Esc clears the filter and the second returns to the slot rows.
         os.write(fd, b"d")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        h.send_and_wait(process, fd, output, b"\x1b", "6 of 6 · / filter".encode())
+        if b"Add fallback candidate" not in h.screen_text(bytes(output)):
+            raise AssertionError("clearing the provider filter closed the picker")
         h.send_and_wait(process, fd, output, b"\x1b",
-                        b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
+                        b"> 1/1  [HTTP] glm-5-turbo default")
         os.write(fd, b"d")
         # Config colours a header's pieces apart, so the drawn screen, not
         # the byte stream, is what names the table.
@@ -1132,7 +1135,19 @@ def run_replace_and_promote(executable: str) -> None:
             h.send_and_wait(process, fd, output, b"s", b"Model order")
             h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
             h.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
-            h.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
+            # The matching label can already be visible before typing; a delta
+            # frame then rewrites only the query. Check the completed selection.
+            h.write_all(fd, output, b"luna medium")
+            def replacement_filtered():
+                end = output.rfind(h.FRAME_END)
+                if end < 0:
+                    return False
+                screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                return (b"filter: luna medium" in screen
+                        and b"> [CLI replacement] gpt-6-luna medium" in screen
+                        and b"Selected: account.luna-medium" in screen)
+            if not h.wait_for_fixture_state(process, fd, output, replacement_filtered, timeout=3.0):
+                raise AssertionError("model/effort query did not select the replacement")
             h.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
         finally:
             release.set()
@@ -1154,13 +1169,19 @@ def run_replace_and_promote(executable: str) -> None:
             raise AssertionError("promotion lost or reordered other candidates")
         h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         h.resize_and_wait(process, fd, output, rows=40, columns=131,
-                          needle=b"Account", controls=(h.FULL_REDRAW,))
+                          needle=b"Account", controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
         screen = h.screen_text(bytes(output))
-        if screen.count(b"context") <= 3:
-            raise AssertionError("a tall terminal still shows only three model choices")
-        if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
-            raise AssertionError("expanded model choices are not visible")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Model order")
+        # Candidate labels identify the expanded choices even when the
+        # adjacent context metadata is clipped by the terminal width.
+        choices = [f"model-{name} default".encode() for name in "abcde"] + [
+            b"gpt-6-sol low", b"gpt-6-sol high", b"gpt-6-luna medium",
+        ]
+        missing = [choice for choice in choices if choice not in screen]
+        if missing:
+            raise AssertionError(f"expanded model choices are not visible: {missing!r}")
+        h.send_and_wait(process, fd, output, b"\x1b", b"> 1/2  [CLI] gpt-6-luna medium")
+        screen_lacks(process, fd, output, b"Add fallback candidate", timeout=3.0)
         h.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 

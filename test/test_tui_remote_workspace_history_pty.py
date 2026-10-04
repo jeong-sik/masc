@@ -11,11 +11,15 @@ import copy
 import hashlib
 import json
 import os
+import re
+import select
 import shlex
+import socket
 import tempfile
 from pathlib import Path
 import sys
 import threading
+import time
 
 import test_tui_keyboard_input as h
 
@@ -167,7 +171,7 @@ def run(binary: str, captures: Path | None) -> None:
 
         try:
             h.resize_and_wait(process, fd, output,
-                rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                rows=34, columns=300, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             assert str(Path(local_base).resolve()) == wire.local_base
             metadata_path = Path(local_base, ".masc", "keepers", "alpha.json")
@@ -201,7 +205,7 @@ def run(binary: str, captures: Path | None) -> None:
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text and b"MISMATCH local " in text,
                          "fresh B roster after the late response was not applied")
-            h.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
+            h.resize_and_wait(process, fd, output, rows=35, columns=300,
                              needle=b"b.settled", controls=(h.FULL_REDRAW,))
             assert BEFORE not in screen(output) and LATE not in screen(output)
             assert DRAFT not in screen(output), "A's input was relabelled as a remote draft"
@@ -209,7 +213,7 @@ def run(binary: str, captures: Path | None) -> None:
                 assert not [event for event in wire.events
                     if event["event"] == "memory" and str(event["phase"]).startswith("b")],                     "a withdrawn A history read continued into B's memory journal"
             refusal = b"Chat requires a matching workspace"
-            for key in (b"m", b"i"):
+            def clear_refusal():
                 # A repeated refusal leaves identical footer cells, so the
                 # incremental renderer need not emit those bytes again.
                 # Require the previous notice to leave the current screen
@@ -218,8 +222,13 @@ def run(binary: str, captures: Path | None) -> None:
                     h.write_all(fd, output, b"\x1b")
                     await_screen(lambda text: refusal not in text,
                                  "previous chat refusal did not clear")
+                    h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+                    h.select_keeper_row(process, fd, output, b"alpha")
+            for key in (b"m", b"i"):
+                clear_refusal()
                 h.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
+            clear_refusal()
             h.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:
                 assert not [event for event in wire.events
@@ -236,11 +245,18 @@ def run(binary: str, captures: Path | None) -> None:
             metadata_path.write_text("{not-json", encoding="utf-8")
             wire.publish("a-returned")
             await_screen(lambda text: b"MISMATCH" not in text
-                         and b"no Keeper selected" in text and b"keeper metadata read failed" in text,
+                         and b"MASC Keepers (1)" in text
+                         and "Keepers ▸ alpha".encode() not in text
+                         and b"keeper metadata read failed: alpha:" in text,
                          "failed A metadata reload retained B's Keeper detail")
             metadata_path.write_bytes(metadata_bytes)
             os.write(fd, b"r")
-            h.resize_and_wait(process, fd, output, rows=70, columns=TERMINAL_COLUMNS,
+            await_screen(lambda text: b"a.returned" in text
+                         and b"keeper metadata read failed" not in text,
+                         "repaired A metadata was not reloaded")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
+            h.resize_and_wait(process, fd, output, rows=70, columns=300,
                              needle=b"Total Turns:", controls=(h.FULL_REDRAW,))
             await_screen(lambda text: b"Total Turns:" in text
                          and b"no Keeper selected" not in text,
@@ -336,7 +352,9 @@ def scoped_roster_authority(binary: str) -> None:
                 rows=32, columns=80, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.palette_go(process, fd, output, b"go Board", b"MASC Board")
-            await_screen(lambda text: b"workspace-b-board" in text, "B Board read did not settle")
+            await_screen(lambda text: b"workspace identity is unverified" in text
+                         and b"[workspace mismatch]" in text,
+                         "B authority did not refuse the unverified Board read")
             with wire.lock:
                 wire.hold_roster = True
             h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
@@ -344,7 +362,7 @@ def scoped_roster_authority(binary: str) -> None:
                 timeout=WAIT_SECONDS), "the scoped B roster was not held"
             h.palette_go(process, fd, output, b"go Board", b"MASC Board")
             wire.publish("b-after-late")
-            h.resize_and_wait(process, fd, output, rows=32, columns=300,
+            h.resize_and_wait(process, fd, output, rows=32, columns=500,
                              needle=b"MASC Board", controls=(h.FULL_REDRAW,))
             os.write(fd, b"r")
             # While a scoped read is held the full revalidation still owns
@@ -411,7 +429,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert h.wait_for_fixture_event(process, fd, output, admission.held_received,
                 timeout=WAIT_SECONDS), "first admission was not held"
             h.send_and_wait(process, fd, output, queued, h.composer_showing(queued))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+            h.send_and_wait(process, fd, output, b"\r", b"NEXT 1")
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"MISMATCH local " in text,
                          "B authority did not become visible")
@@ -424,7 +442,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                          "A authority was not restored")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-            await_screen(lambda text: b"Queue (1 waiting" in text and queued in text,
+            await_screen(lambda text: b"NEXT 1" in text and queued in text,
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
             h.send_and_wait(process, fd, output, b"/queue resume", h.composer_showing(b"/queue resume"))
@@ -433,8 +451,8 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert admission.phases == ["a", "a-returned"], admission.phases
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.escape_to_keeper_detail(process, fd, output, name=b"alpha",
+                                      destination=b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             admission.release_admission.set()
@@ -454,12 +472,24 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
     admission = h.AtomicChatFixture(no_control_token=True)
     fixtures.update(admission.fixtures)
     beta_submitted = []
+    beta_interrupts = []
+    non_beta_interrupts = []
     def beta_request(body):
         beta_submitted.append(json.loads(body))
         return 503, {"error": "synthetic beta admission refused"}
     def chat_request(body):
         return beta_request(body) if json.loads(body)["name"] == "beta" else admission.stream(body)
+    def interrupt_request(body):
+        request = json.loads(body)
+        if request.get("name") == "beta":
+            beta_interrupts.append(request)
+            # Beta's refused request has no admitted turn to interrupt.
+            return 409, {"error": "beta request was not admitted",
+                         "signalled": False, "paused": False}
+        non_beta_interrupts.append(request)
+        return admission.interrupt(body)
     fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(chat_request)
+    fixtures["/api/v1/keepers/turn/interrupt"] = h.RequestHttpResponse(interrupt_request)
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health, HISTORY_PATH: wire.history,
                      MEMORY_PATH: wire.memory})
@@ -505,8 +535,14 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert beta_submitted[0].get("attachments", []) == [], beta_submitted
             assert not [block for block in beta_submitted[0].get("user_blocks", [])
                         if block.get("type") == "image"], beta_submitted
-            h.escape_to_keeper_detail(process, fd, output, name=b"beta")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            # Admission is recorded before the response reaches the client.
+            # Observe beta's refusal before leaving. An Esc interrupt probe
+            # for that refused request belongs to beta's endpoint response.
+            await_screen(lambda text: b"synthetic beta admission refused" in text,
+                         "beta admission refusal was not applied before leaving chat")
+            h.escape_to_keeper_detail(process, fd, output, name=b"beta",
+                                      destination=b"MASC Keepers")
+            assert admission.interrupt_requests == [], "leaving beta interrupted alpha's turn"
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: staged_text in text, "alpha draft was not restored")
@@ -518,10 +554,19 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             attached = actual["attachments"][0]
             assert attached["name"] == h.IMAGE_NAME and attached["data"] == image_data[0], attached
             images = [block for block in actual["user_blocks"] if block.get("type") == "image"]
-            assert images == [{"type": "image", "attachment_id": attached["id"]},
+            assert images == [{"type": "image", "attachment_id": attached["id"],
+                               "name": h.IMAGE_NAME, "mime_type": "image/png",
+                               "size": len(base64.b64decode(image_data[0]))},
                               {"type": "image", "url": reference}], actual
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            # Finish alpha's fixture normally before cleanup. Esc:list is
+            # rendered from the same action that handles Escape, so leaving
+            # this pane cannot legitimately interrupt alpha's held turn.
+            admission.release.set()
+            await_screen(lambda text: b"reply-" + staged_text in text
+                         and b"Esc:list" in text,
+                         "alpha reply did not settle before leaving its chat")
+            h.escape_to_keeper_detail(process, fd, output, name=b"alpha",
+                                      destination=b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             admission.release.set()
@@ -531,13 +576,18 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             + "staged image bytes and references retain exact workspace and Keeper ownership",
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
+    # All HTTP handlers have joined, including a delayed Esc probe.
+    assert non_beta_interrupts == [], "unexpected non-beta interrupt: " + repr(non_beta_interrupts)
+    assert all(request.get("request_id") == beta_submitted[0]["request_id"]
+               and request.get("interrupt_token") is None
+               for request in beta_interrupts), beta_interrupts
 
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
     """Same schedule ID on B needs a fresh arm; the old runtime picker closes."""
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    fixtures.update(h.schedule_detail_http_fixtures())
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    fixtures.update(h.schedule_detail_http_fixtures())
     schedule_template = fixtures[h.SCHEDULES_PATH][1]
     unknown_health = threading.Event()
     cancel_requests = []
@@ -575,15 +625,14 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
                      and b"reaction:matched_consumed_ack" in text,
                      "B identity did not withdraw A's cancel arm and apply its list")
         h.send_and_wait(process, fd, output, b"\x1b[C", b"workspace-b-schedule-owner")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers / Schedules")
         h.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
         assert cancel_requests == [], "A's first press authorized a POST on B"
         os.write(fd, b"x")
         assert h.wait_for_fixture_state(process, fd, output, lambda: len(cancel_requests) == 1,
             timeout=WAIT_SECONDS), "the explicit B confirmation did not send"
         assert cancel_requests[0][0] == "b" and cancel_requests[0][1]["schedule_id"] == "schedule-proof-701"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
-        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
         await_screen(lambda text: b"b.current" in text, "B roster was not applied")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"u", "Keepers ▸ alpha ▸ runtime".encode())
@@ -714,15 +763,28 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         def open_identity(marker):
+            # Withdrawal returns to the list. Re-enter explicitly so each
+            # marked provider reading belongs to the current workspace.
+            h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"Identity")
+            if marker in screen(output):
+                return
             # The same marked title strip as keyboard [/] navigation; no
             # hardcoded index or tab count selects a different detail surface.
             title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Identity" in text]
             assert len(title_rows) == 1, h.screen_rows(bytes(output))
-            h.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
+            row = title_rows[0]
+            text = h.screen_rows(bytes(output))[row]
+            column = len(text[:text.index(b"Identity")].decode("utf-8")) + 1
+            h.write_all(fd, output, b"\x1b[<0;%d;%dM\x1b[<0;%d;%dm" % (column, row, column, row))
+            # The retained Identity tab can finish reading before the click;
+            # require its current phase, not a duplicate incremental repaint.
+            await_screen(lambda text: marker in text, "current Identity providers were not drawn")
         try:
             h.resize_and_wait(process, fd, output,
-                rows=45, columns=300, needle=b"MASC Dashboard",
+                rows=45, columns=500, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
@@ -947,12 +1009,41 @@ def runtime_config_editor_workspace_change(binary: str) -> None:
             refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
+def connection_disconnected(connection: socket.socket) -> bool:
+    """Observe EOF/reset without consuming or closing the held peer socket."""
+    if not select.select([connection], [], [], 0)[0]:
+        return False
+    try:
+        pending = connection.recv(1, socket.MSG_PEEK)
+    except ConnectionResetError:
+        return True
+    assert pending == b"", "unexpected input on the held Ask connection"
+    return True
+
+
 def ask_workspace_withdrawal(binary: str) -> None:
     # Exercise both the armed editor and an already admitted, held POST.
     for submit in (False, True):
         fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
+        admitted_answers: list[tuple[str, str]] = []
+        answer_connections: list[socket.socket] = []
+        def answer_request(method, connection):
+            if method != "POST":
+                return 405, {"error": "POST required"}
+            # The client may cancel its connection while the response is
+            # held. Count admission before responding: the harness's POST
+            # receipt is only appended after a successful response write.
+            with wire.lock:
+                admitted_answers.append((method, wire.phase))
+                answer_connections.append(connection)
+            return answer()
+        def answer_disconnected():
+            with wire.lock:
+                assert len(answer_connections) == 1, answer_connections
+                connection = answer_connections[0]
+            return connection_disconnected(connection)
         b_asks = threading.Event()
         def asks():
             with wire.lock:
@@ -964,7 +1055,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
-            h.KEEPER_ASK_ANSWER_PATH: answer})
+            h.KEEPER_ASK_ANSWER_PATH: h.ConnectionHttpResponse(answer_request)})
         posts: h.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
@@ -976,19 +1067,44 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 h.send_and_wait(process, fd, output, b"1", b"1 (o) ")
                 h.send_and_wait(process, fd, output, b"\r", b"Press Enter again to send")
                 if submit:
+                    # This precedes client dispatch, including a delayed
+                    # server admission. Starting at the fixture gate would
+                    # incorrectly extend the client's timeout observation.
+                    answer_deadline = time.monotonic() + WAIT_SECONDS
                     os.write(fd, b"\r")
                     assert h.wait_for_fixture_event(process, fd, output, answer.requested,
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
+                    assert not answer_disconnected(), "Ask connection closed before workspace withdrawal"
                 wire.publish("b")
                 assert h.wait_for_fixture_state(process, fd, output,
-                    lambda: b"MISMATCH local " in screen(output)
+                    # Approvals withdraws its decision authority in the
+                    # body; the composer can occupy the mismatch footer.
+                    lambda: b"workspace identity is unverified" in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
+                        and b"Enter:answer" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
                 assert h.wait_for_fixture_event(process, fd, output, b_asks,
                     timeout=WAIT_SECONDS), "B failing asks read was not observed"
+                if submit:
+                    # Prove cancellation on the transport while no response
+                    # bytes can leave the held gate. A fixture-return event
+                    # alone cannot establish that the old client is gone.
+                    assert not answer.release.is_set() and not answer.completed.is_set()
+                    # Bound the whole request from before dispatch:
+                    # the existing 8s fixture bound is below the TUI's 10s
+                    # HTTP timeout, which must not masquerade as withdrawal.
+                    remaining = answer_deadline - time.monotonic()
+                    assert remaining > 0, "Ask withdrawal exceeded its dispatch deadline"
+                    assert h.wait_for_fixture_state(process, fd, output, answer_disconnected,
+                        timeout=remaining), "withdrawn Ask client kept its held connection alive"
+                    assert time.monotonic() < answer_deadline, \
+                        "Ask disconnect was too late to establish workspace cancellation"
                 h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()
+                if submit:
+                    assert h.wait_for_fixture_event(process, fd, output, answer.completed,
+                        timeout=WAIT_SECONDS), "held Ask response did not leave its fixture gate"
                 wire.publish("b-after-late")
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
@@ -997,7 +1113,10 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 h.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
                 assert b"Enter:answer" not in screen(output)
                 assert b"ship the cold-start change now?" not in screen(output)
-                assert len([p for p, _ in posts if p == h.KEEPER_ASK_ANSWER_PATH]) == int(submit)
+                with wire.lock:
+                    assert len(admitted_answers) == int(submit), admitted_answers
+                    assert all(method == "POST" and phase == "a"
+                               for method, phase in admitted_answers), admitted_answers
                 os.write(fd, b"q")
             finally:
                 answer.release.set()
@@ -1048,7 +1167,7 @@ def github_workspace_withdrawal(binary: str) -> None:
             wire.publish("b-after-late")
             # Re-entering obtains a fresh, stamped B observation after the
             # server released the stale stream; it cannot recreate A's view.
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             await_screen(lambda text: b"b.settled" in text)
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"GitHub")
@@ -1518,15 +1637,26 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: calls.count(("b", "resources/list")) > refreshes,
                     timeout=WAIT_SECONDS), "B resource refresh was not requested"
-                refreshed_name = f"resource-b-read-{refreshes + 1}".encode()
-                h.wait_for_output(process, fd, output, refreshed_name,
-                    start=0, timeout=WAIT_SECONDS)
-                h.send_and_wait(process, fd, output, h.FULL_REDRAW, refreshed_name)
+                def refreshed_b_visible():
+                    match = re.search(rb"resource-b-read-(\d+)", screen(output))
+                    return match is not None and int(match[1]) > refreshes
+
+                # A later B refresh can overtake this response before resize.
+                # Any displayed B revision after the requested refresh is
+                # current; the exact superseded row need not remain visible.
+                assert h.wait_for_fixture_state(process, fd, output,
+                    refreshed_b_visible, timeout=WAIT_SECONDS), "fresh B resource list was not displayed"
+                # FULL_REDRAW is an output escape, not an input key. Resize
+                # the real terminal to require a complete new frame.
+                h.resize_and_wait(process, fd, output, rows=44, columns=300,
+                    needle=b"resource-b-read-", controls=(h.FULL_REDRAW,),
+                    final_cursor=b"\x1b[?25l")
+                assert refreshed_b_visible(), "redraw restored an older resource reading"
                 h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
-                    assert [(phase, method) for phase, method in calls
-                            if method == "resources/list"] == [("b", "resources/list")] * (refreshes + 1), calls
+                    resource_lists = [phase for phase, method in calls if method == "resources/list"]
+                    assert len(resource_lists) > refreshes and all(phase == "b" for phase in resource_lists), calls
                 os.write(fd, b"q")
             finally:
                 release.set()

@@ -337,7 +337,8 @@ def task_cancel_previous_workspace_receipt(executable):
 
             fixtures["/health"] = health
             fixtures["/health?full=1"] = health
-            fixtures["/mcp"] = h.RequestHttpResponse(rpc)
+            fixtures["/mcp"] = h.RequestHttpResponse(
+                rpc, get_response=(405, {"error": "MCP event stream is unavailable"}))
             history_path = "/api/v1/dashboard/tasks/history"
             previous_history = fixtures.get(history_path, (404, {"error": "no fixture history"}))
 

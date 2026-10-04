@@ -5514,6 +5514,8 @@ let decode_librarian_preflight_attempt json =
     | "http_response" ->
       let* status = required_int_field refusal "status" in
       let* destination_uri = required_string_field refusal "destination_uri" in
+      let* () = if String.equal destination_uri destination.sljd_destination_uri
+        then Ok () else Error "preflight HTTP refusal destination differs from attempted destination" in
       let* body = required_member refusal "body" in
       let* body = match body with
         | `String body -> Ok body
@@ -5547,7 +5549,10 @@ let preflight_fields_absent json fields =
 let decode_librarian_preflight output =
   let ( let+ ) result f = Result.map f result in
   match Json_util.assoc_member_opt "jev_preflight" output with
-  | None -> Ok None
+  | None ->
+    let* () = preflight_fields_absent output
+      ["generation_path"; "full_llm_skipped"; "preflight_domain_rejection"] in
+    Ok None
   | Some preflight ->
     let* status = required_string_field preflight "status" in
     let* lp_status = match status with
@@ -5758,6 +5763,39 @@ let decode_lane_run_detail json =
     | None | Some (Exact_lane_run_registry.Not_loaded
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
+  let* answer_succeeded =
+    match summary.lrs_status with
+    | Lane_run_succeeded -> Ok true
+    | (Lane_run_completion_persistence_failed
+      | Lane_run_completion_durability_unknown)
+      when summary.lrs_lane = Standalone_lane.Board_attention
+           || summary.lrs_lane = Standalone_lane.Librarian ->
+      (* The run's intended outcome, read with the same decoder as its
+         status. Only a run that meant to succeed, fail or be cancelled
+         reaches this record; any other word is a producer the reader does
+         not know, and says so. *)
+      let* intended = required_string_field run "intended_status" in
+      (match lane_run_status_of_string intended with
+       | Lane_run_succeeded -> Ok true
+       | Lane_run_cancelled | Lane_run_failed -> Ok false
+       | Lane_run_running | Lane_run_completion_persistence_failed
+       | Lane_run_completion_durability_unknown | Lane_run_approved
+       | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+       | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+       | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+       | Lane_run_commit_failed | Lane_run_raised
+       | Lane_run_other _ ->
+         Error (Printf.sprintf "unknown intended lane run status %S" intended))
+    | Lane_run_completion_persistence_failed
+    | Lane_run_completion_durability_unknown
+    | Lane_run_running | Lane_run_cancelled | Lane_run_failed
+    | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
+    | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
+    | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
+    | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
+    | Lane_run_other _ ->
+      Ok false
+  in
   let* lrd_answer_source =
     (* The answer-source rule below is about the Board-attention lane. *)
     let is_board_attention =
@@ -5770,38 +5808,6 @@ let decode_lane_run_detail json =
       | Standalone_lane.Verifier
       | Standalone_lane.Browser_stagehand ->
         false
-    in
-    let* answer_succeeded =
-      match summary.lrs_status with
-      | Lane_run_succeeded -> Ok true
-      | (Lane_run_completion_persistence_failed
-        | Lane_run_completion_durability_unknown)
-        when is_board_attention ->
-        (* The run's intended outcome, read with the same decoder as its
-           status. Only a run that meant to succeed, fail or be cancelled
-           reaches this record; any other word is a producer the reader does
-           not know, and says so. *)
-        let* intended = required_string_field run "intended_status" in
-        (match lane_run_status_of_string intended with
-         | Lane_run_succeeded -> Ok true
-         | Lane_run_cancelled | Lane_run_failed -> Ok false
-         | Lane_run_running | Lane_run_completion_persistence_failed
-         | Lane_run_completion_durability_unknown | Lane_run_approved
-         | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
-         | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
-         | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
-         | Lane_run_commit_failed | Lane_run_raised
-         | Lane_run_other _ ->
-           Error (Printf.sprintf "unknown intended lane run status %S" intended))
-      | Lane_run_completion_persistence_failed
-      | Lane_run_completion_durability_unknown
-      | Lane_run_running | Lane_run_cancelled | Lane_run_failed
-      | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
-      | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
-      | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
-      | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
-      | Lane_run_other _ ->
-        Ok false
     in
     match is_board_attention, answer_succeeded, lrd_output with
     | true, true, Some output ->
@@ -5838,6 +5844,14 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
     | _, _ -> Ok None
   in
+  let* () = match lrd_librarian_preflight, answer_succeeded with
+    | Some {lp_generation_path = Generation_not_entered; _}, true ->
+      Error "successful Librarian run cannot await preflight without entering generation"
+    | _, _ -> Ok () in
+  let* () = match lrd_librarian_preflight, answer_succeeded, summary.lrs_selected_slot with
+    | Some {lp_generation_path = Generation_full_lane; _}, true, None ->
+      Error "successful Librarian generation requires its selected slot"
+    | _, _, _ -> Ok () in
   let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
     | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
       Error "run without generation must not have a selected generation slot"

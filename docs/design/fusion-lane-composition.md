@@ -265,6 +265,13 @@ Import and undo restore the same saved state used for TOML generation. A version
 with stale settings. Other conceptual templates remain editable but are not
 silently translated into unsupported packages.
 
+Only the most recently selected composition file can finish importing. Editing
+the composition (including typing before a field loses focus), loading a template
+or undoing a change cancels any pending import. A cancelled read cannot replace
+the graph, installation settings, status or undo history. The
+[deferred-file browser evidence](../evidence/lane-composer-import-race-20261004/README.md)
+reproduces the previous overwrite and verifies both file completion orders.
+
 `test/test_lane_composition_export.mjs` checks the actual HTML template,
 serialized settings roundtrip and negative cases. Python parsed the generated
 TOML and passed its exact bindings through four shipped package MCP subprocesses

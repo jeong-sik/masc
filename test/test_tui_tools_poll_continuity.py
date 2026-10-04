@@ -9,23 +9,10 @@ import threading
 import time
 import zlib
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_tools as _keyboard_tools
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The two surface titles are masc_tui_render.ml's, the broker row
-# ("Async broker") masc_tui_render_tools.ml's.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_tools.ml",
-    "lib/tui_decode_tools.ml",
-    "lib/tui_decode_tools.mli",
-    "lib/tui_decode_fields.ml",
-    "lib/tui_decode_fields.mli",
-    "lib/tui_decode_skill_evidence.ml",
-    "lib/tui_decode_skill_evidence.mli",
-)
+
 
 
 def inventory(marker):
@@ -47,15 +34,15 @@ def inventory(marker):
 
 
 def evidence(binary, phase, process, master, output, marker, observations):
-    h.read_available(master, output)
+    _keyboard_harness.read_available(master, output)
     before = len(output)
-    h.resize_and_wait(process, master, output, rows=30, columns=120,
-                      needle=marker, controls=(h.FULL_REDRAW,))
-    redraw = output.find(h.FULL_REDRAW, before)
+    _keyboard_harness.resize_and_wait(process, master, output, rows=30, columns=120,
+                      needle=marker, controls=(_keyboard_harness.FULL_REDRAW,))
+    redraw = output.find(_keyboard_harness.FULL_REDRAW, before)
     assert redraw >= 0
-    h.wait_for_output(process, master, output, h.FRAME_END, start=redraw, timeout=3.0)
-    end = output.find(h.FRAME_END, redraw) + len(h.FRAME_END)
-    start = output.rfind(h.FRAME_START, before, redraw)
+    _keyboard_harness.wait_for_output(process, master, output, _keyboard_harness.FRAME_END, start=redraw, timeout=3.0)
+    end = output.find(_keyboard_harness.FRAME_END, redraw) + len(_keyboard_harness.FRAME_END)
+    start = output.rfind(_keyboard_harness.FRAME_START, before, redraw)
     frame = bytes(output[redraw if start < 0 else start:end])
     print("TOOLS_POLL_CONTINUITY_PTY_EVIDENCE " + json.dumps({
         "phase": phase, "refresh_s": 2.0, "response_delay_s": 3.0,
@@ -67,7 +54,7 @@ def evidence(binary, phase, process, master, output, marker, observations):
 
 
 def delayed_reads(binary):
-    fixtures = h.skills_usage_clarity_http_fixtures()
+    fixtures = _keyboard_tools.skills_usage_clarity_http_fixtures()
     catalog = fixtures["/api/v1/skills"]
     lock = threading.Lock()
     started = []
@@ -96,16 +83,16 @@ def delayed_reads(binary):
     fixtures["/api/v1/async-requests"] = async_read
 
     def interact(process, master, _slave, output, _base):
-        h.tab_until(process, master, output, b"MASC System")
-        h.send_and_wait(process, master, output, b"t", b"MASC System / Tools")
-        h.wait_for_output(process, master, output, b"keeper_poll_result_1", start=0, timeout=10.0)
+        _keyboard_harness.tab_until(process, master, output, b"MASC System")
+        _keyboard_harness.send_and_wait(process, master, output, b"t", b"MASC System / Tools")
+        _keyboard_harness.wait_for_output(process, master, output, b"keeper_poll_result_1", start=0, timeout=10.0)
         # Inventory must be visible while the independently owned async read
         # is still pending. Its late error must be applied, not starved by ticks.
-        h.send_and_wait(process, master, output, b"p", b"Async broker")
-        h.wait_for_output(process, master, output, "Async broker — 읽기 실패:".encode(), start=0, timeout=10.0)
+        _keyboard_harness.send_and_wait(process, master, output, b"p", b"Async broker")
+        _keyboard_harness.wait_for_output(process, master, output, "Async broker — 읽기 실패:".encode(), start=0, timeout=10.0)
         for _ in range(4):
-            h.send_and_wait(process, master, output, b"p", b"MASC System / Tools")
-        h.wait_for_output(process, master, output, b"keeper_poll_result_2", start=0, timeout=10.0)
+            _keyboard_harness.send_and_wait(process, master, output, b"p", b"MASC System / Tools")
+        _keyboard_harness.wait_for_output(process, master, output, b"keeper_poll_result_2", start=0, timeout=10.0)
         with lock:
             observations = {"inventory_started_s": list(started),
                             "async_response_ready_s": list(async_finished)}
@@ -115,14 +102,14 @@ def delayed_reads(binary):
                  master, output, b"keeper_poll_result_2", observations)
         os.write(master, b"q")
 
-    h.run_terminal_scenario(binary, description="Tools slow automatic polling",
+    _keyboard_harness.run_terminal_scenario(binary, description="Tools slow automatic polling",
                             refresh=2.0, interact=interact, http_fixtures=fixtures)
 
 
 def superseded_catalog(binary):
-    fixtures = h.skills_usage_clarity_http_fixtures()
+    fixtures = _keyboard_tools.skills_usage_clarity_http_fixtures()
     catalog = fixtures["/api/v1/skills"]
-    old = h.GatedHttpResponse((503, {"error": "obsolete catalog"}), hold_seconds=30.0)
+    old = _keyboard_harness.GatedHttpResponse((503, {"error": "obsolete catalog"}), hold_seconds=30.0)
     new_started = threading.Event()
     new_ready = threading.Event()
     lock = threading.Lock()
@@ -154,25 +141,25 @@ def superseded_catalog(binary):
 
     def interact(process, master, _slave, output, _base):
         try:
-            h.tab_until(process, master, output, b"MASC System")
-            h.send_and_wait(process, master, output, b"t", b"keeper_owner_result_1")
-            assert h.wait_for_fixture_event(process, master, output, old.requested, timeout=5.0)
-            h.send_and_wait(process, master, output, b"r", b"keeper_owner_result_2")
-            assert h.wait_for_fixture_event(process, master, output, new_started, timeout=5.0)
+            _keyboard_harness.tab_until(process, master, output, b"MASC System")
+            _keyboard_harness.send_and_wait(process, master, output, b"t", b"keeper_owner_result_1")
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, old.requested, timeout=5.0)
+            _keyboard_harness.send_and_wait(process, master, output, b"r", b"keeper_owner_result_2")
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, new_started, timeout=5.0)
             old.release.set()
-            assert h.wait_for_fixture_event(process, master, output, new_ready, timeout=10.0)
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, new_ready, timeout=10.0)
             # A 2s tick occurs while the 3s catalog read is pending. An old
             # completion must not clear the new catalog's ownership and admit
             # another poll before that current read finishes.
             assert at_new_completion == [{"inventory": 2, "catalog": 2}], at_new_completion
-            h.wait_for_output(process, master, output, b"keeper_owner_result_3", start=0, timeout=10.0)
+            _keyboard_harness.wait_for_output(process, master, output, b"keeper_owner_result_3", start=0, timeout=10.0)
             evidence(binary, "old catalog cannot clear new pending owner", process,
                      master, output, b"keeper_owner_result_3", at_new_completion)
             os.write(master, b"q")
         finally:
             old.release.set()
 
-    h.run_terminal_scenario(binary, description="Tools superseded catalog ownership",
+    _keyboard_harness.run_terminal_scenario(binary, description="Tools superseded catalog ownership",
                             refresh=2.0, interact=interact, http_fixtures=fixtures)
 
 

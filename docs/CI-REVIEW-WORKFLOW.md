@@ -38,13 +38,14 @@ uses `release.yml` with an existing version tag, `rc_run_id`, and explicit
 The publication job verifies its receipt and artifact checksums and uploads the
 existing distribution; it does not rebuild or rerun tests. A publication run is
 not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
-one toolchain job; node behavior and stanza regeneration run only under the
-behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
+one toolchain job; node behavior runs under the behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
 there is no known-failure exemption list or second standalone compilation pass.
-The behavior lane runs product suites, without CI/review/PTY-helper self-tests.
+The behavior lane runs product suites. CI/review/PTY-helper, build-checker and evidence-validator self-tests are not part of the test suite. The optional credential check runs the scanner directly against the tracked tree.
 Presentation tools are installed only for the behavior lane. The dashboard is
 built once with the production configuration and shared by all native targets;
-type checks and backend-coupled dashboard tests stay in their own job.
+type checks and dashboard payload-consumer tests stay in their own job. That
+job exercises Goal, schedule, turn-record, verification, portrait, lifecycle and
+memory behavior directly; test selection does not scan backend source strings.
 Installer script tests run once on Linux in the distribution
 job and once on macOS with stock Bash and BSD utilities;
 each of the four native targets still builds and verifies its shipped binaries

@@ -43,12 +43,24 @@ type bucket_metric =
   ; b_error_rate : float
   ; b_total_cost_usd : float option
   ; b_cache_hit_ratio : float option
+    (** Sum of cache reads divided by inclusive input tokens from the same
+        successful entries reporting both fields, with positive input and
+        cache reads between zero and input. [None] when no such pair exists;
+        [Some 0.0] when valid pairs report zero cache reads. *)
   }
 
 type model_bucketed =
   { mb_model_id : string
   ; mb_buckets : bucket_metric list
   }
+
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
 
 type model_stats =
   { model_id : string
@@ -70,6 +82,7 @@ type model_stats =
   ; total_input_tokens : int option
   ; total_output_tokens : int option
   ; total_cache_read_tokens : int option
+  ; cached_input : cached_input option
   ; total_cache_creation_tokens : int option
   ; total_reasoning_tokens : int option
   ; usage_sample_count : int

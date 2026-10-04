@@ -5157,6 +5157,21 @@ describe('fetchRuntimeProviders', () => {
 })
 
 describe('fetchRuntimeModelMetrics', () => {
+  it.each([
+    { input_tokens: 1000, cache_read_tokens: 900, sample_count: 1 },
+    null,
+    { input_tokens: 0, cache_read_tokens: 0, sample_count: 1 },
+    { input_tokens: 1000, cache_read_tokens: 1001, sample_count: 1 },
+  ])('decodes paired cache evidence independently of totals: %j', async (paired) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      models: [{ model_id: 'paired', total_input_tokens: 2000, total_cache_read_tokens: 950, cached_input: paired }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const result = await fetchRuntimeModelMetrics()
+    expect(result.models[0]?.total_input_tokens).toBe(2000)
+    expect(result.models[0]?.total_cache_read_tokens).toBe(950)
+    expect(result.models[0]?.cached_input).toEqual(paired?.input_tokens === 1000 && paired.cache_read_tokens === 900 ? paired : null)
+  })
+
   it('preserves null telemetry fields instead of coercing them to zero', async () => {
     const rawResponse = {
       window_minutes: 30,

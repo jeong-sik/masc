@@ -202,7 +202,7 @@ let all =
       "User message an autonomous turn is woken with, before any keeper override"
   ; setting
       ~range:(int_range ~min:1 ())
-      ~effective:(Reader (fun () -> display_int Env_config_keeper.KeeperKeepalive.interval_sec))
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperKeepalive.interval_sec ())))
       ~env_name:"MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       ~exposure:(Toml_and_env "heartbeat.interval_sec")
       ~value_kind:Integer
@@ -212,7 +212,7 @@ let all =
       "Keeper heartbeat cycle interval in seconds"
   ; setting
       ~range:(int_range ~min:15 ~max:3600 ())
-      ~effective:(Reader (fun () -> display_int Env_config_keeper.KeeperRuntime.snapshot_sec))
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperRuntime.snapshot_sec ())))
       ~env_name:"MASC_KEEPER_SNAPSHOT_SEC"
       ~exposure:(Toml_and_env "heartbeat.snapshot_sec")
       ~value_kind:Integer
@@ -221,7 +221,7 @@ let all =
       ~category:"heartbeat"
       "Keepalive snapshot interval in seconds"
   ; setting
-      ~effective:(Reader (fun () -> display_bool Env_config_keeper.WorkAsHeartbeat.enabled))
+      ~effective:(Reader (fun () -> display_bool (Env_config_keeper.WorkAsHeartbeat.enabled ())))
       ~env_name:"MASC_KEEPER_WORK_AS_HEARTBEAT"
       ~exposure:(Toml_and_env "heartbeat.work_as_heartbeat")
       ~value_kind:Boolean
@@ -231,7 +231,7 @@ let all =
       "Count successful workspace work heartbeat as presence proof"
   ; setting
       ~range:(float_range ~min:0.1 ~max:10.0 ())
-      ~effective:(Reader (fun () -> display_float Env_config_keeper.KeeperKeepalive.sleep_chunk_sec))
+      ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())))
       ~env_name:"MASC_KEEPER_SLEEP_CHUNK_SEC"
       ~exposure:(Toml_and_env "heartbeat.sleep_chunk_sec")
       ~value_kind:Float
@@ -300,7 +300,7 @@ let all =
       ~category:"diagnostics"
       "Maximum active and retained wire-capture bytes"
   ; setting
-      ~effective:(Reader (fun () -> display_bool Env_config_keeper.KeeperRuntime.debug))
+      ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperRuntime.debug ())))
       ~env_name:"MASC_KEEPER_DEBUG"
       ~exposure:(Toml_and_env "debug.enabled")
       ~value_kind:Boolean
@@ -466,8 +466,10 @@ let all =
       ~category:"turn"
       "Stage timing telemetry ring capacity"
   ; setting
-      ~range:(float_range ~min:0.0 ())
-      ~effective:(Reader (fun () -> display_float Env_config_keeper.KeeperSupervisor.sweep_interval_sec))
+      ~range:(float_range
+        ~min:Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec
+        ~max:Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec ())
+      ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperSupervisor.sweep_interval_sec ())))
       ~env_name:"MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
       ~exposure:(Toml_and_env "supervisor.sweep_sec")
       ~value_kind:Float
@@ -477,7 +479,7 @@ let all =
       "Supervisor sweep interval in seconds"
   ; setting
       ~range:(int_range ~min:0 ())
-      ~effective:(Reader (fun () -> display_int Env_config_keeper.KeeperMetrics.max_file_bytes))
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.max_file_bytes ())))
       ~env_name:"MASC_KEEPER_METRICS_MAX_BYTES"
       ~exposure:(Toml_and_env "metrics.max_bytes")
       ~value_kind:Integer
@@ -486,8 +488,8 @@ let all =
       ~category:"metrics"
       "Metrics file size before rotation"
   ; setting
-      ~range:(int_range ~min:0 ())
-      ~effective:(Reader (fun () -> display_int Env_config_keeper.KeeperMetrics.max_rotated_files))
+      ~range:(int_range ~min:Env_config_keeper.KeeperMetrics.max_rotated_files_min ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.max_rotated_files ())))
       ~env_name:"MASC_KEEPER_METRICS_MAX_ROTATED"
       ~exposure:(Toml_and_env "metrics.max_rotated")
       ~value_kind:Integer

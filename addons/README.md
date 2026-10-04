@@ -14,6 +14,7 @@ step in other Keeper activity.
 | [output-statistics](output-statistics/README.md) | Counts rows and row kinds in each supplied completed output. | Owns its worker; no cumulative event count or machine state. |
 | [frame-progress](frame-progress/README.md) | Measures frame differences between supplied MSX captures. | Keeps a baseline in worker memory; restart or missing input requires a fresh baseline. |
 | [value-difference](value-difference/README.md) | Measures signed changes and directions between supplied numeric values, including DOS counters. | Keeps independent source baselines in worker memory; owns no upstream machine. |
+| [wkbl-score-runs](wkbl-score-runs/README.md) | Derives the largest unanswered scoring run from a complete WKBL play-by-play period. | Reads a supplied snapshot; owns no game, database or website state. |
 | [dos-world](dos-world/README.md) | Runs a homebrew DOS counter, accepts an optional action and emits guest-state and screen artifacts. | Owns its DOS/WASM machine inside its worker; replacement starts a new machine. |
 | [quiz-questions](quiz-questions/) | Derives questions from a supplied fact deck without publishing the answer key. | Reads the deck; owns no source records or score. |
 | [quiz-grader](quiz-grader/README.md) | Grades answers against the same deck and retains exact upstream question references. | Keeps attempts and scores in worker memory; the host retains completed outputs and action receipts. |

@@ -8,7 +8,7 @@ val declaration_change_probe : unit -> (unit -> bool)
 val run : base_path:string -> Candle_appraisal.runner
 module For_testing : sig
   val retryable_execution : Agent_core.Exact_output.execution_error_cause -> bool
-  val terminal_error : rejected:bool -> retryable:bool
+  val terminal_error : rejected:bool -> refused:bool -> retryable:bool
     -> string Agent_core.Exact_output.flow_execution_error -> Candle_appraisal.error
   val run_declared : base_path:string -> cli_runner:Keeper_lane_cli_oneshot.runner -> Candle_appraisal.runner
   val run : base_path:string

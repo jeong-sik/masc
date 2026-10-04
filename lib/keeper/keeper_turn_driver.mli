@@ -266,6 +266,8 @@ type attempt_input =
     so two candidates with different capabilities receive different views of
     the same turn. *)
 
+(** [raw_trace] must be passed explicitly. Keeper turns supply their prepared
+    sink; [None] records a deliberate untraced dispatch, including sink failure. *)
 val run_named :
   ?input_policy:Keeper_input_policy.t ->
   runtime_id:string ->
@@ -290,7 +292,7 @@ val run_named :
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->
   ?approval_gate:Keeper_tool_approval_gate.t ->
-  ?raw_trace:Agent_core.Raw_trace.t ->
+  raw_trace:Agent_core.Raw_trace.t option ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->

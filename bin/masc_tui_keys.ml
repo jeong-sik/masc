@@ -573,9 +573,10 @@ let for_surface = function
           ~help:"open this lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a candidate to this lane's walk order"
-      ; b Act "s" "providers"
-          ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
-                 J/K reorders within each group, Enter/d opens the selected \
+      ; b Act "s" "models"
+          ~help:"edit the model order: r replaces the selected model/effort, \
+                 a adds a fallback, 1 makes it first within its HTTP/CLI group, \
+                 x removes, J/K reorders, Enter/d opens the selected \
                  slot's config table, e opens the lane table, Esc closes; \
                  HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this

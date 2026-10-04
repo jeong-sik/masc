@@ -127,3 +127,32 @@ let audience_label = function
   | Thread_participants -> "thread_participants"
   | Discoverable -> "discoverable"
 ;;
+
+let to_yojson = function
+  | Targets targets ->
+    `Assoc [ "kind", `String "targets"
+           ; "targets", `List (List.map (fun id -> `String (Agent_id.to_string id)) targets) ]
+  | Broadcast -> `Assoc [ "kind", `String "broadcast" ]
+  | Thread_participants -> `Assoc [ "kind", `String "thread_participants" ]
+  | Discoverable -> `Assoc [ "kind", `String "discoverable" ]
+;;
+
+let of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+     | [ "kind", `String "targets"; "targets", `List (_ :: _ as values) ] ->
+       let rec parse acc = function
+         | [] -> Some (Targets (List.sort_uniq compare_agent_id acc))
+         | `String value :: rest ->
+           (match Agent_id.of_string value with
+            | Ok id -> parse (id :: acc) rest
+            | Error _ -> None)
+         | _ -> None
+       in
+       parse [] values
+     | [ "kind", `String "broadcast" ] -> Some Broadcast
+     | [ "kind", `String "thread_participants" ] -> Some Thread_participants
+     | [ "kind", `String "discoverable" ] -> Some Discoverable
+     | _ -> None)
+  | _ -> None
+;;

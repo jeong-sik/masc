@@ -505,19 +505,27 @@ let test_provider_refusal ~status ~rejected () =
     publish ~base_path ~cli_slots:[]
       [ { F.id = slot; base_url = server.base_url } ];
     let calls = ref [] in
+    (* A typed provider refusal of the request is an execution rejection by
+       the variant's contract (Candle_appraisal.error): the declared
+       executions refuse to serve this request and the obligation waits for
+       a change event, not a pulse. *)
     (match run_declared ~base_path (unavailable_cli calls) with
-     | Error (A.Invalid_response _) ->
+     | Error (A.Execution_rejected _) | Error (A.Invalid_response _) ->
        check bool "refusal parks until an explicit event" true rejected
      | Error (A.Transport_unavailable _) ->
        check bool "availability remains pulse retryable" false rejected
      | Ok _ -> fail "provider refusal produced an appraisal");
     check int "one HTTP request was dispatched" 1 (F.post_count server);
     check (list string) "no undeclared CLI dispatch" [] !calls;
-    let code = if rejected then "candle_appraisal_rejected"
+    let code = if rejected then "candle_appraisal_execution_rejected"
       else "candle_appraisal_unavailable" in
     let output, selected = check_failure code (recorded_run ~base_path) in
     check (option string) "receipt retains the refusing slot" (Some slot) selected;
-    check_http_failure ~slot ~body ~invalid:rejected output)
+    (* The observation's invalid_output answers "was the model output
+       unusable"; a typed refusal of the request is not that, so the
+       refusal cases expect false here and carry their refusal through the
+       execution-rejection code above. *)
+    check_http_failure ~slot ~body ~invalid:false output)
 ;;
 
 let test_invalid_http_then_valid_successor_keeps_both_slots () =
@@ -695,7 +703,7 @@ let test_bookkeeping_terminal_remains_retryable () =
             (Exact.flow_execution_terminal_kind cause = Exact.Non_advanceable_terminal);
           List.iter (fun rejected ->
             match Server_candle_appraiser.For_testing.terminal_error
-              ~rejected ~retryable:false cause with
+              ~rejected ~refused:false ~retryable:false cause with
             | A.Transport_unavailable _ -> ()
             | A.Invalid_response _ | A.Execution_rejected _ ->
                 fail "bookkeeping failure permanently rejected a payout") [false;true]) failures
@@ -749,8 +757,8 @@ let () =
             (test_provider_refusal ~status:`Bad_request ~rejected:true)
         ; test_case "provider refuses authorization" `Quick
             (test_provider_refusal ~status:`Forbidden ~rejected:true)
-        ; test_case "provider payment rest remains retryable" `Quick
-            (test_provider_refusal ~status:`Payment_required ~rejected:false)
+        ; test_case "provider payment refusal parks until a payment change" `Quick
+            (test_provider_refusal ~status:`Payment_required ~rejected:true)
         ; test_case "provider rate limit remains retryable" `Quick
             (test_provider_refusal ~status:`Too_many_requests ~rejected:false)
         ; test_case

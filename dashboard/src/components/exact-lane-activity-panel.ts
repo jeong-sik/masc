@@ -51,6 +51,7 @@ export function ExactLaneActivityPanel({ lane }: { lane: StandaloneLaneSnapshotR
       ${state.error ? html`<p role="alert">${state.error}</p>` : null}
       ${state.notice ? html`<p role="status">${state.notice}</p>` : null}
       ${state.receipt ? html`<p role="status">${runtimeConfigCommitReceiptNotice(state.receipt)}</p>` : null}
+      ${state.setupResumeError ? html`<p role="alert">${state.setupResumeError}</p>` : null}
       ${state.followupError ? html`<p role="alert">${state.followupError}</p>` : null}
       <details><summary>설정 파일과 저장 기준</summary>
         <p class="break-all">${state.current?.source_path ?? state.draft?.base.source_path ?? '미확인'}</p>

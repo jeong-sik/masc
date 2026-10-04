@@ -9,7 +9,8 @@ type row =
   ; api_name : string option  (** [api-name] when the binding renames the model. *)
   ; reasoning_effort : string option  (** From [\[models.NAME\]]. *)
   ; temperature : string option
-        (** From [\[models.NAME\]], shown as a normalized number; unchanged form values preserve source precision. *)
+        (** From [\[models.NAME\]], using a round-trip-safe float representation;
+            unchanged form values preserve the original source spelling. *)
   ; context : (string * int) option
         (** Declared context precedence: binding, provider, model; absent requires catalog resolution. *)
   ; model_context : int option (** Original shared model declaration, before overrides. *)

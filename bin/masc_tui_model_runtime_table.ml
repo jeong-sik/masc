@@ -30,7 +30,7 @@ let parse lines =
       Some { model = model.id; provider = provider.id;
         api_name = Some model.api_name;
         reasoning_effort = Option.map Llm_provider.Reasoning_effort.to_string model.reasoning_effort;
-        temperature = Option.map (Printf.sprintf "%g") model.temperature;
+        temperature = Option.map (Printf.sprintf "%.17g") model.temperature;
         max_tokens = binding.max_tokens; context; model_context = model.max_context }
     | None, _ | _, None -> None) config.bindings in
   Ok (List.sort (fun a b -> match String.compare a.provider b.provider with

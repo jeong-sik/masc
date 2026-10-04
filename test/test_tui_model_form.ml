@@ -163,6 +163,39 @@ num-ctx = 272000
   check (option int) "clearing context inherits the model serving context" (Some 272000) (List.hd c.bindings).num_ctx;
   check (option int) "clearing context removes the override" None (List.hd c.bindings).max_context
 
+let test_copy_preserves_ollama_request_context () =
+  List.iter (fun declaration ->
+    let source = {|
+[providers.local]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+[models.a]
+|} ^ declaration ^ {|
+[local.a]
+num-ctx = 8192
+|} in
+    let copied = config (apply (F.create F.Copy (row source)) source)
+      |> fun c -> List.find (fun (b:Runtime_schema.binding) -> b.model_id="a-copy") c.bindings in
+    check (option int) "unchanged Copy preserves transport num-ctx" (Some 8192) copied.num_ctx;
+    let changed = F.create F.Copy (row source) |> fun f -> edit f "tab"
+      |> fun f -> set f "16384" in
+    let copied = config (apply changed source)
+      |> fun c -> List.find (fun (b:Runtime_schema.binding) -> b.model_id="a-copy") c.bindings in
+    check (option int) "changing Context updates transport num-ctx" (Some 16384) copied.num_ctx)
+    [""; "max-context = 272000\n"]
+
+let test_temperature_round_trip () =
+  let selected = row source in
+  let displayed = match selected.temperature with Some n -> n | None -> fail "missing temperature" in
+  check (float 0.) "displayed temperature represents exact value"
+    0.123456789012345 (float_of_string displayed);
+  let form = F.create F.Edit selected |> fun f -> edit f "tab" |> fun f -> edit f "tab" in
+  let unchanged = apply (set form displayed) source in
+  check string "unchanged exact value preserves source" source unchanged;
+  let updated = config (apply (set form "0.123457") source) in
+  check (option (float 0.)) "a distinct explicitly entered value is applied"
+    (Some 0.123457) (List.hd updated.models).temperature
+
 let () = run "Account model variants" ["model editing", [
   test_case "copy retains account, API model and settings" `Quick test_copy_variant;
   test_case "edit context and cancel" `Quick test_edit_and_cancel;
@@ -170,4 +203,6 @@ let () = run "Account model variants" ["model editing", [
   test_case "inline edit clear cannot be a no-op" `Quick test_inline_edit_refusal;
   test_case "dotted parent cannot lose settings" `Quick test_dotted_parent_refusal;
   test_case "wrapped error obeys form height" `Quick test_error_height_bound;
-  test_case "Ollama requested context follows variant" `Quick test_ollama_context]]
+  test_case "Ollama requested context follows variant" `Quick test_ollama_context;
+  test_case "Ollama Copy preserves unchanged request context" `Quick test_copy_preserves_ollama_request_context;
+  test_case "temperature display and edit round-trip" `Quick test_temperature_round_trip]]

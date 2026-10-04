@@ -10032,11 +10032,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.runtime_config_view <- None;
   state.runtime_config_view_error <- None;
-  state.config_models_error <- None;
+  withdraw_config_models state;
   state.runtime_config_jump_section <- None;
   state.runtime_config_status_open <- false;
   state.runtime_account_form <- None;
-  state.runtime_model_form <- None;
   state.presets_snapshot <- None;
   state.presets_error <- None;
   state.presets_cursor <- 0;
@@ -17534,9 +17533,9 @@ let main
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
   let handle_model_form_open mode () =
-    match List.nth_opt state.config_models_rows state.config_models_cursor with
-    | Some row -> state.runtime_model_form <- Some (Masc_tui_model_form.create mode row)
-    | None -> report_action state "error" "Select a loaded account/model first"
+    match selected_config_model state with
+    | Ok row -> state.runtime_model_form <- Some (Masc_tui_model_form.create mode row)
+    | Error detail -> report_action state "error" detail
   in
   let handle_runtime_account_open () =
     match state.runtime_config_view with

@@ -157,7 +157,7 @@ let apply t current =
   let draft = if output = t.source.max_tokens then draft else set_int draft "max-tokens" output in
   let draft = match Runtime_schema.provider_of_id config t.source.provider with
     | Some ({ api_format = Runtime_schema.Ollama_api; _ } as provider)
-      when t.mode = Copy || context <> Option.map snd t.source.context ->
+      when context <> Option.map snd t.source.context ->
       let requested = match context, provider.max_context with
         | Some value, _ | None, Some value -> Some value
         | None, None -> source.max_context in

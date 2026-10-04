@@ -6691,6 +6691,21 @@ let config_models_read_error (state : state) =
   | Some _ as error -> error
   | None -> state.config_models_error
 
+let withdraw_config_models (state : state) =
+  state.config_models_rows <- [];
+  state.config_models_cursor <- 0;
+  state.config_models_error <- None;
+  state.runtime_model_form <- None
+
+let selected_config_model (state : state) =
+  match state.runtime_config_view, config_models_read_error state with
+  | None, _ -> Error "Config not loaded for this workspace; r to reload"
+  | Some _, Some _ -> Error "Current config reading failed; r to reload before editing Models"
+  | Some _, None ->
+      (match List.nth_opt state.config_models_rows state.config_models_cursor with
+       | Some row -> Ok row
+       | None -> Error "Select a loaded account/model first")
+
 let text_input_target (state : state) ~compact_viewport =
   let identity_surface =
     state.view = Keepers Keeper_detail

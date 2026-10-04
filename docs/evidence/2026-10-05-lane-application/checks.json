@@ -1,0 +1,28 @@
+{
+  "base": "24ddb0d7d315299246a9dabfe6d2b9025ab2ecb2",
+  "compiler": "5.5.0",
+  "pure_module": {
+    "tests": 5,
+    "passed": 5,
+    "command": "ocamlfind ocamlopt -w +32+69 -warn-error +a -package yojson,alcotest -linkpkg lane_addon_application.mli lane_addon_application.ml test_lane_addon_application.ml -o check; ./check",
+    "source_hashes": {
+      "lib/lane_addon/lane_addon_application.ml": "1abcceb30266f6a82e8c35cbad659e8d451d9a51deaab0bb45eb6fdd0edb91fc",
+      "lib/lane_addon/lane_addon_application.mli": "2b4582d6abc290e266e6258580279e0957be693b760e1d3f33317078efb58c2d",
+      "test/test_lane_addon_application.ml": "70f506a95af970f82566f48f5b237da720e08c1dc0e16be0ae5defa1ea7c254e"
+    }
+  },
+  "syntax": 11,
+  "runtime_tests": "Authored only: accepted-startup barrier, live/historical cleanup and incomplete readings; terminal replacement/deletion held during publication then failed and retried without repeating cleanup; cold directory sync failure and recovery. Direct reconciliation, not a Pulse scheduling test. Not typechecked or executed.",
+  "limits": [
+    "No local Dune or full project build",
+    "No full Runtime/Store typecheck or executable tests",
+    "No native TUI or Web consumer behavior, backend/provider/worker, main, CI or deployment proof"
+  ],
+  "review_repairs": [
+    "P2 source-confirmed: terminal historical cleanup pending/failed publication could appear inactive; repair keeps typed owned state, retries publication only, syncs unlink and cold inventories, handles cancellation.",
+    "P3 source-confirmed: old binding_inventory no-sync doc corrected.",
+    "Prior test incorrectly expected enabled=true to be rejected as an unknown field; now uses unexpected=true."
+  ],
+  "source_checkpoint": "1e15b34f4ad75b8664a6675b84c848db3f0e1f48",
+  "authored_direct_runtime_scenarios": 5
+}

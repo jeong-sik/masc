@@ -1,0 +1,17 @@
+{
+  "qualified_commit": "bded711a7352a6a5e510b7a0cedbad96efd3e64f",
+  "focused_build_exit": 0,
+  "tests": 18,
+  "test_exit": 0,
+  "source_sha256": {
+    "lib/server/server_lane_addon_sampling.ml": "dd396777b804a1cefc8d42f43416df944ce1583f58408c996c27905cacb88702",
+    "lib/server/server_lane_addon_sampling.mli": "fe3752061ffe887e5526aafb6967773060daf194359c558ad242e4c91326e0e1",
+    "test/test_server_lane_addon_sampling.ml": "087e97ee328e2391d6c50a896a699f45aa8c07a60e64567257e5eb8f18c73e96"
+  },
+  "raw_sha256": {
+    "build.log": "08f2aaba0be15f7a2e4fc366b302ebe9786d78d7fdcfbe3f5af3fe6b035a7044",
+    "test.log": "511228286cd9a332e1cc869522ff7f217bc75e18ddc3dc09aea5b1da29241354"
+  },
+  "binary_sha256": "3fef44473d23ae7ec87c29685d49f812cb0332d8bf706aba8cf127b83ec7af3a",
+  "full_suite": false
+}

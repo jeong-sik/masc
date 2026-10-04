@@ -293,6 +293,17 @@ endpoint = "https://example.invalid"
   | Error errors -> Alcotest.(check bool) "request path typo identifies its provider field"
       true (refused_at "providers.first.request_path" errors)
 
+let test_provider_fields_are_declared_and_healthcheck_is_retained () =
+  let config extra = shared_model ^ provider_named "first" ^
+    "[providers.first.healthcheck]\npath = \"/health\"\n" ^ extra ^ "[first.sol]\n" in
+  let valid = parse_config (config "") in
+  Alcotest.(check (option string)) "healthcheck remains retained provider metadata"
+    (Some "/health") (List.hd valid.providers).Runtime_schema.healthcheck_path;
+  match Runtime_toml.parse_string (config "[providers.first.log]\nlevel = \"debug\"\n") with
+  | Ok _ -> Alcotest.fail "undeclared provider log table was accepted"
+  | Error errors -> Alcotest.(check bool) "unsupported table has its exact provider path"
+      true (refused_at "providers.first.log" errors)
+
 let test_provider_typos_do_not_hide_behind_explicit_bindings () =
   let config field = shared_model ^ Printf.sprintf {|[providers.first]
 protocol = "codex-app-server"
@@ -324,6 +335,8 @@ let () =
     [ ( "namespaces"
       , [ Alcotest.test_case "provider request path retains its decoder" `Quick
             test_provider_request_path_survives_unknown_key_validation
+        ; Alcotest.test_case "provider fields retain supported healthcheck metadata" `Quick
+            test_provider_fields_are_declared_and_healthcheck_is_retained
         ; Alcotest.test_case "provider typos cannot hide behind explicit bindings" `Quick
             test_provider_typos_do_not_hide_behind_explicit_bindings
         ; Alcotest.test_case "no provider takes a table another reader owns" `Quick

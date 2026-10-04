@@ -1515,8 +1515,10 @@ let approval_decision_unverified = function
 open Masc_tui_async_protocol
 
 let msx_poll_view = ref (ref ())
-type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
-let msx_pending_poll = ref Poll_idle
+type msx_poll_state = Poll_ready of Masc_tui_msx_tick.poll_policy
+  | Poll_pending of msx_poll_request
+  | Poll_observing of msx_poll_request * Masc_tui_msx_tick.refusal
+let msx_pending_poll = ref (Poll_ready Advancing)
 let invalidate_msx_poll () = msx_poll_view := ref ()
 type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
 let decode_play_mutation decode = function
@@ -2566,14 +2568,28 @@ let launch_voice_config_load state ~mailbox =
          , None ))
 ;;
 
-let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
+let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
   match state.msx_live, state.msx_live_in_flight with
   | (Masc_tui_machine_live.Unread | Failed _), _ | _, Some _ -> ()
   | (Not_loaded | Showing _), None ->
   match !msx_pending_poll with
-  | Poll_pending _ | Poll_failed -> ()
-  | Poll_idle ->
-      let request = { poll_view = !msx_poll_view; poll_port = state.port } in
+  | Poll_observing (request,refusal) when request.poll_view != !msx_poll_view
+      || request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
+      msx_pending_poll := Poll_ready (Observing refusal);
+      launch_msx_poll state ~mailbox
+  | Poll_pending _ | Poll_observing _ | Poll_ready Outcome_unknown -> ()
+  | Poll_ready (Observing refusal) ->
+      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
+      let since = Masc_tui_machine_live.since state.msx_live in
+      msx_pending_poll := Poll_observing (request,refusal);
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Msx_activity_loaded (request,result))
+        (fun () ->
+          Result.map (fun activity -> activity,
+            Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.poll_port Masc.Machine_lane.Msx ~since)
+            (Masc_tui_http.fetch_msx_activity ~host:server_peer_host ~port:request.poll_port))
+  | Poll_ready Advancing ->
+      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
       msx_pending_poll := Poll_pending request;
       let run () =
         let frame =
@@ -7929,10 +7945,10 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   (* An explicit fresh observation can rearm polling after a lost tick reply.
      It cannot settle an outstanding request whose result has yet to arrive. *)
   match !msx_pending_poll with
-  | Poll_failed when Option.is_some state.msx_frame ->
-      msx_pending_poll := Poll_idle;
+  | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame ->
+      msx_pending_poll := Poll_ready Advancing;
       if clear_notice then state.msx_notice <- None
-  | Poll_idle | Poll_pending _ | Poll_failed -> ()
+  | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ()
 ;;
 
 (* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
@@ -15017,22 +15033,33 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Msx_frame_loaded (request, result) ->
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
+           (* A scope change invalidates presentation, not knowledge of an
+              in-flight mutation. A lost reply remains unknown until an
+              explicit current-scope frame read succeeds. *)
+           msx_pending_poll := Poll_ready (Masc_tui_msx_tick.policy_after_tick result);
            (match result with
-            | Error _ when request.poll_port <> state.port ->
-                msx_pending_poll := Poll_idle
+            | _ when request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
+                ()
             | Error detail ->
                 (* A lost HTTP response does not prove the server stopped its
                    mutation. Observe explicitly before another automatic tick. *)
-                msx_pending_poll := Poll_failed;
                 let notice = "Refresh outcome unknown; reopen before continuing: " ^ detail in
-                state.msx_notice <- Some notice;
-                if state.msx_open then
+                if request.poll_view == !msx_poll_view && state.msx_open
+                   && state.machine_source = Masc.Machine_lane.Msx then begin
+                  state.msx_notice <- Some notice;
                   if state.msx_menu_open then
                     Masc_tui_msx.render_menu ~write:write_to_terminal ~status:notice state
                   else
                     render_spectator state
-            | Ok (frame, mark) ->
-                msx_pending_poll := Poll_idle;
+                end
+            | Ok (Not_started refusal) ->
+                if request.poll_view == !msx_poll_view && request.poll_port = state.port
+                   && state.msx_open && not state.msx_menu_open
+                   && state.machine_source = Masc.Machine_lane.Msx then begin
+                  state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice refusal);
+                  render_spectator state
+                end
+            | Ok (Advanced (frame, mark)) ->
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin
                   state.msx_frame <- frame;
@@ -15050,7 +15077,48 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   render_spectator state
                 end)
-       | Poll_pending _ | Poll_idle | Poll_failed -> ())
+       | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
+  | Msx_activity_loaded (request, result) ->
+      (match !msx_pending_poll with
+       | Poll_observing (pending,refusal) when pending == request ->
+           (* This read can recover a known refusal only. It never owns an
+              outstanding or unknown mutation, including from another view. *)
+           msx_pending_poll := Poll_ready (Observing refusal);
+           if request.poll_view == !msx_poll_view && request.poll_port = state.port
+              && request.poll_authority = state.workspace_authority
+              && state.msx_open && not state.msx_menu_open
+              && state.machine_source = Masc.Machine_lane.Msx then begin
+             let activity = match result with
+               | Ok (activity,Ok _) -> Ok activity
+               | Ok (_,Error detail) | Error detail -> Error detail in
+             let policy = Masc_tui_msx_tick.policy_after_activity (Observing refusal) activity in
+             msx_pending_poll := Poll_ready policy;
+             (match result with
+              | Error detail -> state.msx_notice <- Some ("Activity read failed; no tick sent: " ^ detail)
+              | Ok (_,live) ->
+                  (match live with
+                   | Error detail -> state.msx_notice <- Some ("Screen read failed; retaining previous frame: " ^ detail)
+                   | Ok (answer,_) ->
+                       let observed = match Masc_tui_machine_live.advance state.msx_live (Ok answer) with
+                        | None -> Ok ()
+                        | Some (Masc_tui_machine_live.Failed detail) ->
+                            Error detail
+                        | Some live ->
+                            let live,frame = msx_frame_of_live ~previous_live:state.msx_live ~previous_frame:state.msx_frame live in
+                            state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame;
+                            Ok () in
+                       (match observed with
+                        | Error detail ->
+                            msx_pending_poll := Poll_ready (Observing refusal);
+                            state.msx_notice <- Some ("Screen read rejected; retaining previous frame: " ^ detail)
+                        | Ok () -> state.msx_notice <- (match policy with
+                          | Advancing -> None
+                          | Observing refusal -> Some (Masc_tui_msx_tick.refusal_notice refusal)
+                          | Outcome_unknown -> state.msx_notice))));
+             state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+             render_spectator state
+           end
+       | Poll_observing _ | Poll_pending _ | Poll_ready _ -> ())
   | Msx_live_loaded (request, result) ->
       (match state.msx_live_in_flight with
        | Some pending when pending == request ->
@@ -15067,8 +15135,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   state.msx_frame <- frame;
                   msx_surface_frame := frame);
              (match !msx_pending_poll with
-              | Poll_failed when Option.is_some state.msx_frame -> msx_pending_poll := Poll_idle
-              | Poll_idle | Poll_pending _ | Poll_failed -> ());
+              | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame -> msx_pending_poll := Poll_ready Advancing
+              | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ());
              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
              render_spectator state
            end
@@ -19151,8 +19219,8 @@ and is loaded on demand through keeper_skill.
                  Masc_tui_http.post_msx_press ~host:server_peer_host
                    ~port:state.port ~keys:[ server_key ]
                with
-               | Ok _ | Error _ -> ());
-              observe_msx_frame ~clear_notice:true state;
+               | Ok _ -> observe_msx_frame ~clear_notice:true state
+               | Error detail -> state.msx_notice <- Some detail);
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
               render_spectator state
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)

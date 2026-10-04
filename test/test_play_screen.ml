@@ -123,9 +123,11 @@ let test_the_screen_png () =
       let dir = Filename.temp_dir "play-screen-dos-" "" in
       Fun.protect
         ~finally:(fun () ->
+          Dos_lane.install_activity_observer None;
           (match Dos_lane.eject ~who:"operator" ~announce:ignore () with Ok () | Error _ -> ());
           remove_tree dir)
         (fun () ->
+          Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
           (match
              Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")

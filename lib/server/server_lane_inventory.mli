@@ -15,14 +15,16 @@ type state =
   | Exact_state of Server_standalone_lane_projection.lane_configuration
   | Browser_clients of Browser_lane.activity * int
   | Browser_executor of Browser_lane.activity * bool
-  | Machine_state of machine_publication
+  | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of {
       declaration : declaration option;
       instances : Lane_addon_runtime.inventory_instance list;
     }
 (** [Package_state.declaration=None] only for a manual attachment.
     Instances exclude confirmed Detached history. Complete declaration absence
-    and confirmed cleanup remove a row; incomplete reads never prove absence. *)
+    and confirmed cleanup remove a row; incomplete reads never prove absence.
+    Machine activity and the last published screen are independent readings;
+    disabled activity does not erase a stable or running publication. *)
 type row = { id : string; label : string; purpose : string;
              selection : selection; state : state }
 type t

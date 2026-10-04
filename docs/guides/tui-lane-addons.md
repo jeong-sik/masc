@@ -15,6 +15,7 @@ Esc로 초안을 닫아 설치 목록을 본다. 끄기 요청 중인 worker나 
 계속 표시한다. 다시 켜면 이전 worker 정리가 확인된 뒤 새 worker가 붙는다.
 선언 파일과 보존 관측은 남으며 기존 제거 동작과 구별된다.
 [활성화 계약과 부분 읽기](lane-package-activity.md)를 참고한다.
+MSX·DOS는 별도의 [기계 활동 설정](machine-activity.md)을 사용한다.
 
 ## 설치 목록
 

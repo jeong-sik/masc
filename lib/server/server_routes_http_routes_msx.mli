@@ -46,14 +46,20 @@ val msx_tick_default_frames : int
 
 val tick_response :
   body:string ->
-  [ `OK | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+  [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
 (** Authenticated tick body handling. An optional integer [frames] controls
     advancement. [pixel_response="retained"] requests an inline/retained pixel
     response; optional [known_pixels={revision,width,height}] advertises the
     client's exact retained pixels. Duplicate and unknown fields are refused before
     mutation. Accepted frame counts are clamped to the lane's per-call range.
     Stepping and atomic frame/ledger capture run once on the shared executor pool;
-    an unavailable pool refuses the tick without running it inline. *)
+    an unavailable pool refuses the tick without running it inline.
+    Activity refusal is HTTP 409 with [ok=false] and a closed [code] of
+    [activity_disabled] or [activity_unobserved], before execution starts. *)
+
+val activity_json : unit -> Yojson.Safe.t
+(** Read the published MSX activity only. No machine is started or advanced.
+    Also served by the public-read GET [/api/v1/msx/activity]. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 

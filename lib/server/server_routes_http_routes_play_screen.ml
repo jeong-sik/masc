@@ -22,7 +22,7 @@ let screen_response () =
     Error (`Conflict, Server_refusal.json ~code:"no_machine" "no DOS program is loaded")
   | Error
       (Tool_misc_dos_lane.Lane
-        (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+        (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
          | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
          | Dos_lane.Other_program _ ) as err)) ->
     Error (`Internal_server_error, Server_refusal.json ~code:"capture_failed" (Dos_lane.error_to_string err))

@@ -32,12 +32,13 @@ type instance = {
   presence : presence; phase : phase; applied_revision : string option;
 }
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
+type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running
 type state =
   | Exact_state of configuration
   | Browser_clients of browser_activity * int
   | Browser_executor of browser_activity * bool
-  | Machine_state of machine_publication
+  | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
 type package_read = {
@@ -157,6 +158,12 @@ let browser_activity = function
   | `String "unobserved" -> Ok Browser_unobserved
   | _ -> error "unknown Browser activity"
 
+let machine_activity = function
+  | `String "on" -> Ok Machine_enabled
+  | `String "off" -> Ok Machine_disabled
+  | `String "unobserved" -> Ok Machine_unobserved
+  | _ -> error "unknown Machine activity"
+
 let state json =
   let* tag = kind json in
   match tag with
@@ -167,9 +174,10 @@ let state json =
   | "browser_executor" -> let* f = fields ["kind";"activity";"registered"] json in
       let* activity = get browser_activity "activity" f in
       Result.map (fun value -> Browser_executor (activity,value)) (get bool "registered" f)
-  | "machine" -> let* f = fields ["kind";"publication"] json in
+  | "machine" -> let* f = fields ["kind";"activity";"publication"] json in
+      let* activity = get machine_activity "activity" f in
       let* value = get (function `String "no_screen" -> Ok No_screen | `String "stable" -> Ok Stable | `String "running" -> Ok Running | _ -> error "unknown machine publication") "publication" f in
-      Ok (Machine_state value)
+      Ok (Machine_state (activity,value))
   | "package" -> let* f = fields ["kind";"declaration";"instances"] json in
       let* declaration = get (nullable declaration) "declaration" f in let* instances = get (list instance) "instances" f in
       Ok (Package_state {declaration;instances})

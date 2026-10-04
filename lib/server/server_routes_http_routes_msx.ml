@@ -133,7 +133,7 @@ let press_response ~config ~who ~body =
       | Ok obs ->
         machine_changed ~config;
         `OK, press_result_json ~ok:true (Some obs)
-      | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
+      | Error ((Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
         error `Internal_server_error (Msx_lane.error_to_string e)))
@@ -347,6 +347,10 @@ let tick_response ~body =
       | Ok (frame, entries, mark) ->
         `OK, tick_frame_json pixel_response frame entries mark
       | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
+      | Error Msx_lane.Activity_disabled ->
+        `Conflict, `Assoc ["ok",`Bool false;"code",`String "activity_disabled"]
+      | Error Msx_lane.Activity_unobserved ->
+        `Conflict, `Assoc ["ok",`Bool false;"code",`String "activity_unobserved"]
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
@@ -371,6 +375,9 @@ let handle_tick request reqd =
       Http.Response.json_value_on_cpu ~status ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
+
+let activity_json () = `Assoc ["schema",`String "masc.msx-activity/v1";
+  "activity",`String (Machine_configuration.activity_to_wire (Msx_lane.activity ()))]
 
 let checkpoint_response ~(config : Workspace.config) ~restore ~body =
   let base_path = config.base_path in
@@ -444,6 +451,10 @@ let handle_checkpoint ~config ~restore request reqd =
 
 let add_routes router =
   router
+  |> Http.Router.get "/api/v1/msx/activity" (fun request reqd ->
+       with_public_read
+         (fun _state req reqd -> Http.Response.json_value ~compress:true ~request:req (activity_json ()) reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read
          (fun state req reqd ->

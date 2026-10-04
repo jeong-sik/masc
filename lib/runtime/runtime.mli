@@ -628,6 +628,10 @@ val browser_configuration : unit -> Browser_configuration.t option
     is unavailable. Activity follows this snapshot immediately; backend paths
     are consumed when the server installs its executors. *)
 
+val machine_configuration : unit -> Machine_configuration.t option
+(** Activity from the same atomic published configuration as Runtime. [None]
+    means no valid configuration is currently published. *)
+
 val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
 (** [\[lsp.servers\]] applied over the client's own table: the command that
     starts a language's server, the operator's where one was written for that

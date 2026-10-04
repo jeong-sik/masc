@@ -32,6 +32,7 @@
   masc.sse_wire
   masc.agent_observation
   masc.browser_configuration
+  masc.machine_configuration
   masc.browser_lane
   masc.slack_lane
   masc.msx_lane

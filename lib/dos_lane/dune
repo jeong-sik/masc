@@ -11,6 +11,7 @@
   masc.time_compat
   masc.masc_random_id
   masc.machine_live_publication
+  masc.machine_configuration
   masc.machine_checkpoint
   masc.lane_activity)
  (preprocess

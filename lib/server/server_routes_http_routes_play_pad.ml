@@ -26,7 +26,7 @@ let current_layout ~config =
   match Tool_misc_dos_lane.off_domain Dos_lane.screen with
   | Error Dos_lane.No_machine -> Refused (`Conflict, Server_refusal.json ~code:"no_machine" "no DOS program is loaded")
   | Error
-      (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+      (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
        | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
        | Dos_lane.Other_program _ ) as err) ->
     Refused (`Internal_server_error, Server_refusal.json ~code:"screen_failed" (Dos_lane.error_to_string err))

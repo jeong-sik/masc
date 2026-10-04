@@ -1243,7 +1243,7 @@ def lane_inventory_response(
             "id": "machine/" + machine, "label": machine.upper(),
             "purpose": "Published machine state.",
             "selection": {"kind": "machine", "machine": machine},
-            "state": {"kind": "machine", "publication": "no_screen"},
+            "state": {"kind": "machine", "activity": "on", "publication": "no_screen"},
         })
     return 200, {
         "schema": "masc.lane-inventory/v1",

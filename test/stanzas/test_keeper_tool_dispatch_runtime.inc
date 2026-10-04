@@ -6,6 +6,7 @@
   ../skills/browser-live-follow-read/SKILL.md
   ../skills/browser-navigate-read/SKILL.md)
  (libraries
+  masc.machine_configuration
   masc_test_deps
   masc.keeper_chat_operations
   masc.keeper_execution_scope

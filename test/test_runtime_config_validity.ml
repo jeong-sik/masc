@@ -4183,7 +4183,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
-    ; browser = Browser_configuration.none; typesafeai = Runtime_schema.default_typesafeai
+    ; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -6299,15 +6299,22 @@ geckodriver = "/fixture/geckodriver"
 enabled = %b
 chrome = "/fixture/chrome"
 extension = "/fixture/extension"
-|} enabled enabled enabled in
+[machines.msx]
+enabled = %b
+[machines.dos]
+enabled = %b
+|} enabled enabled enabled enabled enabled in
   let on = content true and off = content false in
   let expected text = match Runtime_toml.parse_string text with
-    | Ok config -> config.Runtime_schema.browser
+    | Ok config -> config
     | Error errors -> failf "browser fixture: %s" (render_parse_errors errors) in
   let check_published label text =
-    check bool label true (match Runtime.browser_configuration () with
-      | None -> false
-      | Some actual -> Browser_configuration.equal (expected text) actual) in
+    check bool label true (match Runtime.browser_configuration (), Runtime.machine_configuration () with
+      | Some browser, Some machines ->
+        let expected = expected text in
+        Browser_configuration.equal expected.Runtime_schema.browser browser
+        && Machine_configuration.equal expected.machines machines
+      | None, _ | _, None -> false) in
   with_temp_runtime_toml on (fun path ->
     (match Runtime.init_default ~config_path:path with
      | Ok () -> () | Error detail -> failf "browser boot: %s" detail);
@@ -6355,7 +6362,7 @@ extension = "/fixture/extension"
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
-        [ test_case "Browser activity follows the visible config across save failure and reload" `Quick
+        [ test_case "Browser and machine activity follow the visible config across save failure and reload" `Quick
             test_browser_config_publication_follows_visible_file;
           test_case "same model serves three context windows concurrently" `Quick
             test_same_model_context_windows_coexist;

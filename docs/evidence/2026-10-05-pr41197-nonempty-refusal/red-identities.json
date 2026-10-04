@@ -1,0 +1,9 @@
+{
+  "head": "650879ef1e87c00fcf56a1b11f4b50e7f8fa2d87",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_sampling.ml": "c47c4a6d89f2d89712c3e37110110d8efa3bccf98e1fa752cad7c4b27b80e2e0",
+    "lib/lane_addon/lane_addon_manifest.ml": "637fe88b5aa5bbbd8241d3191d077b853dd204e38ae4d399448124fe0d13a583",
+    "test/test_lane_addon_worker.ml": "e4fd2ea2a72d6ff7a5425e918311c4e24a2b7f26c0da6b54ea549b00e69b7200"
+  },
+  "binary_sha256": "9f7a478abf098d6a3492e56c27f6758b89c374c92d83f7dc9a6ad66a62573d51"
+}

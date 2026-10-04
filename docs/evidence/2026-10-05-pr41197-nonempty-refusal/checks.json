@@ -1,0 +1,40 @@
+{
+  "original_head": "650879ef1e87c00fcf56a1b11f4b50e7f8fa2d87",
+  "integrated_parent": "2e34863666dde7dd334adb47dee397b81358f928",
+  "tested_head": "f253065707c1f2778cb0d4095033aed50fc1a0d1",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_types.ml": "b36397158cef8b9ec50f64fd1e9894d502783149513827fe49e00584012f939d",
+    "lib/lane_addon/lane_addon_types.mli": "2225838b092ff9f7b42439de8c17bbed8896c68953177f1fbcaf0d0908403d9f",
+    "lib/lane_addon/lane_addon_manifest.ml": "fba9a8d401393dc0c265efce7f0d45bf1f10fea8a803e11887bad82f7f4e5e40",
+    "lib/lane_addon/lane_addon_sampling.ml": "1a6420d560a119a2ac46a9c4eaffff49f03c77516b3296dbc3a0e9f60bfe66ea",
+    "lib/lane_addon/lane_addon_sampling.mli": "62920a8fa51a58dc2c27cb4ba4d8dcec0d14d450533767d87589ca34e6e27a86",
+    "test/test_lane_addon_worker.ml": "e4fd2ea2a72d6ff7a5425e918311c4e24a2b7f26c0da6b54ea549b00e69b7200"
+  },
+  "artifact_sha256": {
+    "red-build.log": "f8be6c86b50baad3e865f1df40975e63729f149b5817356228e664c564cfe03b",
+    "red-tests.log": "0610504457d0e05949099284527f855c2eaa447b5fa87054da4f66197a07f5f0",
+    "red-case0.log": "d6141f6377ff7e3f9d176156f91e4a49d606c33ee78902bd0260f78c165992ff",
+    "red-case1.log": "e633fba9ab8f1ed3a3334aee8cabf80e7fc9f7eac1da193902e1715a323b7061",
+    "red-identities.json": "0269c00e4c257268c32f99c546eff405cdef673ce8ddb69db15ba36be510371e",
+    "green-build.log": "abfa9882165cd673917edb583e219cc2bc8218d8047acb77b5a56ef266db0374",
+    "green-tests.log": "e9c204e8619417f87d09a886bc6fd9cde95ac3d1209743b0dc100ff7b9f03d35",
+    "parent-merge.log": "96bb6a194a796153cbd0c640642866371219451832063763d544b942a8d97c4e"
+  },
+  "worker_binary_sha256": "29abc196e8fb6c22b0a681e5b39ea12e187f4690d4fbf36136d5ef30597b43a6",
+  "red": {
+    "build_exit": 0,
+    "tests_exit": 1,
+    "selected": 2,
+    "failed": 2
+  },
+  "green": {
+    "build_exit": 0,
+    "tests_exit": 0,
+    "total": 31
+  },
+  "commands": [
+    "DUNE_JOBS=2 opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_lane_addon_worker.exe",
+    "_build/default/test/test_lane_addon_worker.exe test lifecycle 0,1",
+    "MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false DUNE_SOURCEROOT=\"$PWD\" _build/default/test/test_lane_addon_worker.exe"
+  ]
+}

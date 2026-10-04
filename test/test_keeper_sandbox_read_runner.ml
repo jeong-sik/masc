@@ -90,10 +90,12 @@ end
 module Runner = Keeper_sandbox_read_runner.Make (Mock_backend)
 
 let test_route_labels_match_sandbox_runner () =
-  Alcotest.(check string)
-    "backend via"
-    (Keeper_sandbox_runner.route_label Keeper_sandbox_runner.Sandbox_backend)
-    Runner.backend_via
+  List.iter
+    (fun (sandbox_profile, expected) ->
+      Alcotest.(check string) "backend via" expected
+        (Runner.backend_via ~meta:{ meta with sandbox_profile }))
+    Keeper_types_profile_sandbox.
+      [ Docker, "docker"; Micro_vm, "microvm"; Remote_ssh, "remote_ssh" ]
 
 let test_mock_backend_forwards_read_contract () =
   Calls.reset ();

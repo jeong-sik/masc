@@ -1,0 +1,16 @@
+{
+  "scope": "native real boot loader and registry, exact JSONL writer source, full isolated Fs_compat and cached dependencies; temporary filesystem only; no full server",
+  "source_sha256": {
+    "lib/config/env_config_keeper_supervisor.mli": "4415222e30b956ac3c9fba8780edf69132286f5984fe480f1a8dd001f2e58e67",
+    "lib/config/env_config_keeper_supervisor.ml": "6d23921b11685737fd5c6041796be69d68fe74048ac299875beb656be6e4bec0",
+    "lib/config/env_config_keeper.mli": "6da6a5522a9f0e2e198a5581bf8aa731ef6cc64374703b410327f83d307d319b",
+    "lib/config/env_config_keeper.ml": "93410943839c8605bdcce3c3acda99df7ad0445562ff8f421268c41fcdf04ec3",
+    "lib/config/keeper_runtime_setting_registry.mli": "89bde3778f692bb6525d53d3c2e56ec595218ee7494dd7678e2d48f4a762807b",
+    "lib/config/keeper_runtime_setting_registry.ml": "7fbb0f509302c61f6c5dddae301030f4eef13c5aa1f0921023d4ffe67f4b3c2e",
+    "lib/keeper_runtime/keeper_runtime_config.mli": "52ece5895fe6866c1948d76219db31e45ccd2b3c94a6c0e358a9bdcaad0fc587",
+    "lib/keeper_runtime/keeper_runtime_config.ml": "4e3e7cfc36509ed536979eb80071d3344cdcce2e1a9d08a1c9e22fa72807b36a",
+    "lib/fs_compat/fs_compat.ml": "4ad0e9a682cb6f17e944778956db4a8ada86cabc547288ebdcf179eaa2f143ae",
+    "lib/fs_compat/fs_compat.mli": "0a213bcc42b40b98a6023625e0d401859d7bb07b6d7a316acdac25c7a2590566",
+    "lib/keeper/keeper_types_support.ml": "e0b3641f9a75b38e966a36c1471d3afb2c7e2fd003428b034d122943b1bbb383"
+  }
+}

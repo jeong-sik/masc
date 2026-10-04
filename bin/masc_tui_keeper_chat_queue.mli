@@ -28,6 +28,7 @@
 module Chat = Masc_tui_keeper_chat_projection
 
 type t
+(** Local queue with a submission counter retained across extraction and removal. *)
 
 type intent =
   | Next
@@ -59,6 +60,12 @@ val waiting_for_keeper : t -> keeper_name:string -> item list
 val cap : int
 (** How many lines may wait. A turn that never settles would otherwise grow
     this without limit. *)
+
+val restore_unsent : t -> item -> t
+(** Return an already admitted item whose first POST never began. It precedes
+    input staged while its workspace probe was pending, retaining its payload,
+    submission ordinal, intent and causal parent. The admission cap cannot discard existing input.
+    A request already held by the queue is left unchanged. *)
 
 val push : t -> submitted_at:float -> Chat.request -> (t * int, string) result
 (** Append one request. [Ok (queue, waiting)] carries how many are now waiting,

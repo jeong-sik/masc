@@ -7,7 +7,6 @@
     [Keeper_types_profile_toml] (included below). *)
 
 include Keeper_config
-let keeper_debug = Env_config.KeeperRuntime.debug
 
 include Keeper_types_profile_sandbox
 

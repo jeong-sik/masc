@@ -1,0 +1,10 @@
+Testing `keeper_chat_store_append_result'.
+This run has ID `1PVX1XU7'.
+
+  [OK]          append-result          0   writable dir -> Ok.
+  [OK]          append-result          1   path under a file -> Error.
+  [OK]          append-result          2   owner-only durable append.
+  [OK]          append-result          3   incomplete tail is cut before the ...
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-notification-contract-m9puhcp3/_build/_tests/keeper_chat_store_append_result'.
+Test Successful in 0.005s. 4 tests run.

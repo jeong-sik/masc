@@ -84,6 +84,5 @@ The transaction stage also rejects an owned face item in the head slot and check
 Browser validation failures retain a separate failed receipt with the current stage, request paths/statuses and available screenshot hashes. Credentials, storage, headers, request bodies, DOM dumps and raw error text are excluded. A successful receipt is written only after browser cleanup succeeds.
 
 Authenticated probe HTTP requests reject redirects before following another URL. The route receipt cannot substitute a redirected endpoint for the isolated server.
-The standalone `python3 -I test/test_item_http_redirects.py scripts/item-http-acceptance.py --mcp` regression exercises real loopback GET and MCP redirects without a native binary. Its scope is the actual extracted helper and redirect refusal, rather than a complete native acceptance run.
 
 The harness and all source fixtures, including the paid credit and browser script when used, must match the binary source SHA before the isolated server starts. Browser access uses the synthetic admin bearer required by its surrounding dashboard reads; purchases use each synthetic Keeper’s own Worker bearer.

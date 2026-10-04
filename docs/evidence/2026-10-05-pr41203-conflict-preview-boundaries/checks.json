@@ -1,0 +1,21 @@
+{
+  "head": "7a2057102ae39146e822b4feea3944a2a7e6e338",
+  "source_sha256": {
+    "dashboard/src/lib/machine-lane-activity-session.ts": "e229b3a30936a39cb02ad1509a831119079e9126476041795eecb90286e9c2ac",
+    "dashboard/src/components/machine-lane-activity-panel.test.ts": "801a902fd480b425f537a5681f091a7ec6a0d011fba50452a6e9002952b3e5f2"
+  },
+  "raw_logs_sha256": {
+    "red.log": "e1f610af345e3029b9c45a99f177a8d2b0e35e8f06435bdc60620bfa05dc6293",
+    "green.log": "968ca92eca2772df905a92607e6656c946e762cc3db1db346d6336ece40610bf",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results": {
+    "red": "2 failed / 52 passed; existing unsent-generation control passed",
+    "green": 55,
+    "suites": 1,
+    "tsc_exit": 0,
+    "eslint_exit": 0
+  },
+  "scope": "Actual owner session regressions in component suite with mocked HTTP; no server/browser/native/provider/full-suite execution. No parent propagation."
+}

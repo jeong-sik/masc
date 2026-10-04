@@ -1,7 +1,7 @@
 import { effect, signal } from '@preact/signals'
 import {
   fetchRuntimeTomlConfig, previewRuntimeTomlConfig, saveRuntimeTomlConfig,
-  RuntimeTomlRevisionConflict, type RuntimeTomlCurrentSource, type RuntimeTomlConfig,
+  RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlCurrentSource, type RuntimeTomlConfig,
   type CommittedRuntimeTomlConfig,
 } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
@@ -15,7 +15,7 @@ import { announceRuntimeTomlCommitted } from './runtime-toml-session'
 type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
 type State = {
-  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving';
+  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving' | 'followup';
   error: string | null; notice: string | null; followupError: string | null;
   receipt: CommittedRuntimeTomlConfig | null; uncertain: boolean;
 }
@@ -142,6 +142,7 @@ export class BrowserLaneActivitySession {
     catch (error) { this.update({ error: errorToString(error) }); return false }
     const version = ++this.version, options = this.options(authority, version)
     let sent = false, committed = false
+    const sourceGeneration = runtimeTomlSourceGeneration.peek()
     this.update({ phase: 'saving', error: null, notice: null, followupError: null })
     try {
       const preview = await previewRuntimeTomlConfig(source, options)
@@ -156,7 +157,7 @@ export class BrowserLaneActivitySession {
       committed = true
       announceRuntimeTomlWritten()
       announceRuntimeTomlCommitted(authority)
-      this.update({ receipt, current: null, uncertain: receipt.commit.durability !== 'durable',
+      this.update({ phase: 'followup', receipt, current: null, uncertain: receipt.commit.durability !== 'durable',
         draft: receipt.commit.durability === 'durable' ? { ...draft, base: saved } : draft,
         notice: '파일 저장 응답을 받았습니다. 현재 설정과 적용 상태를 다시 확인합니다.' })
       // Browser activity is already published by the raw-save route. Model
@@ -167,12 +168,17 @@ export class BrowserLaneActivitySession {
         [this.state.peek().followupError, `설정 저장 후 목록 갱신 실패: ${errorToString(error)}`].filter(Boolean).join(' ') }) }
     } catch (error) {
       if (this.owns(authority, version)) {
-        if (error instanceof RuntimeTomlRevisionConflict && error.current.source_path === draft.base.source_path) {
+        if (error instanceof RuntimeTomlRevisionConflict) {
           try {
-            readBrowserActivity(error.current.source_text, this.lane)
-            this.update({ current: error.current, error: '파일이 바뀌어 저장하지 않았습니다. 초안은 보관했습니다.' })
-          } catch (cause) { this.update({ current: null, error: errorToString(cause) }) }
-        } else this.update({ current: sent ? null : current, uncertain: sent || this.state.peek().uncertain,
+            const current = sourceGeneration === runtimeTomlSourceGeneration.peek() ? error.current : null
+            if (current) readBrowserActivity(current.source_text, this.lane)
+            this.update({ current, uncertain: false, error: current
+              ? '파일이 바뀌어 저장하지 않았습니다. 초안은 보관했습니다.'
+              : '파일이 바뀌어 저장하지 않았습니다. 다른 변경도 관측되어 현재 설정을 다시 읽으세요.' })
+          } catch (cause) { this.update({ current: null, uncertain: false, error: errorToString(cause) }) }
+        } else if (error instanceof RuntimeTomlSaveRejected) {
+          this.update({ uncertain: false, error: `${errorToString(error)} 저장 전에 거절되었습니다. 초안과 저장 기준은 유지됩니다.` })
+        } else this.update({ current: sent ? null : this.state.peek().current, uncertain: sent || this.state.peek().uncertain,
           error: errorToString(error) + (sent ? ' 저장 결과가 불확실합니다. 현재 설정을 다시 읽으세요.' : '') })
       }
     } finally {

@@ -1,8 +1,8 @@
-import { effect, signal } from '@preact/signals'
+import { batch, effect, signal } from '@preact/signals'
 import { fetchRuntimeTomlConfig, type CommittedRuntimeTomlConfig, type RuntimeTomlConfig } from '../api/dashboard'
 import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlCurrentSource, type RuntimeTomlRequestOptions } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
-import { runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { runtimeConfigCommitReceiptNotice } from './runtime-config-receipt'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
@@ -165,6 +165,12 @@ export class RuntimeTomlSession {
             + (latest.draft !== submitted && latest.draft !== before.draft ? ' 저장 중 추가한 초안은 저장되지 않았습니다.' : '')
           : 'runtime assignment unchanged' })
       if ('unchanged' in result) return false
+      // The file receipt invalidates other editors even if setup resume fails.
+      // This session has already adopted that receipt, so keep its own basis.
+      batch(() => {
+        announceRuntimeTomlWritten()
+        this.generation = runtimeTomlSourceGeneration.peek()
+      })
       // Unmount does not interrupt the saved file's session. A different
       // workspace does prevent follow-up writes to model setup.
       if (!this.admits(authority)) return true
@@ -188,7 +194,13 @@ export class RuntimeTomlSession {
         this.update({ uncertainWrite: false, error: `${errorToString(error)} 저장 전에 거절되었습니다. 초안과 저장 기준은 유지됩니다.` })
       } else this.update({ uncertainWrite: true, error: `${errorToString(error)} 초안은 유지됩니다. 파일 변경 여부를 확인하지 못했습니다. 현재 파일을 읽고 비교한 뒤 다시 저장하세요.` })
       return false
-    } finally { this.resumeController = null; this.update({ phase: 'idle' }) }
+    } finally {
+      this.resumeController = null
+      this.update({ phase: 'idle' })
+      // Another editor may commit while this write owns setup/refresh follow-up.
+      // Re-read only an owned, certain session; ensure preserves dirty drafts.
+      if (this.admits(authority) && !this.state.peek().uncertainWrite) await this.ensure(authority)
+    }
   }
 }
 

@@ -1,0 +1,30 @@
+{
+    "version": "1.1.409",
+    "time": "1791145686324",
+    "generalDiagnostics": [
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_machine_activity_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 67,
+                    "character": 19
+                },
+                "end": {
+                    "line": 67,
+                    "character": 24
+                }
+            },
+            "rule": "reportIndexIssue"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 1,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.249
+    }
+}
+

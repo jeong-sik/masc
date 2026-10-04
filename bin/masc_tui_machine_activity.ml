@@ -1,6 +1,6 @@
 type owner = { workspace : string * string; machine : Masc.Machine_lane.t }
 type document = Masc_tui_runtime_config_edit.document
-type reading = { document : document; activity : (Machine_configuration.activity, string) result }
+type reading = { document : (document, string) result; activity : (Machine_configuration.activity, string) result }
 type write = { source_text : string; expected_source_revision : string }
 type draft = { base : document; desired : bool }
 type phase = Idle | Reading of int | Writing of int
@@ -62,9 +62,11 @@ let finish_read request result t =
   let t = {t with phase=Idle;current=None;observed=None} in
   match result with
   | Error detail -> {t with message=Some (detail ^ " · draft retained")}
-  | Ok {document=current;activity=observed} ->
+  | Ok {document=Error detail;activity=observed} ->
+      {t with observed=Some observed;message=Some (detail ^ " · draft retained")}
+  | Ok {document=Ok current;activity=observed} ->
     (match activity t.owner.machine current with
-     | Error detail -> {t with message=Some detail}
+     | Error detail -> {t with observed=Some observed;message=Some detail}
      | Ok enabled ->
        let retain = match t.draft with
          | None -> false
@@ -112,7 +114,7 @@ let start_save ~generation t =
   let* () = if was_enabled=draft.desired then Error "No activity change to save." else Ok () in
   let* source_text = apply draft.desired t.owner.machine draft.base in
   let write = {source_text;expected_source_revision=draft.base.source_revision} in
-  Ok ({t with phase=Writing generation;observed=None;message=None},
+  Ok ({t with phase=Writing generation;message=None},
       {owner=t.owner;generation;operation=Save write},write)
 let finish_save request result t =
   if not (matches request t) then t else

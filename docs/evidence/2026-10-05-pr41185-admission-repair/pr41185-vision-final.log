@@ -1,0 +1,9 @@
+[2026-10-05 05:41:56] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-vision-tool-test-16723b (no git root found)
+[2026-10-05 05:41:56] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-vision-tool-test-16723b (MASC_BASE_PATH)
+[2026-10-05 05:41:56] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+[2026-10-05 05:41:56] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-vision-tool-test-1a4eb2 (no git root found)
+[2026-10-05 05:41:56] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-vision-tool-test-1a4eb2 (MASC_BASE_PATH)
+[2026-10-05 05:41:56] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 65536 to the output ceiling 32768 (declared capability override) for model vision-a: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 60000 to the output ceiling 49152 (declared capability override) for model vision-b: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+test_keeper_vision_tool: all assertions passed

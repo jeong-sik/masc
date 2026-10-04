@@ -939,6 +939,37 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
    | None -> fail "newer input disappeared")
 ;;
 
+let test_preflight_recovery_preserves_order_and_steer_intent () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let older, older_item = preflight_input () in
+  let newer, newer_item = preflight_input () in
+  let steer_item = {newer_item with Q.intent=Q.Steer_after_interrupt;
+    causal_parent_request_id=Some older_item.request.request_id; submission_seq=1} in
+  let steer = {newer with Tui_types.phase=Tui_types.Turn_preflight steer_item} in
+  Tui_types.retain_preflight_inputs state [steer];
+  check string "steer is not converted to a plain composer message" "" (Buffer.contents state.msg_input);
+  (match Q.waiting state.msg_queued with
+   | [restored] -> check bool "steer intent and causal parent retained" true
+       (restored.intent = Q.Steer_after_interrupt
+        && restored.causal_parent_request_id = Some older_item.request.request_id)
+   | _ -> fail "expected retained steer");
+  state.msg_queued <- Q.empty;
+  state.keeper_interactive_waiting <- [];
+  Buffer.add_string state.msg_input "newer draft";
+  (* Inflight owners are stored newest first; restore them in that order so
+     each earlier item precedes the items restored before it. *)
+  Tui_types.retain_preflight_inputs state [newer; older];
+  (match Q.waiting state.msg_queued with
+   | [first; second] ->
+       check string "oldest input remains first" older_item.request.request_id first.request.request_id;
+       check string "newer input remains second" newer_item.request.request_id second.request.request_id;
+       check bool "recall order agrees with submission order" true
+         (first.submission_seq < second.submission_seq)
+   | _ -> fail "expected both preflight inputs")
+;;
+
 let test_offscreen_preflight_recovery_retains_its_owner () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -4150,6 +4181,7 @@ let () =
     [ ( "status ownership",
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
+        ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
         ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal

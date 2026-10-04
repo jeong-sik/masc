@@ -7369,7 +7369,8 @@ let retain_preflight_inputs (state : state) entries =
              && String.equal row.me_request_id request.request_id
              && match row.me_role with Message_user _ -> true | _ -> false))
         state.msg_history;
-      if state.msg_target_keeper_name = Some request.keeper_name
+      if item.intent = Masc_tui_keeper_chat_queue.Next
+         && state.msg_target_keeper_name = Some request.keeper_name
          && Buffer.length state.msg_input = 0
          && state.msg_attachments = [] && state.msg_references = []
          && Option.is_none state.msg_recall_replaces
@@ -7384,7 +7385,7 @@ let retain_preflight_inputs (state : state) entries =
           (request.keeper_name, request.request_id, Retained_after_stop)
           :: List.filter (fun (_, id, _) -> id <> request.request_id)
             state.keeper_interactive_waiting
-      end) (List.rev entries)
+      end) entries
 ;;
 
 (* Authority withdrawal drops local request owners, not submitted server work. *)

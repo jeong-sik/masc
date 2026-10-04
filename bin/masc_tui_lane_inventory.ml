@@ -81,7 +81,7 @@ let detail_lines (row : row) =
          "Registration does not prove browser process health or an open session.";
          "Activity follows saved settings; executable and profile paths are installed at server startup."]
      | Machine_state _ -> ["Off refuses new execution and input; existing machine state and checkpoints are retained.";
-         "Dedicated activity controls are not available here; edit and save runtime.toml."]
+         "Select this machine in All Lanes and press Space for activity settings."]
      | Package_state {declaration;instances} ->
          (match declaration with
           | None -> []

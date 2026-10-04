@@ -1,0 +1,145 @@
+"""Native TUI machine settings keys against synthetic Runtime/inventory HTTP.
+
+Select MSX/DOS independently; draft navigation performs no writes. A preview
+failure, CAS conflict and ambiguous commit preserve intent. File settings and
+the server reading stay separate. Requires a separately built matching TUI;
+this fixture does not execute a real server or machine.
+"""
+import hashlib
+import json
+import os
+import re
+import sys
+import threading
+import tomllib
+
+import tui_keyboard_harness as h
+import tui_keyboard_keepers as lanes
+import tui_keyboard_runtime as runtime
+from test_tui_runtime_account_form_pty import commit_receipt
+
+RAW = runtime.RUNTIME_CONFIG_RAW_PATH
+PATH = '/workspace/config/runtime.toml'
+SOURCE = '# operator note\n[machines.msx]\nenabled = true\n[machines.dos]\nenabled = false\n'
+
+
+def revision(text):
+    return hashlib.sha256(b'runtime_config_source\x00' + text.encode()).hexdigest()
+
+
+class Server:
+    def __init__(self):
+        self.text = SOURCE
+        self.lock = threading.Lock()
+        self.previews = 0
+        self.saves = []
+        self.ambiguous = False
+        self.msx_observed = False
+
+    def raw(self, body):
+        with self.lock:
+            if not body:
+                return 200, {**runtime.runtime_config_read_metadata(), 'path': PATH,
+                             'source_text': self.text, 'source_revision': revision(self.text)}
+            request = json.loads(body)
+            self.saves.append(request)
+            if request['expected_source_revision'] != revision(self.text):
+                return 409, {'code': 'revision_conflict', 'error': 'file changed', 'current': {
+                    'source_path': PATH, 'source_text': self.text, 'source_revision': revision(self.text)}}
+            self.text = request['source_text']
+            self.msx_observed = tomllib.loads(self.text)['machines']['msx']['enabled']
+            if self.ambiguous:
+                self.ambiguous = False
+                return 503, {'error': 'fixture lost commit acknowledgement'}
+            return 200, commit_receipt(self.text)
+
+    def preview(self, _body):
+        with self.lock:
+            self.previews += 1
+            if self.previews == 1:
+                return 400, {'error': 'fixture preview refused'}
+        return 200, {'ok': True, 'can_save': True, 'validation': {'valid': True, 'issues': []}}
+
+    def inventory(self, _body):
+        with self.lock:
+            configured = tomllib.loads(self.text)['machines']
+            observed = self.msx_observed
+        status, value = lanes.lane_inventory_response()
+        for row in value['rows']:
+            if row['selection']['kind'] == 'machine':
+                machine = row['selection']['machine']
+                enabled = observed if machine == 'msx' else configured[machine]['enabled']
+                row['state']['activity'] = 'on' if enabled else 'off'
+        return status, value
+
+
+def select(process, fd, output, machine):
+    h.send_and_wait(process, fd, output, b'/machine/' + machine.encode(),
+                    re.compile(rb'\x1b\[7m[^\x1b\n]*' + machine.upper().encode()))
+    h.send_and_wait(process, fd, output, b'\x1b', b'j/k:move')
+
+
+def run(binary):
+    server = Server()
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[RAW] = h.RequestHttpResponse(server.raw)
+    fixtures[RAW + '/preview'] = h.RequestHttpResponse(server.preview)
+    fixtures[lanes.LANE_INVENTORY_PATH] = h.RequestHttpResponse(server.inventory)
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b'go keepers', b'MASC Keepers')
+        h.select_keeper_row(process, fd, output, b'alpha')
+        h.palette_go(process, fd, output, b'go lanes', b'All lanes')
+        select(process, fd, output, 'msx')
+        h.send_and_wait(process, fd, output, b' ', b'Current file: On')
+        h.drain_until_quiet(process, fd, output)
+        assert b'Server activity: Off' in h.screen_text(bytes(output))
+        h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
+        h.send_and_wait(process, fd, output, b'?', b'reapply activity')
+        h.send_and_wait(process, fd, output, b'\x1b', b'MASC Machine activity')
+        h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
+        h.send_and_wait(process, fd, output, b' ', b'Current file: On')
+        h.drain_until_quiet(process, fd, output)
+        assert b'Activity draft: Off' in h.screen_text(bytes(output))
+        assert not server.saves and server.previews == 0
+        h.send_and_wait(process, fd, output, b's', b'fixture preview refused')
+        assert not server.saves
+        with server.lock:
+            server.text += '\n[providers.extra]\nvalue = "keep"\n'
+        h.send_and_wait(process, fd, output, b's', b'File changed; draft retained')
+        h.send_and_wait(process, fd, output, b'u', b'Activity reapplied to current settings')
+        with server.lock:
+            server.ambiguous = True
+        h.send_and_wait(process, fd, output, b's', b'Current file: Off')
+        h.drain_until_quiet(process, fd, output)
+        with server.lock:
+            save_count = len(server.saves)
+            data = tomllib.loads(server.text)
+            assert data['machines'] == {'msx': {'enabled': False}, 'dos': {'enabled': False}}
+            assert data['providers']['extra']['value'] == 'keep'
+            assert '# operator note' in server.text
+        assert b'Activity draft: Off' in h.screen_text(bytes(output))
+        h.send_and_wait(process, fd, output, b's', b'File changed.')
+        assert len(server.saves) == save_count, 'uncertain write was retried automatically'
+        h.send_and_wait(process, fd, output, b'u', b'Activity reapplied to current settings')
+        h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
+        select(process, fd, output, 'dos')
+        h.send_and_wait(process, fd, output, b' ', b'Current file: Off')
+        h.send_and_wait(process, fd, output, b' ', b'Activity draft: On')
+        h.send_and_wait(process, fd, output, b's', b'Current file: On')
+        h.drain_until_quiet(process, fd, output)
+        assert b'Server activity: On' in h.screen_text(bytes(output))
+        with server.lock:
+            data = tomllib.loads(server.text)
+            assert data['machines'] == {'msx': {'enabled': False}, 'dos': {'enabled': True}}
+        h.send_and_wait(process, fd, output, b'q', b'All lanes')
+        os.write(fd, b'q')
+
+    h.run_terminal_scenario(binary, description='machine activity draft, conflict and ambiguous save',
+                            interact=interact, http_fixtures=fixtures,
+                            terminal_cols=120, terminal_rows=40)
+
+
+if __name__ == '__main__':
+    run(os.path.abspath(sys.argv[1]))
+    print('tui machine activity: PASS')

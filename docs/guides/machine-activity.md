@@ -1,7 +1,8 @@
 # MSX and DOS activity
 
-Set machine activity in the workspace's `runtime.toml` through the existing
-Runtime source editor and its preview/save flow:
+In TUI All Lanes, select MSX or DOS and press Space to open activity settings.
+Space edits the draft and **s** previews and saves it. The Runtime source editor
+also accepts these settings in the workspace's `runtime.toml`:
 
 ```toml
 [machines.msx]
@@ -40,6 +41,18 @@ means new machine work is disabled and a completed screen is still available.
 **Off + Running** can occur while previously accepted work finishes. Activity On
 does not imply a machine has been loaded. Unobserved does not mean Off.
 
-The inventory currently provides these readings in TUI and Web. Dedicated
-machine on/off editors remain a follow-up; use Runtime source editing for now.
-Package Add-ons have a separate [activity setting](lane-package-activity.md).
+In TUI **All Lanes**, select MSX or DOS and press **Space** to open activity
+settings. Enter still opens the spectator. Inside settings, Space changes only
+the draft and **s** previews and saves it against the original file revision.
+Esc returns to the list and keeps the draft. **r** reads both the current file
+and the machine's server activity again; those are displayed separately.
+
+A conflicting or uncertain save keeps the intended change. **u** reapplies
+only that activity to the displayed current file; **s** then saves explicitly.
+If the reread already contains the intended value, no further save is needed.
+**x** discards the draft without writing. A changed configuration-file path
+requires discarding the old draft before editing the new file. Existing inline
+or dotted machine declarations currently use the Runtime source editor.
+
+Web inventory provides activity readings; its dedicated machine editor remains
+a follow-up. Package Add-ons have a separate [activity setting](lane-package-activity.md).

@@ -1380,7 +1380,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1878,7 +1878,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle
@@ -2409,4 +2409,11 @@
  (wrapped false)
  (modules masc_tui_browser_activity)
  (libraries masc.browser_lane masc.browser_configuration masc.runtime_toml_namespace
+  otoml masc.toml_line_editor masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+
+(library
+ (name masc_tui_machine_activity)
+ (wrapped false)
+ (modules masc_tui_machine_activity)
+ (libraries masc masc.machine_configuration masc.runtime_toml_namespace
   otoml masc.toml_line_editor masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))

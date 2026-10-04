@@ -514,6 +514,31 @@ let skip_value ~opening rest =
     consume state rest)
 ;;
 
+let boolean_assignment ~key line =
+  match Otoml.Parser.from_string_result (String.trim line) with
+  | Ok (Otoml.TomlTable [(name, Otoml.TomlBoolean _)]) -> String.equal name key
+  | Ok _ | Error _ -> false
+;;
+
+let boolean_trailing_comment ~key opening =
+  (* A # in a quoted key is data. Only a prefix that the grammar reads as
+     the complete boolean assignment can end the value. *)
+  let rec comment from =
+    match String.index_from_opt opening from '#' with
+    | None -> if String.ends_with ~suffix:"\r" opening then "\r" else ""
+    | Some at when boolean_assignment ~key (String.sub opening 0 at) ->
+      let rec start index =
+        if index > 0 && (opening.[index - 1] = ' ' || opening.[index - 1] = '\t')
+        then start (index - 1)
+        else index
+      in
+      let index = start at in
+      String.sub opening index (String.length opening - index)
+    | Some at -> comment (at + 1)
+  in
+  comment 0
+;;
+
 let replace_or_append_value section_lines ~key ~value =
   let line = value_line ~key ~value in
   match find_structural_index (has_key ~key) section_lines with
@@ -522,7 +547,12 @@ let replace_or_append_value section_lines ~key ~value =
     let before, from_key = split_at index section_lines in
     (match from_key with
      | [] -> before @ [ line ]
-     | opening :: rest -> before @ (line :: skip_value ~opening rest))
+     | opening :: rest ->
+       let line = match value with
+         | Bool _ -> line ^ boolean_trailing_comment ~key opening
+         | String _ | Int _ | Float _ -> line
+       in
+       before @ (line :: skip_value ~opening rest))
 ;;
 
 let remove_key section_lines ~key =
@@ -568,28 +598,15 @@ let edit_root_bool content ~key ~value =
   let lines, trailing_newline = split_lines content in
   let root, rest = match find_structural_index is_table_header lines with
     | None -> lines, [] | Some index -> split_at index lines in
-  let boolean_line line = match Otoml.Parser.from_string_result (String.trim line) with
-    | Ok (Otoml.TomlTable [(name, Otoml.TomlBoolean _)]) -> String.equal name key
-    | Ok _ | Error _ -> false in
   let line = value_line ~key ~value:(Bool value) in
-  let root = match find_structural_index boolean_line root with
+  let root = match find_structural_index (boolean_assignment ~key) root with
     | None -> line :: root
     | Some index ->
         let before, found = split_at index root in
         match found with
         | [] -> line :: root
         | opening :: after ->
-            (* A # in a quoted key is data. Only a prefix that the grammar
-               reads as the complete boolean assignment can end the value. *)
-            let rec comment from = match String.index_from_opt opening from '#' with
-              | None -> if String.ends_with ~suffix:"\r" opening then "\r" else ""
-              | Some at when boolean_line (String.sub opening 0 at) ->
-                  let rec start index =
-                    if index > 0 && (opening.[index-1]=' ' || opening.[index-1]='\t')
-                    then start (index-1) else index in
-                  let index = start at in String.sub opening index (String.length opening-index)
-              | Some at -> comment (at+1) in
-            before @ ((line ^ comment 0) :: after) in
+            before @ ((line ^ boolean_trailing_comment ~key opening) :: after) in
   join_lines (root @ rest) ~trailing_newline
 ;;
 

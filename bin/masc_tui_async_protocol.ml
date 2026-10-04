@@ -453,6 +453,8 @@ type async_msg =
   | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
   | Browser_activity_read of Masc_tui_browser_activity.request * (Masc_tui_browser_activity.document, string) result
   | Browser_activity_saved of Masc_tui_browser_activity.request * Masc_tui_browser_activity.write_result
+  | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
+  | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
   | Runtime_config_view_loaded of
       (Masc_tui_runtime_config_view.reading, string) result
   | Runtime_params_loaded of

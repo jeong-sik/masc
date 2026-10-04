@@ -5,13 +5,13 @@ the footer names that package."""
 
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 

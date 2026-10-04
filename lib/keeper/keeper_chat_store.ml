@@ -682,7 +682,7 @@ let mint_message_id ~ts =
 let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
     ?execution_id ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
-    ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
+    ?audio ?blocks ?mentions ?(kind = Row_kind.Utterance) ?turn_ref
     ?stream_lifecycle ?approval_lifecycle ?provenance ()
     : string =
   let surface_field =
@@ -712,10 +712,12 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
       then Some (Keeper_chat_blocks.parse_text_to_blocks content)
       else None
   in
+  (* Some [] records the writer's explicit no-mention decision. None is used
+     only where this row has no mention metadata supplied by its writer. *)
   let mention_fields =
     match mentions with
-    | [] -> []
-    | ids ->
+    | None -> []
+    | Some ids ->
         [ ( "mentions",
             `List
               (List.map
@@ -1838,6 +1840,8 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     Log.Keeper.warn "keeper_chat_store: user append failed for %s: %s"
       (sanitize_name keeper_name) (Printexc.to_string exn)
 
+type mention_policy = Parse_mentions | Passive_context
+
 let append_user_message_once
       ~base_dir
       ~keeper_name
@@ -1849,6 +1853,7 @@ let append_user_message_once
       ?external_message_id
       ?workspace_id
       ?speaker
+      ?(mention_policy = Parse_mentions)
       ?(extra_mentions = [])
       ()
   =
@@ -1878,7 +1883,9 @@ let append_user_message_once
         ?external_message_id
         ?workspace_id
         ?speaker
-        ~mentions:(user_line_mentions ~extra_mentions content)
+        ~mentions:(match mention_policy with
+          | Parse_mentions -> user_line_mentions ~extra_mentions content
+          | Passive_context -> [])
         ~provenance
         ()
     in

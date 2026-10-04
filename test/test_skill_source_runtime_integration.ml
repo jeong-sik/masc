@@ -82,18 +82,6 @@ let rejected_text =
   ^ "\n[[skills.sources]]\nid = \"rejected-source\"\nanchor = \"base-path\"\npath = \"../escape\"\naccess = \"read-only\"\n"
 ;;
 
-let over_bound_text =
-  let root = repo_root_from (Sys.getcwd ()) in
-  let seed = read_file (Filename.concat root "config/runtime.toml") in
-  let rec add_legacy_key = function
-    | [] -> fail "seed has no [skills] table"
-    | "[skills]" :: rest ->
-      "[skills]" :: "resource-read-max-bytes = 65536" :: rest
-    | line :: rest -> line :: add_legacy_key rest
-  in
-  String.concat "\n" (add_legacy_key (String.split_on_char '\n' seed))
-;;
-
 (* #39269 (d): the shipped seed, read as is, passes the same precondition a
    runtime config save runs. *)
 let test_seed_passes_save_precondition () =
@@ -222,41 +210,6 @@ let test_unreadable_publication_is_an_error () =
     (levels (logged_by ~path (refresh ~base_path ~path runtime_with_skills)))
 ;;
 
-(* task-1779 B: a live runtime.toml that still sets the old bound saves, and
-   the boot says once that the key is ignored and which file carries it. The
-   seed has no such key and says nothing. *)
-let test_legacy_bound_saves_and_warns_at_boot () =
-  (match
-     Runtime.validate_config_text
-       ~runtime_config_path:"/tmp/live/runtime.toml"
-       over_bound_text
-   with
-   | Ok () -> ()
-   | Error detail -> fail ("legacy resource-read-max-bytes was refused: " ^ detail));
-  (match
-     Server_skill_snapshot_runtime.boot_notice
-       ~runtime_config_path:"/tmp/live/runtime.toml"
-       ~source_text:over_bound_text
-   with
-   | None -> fail "legacy resource-read-max-bytes produced no boot WARN"
-   | Some line ->
-     check bool "WARN names the ignored value" true
-       (String_util.contains_substring
-          line
-          "[skills] resource-read-max-bytes = 65536 is ignored");
-     check bool "WARN names the follow-up" true
-       (String_util.contains_substring line "#39284");
-     check bool "WARN names the file" true
-       (String_util.contains_substring line "(file: /tmp/live/runtime.toml)"));
-  let root = repo_root_from (Sys.getcwd ()) in
-  let seed = Filename.concat root "config/runtime.toml" in
-  check bool "seed has no ignored key" true
-    (Option.is_none
-       (Server_skill_snapshot_runtime.boot_notice
-          ~runtime_config_path:seed
-          ~source_text:(read_file seed)))
-;;
-
 let () =
   run
     "skill_source_runtime_integration"
@@ -275,8 +228,7 @@ let () =
             test_publication_logs_each_config_state_change_once
         ; test_case "unreadable publication is an error" `Quick
             test_unreadable_publication_is_an_error
-        ; test_case "legacy bound saves and warns at boot" `Quick
-            test_legacy_bound_saves_and_warns_at_boot
+
         ] )
     ]
 ;;

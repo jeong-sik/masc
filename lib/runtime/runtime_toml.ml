@@ -823,6 +823,21 @@ let parse_provider (id : string) (tbl : Otoml.t)
   match display_name_result, protocol_result, transport_result with
   | Error errors, _, _ | _, Error errors, _ | _, _, Error errors -> Error errors
   | Ok display_name, Ok (protocol, api_format), Ok transport ->
+    let request_path_result =
+      match typed_find "a string" path tbl "request-path" Otoml.get_string with
+      | Error _ as error -> error
+      | Ok None -> Ok None
+      | Ok (Some value) ->
+        let uri = Uri.of_string value in
+        (match transport with
+         | Http _ when value <> "" && value.[0] = '/'
+             && Uri.scheme uri = None && Uri.host uri = None
+             && Uri.query uri = [] && Uri.fragment uri = None
+             && not (String.exists (function '\000'..'\032' | '\127' -> true | _ -> false) value) ->
+           Ok (Some value)
+         | Http _ | Cli _ -> Error (error (path ^ ".request-path")
+             "request-path must be an HTTP endpoint-relative absolute path without query or fragment"))
+    in
     let account_home_result =
       match typed_find "a string" path tbl "account-home" Otoml.get_string with
       | Error errors -> Error errors
@@ -940,6 +955,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
         let* exact_body_timeout_s = exact_body_timeout_result in
         let* is_non_interactive = is_non_interactive_result in
         let* wire_kind = wire_kind_result in
+        let* request_path = request_path_result in
         let* account_home = account_home_result in
         let* usage_read = usage_read_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
@@ -950,6 +966,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; protocol
             ; api_format
             ; wire_kind
+            ; request_path
             ; transport
             ; is_non_interactive
             ; credentials
@@ -3032,6 +3049,7 @@ let typesafeai_keys =
   ; "absorb_gate"
   ; "context_review"
   ; "skill_applicability"
+  ; "librarian_preflight"
   ; "excluded_keepers"
   ]
 ;;
@@ -3223,6 +3241,10 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
+    let librarian_preflight =
+      typed_find_or "a boolean" path tbl "librarian_preflight" Otoml.get_boolean
+        ~default:d.librarian_preflight
+    in
     (match
        ( unknown
        , enabled
@@ -3232,6 +3254,7 @@ let parse_typesafeai (toml : Otoml.t)
        , absorb_gate
        , context_review
        , skill_applicability
+       , librarian_preflight
        , excluded_keepers )
      with
      | ( []
@@ -3242,6 +3265,7 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
+       , Ok librarian_preflight
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
@@ -3251,6 +3275,7 @@ let parse_typesafeai (toml : Otoml.t)
          ; absorb_gate
          ; context_review
          ; skill_applicability
+         ; librarian_preflight
          ; excluded_keepers
          }
      | _ ->
@@ -3263,6 +3288,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability
+          @ result_errors librarian_preflight
           @ result_errors excluded_keepers))
   | Some _ -> Error (error path "[typesafeai] must be a TOML table")
 ;;

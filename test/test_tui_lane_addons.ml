@@ -336,7 +336,7 @@ let guided_actions () =
   check bool "failed row keeps retry and cleanup visible with its long reason" true
     (List.exists (String.starts_with ~prefix:"> MSX · failed") failed_lines
      && List.exists (String.starts_with
-       ~prefix:"    Enter:open  o:retry observation  d:cleanup") failed_lines
+       ~prefix:"    Enter:open  o:retry observation  d:remove worker") failed_lines
      && List.mem "    D:full ·" failed_lines
      && List.exists (String.starts_with ~prefix:("    " ^ String.make 8 'x')) failed_lines);
   check int "long failure reason survives wrapping" 120
@@ -1085,7 +1085,7 @@ let empty_completed_results_keep_capability_identity_and_input_details () =
   let failed_lines = UI.lines ~width:180 (changed {judge with phase=UI.Row.Failed "model route unavailable"}) in
   check bool "failed Add-on exposes its actual cause and retry/cleanup controls" true
     (List.mem "Add-on failed: model route unavailable" failed_lines
-     && List.mem "o:retry observation  d:cleanup" failed_lines);
+     && List.mem "o:retry observation  d:remove TOML + worker" failed_lines);
   check bool "filtered view does not claim latest result was empty" true
     (List.mem "No result rows in this received view."
       (UI.lines ~width:180 (changed {judge with rows_count=2})))

@@ -208,7 +208,7 @@ describe('optional Lane Add-on surface', () => {
       expect.stringContaining('/workspace/.masc/config/lane-addons/broken.toml — Expected a closing quote'),
     ])
     expect(screen.getByText('observing')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Detach' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Remove TOML + worker' }) as HTMLButtonElement).disabled).toBe(false)
     expect(api.detachLaneAddon).not.toHaveBeenCalled()
 
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
@@ -258,7 +258,7 @@ describe('optional Lane Add-on surface', () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
     api.detachLaneAddon.mockResolvedValue({ phase: { kind: 'detaching' } })
     const screen = render(html`<${LaneAddonsPanel} />`)
-    const detach = await screen.findByRole('button', { name: 'Detach' })
+    const detach = await screen.findByRole('button', { name: 'Remove worker' })
     expect((screen.getByRole('button', { name: 'Observe' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(detach)
     await waitFor(() => expect(api.detachLaneAddon).toHaveBeenCalledWith('instance-1'))
@@ -391,7 +391,7 @@ describe('optional Lane Add-on surface', () => {
     expect(request).toEqual({ ...actionRequest, request_id: expect.any(String) })
     expect(request.request_id).toMatch(/^[0-9a-f-]{36}$/)
     expect((screen.getByRole('button', { name: 'Send new request' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Detach' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Remove worker' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
     await screen.findByText('Slice: partial')
     expect(api.fetchLaneAddonSlice).toHaveBeenCalledTimes(1)

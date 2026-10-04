@@ -830,7 +830,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
         @ ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json)) in
   let draft = match view.draft with
     | None -> []
-    | Some text -> [(if view.naming then "New TOML filename: " else ":") ^ text] in
+    | Some text -> [(if view.naming then "New TOML filename: " else "Add-on command: ") ^ text] in
   let document = match selected_document view with
     | None -> [] | Some session -> Document.summary session in
   List.concat_map wrap
@@ -866,13 +866,17 @@ let can_observe (instance : instance) = match instance.phase with
   | Row.Attached | Row.Observing | Row.Failed _ -> true
   | Row.Detaching | Row.Detached -> false
 
-let instance_controls (instance : instance) = match instance.phase with
+let instance_controls (instance : instance) =
+  let removal = match instance.source_path with
+    | Some _ -> "  d:remove TOML + worker"
+    | None -> "  d:remove worker" in
+  match instance.phase with
   | Row.Attached | Row.Observing ->
-      "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:remove"
+      "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
   | Row.Detaching -> "removal pending"
   | Row.Detached -> "retained history · D:details"
   | Row.Failed _ -> "o:retry observation" ^
-      (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:cleanup"
+      (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
 
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)
@@ -1112,13 +1116,16 @@ let help_lines = [
   "List: j/k select · Enter open · h history/current · i install · n new TOML";
   "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
   "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
-  "Actions: o observe/retry · d remove/cleanup · a advertised actions";
+  "Actions: o observe/retry · d remove TOML/worker · a advertised actions";
+  "TOML-managed removal deletes the matching declaration from disk and cleans up its owned worker.";
+  "Manual attachments remove only the worker and its owned resources.";
+  "Declarations now owned by another instance are preserved; observations and evidence remain.";
   "Actions: t check last request · D raw details · f flow";
   "Installation: E edit · s save · l reload · u/U revision";
   "Links: S subscriptions · Left/Right lane";
   "Records: Space mark row · e export marked rows";
   "Navigation: : command palette · Esc returns to Lane Add-ons";
-  "Advanced: A command (including act)";
+  "Advanced: A opens Add-on commands · Enter submits (including act or detach ID)";
 ]
 
 let detail_lines ~width view =

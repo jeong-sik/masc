@@ -171,6 +171,25 @@ let test_a_clipped_wide_name_keeps_its_scalars_whole () =
       check bool "the clip marker is there" true (marked 0)
   | _ -> Alcotest.fail "expected a header and one row"
 
+let test_narrow_layout_preserves_mandatory_values () =
+  let rows = T.parse sample in
+  check bool "narrow pane does not fit fixed table" false (T.fits ~width:30 rows);
+  let rendered = T.render ~width:40 ~pane:30 rows in
+  check bool "stacked output keeps max-tokens" true
+    (List.exists (fun line -> String.equal line "max-tokens 16384") rendered);
+  check bool "stacked lines fit pane" true
+    (List.for_all
+       (fun line -> Masc_tui_message_layout.display_width line <= 30)
+       rendered)
+
+let test_stacked_item_starts_are_monotonic () =
+  let rows = T.parse sample in
+  match T.stacked_item_starts ~pane:30 rows with
+  | [ first; second ] ->
+      check int "first item starts at zero" 0 first;
+      check bool "second item follows first" true (second > first)
+  | starts -> Alcotest.failf "expected two item starts, got %d" (List.length starts)
+
 let test_empty_input () =
   check
     string
@@ -241,6 +260,10 @@ let () =
             test_a_wide_name_is_padded_by_cells_not_bytes
         ; Alcotest.test_case "a clipped wide name keeps its scalars whole" `Quick
             test_a_clipped_wide_name_keeps_its_scalars_whole
+        ; Alcotest.test_case "narrow layout preserves mandatory values" `Quick
+            test_narrow_layout_preserves_mandatory_values
+        ; Alcotest.test_case "stacked item starts are monotonic" `Quick
+            test_stacked_item_starts_are_monotonic
         ; Alcotest.test_case "empty input" `Quick test_empty_input
         ; Alcotest.test_case
             "detail names owners and API override"

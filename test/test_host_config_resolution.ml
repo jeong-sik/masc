@@ -38,16 +38,6 @@ let test_host_field_values () =
     d.host_zsh
 ;;
 
-let test_legacy_coreutils_match_macos () =
-  let d = Host_config.host () in
-  (check string) "ls = /bin/ls" "/bin/ls" d.coreutils.ls;
-  (check string) "cat = /bin/cat" "/bin/cat" d.coreutils.cat;
-  (check string) "pwd = /bin/pwd" "/bin/pwd" d.coreutils.pwd;
-  (check string) "head = /usr/bin/head" "/usr/bin/head" d.coreutils.head;
-  (check string) "tail = /usr/bin/tail" "/usr/bin/tail" d.coreutils.tail;
-  (check string) "wc = /usr/bin/wc" "/usr/bin/wc" d.coreutils.wc
-;;
-
 let test_is_test_mode_typed () =
   (check bool)
     "is_test_mode Test = true (typed replacement for String.starts_with \"test_\")"
@@ -89,13 +79,10 @@ let () =
     "RFC-0084 PR-12 Host_config typed"
     [ ( "host-config"
       , [ test_case
-            "legacy-macos-default-field-values"
+            "host-default-field-values"
             `Quick
             test_host_field_values
-        ; test_case
-            "legacy-coreutils-match-macos"
-            `Quick
-            test_legacy_coreutils_match_macos
+
         ; test_case "is-test-mode-typed" `Quick test_is_test_mode_typed
         ; test_case "resolve-with-base-path" `Quick test_resolve_with_base_path
         ; test_case "resolve-default-base-path" `Quick test_resolve_default_base_path

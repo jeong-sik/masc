@@ -524,8 +524,7 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
       }
 
 (* What a row wears in its first cell. The category is the librarian
-   taxonomy, a closed sum the producer writes and the model's schema enum is
-   built from ([Keeper_memory_os_types.category]); the other two are this
+   label the producer writes ([Keeper_memory_os_types.category]); the other two are this
    pane's own words for rows that are not ordinary facts, and the call sites
    know which they are drawing, so they say so rather than handing over a
    string to be recognised. *)
@@ -558,7 +557,7 @@ let format_row_badge badge =
           | Memory_category.Code_change | Memory_category.Fact
           | Memory_category.Preference | Memory_category.Goal
           | Memory_category.Constraint | Memory_category.Validated_approach
-          | Memory_category.Lesson ->
+          | Memory_category.Lesson | Memory_category.Custom _ ->
               Theme.recede ()
         in
         ( style
@@ -567,7 +566,12 @@ let format_row_badge badge =
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
-      Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
+      match badge with
+      | Badge_category (Memory_category.Custom _) ->
+          Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
+          ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
+      | Badge_category _ | Badge_source | Badge_dropped ->
+          Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
   let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
@@ -1273,13 +1277,18 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   in
   (detail_lines, height, overflowing, scroll)
 
+let memory_facts_pane_cols cols =
+  if cols >= Masc_tui_roster_pane.threshold_cols then
+    cols - Masc_tui_roster_pane.pane_cols - Message_layout.display_width " │ "
+  else cols
+
 let memory_facts_content_height ~cols ~budget ~cursor state =
   let _, height, _, _ =
-    memory_facts_layout ~cols ~budget ~cursor state (memory_fact_rows state)
+    memory_facts_layout ~cols:(memory_facts_pane_cols cols) ~budget ~cursor state (memory_fact_rows state)
   in
   height
 
-let render_memory_facts_body ~cols ~budget (state : state)
+let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~(push_selected : string -> unit)
@@ -1332,7 +1341,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
           facts_stats_row ~ordinary:ordinary_count ~source:source_count
             ~dropped:dropped_count ~sort_label
         in
-        let all_categories = memory_fact_categories state in
+        let all_categories = if show_category_strip then memory_fact_categories state else [] in
         (* Through [tab_strip], the one drawing every in-screen strip shares,
            the way the Themes filter draws its chips: the key that walks the
            entries first, then the entries with the one being read marked.
@@ -1351,7 +1360,8 @@ let render_memory_facts_body ~cols ~budget (state : state)
         in
         let keys = "  c/C:category  " in
         let pills =
-          Ansi.dim ^ keys ^ Ansi.reset
+          if not show_category_strip then "  c/C:category · Enter:fact detail"
+          else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after:"")
               ~press:(fun filt text ->
@@ -1463,3 +1473,91 @@ let render_memory_facts_body ~cols ~budget (state : state)
    | lines ->
        push_divider ();
        List.iter push lines)
+
+let render_memory_facts_body ~cols ~budget (state : state)
+    ~push ~push_styled ~push_selected ~push_divider ~push_empty =
+  if cols < Masc_tui_roster_pane.threshold_cols then
+    render_memory_facts_body_single ~cols ~budget state
+      ~push ~push_styled ~push_selected ~push_divider ~push_empty
+  else begin
+    let width = Masc_tui_roster_pane.pane_cols in
+    let fact_cols = memory_facts_pane_cols cols in
+    let facts = ref [] in
+    let collect text = facts := text :: !facts in
+    render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
+      ~push:collect
+      ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
+      ~push_selected:(fun text -> collect (Theme.selection ^ text ^ Ansi.reset))
+      ~push_divider:(fun () -> collect (String.make fact_cols '-'))
+      ~push_empty:(fun () -> collect "");
+    let count category =
+      match memory_facts_snapshot state with
+      | None -> None
+      | Some snapshot ->
+        let ordinary = match snapshot.mfs_ordinary with
+          | Memory_store_present store -> Some store.mos_facts
+          | Memory_store_absent -> Some [] | Memory_store_read_error _ -> None in
+        let source = match snapshot.mfs_source with
+          | Memory_store_present store -> Some (List.length store.mss_facts, List.length store.mss_invalidations)
+          | Memory_store_absent -> Some (0,0) | Memory_store_read_error _ -> None in
+        match category, ordinary, source with
+        | Category_ordinary cat, Some facts, _ ->
+          Some (List.length (List.filter (fun (fact : memory_fact) -> fact.mf_category = cat) facts))
+        | Category_source, _, Some (count, _) | Category_dropped, _, Some (_, count) -> Some count
+        | Category_all, Some facts, Some (source, dropped) -> Some (List.length facts + source + dropped)
+        | _ -> None
+    in
+    let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
+    let height = max 0 (budget - List.length header) in
+    let categories = Category_all :: memory_fact_categories state in
+    let selected =
+      categories |> List.find_mapi (fun index category ->
+        if category = state.memory_facts_category then Some index else None)
+      |> Option.value ~default:0 in
+    let category_scroll = Masc_tui_scroll.ensure_visible ~cursor:selected ~height:(max 1 height) 0 in
+    let entries =
+      categories
+      |> List.filteri (fun index _ -> index >= category_scroll && index < category_scroll + height)
+      |> List.concat_map (fun category ->
+        let count = match count category with None -> "?" | Some count -> string_of_int count in
+        let suffix = " (" ^ count ^ ")" in
+        (* Category names are validated ASCII. Bound bytes before wrapping:
+           the selected label gets the rail height; other previews get one row.
+           Enter's fact detail retains the complete category value. *)
+        let rows = if category = state.memory_facts_category then max 1 height else 1 in
+        let room = max 1 (rows * (width - 2) - String.length suffix) in
+        let name = memory_category_filter_label category in
+        let name = if String.length name <= room then name
+          else String.sub name 0 (room - 1) ^ "…" in
+        Message_layout.wrap_words ~max_cells:(width - 2) (Terminal_text.single_line (name ^ suffix))
+        |> List.map (fun text -> category, text)) in
+    let selected_indices =
+      entries
+      |> List.mapi (fun index (category, _) -> index, category)
+      |> List.filter (fun (_, category) -> category = state.memory_facts_category)
+      |> List.map fst in
+    let start_row, end_row = match selected_indices with
+      | [] -> 0, 0
+      | first :: _ -> first, List.hd (List.rev selected_indices) in
+    let span = end_row - start_row + 1 in
+    let scroll =
+      if span <= height then
+        let s = Masc_tui_scroll.ensure_visible ~cursor:end_row ~height:(max 1 height) 0 in
+        Masc_tui_scroll.ensure_visible ~cursor:start_row ~height:(max 1 height) s
+      else
+        start_row
+    in
+    let rail = header @
+      (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
+       |> List.map (fun (category, text) ->
+           let text = fit_width ("  " ^ text) width in
+           let style = if category = state.memory_facts_category then Theme.selection else Theme.recede () in
+           Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
+    let facts = List.rev !facts in
+    let height = max (List.length facts) (min budget (List.length rail)) in
+    for index = 0 to height - 1 do
+      let row lines = Option.value (List.nth_opt lines index) ~default:"" in
+      push (fit_width (row rail) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
+        ^ fit_width (row facts) fact_cols)
+    done
+  end

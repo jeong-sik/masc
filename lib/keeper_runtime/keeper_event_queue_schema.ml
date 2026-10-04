@@ -13,9 +13,8 @@
 
    Rule: a generation change edits exactly the constants below in the same
    commit as the shape change, and references the incident pattern in the
-   commit message. test/keeper_event_queue/test_schema_generation_pins.ml
-   pins these values a second time so an accidental edit needs two
-   conscious changes, not one. *)
+   commit message. The decoder rejects foreign generations at the wire
+   boundary; tests exercise that rejection without copying these markers. *)
 
 let state = "keeper.event_queue.state.v19"
 

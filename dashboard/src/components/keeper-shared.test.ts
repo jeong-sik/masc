@@ -52,6 +52,7 @@ vi.mock('../keeper-state', async () => {
 
   return {
     keeperActionErrors: signal({}),
+    keeperChatHistoryErrors: signal({}),
     keeperHydrating: signal({}),
     // keeper-actions is mocked here, so no history hydration ever settles:
     // treat the first hydration as settled to exercise the rendered thread.
@@ -123,7 +124,7 @@ vi.mock('./common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-state'
+import { keeperChatHistoryErrors, keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-state'
 import { keeperStatusDetails } from '../keeper-state'
 import {
   cancelActiveKeeperThreadMessage,
@@ -219,6 +220,7 @@ describe('KeeperConversationPanel', () => {
     keeperHydrating.value = {}
     keeperStatusDetails.value = {}
     keeperActionErrors.value = {}
+    keeperChatHistoryErrors.value = {}
     keeperStreamStartedAt.value = {}
     shellAuthSummary.value = null
     mockedToolsData.value = null
@@ -241,6 +243,18 @@ describe('KeeperConversationPanel', () => {
     container.remove()
     resetToolCallOutputs()
     vi.unstubAllGlobals()
+  })
+
+  it('dismisses action and history errors independently', async () => {
+    keeperActionErrors.value = { sangsu: 'Action failed' }
+    keeperChatHistoryErrors.value = { sangsu: 'History failed' }
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`, container)
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Action failed')
+    fireEvent.click(container.querySelector('[aria-label="에러 메시지 닫기"]')!)
+    await waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain('History failed'))
+    expect(keeperChatHistoryErrors.value.sangsu).toBe('History failed')
+    fireEvent.click(container.querySelector('[aria-label="에러 메시지 닫기"]')!)
+    await waitFor(() => expect(container.querySelector('[role="alert"]')).toBeNull())
   })
 
   it('renders a chat-first shell and removes the old KPI header cards', async () => {

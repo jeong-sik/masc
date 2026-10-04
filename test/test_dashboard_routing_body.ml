@@ -195,7 +195,7 @@ let () =
               expect_error "unknown-action"
                 ~message:
                   "unknown lane action: renombrar (expected set, create, remove, \
-                   rename, append, drop or move)"
+                   rename, append, drop, move or replace)"
                 {|{"lane":"runpod_mtp.qwen","action":"renombrar","runtime_ids":[]}|})
         ; Alcotest.test_case "append adds one slot to an exact lane" `Quick
             (fun () ->
@@ -236,7 +236,7 @@ let () =
         ; Alcotest.test_case "move refuses a direction it cannot read" `Quick
             (fun () ->
               expect_error "move-sideways"
-                ~message:"unknown direction: sideways (expected up or down)"
+                ~message:"unknown direction: sideways (expected up, down or first)"
                 {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"sideways"}|};
               expect_error "move-no-direction"
                 ~message:"direction required"

@@ -119,23 +119,32 @@ let write_keeper (config : Workspace.config) name =
   Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "")
 ;;
 
-let enable_candle (config : Workspace.config) =
+let enable_candle ?(medium_criteria = "Connected feature") (config : Workspace.config) =
   let path =
     inside config (Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path)
   in
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|half_life = "off"
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc (Printf.sprintf {|half_life = "off"
 [payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "%s"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 2000
 medium = 3000
 large = 4000
 epic = 5000
-|})
+|} medium_criteria))
 ;;
 
 (* A Goal whose pass the operator confirmed. It was created 2026-09-20, and the
@@ -284,6 +293,30 @@ let test_a_payout_with_a_keeper_to_pay_gets_candidates_and_keeps_waiting () =
 
 (* A start for the base path that already runs, and a start for another base
    path while one runs, are refused. The refused base path's payout waits. *)
+let test_policy_edit_releases_a_rejected_owner () =
+  with_workspace @@ fun env config ->
+  enable_candle config;
+  write_backlog config [make_task ~id:"task-policy" (done_by "keeper-a" "2026-09-25T00:00:00Z")];
+  write_keeper config "keeper-a";
+  seed_payout config ~goal_id:"goal-policy" ~linked_task_ids:["task-policy"];
+  let calls = ref 0 in
+  let reject ~identity:_ _ =
+    incr calls;
+    Error (Candle_appraisal.Invalid_response "fixture rejects the captured policy") in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~appraise:reject ~sw ~config ();
+    await_within env "first rejected appraisal" (fun () -> !calls = 1 && Candle_payout_worker.For_testing.idle ());
+    Candle_payout_worker.pulse ();
+    await_within env "unchanged policy pulse" Candle_payout_worker.For_testing.idle;
+    check int "unchanged policy does not release rejection" 1 !calls;
+    enable_candle ~medium_criteria:"Revised connected feature" config;
+    Candle_payout_worker.pulse ();
+    await_within env "policy edit retries the original obligation" (fun () -> !calls = 2 && Candle_payout_worker.For_testing.idle ());
+    Candle_payout_worker.pulse ();
+    await_within env "second unchanged policy pulse" Candle_payout_worker.For_testing.idle;
+    check int "rejected retry does not become a pulse loop" 2 !calls)
+;;
+
 let test_a_start_while_a_worker_runs_is_refused () =
   with_workspace
   @@ fun env config ->
@@ -384,6 +417,7 @@ let () =
             "a payout with a keeper to pay gets candidates and keeps waiting"
             `Quick
             test_a_payout_with_a_keeper_to_pay_gets_candidates_and_keeps_waiting
+        ; test_case "policy edit releases rejected payout owner" `Quick test_policy_edit_releases_a_rejected_owner
         ; test_case "a start while a worker runs is refused" `Quick test_a_start_while_a_worker_runs_is_refused
         ; test_case
             "a worker can start again once its switch has ended"

@@ -91,7 +91,7 @@ let run ~repo_root ~output_dir ~head_sha =
             let read flow = Eio.Buf_read.(of_flow ~max_size:4194304 flow |> take_all) in
             let stdout,stderr = Eio.Fiber.pair (fun () -> read stdout_r) (fun () -> read stderr_r) in
             match Eio.Process.await child with
-            | `Exited 0 -> stdout
+            | `Exited 0 -> Ok stdout
             | `Exited code -> failwith (Printf.sprintf "qualification control %s exited %d: %s"
                 (List.hd arguments) code (String.trim stderr))
             | `Signaled signal -> failwith (Printf.sprintf "qualification control %s received signal %d: %s"

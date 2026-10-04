@@ -551,9 +551,9 @@ let test_board_write_routes_reject_foreign_workspace () =
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   with_board_store ~base_path @@ fun () ->
   let expected root = `Assoc
-      [ "base_path", `String (Unix.realpath config.Workspace.base_path)
+      [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
       ; "masc_root", `String root ] in
-  let current = expected (Unix.realpath (Workspace.masc_root_dir config)) in
+  let current = expected (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
   let post path workspace fields =
     dispatch_json ~router ~token ~path ~extra_headers:[]
       ~body:(Yojson.Safe.to_string (`Assoc (("expected_workspace", workspace) :: fields))) () in

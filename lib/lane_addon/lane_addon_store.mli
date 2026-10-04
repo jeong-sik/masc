@@ -113,10 +113,10 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
-  val load_sampling_request_bounded :
+  val iter_sampling_requests :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
-    budget:read_budget -> t -> instance_id:string -> request_id:string ->
-    (Yojson.Safe.t option, bounded_read_error) result
+    t -> instance_id:string -> max_bytes:int ->
+    f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
   val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
   val load_sampling_request_bounded :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

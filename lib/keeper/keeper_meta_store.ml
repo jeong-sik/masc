@@ -699,7 +699,7 @@ let read_meta_presence config name : (meta_presence, string) result =
 let read_meta config name : (Keeper_meta_contract.keeper_meta option, string) result =
   let requested_name = String.trim name in
   let path = keeper_meta_path config requested_name in
-  if keeper_debug
+  if Env_config.KeeperRuntime.debug ()
   then
     Log.Keeper.debug
       "read_meta name=%s path=%s exists=%b"

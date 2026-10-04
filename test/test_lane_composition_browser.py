@@ -9,6 +9,177 @@ import tomllib
 from playwright.sync_api import sync_playwright, expect
 
 
+def check_composition_import_races(page, output, checks):
+    """Delay real File.text reads while driving the file input and editor UI."""
+    page.evaluate("""() => {
+        const text = File.prototype.text, pending = new Map();
+        File.prototype.text = function () {
+            return new Promise((resolve, reject) => {
+                pending.set(this.name, {file: this, resolve, reject});
+            });
+        };
+        globalThis.finishCompositionRead = async (name, fail) => {
+            const read = pending.get(name);
+            if (!read) throw Error('File.text was not called for ' + name);
+            pending.delete(name);
+            if (fail) read.reject(Error('fixture read failure'));
+            else read.resolve(await text.call(read.file));
+            // The application's await continuation runs before this resumes.
+            await Promise.resolve();
+        };
+    }""")
+
+    def exported(name):
+        with page.expect_download() as saved:
+            page.locator("#export").click()
+        path = output / ("import-race-" + name + ".json")
+        saved.value.save_as(path)
+        return json.loads(path.read_text())
+
+    original = exported("original")
+
+    def fixture(name):
+        graph = json.loads(json.dumps(original))
+        graph["title"] = "Import fixture " + name
+        graph["nodes"][0]["name"] = "Source " + name
+        graph["nodes"][0].update(snapshot_path="/fixture/" + name + ".json",
+                                  snapshot_source_id="source-" + name)
+        graph["installation_settings"] = {
+            "run_id": "run-" + name, "analysis_id": "analysis-" + name,
+            "compute_manifest": "/fixture/fusion-compute/lane.toml",
+            "report_manifest": "/fixture/fusion-report/lane.toml", "prompt": "Question " + name}
+        for node in graph["nodes"]:
+            if "installation" in node:
+                node["installation"].update(model_route="fixture." + name,
+                                            instructions="Review " + name, max_tokens=512)
+        return graph
+
+    a, b = fixture("a"), fixture("b")
+
+    def start(name, graph):
+        page.locator("#import-file").set_input_files({
+            "name": name, "mimeType": "application/json",
+            "buffer": json.dumps(graph, ensure_ascii=False).encode()})
+
+    def finish(name, fail=False):
+        page.evaluate("([name, fail]) => finishCompositionRead(name, fail)", [name, fail])
+
+    def unchanged(name, expected, download=False):
+        # Use the actual download for the overwrite regression; observe the live
+        # editor state elsewhere so Chromium does not throttle burst downloads.
+        actual = exported(name) if download else page.evaluate("JSON.parse(JSON.stringify(graph))")
+        (output / ("import-race-" + name + ".json")).write_text(
+            json.dumps(actual, ensure_ascii=False, indent=2) + "\n")
+        assert actual == expected, (f"{name}: expected {expected['title']} / "
+                                    f"{expected['installation_settings']['run_id']}, got "
+                                    f"{actual['title']} / {actual['installation_settings']['run_id']}")
+        expect(page.locator("#graph-title")).to_have_text(expected["title"])
+        expect(page.get_by_label("실행 이름", exact=True)).to_have_value(expected["installation_settings"]["run_id"])
+
+    def undo_to_original():
+        page.locator("#undo").click()
+        unchanged("after-undo", original)
+        expect(page.locator("#undo")).to_be_disabled()
+
+    start("a.json", a)
+    start("b.json", b)
+    finish("b.json")
+    unchanged("b-before-a", b)
+    status = page.locator("#status").text_content()
+    finish("a.json")
+    page.screenshot(path=str(output / "import-race-latest-file.png"), full_page=True)
+    actual_status = page.locator("#status").text_content()
+    unchanged("b-after-a", b, download=True)
+    assert actual_status == status
+    page.locator("#declaration-preview").click()
+    declarations = [tomllib.loads(text) for text in page.locator("#declaration-files pre").all_text_contents()]
+    assert len(declarations) == 4
+    assert all(item["run_id"] == "run-b" for item in declarations)
+    undo_to_original()
+    checks.append("deferred A/B imports: B finishes first; late A cannot replace graph/settings/TOMLs or add Undo history")
+
+    start("a.json", a)
+    start("b.json", b)
+    finish("a.json")
+    unchanged("a-while-b-pending", original)
+    finish("b.json")
+    unchanged("b-after-pending", b)
+    undo_to_original()
+    checks.append("deferred A/B imports: A finishes first after B selection; only B is applied")
+
+    page.get_by_text("설치 선언에 사용할 공통 설정", exact=True).click()
+
+    def edit_run():
+        field = page.get_by_label("실행 이름", exact=True)
+        field.fill("edited-run")
+        field.press("Tab")
+
+    start("a.json", a)
+    field = page.get_by_label("실행 이름", exact=True)
+    field.fill("still-typing")
+    finish("a.json")
+    expect(field).to_have_value("still-typing")
+    field.press("Tab")
+    expected = json.loads(json.dumps(original))
+    expected["installation_settings"]["run_id"] = "still-typing"
+    unchanged("typing-before-blur", expected)
+    undo_to_original()
+    checks.append("typing in an installation setting cancels pending import before blur commits the edit")
+
+    for action in ("edit", "template", "undo"):
+        if action == "undo":
+            edit_run()
+        start("a.json", a)
+        if action == "edit":
+            edit_run()
+        elif action == "template":
+            page.locator("#template").select_option("empty")
+            page.locator("#load-template").click()
+        else:
+            page.locator("#undo").click()
+        expected = page.evaluate("JSON.parse(JSON.stringify(graph))")
+        status = page.locator("#status").text_content()
+        finish("a.json")
+        expect(page.locator("#status")).to_have_text(status)
+        unchanged("late-file-after-" + action, expected)
+        if action != "undo":
+            undo_to_original()
+        else:
+            assert expected == original
+            expect(page.locator("#undo")).to_be_disabled()
+        checks.append("deferred import cannot overwrite subsequent " + action + " or change its Undo history")
+
+    for fail in (False, True):
+        start("stale-invalid.json", {})
+        start("b.json", b)
+        finish("b.json")
+        status = page.locator("#status").text_content()
+        finish("stale-invalid.json", fail=fail)
+        expect(page.locator("#status")).to_have_text(status)
+        expect(page.locator("#status")).not_to_have_class("status error")
+        unchanged("stale-error-" + str(fail), b)
+        undo_to_original()
+    for fail in (False, True):
+        start("a.json", a)
+        start("current-invalid.json", {})
+        finish("current-invalid.json", fail=fail)
+        expect(page.locator("#status")).to_contain_text("불러오기 실패")
+        status = page.locator("#status").text_content()
+        finish("a.json")
+        expect(page.locator("#status")).to_have_text(status)
+        unchanged("failed-newest-import-" + str(fail), original)
+        expect(page.locator("#undo")).to_be_disabled()
+    checks.append("stale validation/read errors stay silent; failed newest import preserves graph and cancels older read")
+    start("a.json", a)
+    page.locator(".node[data-kind=source]").click()
+    finish("a.json")
+    unchanged("node-selection-during-read", a)
+    undo_to_original()
+    checks.append("inspecting a node without editing still allows the current import to finish")
+    # Remove the File.text fixture and reset editor history for the other checks.
+    page.reload()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", required=True)
@@ -19,17 +190,19 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     files = [root / "docs/design/lane-addons-composer.html",
              root / "docs/design/lane-composition-export.js",
-             root / "addons/fusion-report/server.py"]
+             root / "addons/fusion-report/server.py",
+             Path(__file__).resolve()]
     summary = {"scope": "real Chromium local HTML and Python package MCP stdio fixtures; no MASC server or live provider execution",
                "source_sha256": {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in files},
-               "masc_server_execution": False, "package_stdio_fixture": True,
+               "masc_server_execution": False, "package_stdio_fixture": False,
                "live_provider": False, "broadcast": False,
                "checks": [], "status": "running"}
     errors = []
     try:
         with sync_playwright() as driver:
             browser = driver.chromium.launch(headless=True, executable_path=args.browser_executable)
+            summary["browser"] = browser.version
             try:
                 context = browser.new_context(viewport={"width": 1600, "height": 1100}, accept_downloads=True)
                 context.route("**/*", lambda route: route.continue_() if route.request.url.startswith(("file:", "blob:", "data:")) else route.abort())
@@ -37,6 +210,7 @@ def main():
                 page.set_default_timeout(10000)
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.goto(files[0].as_uri())
+                check_composition_import_races(page, output, summary["checks"])
                 expect(page.locator(".node[data-kind=panel]")).to_have_count(2)
                 expect(page.locator(".layer")).to_have_count(6)
                 page.get_by_role("button", name="설치 TOML 미리보기", exact=True).click()
@@ -102,18 +276,17 @@ def main():
                 # rather than constructing a fake DOM result for this check.
                 sys.path.insert(0, str(root / "addons/tests"))
                 from test_fusion_report import call, computation_output, upstream, reports, contexts
-                computed = computation_output(role="judge")
+                untrusted = '<img src=x onerror="globalThis.reportInjected=true">'
+                computed = computation_output(role="judge", text="Retained Judge comparison\n" + untrusted)
                 fields = computed["rows"][0]["fields"]
                 fields["computation"]["analysis_id"] = "browser-analysis"
                 computed["rows"][0]["subject_id"] = "browser-analysis"
-                untrusted = '<img src=x onerror="globalThis.reportInjected=true">'
-                fields["computation"]["text"] = "Retained Judge comparison\n" + untrusted
-                fields["sampling_response"]["content"]["text"] = fields["computation"]["text"]
                 fields["input_complete"] = False
                 fields["input_coverage"][0].update(complete=False, detail="Panel B evidence is missing")
                 supplied = upstream(computed, installation_id="judge", instance_id="fixture-judge", sequence=7)
                 supplied["observations"][0]["producer"]["run_id"] = "browser-fixture"
                 report = call("fusion-report", [supplied])
+                summary["package_stdio_fixture"] = True
                 assert not report["isError"]
                 report_path = output / "received-report.json"
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -244,7 +417,6 @@ def main():
                 page.screenshot(path=str(output / "mobile.png"), full_page=True)
                 summary["checks"].append("390px document has no horizontal overflow")
                 assert not errors, errors
-                summary["browser"] = browser.version
                 summary["status"] = "passed"
             finally:
                 browser.close()

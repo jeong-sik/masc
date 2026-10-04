@@ -81,7 +81,7 @@ class Host:
 
 
 def call(host, inputs, settings=None, *, sampling=True, ping=False,
-         command=None, command_env=None, transport_timeout=None):
+         command=None, command_env=None, transport_timeout: float | None = 10.0):
     settings = copy.deepcopy(settings if settings is not None else binding())
     if not settings.get("sources"):
         declared = []
@@ -96,11 +96,16 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
                 declared.append({"source_id": item["source_id"], "kind": "snapshot_file",
                                  "path": "/fixture/" + item["source_id"] + ".json"})
         settings["sources"] = declared
-    process = subprocess.Popen(command if command is not None else
-                               [sys.executable, str(ADDONS / "fusion-compute" / "server.py")],
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True,
-                               env=command_env if command is not None else {})
+    stderr = tempfile.TemporaryFile(mode="w+t")
+    try:
+        process = subprocess.Popen(command if command is not None else
+                                   [sys.executable, str(ADDONS / "fusion-compute" / "server.py")],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=stderr, text=True,
+                                   env=command_env if command is not None else {})
+    except OSError:
+        stderr.close()
+        raise
     timed_out = threading.Event()
     def expire_transport():
         if process.poll() is None:
@@ -114,7 +119,7 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
         timer = threading.Timer(transport_timeout, expire_transport)
         timer.daemon = True
         timer.start()
-    stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
+    stdin, stdout = process.stdin, process.stdout
     try:
         assert stdin is not None and stdout is not None and stderr is not None
         def send(message):
@@ -125,6 +130,7 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
             if timed_out.is_set():
                 raise TimeoutError("Fixture worker transport deadline exceeded")
             if not line:
+                stderr.seek(0)
                 raise AssertionError("worker closed stdout: " + stderr.read())
             host.last_reply_bytes = len(line.encode("utf-8"))
             if host.last_reply_bytes > MAXIMUM_FRAME:
@@ -154,6 +160,7 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
         stdin.close()
         process.wait(timeout=10)
         assert process.returncode == 0
+        stderr.seek(0)
         assert stderr.read() == ""
         return message["result"]
     finally:
@@ -319,6 +326,24 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                     configured["temperature"] = temperature
                     self.assertFalse(call(host, [source()], configured)["isError"])
                     self.assertEqual(host.calls[0]["params"]["temperature"], temperature)
+
+    def test_decoder_limits_in_host_terminal_keep_next_ping_available(self):
+        class DecoderLimitHost(Host):
+            def answer(self, request):
+                reply = super().answer(request)
+                reply["error"]["message"] = self.text
+                return reply
+
+        terminals = (
+            "[" * 10000 + "0" + "]" * 10000,
+            "9" * (sys.int_info.default_max_str_digits + 1),
+        )
+        for terminal in terminals:
+            with self.subTest(terminal_length=len(terminal)), tempfile.TemporaryDirectory() as root:
+                host = DecoderLimitHost(root, status="host_error", text=terminal)
+                result = call(host, [source()], ping=True)
+                self.assertTrue(result["isError"])
+                self.assertEqual(len(host.calls), 1)
 
     def test_oversized_terminal_sampling_reply_is_rejected_before_outcome_copy(self):
         class OversizedHost(Host):

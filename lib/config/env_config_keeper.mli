@@ -66,7 +66,7 @@ module KeeperMetrics : sig
   val max_file_bytes : unit -> int
   val max_rotated_files_min : int
   val max_rotated_files : unit -> int
-  (** At least one backup; zero is rejected by the TOML schema. *)
+  (** Zero discards old versions at rotation; positive values retain backups. *)
 end
 
 (** {1 Keeper wire capture} *)

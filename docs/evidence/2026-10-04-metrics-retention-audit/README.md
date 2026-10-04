@@ -1,6 +1,11 @@
 # Metrics retention after boot configuration (K1-retention)
 
-Base: `deeef1dbf7ea16c1ed0759f7eefa34e182647215` (PR #41062).
+Base: `2b230357cb72586fe0c20d5a07490a43cb93ecab` (current main at review freeze).
+
+The earlier source review used base PR #41062. This PR was rebased onto main
+after #41047 merged there: that repair temporarily enforced a minimum of one
+backup. This change now implements zero retention and consistently changes the
+shared reader/schema minimum to zero; negative TOML retention stays invalid.
 
 Zero backup retention previously still created `.1`; decreasing retention left
 higher-numbered backups indefinitely. Rotation now enumerates only canonical
@@ -23,11 +28,13 @@ unlink as refusing directories. This change does not implement logrotate itself.
 
 ## Validation
 
-Five changed OCaml files pass parser-only checks; git diff --check passes.
+Eight changed OCaml files pass parser-only checks; git diff --check passes.
 Twelve metrics scenarios are authored for both Stdlib and Eio filesystem paths
 (24 cases): existing size/append behavior, zero retention, decreased retention,
 unrelated filenames, live/dangling symlink targets, directory collision errors,
-directory shifting, and disabled rotation. Environment and filesystem globals are restored.
+directory shifting, and disabled rotation. Environment and filesystem globals are restored. A separate TOML-loader case
+checks applied/effective zero retention and actual file rotation. The existing
+boot range test now rejects negative retention and accepts environment zero.
 
 The authored native tests have not been executed. No typecheck, Dune, CI,
 production-directory mutation, deployed behavior or crash-atomicity claim.

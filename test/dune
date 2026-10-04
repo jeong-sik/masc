@@ -8120,6 +8120,12 @@
  (libraries alcotest masc masc_test_deps yojson unix fs_compat))
 
 (test
+ (name test_lane_addon_application)
+ (modules test_lane_addon_application)
+ (flags :standard -open Masc)
+ (libraries alcotest masc yojson))
+
+(test
  (name test_lane_addon_config)
  (modules test_lane_addon_config)
  ; The shipped DOS chain manifests and their checked-in declarations are read

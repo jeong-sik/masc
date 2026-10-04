@@ -89,12 +89,14 @@ sources = [{kind = "msx_capture", source_id = "machine"}]
 |};
   let reordered = unwrap (Config.load_file ~path) in
   check string "semantic revision ignores comments and field order" initial.revision reordered.revision;
+  check bool "source revision tracks exact edited bytes" true (initial.source_revision <> reordered.source_revision);
   let renamed = Filename.concat directory "renamed.toml" in
   Sys.rename path renamed;
   let snapshot = Config.load ~directory in
   let found = only_declaration snapshot in
   check string "renaming retains stable identity" initial.id found.id;
   check string "renaming does not change semantic revision" initial.revision found.revision;
+  check string "renaming preserves the exact bytes revision" reordered.source_revision found.source_revision;
   check (list string) "discovery tracks the renamed source" [renamed] snapshot.paths;
   check string "applied source path can be updated" renamed found.source_path)
 
@@ -121,7 +123,7 @@ let reject_invalid_values () = with_directory (fun _root packages directory ->
   ignore (install_package packages);
   let path = Filename.concat directory "frames.toml" in
   List.iter (fun (label, bytes) -> write path bytes; check_error label path)
-    ["unknown top-level field", declaration ~extra:"enabled = true" msx_binding;
+    ["unknown top-level field", declaration ~extra:"unexpected = true" msx_binding;
      "duplicate declaration identity key", "id = \"duplicate\"\n" ^ declaration msx_binding;
      "duplicate declaration binding key", declaration (msx_binding ^ "sources=[]\n");
      "missing binding", declaration "";

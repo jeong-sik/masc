@@ -118,6 +118,15 @@ type cost_read_diagnostics =
 type cost_read_result =
   (cost_read_diagnostics, Dated_jsonl.read_error) result
 
+type decision_read_error =
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+
+type read_error =
+  | Decisions_unavailable of decision_read_error
+  | Costs_unavailable of Dated_jsonl.read_error
+
 type aggregate =
   { window_minutes : int
   ; bucket_minutes : int
@@ -127,6 +136,8 @@ type aggregate =
   ; latency_buckets : latency_bucket list
   ; cost_read : cost_read_result
   }
+
+val read_error_to_string : read_error -> string
 
 type raw_entry =
   { model : string
@@ -165,6 +176,7 @@ type raw_entry =
 
 type parse_error =
   | Not_assoc
+  | Invalid_ts_unix
   | Missing_ts_unix
   | Out_of_window
   | No_telemetry_object

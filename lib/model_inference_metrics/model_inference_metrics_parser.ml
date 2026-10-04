@@ -96,11 +96,19 @@ let required_bool_field fields key error =
 
 (* ── decisions.jsonl parser ─────────────────────────────── *)
 
+(* Ask the platform conversion instead of guessing a time_t range. Invalid
+   stored epochs must not reach either bucket arithmetic or UI date formatting. *)
+let renderable_timestamp ts =
+  Float.is_finite ts &&
+  try ignore (Unix.gmtime ts); true with
+  | Unix.Unix_error _ | Invalid_argument _ -> false
+
 let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
   : (raw_entry, parse_error) result
   =
   match Safe_ops.json_float_opt "ts_unix" json with
   | None -> Error Missing_ts_unix
+  | Some ts when not (renderable_timestamp ts) -> Error Invalid_ts_unix
   | Some ts when ts < since_unix -> Error Out_of_window
   | Some ts ->
     (match json with
@@ -358,6 +366,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
   =
   match Cost_ledger.of_json json with
   | Error error -> Error (Invalid_current_cost_row error)
+  | Ok row when not (renderable_timestamp row.ts_unix) -> Error Invalid_ts_unix
   | Ok row when row.ts_unix < since_unix -> Error Out_of_window
   | Ok row ->
     let fields =

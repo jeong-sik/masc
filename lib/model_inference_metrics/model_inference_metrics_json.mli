@@ -6,7 +6,8 @@ val to_json : aggregate -> Yojson.Safe.t
 val render_keeper_prompt_feedback : aggregate -> string
 (** Redacted planning feedback. Pricing and billing fields are excluded. *)
 val compute_cost_latency_json :
-  base_path:string -> window_minutes:int -> Yojson.Safe.t
+  base_path:string -> window_minutes:int -> (Yojson.Safe.t, read_error) result
+(** Decision read failures propagate to the cache; partial samples are not published. *)
 
 (** Operator-only runtime history. Groups by the exact executed runtime from
     decision records; unpaired cost observations and records without an answerer

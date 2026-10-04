@@ -102,5 +102,6 @@ let metadata_keeper_name observed_basename =
   classify_basename observed_basename
   |> List.find_map (function
     | Keeper { keeper_name; artifact = Metadata; rotation = None } -> Some keeper_name
-    | Keeper _ -> None)
+    | Keeper { artifact = Metadata; rotation = Some _; _ }
+    | Keeper { artifact = Decision_log | Feedback_log | Tla_trace_log; _ } -> None)
 ;;

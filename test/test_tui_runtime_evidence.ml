@@ -57,12 +57,44 @@ let decision_store_failure () =
     let lines = Evidence.lines snapshot ~runtime_id:"one" in
     check bool "decision read failure remains visible" true (contains (value "Runtime history" lines) expected);
     check bool "an unread file never claims no attributed samples" false (List.mem_assoc "Runtime samples" lines);
-    check bool "an unread file never claims no recent success" false (List.mem_assoc "Last success" lines))
+    check bool "an unread file never claims no recent success" false (List.mem_assoc "Last non-error turn" lines))
     [["cause", `String "directory_unavailable"], "directory could not be read";
      ["cause", `String "files_unreadable"; "unreadable_files", `Int 2], "2 decision log files could not be read";
      ["cause", `String "rows_invalid"; "malformed_rows", `Int 1; "schema_violation_rows", `Int 2],
        "1 malformed and 2 schema-invalid decision rows"]
+let replace_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> fail "expected object fixture"
+let map_field key f json = replace_field key (f (Yojson.Safe.Util.member key json)) json
+let recent_outcomes () =
+  List.iter (fun (outcome, label) ->
+    let runtime = row "one" ~cached:cache |> map_field "recent_entries" (function
+      | `List entries -> `List (List.map (replace_field "outcome" (`String outcome)) entries)
+      | _ -> fail "expected recent entries") in
+    let lines = Evidence.lines (read (payload [runtime])) ~runtime_id:"one" in
+    check bool "non-error outcome is shown without claiming completion" true
+      (contains (value "Last non-error turn" lines) label);
+    check bool "recent entry retains its outcome" true
+      (contains (value "Recent non-error turn" lines) label))
+    ["success", "completed"; "checkpoint", "checkpoint"; "input_required", "input required"];
+  let bad = row "one" ~cached:cache |> map_field "recent_entries" (function
+    | `List entries -> `List (List.map (replace_field "outcome" (`String "error")) entries)
+    | _ -> fail "expected recent entries") in
+  check bool "error is not accepted as a recent non-error turn" true
+    (Result.is_error (Evidence.decode (payload [bad])))
+let invalid_dates () =
+  let baseline = payload [row "one" ~cached:cache] in
+  let bad_recent = row "one" ~cached:cache |> map_field "recent_entries" (function
+    | `List entries -> `List (List.map (replace_field "ts_unix" (`Float 1e300)) entries)
+    | _ -> fail "expected recent entries") in
+  List.iter (fun json ->
+    check bool "platform-unrenderable dates fail before rendering" true
+      (Result.is_error (Evidence.decode json)))
+    [payload [bad_recent]; baseline |> map_field "history" (replace_field "observed_at" (`Float 1e300))]
+
 let () = run "TUI runtime evidence" ["operator reading", [
+  test_case "checkpoint and input-required outcomes retain their meaning" `Quick recent_outcomes;
+  test_case "unrenderable timestamps fail decoding" `Quick invalid_dates;
   test_case "attribution, missing evidence and specification" `Quick attributed_view;
   test_case "failed cold snapshot" `Quick cold_failure;
   test_case "unavailable decision store is never empty activity" `Quick decision_store_failure;

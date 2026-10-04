@@ -44,7 +44,9 @@ uncropped live captures remain private and are not included here.
 ## Evidence
 
 - `checks.json`: scope, count, source/binary identity, executor and limitations.
-- `live-readback.json`: sanitized last live census.
+- `live-readback.json`: sanitized post-repair source comparison.
+- `final-live-census.json`: final live recheck before submission (89 runtimes,
+  six Codex bindings, two account scopes).
 - `installed-tui.json`: identity of the installed TUI used for live captures.
 - `live-runtime-catalog.txt`, `live-usage.txt`: text replay of the old installed
   binary's real PTY, cropped to the main pane. These are not images of the new UI.

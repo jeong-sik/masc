@@ -226,7 +226,55 @@ let h2_operator_route () = with_fixture (fun env sw config root _directory ->
   check bool "H2 read leaves package manager unconstructed" false (Addon.inventory ~config).owner_present;
   check bool "H2 read leaves workspace bytes unchanged" true (before=files root))
 
+let retained_binding config id incarnation configuration =
+  let masc = Workspace.masc_dir config in
+  if not (Sys.file_exists masc) then Unix.mkdir masc 0o700;
+  let store = Lane_addon_store.create ~root:(Filename.concat masc "lane-addons") in
+  let json = `Assoc ["instance_id",`String id;"incarnation",`String incarnation;"run_id",`String "world";
+    "addon_id",`String "observer";"title",`String "Retained observer";"revision",`String "1";
+    "phase",Lane_addon_types.phase_to_json (Failed "cleanup incomplete");"configuration",configuration;
+    "visibility",`Assoc ["kind",`String "shared"];
+    "source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated] in
+  match Lane_addon_store.save_binding store ~instance_id:id json with Ok () -> () | Error e -> fail e
+
+let invalid_config_root () = with_fixture (fun _ _ config root directory ->
+  let owned = Filename.concat directory "owned.toml" in
+  retained_binding config "managed" "managed"
+    (`Assoc ["id",`String "owned";"source_path",`String owned;"revision",`String "r1"]);
+  let not_directory = Filename.concat root "ordinary-file" in write not_directory "not a directory";
+  List.iter (fun invalid -> with_env "MASC_CONFIG_DIR" invalid (fun () ->
+    let observation = Inventory.snapshot ~config |> Inventory.to_json in
+    let reading = member "package_read" observation in
+    check bool "invalid explicit root is incomplete" false (member "complete" reading |> Yojson.Safe.Util.to_bool);
+    check bool "resolver warning is visible" true (values "issues" reading <> []);
+    let row = List.find (fun row -> member "source_path" (member "selection" row)=`String owned) (values "rows" observation) in
+    check string "retained owner is unobserved, not absent" "unobserved"
+      (text "kind" (member "declaration" (member "state" row)))))
+    [Filename.concat root "missing-explicit-root";not_directory])
+
+let mismatched_retained_incarnation () = with_fixture (fun _ _ config _ _ ->
+  retained_binding config "good" "good" `Null;
+  retained_binding config "bad" "another-incarnation" `Null;
+  let observed = Addon.inventory ~config in
+  check (list string) "valid sibling survives corrupt identity" ["good"]
+    (List.map (fun (i : Addon.inventory_instance) -> i.instance_id) observed.instances);
+  check bool "bad record is reported" true (observed.issues <> []);
+  check bool "bad record makes retained inventory partial" false observed.complete)
+
+let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root directory ->
+  let source_path = Filename.concat directory ".toml" in
+  write source_path (declaration (package root) "suffix-only");
+  let observed = Inventory.snapshot ~config |> Inventory.to_json in
+  check bool "loader exposes suffix-only direct child" true
+    (List.exists (fun row -> member "source_path" (member "selection" row)=`String source_path) (values "rows" observed));
+  match Lane_addon_declaration.read ~directory ~source_path with
+  | Ok document -> check string "same enumerated source can be opened" ".toml" document.file_name
+  | Error e -> fail e.message)
+
 let () = run "operator lane inventory" ["read boundaries",[
+  test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;
+  test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;
+  test_case "suffix-only declaration stays editable" `Quick suffix_only_declaration_is_editable;
   test_case "all builtin and invalid/duplicate declarations before reconcile" `Quick before_reconcile;
   test_case "retained manual/managed owners survive partial metadata" `Quick retained_metadata;
   test_case "confirmed cleanup leaves history without crowding active inventory" `Quick detached_history;

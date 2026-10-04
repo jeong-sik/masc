@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  181 passed (181)
+   Start at  04:22:54
+   Duration  6.64s (tests 45%, import 23%, transform 18%, environment 7%, setup 5%)
+
+    Isolate  3 workers spawned · ~255ms startup each (spawn + environment, per file)
+             at least ~510ms faster with isolate: false — reuses workers across files instead of one per file
+

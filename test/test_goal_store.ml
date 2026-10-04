@@ -78,7 +78,7 @@ let test_delete_goal_bumps_version () =
   with_workspace @@ fun config ->
   let g = make_goal "g-1" "to delete" in
   Goal_store.write_state config
-    { pending_events = []; version = 10; updated_at = iso_now (); goals = [g] };
+    { pending_events = []; pending_notifications = []; version = 10; updated_at = iso_now (); goals = [g] };
   let v_before = (available config).version in
   check int "initial version" 10 v_before;
   (match Goal_store.delete_goal config ~goal_id:"g-1" with
@@ -94,7 +94,7 @@ let test_multiple_deletes_each_bump () =
   let goals = List.init 3 (fun i ->
     make_goal (Printf.sprintf "g-%d" i) (Printf.sprintf "goal %d" i)) in
   Goal_store.write_state config
-    { pending_events = []; version = 5; updated_at = iso_now (); goals };
+    { pending_events = []; pending_notifications = []; version = 5; updated_at = iso_now (); goals };
   let v0 = (available config).version in
   List.iter (fun i ->
     let _ = Goal_store.delete_goal config
@@ -108,7 +108,7 @@ let test_delete_nonexistent_does_not_bump () =
   with_workspace @@ fun config ->
   let g = make_goal "exists" "one goal" in
   Goal_store.write_state config
-    { pending_events = []; version = 42; updated_at = iso_now (); goals = [g] };
+    { pending_events = []; pending_notifications = []; version = 42; updated_at = iso_now (); goals = [g] };
   let v_before = (available config).version in
   (match Goal_store.delete_goal config ~goal_id:"ghost" with
    | Error (Goal_store.Unknown_goal _) -> ()
@@ -123,7 +123,7 @@ let test_updated_at_also_refreshed () =
   let g = make_goal "g-1" "x" in
   let stale_ts = "2020-01-01T00:00:00Z" in
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = stale_ts; goals = [g] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = stale_ts; goals = [g] };
   let _ = Goal_store.delete_goal config ~goal_id:"g-1" in
   let after = available config in
   check bool "updated_at refreshed" true (after.updated_at <> stale_ts)
@@ -135,7 +135,7 @@ let test_delete_goal_prunes_goal_task_links () =
   let preserved = make_goal "g-2" "preserved goal" in
   Goal_store.write_state
     config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ deleted; preserved ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ deleted; preserved ] };
   Workspace_goal_index.write_goal_task_links
     config
     [ "g-1", [ "task-a"; "task-b" ]; "g-2", [ "task-c" ] ];
@@ -162,7 +162,7 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
   @@ fun config ->
   let deleted = make_goal "g-1" "deleted goal" in
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ deleted ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ deleted ] };
   Workspace_goal_index.write_goal_task_links config [ "g-1", [ "task-a" ] ];
   let links_path = Workspace_goal_index.goal_task_links_path config in
   Sys.remove links_path;
@@ -281,7 +281,7 @@ let test_other_unknown_goal_field_still_fails () =
   with_workspace @@ fun config ->
   let goal = make_goal "unknown-field" "unknown field fails" in
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   add_goal_field config "unexpected_assignment" (`String "still-closed");
   (match unavailable config with
    | { reason = Goal_store.Schema_rejected { field; _ };
@@ -305,7 +305,7 @@ let test_undecodable_store_read_error_names_path () =
   with_workspace @@ fun config ->
   let goal = make_goal "read-error" "read error names the store path" in
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   add_goal_field config "unexpected_assignment" (`String "still-closed");
   match Goal_store.list_goals_result config () with
   | Ok _ -> fail "undecodable store listed goals"
@@ -448,7 +448,7 @@ let test_update_missing_goal_does_not_bump () =
   with_workspace @@ fun config ->
   let goal = make_goal "exists" "one goal" in
   Goal_store.write_state config
-    { pending_events = []; version = 9; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; pending_notifications = []; version = 9; updated_at = iso_now (); goals = [ goal ] };
   let before = available config in
   (match
      Goal_store.update_goal_if_phase config ~goal_id:"ghost"
@@ -465,7 +465,7 @@ let test_update_goal_if_phase_refuses_stale_phase () =
   with_workspace @@ fun config ->
   let goal = make_goal "cas" "concurrent transition refusal" in
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   let before = available config in
   (* A concurrent transition lands first: the goal leaves Executing. *)
   (match
@@ -513,7 +513,7 @@ let test_write_state_sanitizes_invalid_utf8_before_persisting () =
     }
   in
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   let raw = Fs_compat.load_file (Goal_store.goals_path config) in
   check bool "raw file has no original invalid byte" false
     (String.contains raw '\255');
@@ -535,7 +535,7 @@ let test_write_state_result_keeps_primary_commit_when_recovery_write_fails () =
   with_workspace @@ fun config ->
   Unix.mkdir (goals_recovery_path config) 0o755;
   let goal = make_goal "recovery-mirror-fail" "recovery mirror fail" in
-  let state = { Goal_store.pending_events = []; version = 3; updated_at = iso_now (); goals = [ goal ] } in
+  let state = { Goal_store.pending_events = []; pending_notifications = []; version = 3; updated_at = iso_now (); goals = [ goal ] } in
   (match Goal_store.write_state_result config state with
    | Ok () -> ()
    | Error msg ->
@@ -559,7 +559,7 @@ let test_criterion_edits_invalidate_proof_phase () =
   check bool "creation has revision" true (original.criterion_revision <> "");
   let completed = { original with phase = Goal_phase.Completed;
     last_review_note = Some "proved"; last_review_at = Some (iso_now ()) } in
-  Goal_store.write_state config { pending_events = []; version = 1; updated_at = iso_now (); goals = [completed] };
+  Goal_store.write_state config { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [completed] };
   let same = upsert_exn config ~id:original.id ~title:original.title ~metric:"p99"
       ~target_value:"400ms" ~priority:1 ~due_date:"2026-09-23" () in
   check string "priority, due date and no-op criterion preserve revision" original.criterion_revision same.criterion_revision;
@@ -573,11 +573,11 @@ let test_criterion_edits_invalidate_proof_phase () =
   check bool "ABA cannot restore old proof identity" false
     (Goal_store.criterion_equal (Goal_store.criterion_of_goal original) (Goal_store.criterion_of_goal restored));
   let verifying = { restored with phase = Goal_phase.Verifying } in
-  Goal_store.write_state config { pending_events = []; version = 4; updated_at = iso_now (); goals = [verifying] };
+  Goal_store.write_state config { pending_events = []; pending_notifications = []; version = 4; updated_at = iso_now (); goals = [verifying] };
   let renamed = upsert_exn config ~id:original.id ~title:"Another measurement" () in
   check bool "title edit supersedes active review" true (renamed.phase = Goal_phase.Executing);
   let dropped = { renamed with phase = Goal_phase.Dropped } in
-  Goal_store.write_state config { pending_events = []; version = 6; updated_at = iso_now (); goals = [dropped] };
+  Goal_store.write_state config { pending_events = []; pending_notifications = []; version = 6; updated_at = iso_now (); goals = [dropped] };
   let updated = upsert_exn config ~id:original.id ~metric:"p95" () in
   check bool "criterion edit does not reopen dropped Goal" true (updated.phase = Goal_phase.Dropped)
 
@@ -799,7 +799,7 @@ let test_source_missing_after_init () =
   with_workspace @@ fun config ->
   let stamp = "2026-09-08T16:20:13Z" in
   Goal_store.write_state config
-    { pending_events = []; version = 7; updated_at = stamp; goals = [ make_goal "g-1" "survivor" ] };
+    { pending_events = []; pending_notifications = []; version = 7; updated_at = stamp; goals = [ make_goal "g-1" "survivor" ] };
   Sys.remove (Goal_store.goals_path config);
   (match unavailable config with
    | { file; reason = Goal_store.Missing_after_init;
@@ -852,7 +852,7 @@ let test_source_unreadable_eacces () =
   end;
   with_workspace @@ fun config ->
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ make_goal "g-1" "locked out" ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ make_goal "g-1" "locked out" ] };
   let path = Goal_store.goals_path config in
   Unix.chmod path 0o000;
   Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) (fun () ->
@@ -866,7 +866,7 @@ let test_source_unreadable_eacces () =
 let test_source_available_never_consults_the_mirror () =
   with_workspace @@ fun config ->
   Goal_store.write_state config
-    { pending_events = []; version = 2; updated_at = iso_now ();
+    { pending_events = []; pending_notifications = []; version = 2; updated_at = iso_now ();
       goals = [ make_goal "g-1" "first"; make_goal "g-2" "second" ] };
   write_raw (mirror_path config) "{broken";
   let state = available config in
@@ -896,7 +896,7 @@ let test_mirror_four_states_are_evidence () =
   Unix.rmdir mirror;
   let stamp = "2026-09-09T00:10:29Z" in
   Goal_store.write_state config
-    { pending_events = []; version = 3; updated_at = stamp; goals = phase_fixture_goals () };
+    { pending_events = []; pending_notifications = []; version = 3; updated_at = stamp; goals = phase_fixture_goals () };
   write_raw primary "{broken";
   expect "decodes" (function
     | Goal_store.Mirror_decodes { goal_count = 5; updated_at } -> String.equal updated_at stamp
@@ -973,7 +973,7 @@ let test_writers_refuse_unavailable_and_keep_bytes () =
 let test_find_goal_three_arms () =
   with_workspace @@ fun config ->
   Goal_store.write_state config
-    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ make_goal "known" "found" ] };
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ make_goal "known" "found" ] };
   (match Goal_store.find_goal config ~goal_id:"known" with
    | Goal_store.Goal_found goal -> check string "found the row" "found" goal.title
    | Goal_store.Goal_absent -> fail "known id read as absent"

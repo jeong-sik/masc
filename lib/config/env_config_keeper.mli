@@ -63,10 +63,15 @@ module KeeperSpawn : sig
 end
 
 module KeeperMetrics : sig
+  (** Rotation settings for auxiliary Keeper JSONL logs written through
+      [Keeper_types_support.append_jsonl_line], not the date-sharded metrics store. *)
   val max_file_bytes : unit -> int
   val max_rotated_files_min : int
   val max_rotated_files : unit -> int
-  (** At least one backup; zero is rejected by the TOML schema. *)
+  (** Zero discards old versions at rotation; positive values retain backups. *)
+  val store_max_bytes : unit -> int
+  (** Per-Keeper date-sharded turn/heartbeat metric byte target. Zero keeps all
+      records. Captured when the store is opened; reload requires restart. *)
 end
 
 (** {1 Keeper wire capture} *)

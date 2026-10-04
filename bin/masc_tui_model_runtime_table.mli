@@ -1,17 +1,6 @@
-(** One row per model binding in runtime.toml, for the pane that answers
-    "which knobs are actually set on this model".
-
-    The knobs live in different tables. [reasoning-effort] and [temperature]
-    are read from [\[models.NAME\]] and [max-tokens] from [\[PROVIDER.NAME\]]
-    (runtime_toml.ml:1102 and the binding parser respectively). Reading the
-    file top to bottom hides that split across hundreds of lines, so an
-    operator adding a knob copies whichever sibling they happened to scroll
-    past. This table puts all three columns beside the model name.
-
-    Absence is a value here, not a blank: a binding with no effort sends no
-    [reasoning_effort] field, and Ollama then turns thinking on by itself
-    (docs.ollama.com/api/openai-compatibility). {!row} keeps [None] so the
-    renderer can say so. *)
+(** Account/model settings projected from the same typed TOML parser as the
+    runtime. Shared model sets expand to one row per account binding; quoted
+    paths and comments follow TOML syntax rather than line heuristics. *)
 
 type row =
   { model : string
@@ -20,11 +9,15 @@ type row =
   ; api_name : string option  (** [api-name] when the binding renames the model. *)
   ; reasoning_effort : string option  (** From [\[models.NAME\]]. *)
   ; temperature : string option
-        (** From [\[models.NAME\]], preserving the source spelling. *)
+        (** From [\[models.NAME\]], using a round-trip-safe float representation;
+            unchanged form values preserve the original source spelling. *)
+  ; context : (string * int) option
+        (** Declared context precedence: binding, provider, model; absent requires catalog resolution. *)
+  ; model_context : int option (** Original shared model declaration, before overrides. *)
   ; max_tokens : int option  (** From [\[PROVIDER.NAME\]]. *)
   }
 
-val parse : string list -> row list
+val parse : string list -> (row list, string) result
 (** [parse lines] reads the runtime.toml source the TUI already fetches for
     the raw config pane. Rows come back sorted by provider then model.
 
@@ -60,3 +53,6 @@ val detail_lines : row -> string list
 (** Selected-binding explanation for the Models pane. It names the effective
     API model and the exact TOML sections that own each knob. A model name that
     is not a bare TOML key is quoted in the section path. *)
+
+val find_runtime : runtime_id:string -> row list -> (int * row) option
+(** Exact account/binding lookup for Runtime and Lane settings. *)

@@ -4,6 +4,6 @@
  (libraries masc masc.keeper_runtime unix))
 
 (test
- (name test_schema_generation_pins)
- (modules test_schema_generation_pins)
+ (name test_schema_boundary)
+ (modules test_schema_boundary)
  (libraries masc masc.keeper_runtime))

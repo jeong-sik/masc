@@ -38,6 +38,7 @@ import type {
 import {
   activeKeeperName,
   keeperActionErrors,
+  keeperChatHistoryErrors,
   keeperChatHistoryHydration,
   keeperHydrating,
   keeperProbing,
@@ -361,15 +362,20 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
 // the merge are the fresher copy, and re-merging mid-session would
 // race the in-flight stream entries.
 const hydratedChatKeepers = new Set<string>()
-
+// Forced refreshes may overlap. Only the latest request may merge history
+// or settle this keeper's hydration state.
+const chatHistoryHydrationRequests = new Map<string, object>()
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
+  chatHistoryHydrationRequests.clear()
+  keeperChatHistoryErrors.value = {}
   keeperChatHistoryHydration.value = {}
 }
 
-async function fetchAndMergeKeeperChatHistory(keeperName: string): Promise<void> {
+async function fetchAndMergeKeeperChatHistory(keeperName: string, request: object): Promise<void> {
   const history = await fetchKeeperChatHistory(keeperName)
+  if (chatHistoryHydrationRequests.get(keeperName) !== request) return
   if (history.length > 0) {
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
   }
@@ -388,16 +394,21 @@ export async function hydrateKeeperChatHistory(
   const keeperName = name.trim()
   if (!keeperName) return
   if (!options.force && hydratedChatKeepers.has(keeperName)) return
+  const request = {}
+  chatHistoryHydrationRequests.set(keeperName, request)
   hydratedChatKeepers.add(keeperName)
   setRecordValue(keeperHydrating, keeperName, true)
   try {
-    await fetchAndMergeKeeperChatHistory(keeperName)
+    await fetchAndMergeKeeperChatHistory(keeperName, request)
+    if (chatHistoryHydrationRequests.get(keeperName) !== request) return
     // Tool outputs are stored on a separate durable endpoint. Hydrate even
     // when chat history is empty so a keeper panel can still join recently
     // fetched tool rows from the rail/inspector.
     void hydrateKeeperToolOutputs(keeperName)
     setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
+    setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
+    if (chatHistoryHydrationRequests.get(keeperName) !== request) return
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
     // A failed first hydration is settled, not pending: the error banner
@@ -408,9 +419,13 @@ export async function hydrateKeeperChatHistory(
     }
     const message = err instanceof Error ? err.message : `Failed to load chat history for ${keeperName}`
     console.warn(`[keeper] chat history hydration failed for ${keeperName}:`, message)
-    setRecordValue(keeperActionErrors, keeperName, `이전 대화 불러오기 실패: ${message}`)
+    const historyError = `이전 대화 불러오기 실패: ${message}`
+    setRecordValue(keeperChatHistoryErrors, keeperName, historyError)
   } finally {
-    setRecordValue(keeperHydrating, keeperName, false)
+    if (chatHistoryHydrationRequests.get(keeperName) === request) {
+      chatHistoryHydrationRequests.delete(keeperName)
+      setRecordValue(keeperHydrating, keeperName, false)
+    }
   }
 }
 

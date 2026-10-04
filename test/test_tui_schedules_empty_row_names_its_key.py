@@ -1,7 +1,9 @@
 """An empty Schedules list says which key fills it."""
 import os
 import sys
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_schedule as _keyboard_schedule
 
 
 
@@ -14,20 +16,20 @@ CREATE = b"n"
 
 
 def empty_row(rows: dict[int, bytes]) -> bytes:
-    index = h.screen_row_of(rows, EMPTY)
+    index = _keyboard_harness.screen_row_of(rows, EMPTY)
     if index < 0:
         raise AssertionError("Schedules drew no empty row")
     return rows[index].rstrip()
 
 
 def run(executable: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     # A workspace with no schedules at all: the state this row exists for.
-    fixtures[h.SCHEDULES_PATH] = (
+    fixtures[_keyboard_schedule.SCHEDULES_PATH] = (
         200,
         {
             "status": "ok",
-            "schedule_runner": h.SCHEDULE_RUNNER_OK,
+            "schedule_runner": _keyboard_schedule.SCHEDULE_RUNNER_OK,
             "schedule_store_read_error": None,
             "request_count": 0,
             "truncated": False,
@@ -37,11 +39,11 @@ def run(executable: str) -> None:
     )
 
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
-        h.palette_go(process, fd, output, b"go schedules", b"MASC Keepers / Schedules")
-        drawn = h.resize_and_wait(process, fd, output, rows=24, columns=110,
-                                  needle=EMPTY, controls=(h.FULL_REDRAW,))
-        row = empty_row(h.screen_rows(drawn))
+        _keyboard_harness.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        _keyboard_harness.palette_go(process, fd, output, b"go schedules", b"MASC Keepers / Schedules")
+        drawn = _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=110,
+                                  needle=EMPTY, controls=(_keyboard_harness.FULL_REDRAW,))
+        row = empty_row(_keyboard_harness.screen_rows(drawn))
         # Still says what it says: the list is empty, not unread and not
         # failed. Those are other rows with other words.
         if EMPTY not in row:
@@ -50,10 +52,10 @@ def run(executable: str) -> None:
         if CREATE not in tail:
             raise AssertionError(
                 f"the empty row does not say which key fills the list: {row!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC ")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC ")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
                             description="empty Schedules list",
                             interact=interact, http_fixtures=fixtures)
 

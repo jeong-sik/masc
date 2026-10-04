@@ -9,7 +9,7 @@ import subprocess
 import sys
 from typing import cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 

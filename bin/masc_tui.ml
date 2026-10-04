@@ -3547,7 +3547,13 @@ let keeper_item_revision state keeper_name =
   | Keeper_control.Present runtime -> runtime.kr_candle_account_revision
   | Unobserved | Invalid _ | Absent -> Error "Keeper account revision is not observed in the current roster"
 
-let launch_keeper_items state ~mailbox keeper_name =
+let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_name =
+  let observed_account =
+    match state.item_account with
+    | Some (name, _) as account when keep_observed_account
+        && String.equal name keeper_name -> account
+    | _ -> None
+  in
   withdraw_keeper_items state;
   match state.workspace_identity, state.server_identity with
   | (Workspace_identity_unread | Workspace_identity_mismatch _), _
@@ -3555,7 +3561,26 @@ let launch_keeper_items state ~mailbox keeper_name =
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
+  | Workspace_identity_match, Some _
+    when state.keeper_roster = Keeper_control.Roster_unobserved ->
+    state.item_account_error <- Some "Keeper roster authority is unavailable"
   | Workspace_identity_match, Some identity ->
+  (* The read-state Item endpoint owns account authority. Public roster
+     currency observations require CanAdmin and may legitimately be absent;
+     the roster itself must have been successfully observed before this read.
+     A partial roster's silence is not absence: past the cap the roster says
+     nothing about a locally known Keeper, and [Unobserved] is exactly that
+     silence -- the authoritative read proceeds and the endpoint itself
+     answers for a Keeper that is truly gone. A complete roster's [Absent]
+     and this Keeper's own decode failure remain refusals. *)
+  match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+  | Invalid _ | Absent ->
+    state.item_account_error <- Some "Keeper is not observed in the current roster"
+  | Present _ | Unobserved ->
+  (* A cadence read under unchanged authority refreshes an observed account
+     without blanking it while the request is pending. Refusals above and a
+     failed endpoint response still withdraw it. *)
+  state.item_account <- observed_account;
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -3586,15 +3611,29 @@ let visible_item_revision state =
 
 let refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous =
   let current = visible_item_revision state in
+  (* A capped roster can stop reporting this Keeper's public revision without
+     changing the authority of its private account or pending Item read. *)
+  let partial_same_authority =
+    match previous, current with
+    | Some (previous_keeper, _, _, previous_workspace),
+      Some (keeper, _, _, workspace) ->
+        roster_refreshed && String.equal previous_keeper keeper
+        && previous_workspace = workspace
+        && Keeper_control.liveness_of_roster state.keeper_roster keeper = Unobserved
+    | None, _ | _, None -> false
+  in
+  let revision_changed = current <> previous && not partial_same_authority in
   let read_pending =
     List.exists (fun request -> request.drr_tab = Detail_items) state.detail_reads
   in
   let retry_settled_failure =
     Option.is_some state.item_account_error && not read_pending
   in
-  if current <> previous || retry_settled_failure || (roster_refreshed && not read_pending) then
+  if revision_changed || retry_settled_failure || (roster_refreshed && not read_pending) then
     match current with
-    | Some (keeper_name, _, _, _) -> launch_keeper_items state ~mailbox keeper_name
+    | Some (keeper_name, _, _, _) ->
+        launch_keeper_items ~keep_observed_account:(not revision_changed)
+          state ~mailbox keeper_name
     | None -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
@@ -9662,8 +9701,8 @@ let apply_keeper_roster_load state result =
        | None -> ()
        | Some (keeper_name, _) ->
          (match Keeper_control.liveness_of_roster roster keeper_name with
-          | Keeper_control.Present _ -> ()
-          | Unobserved | Invalid _ | Absent -> withdraw_keeper_items state))
+          | Keeper_control.Present _ | Unobserved -> ()
+          | Invalid _ | Absent -> withdraw_keeper_items state))
   | Error failure ->
       (* The last good roster is dropped rather than kept: a stale one reports
          fibers as running after the reading that said so stopped arriving,
@@ -13802,7 +13841,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
-         && item_authority_ready state then
+         && item_authority_ready state
+         && state.keeper_roster <> Keeper_control.Roster_unobserved
+         (* The same reading the dispatch guard makes: a partial roster's
+            silence is not absence, so a read this TUI legitimately launched
+            for an Unobserved Keeper is accepted here too. A complete
+            roster's Absent and this Keeper's own decode failure still
+            refuse their answers. *)
+         && (match Keeper_control.liveness_of_roster state.keeper_roster request.drr_keeper with
+             | Present _ | Unobserved -> true
+             | Invalid _ | Absent -> false) then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
@@ -19620,20 +19668,25 @@ and is loaded on demand through keeper_skill.
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if not (String.equal name "") then begin
-                   state.runtime_lane_name_draft <- None;
-                   Masc_tui_types.dismiss_runtime_lane_notice state;
                    match entry with
-                   | Masc_tui_types.Naming_new_lane _ ->
-                     (* A lane is its candidates, so it comes to exist with
-                        one: the picker that opens here declares it. *)
-                     Masc_tui_types.open_runtime_lane_pick state
-                       (Masc_tui_types.Pick_new_lane name)
-                   | Masc_tui_types.Renaming_lane { lane; _ } ->
-                     (* The rename lands in one write, references and all, so
-                        there is nothing to pick and nothing to follow. *)
-                     launch_runtime_lane_write state ~mailbox:async_messages
-                       ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
-                       Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
+                   | Masc_tui_types.Renaming_lane _
+                     when Masc_tui_types.runtime_lane_write_busy state ->
+                       state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+                   | _ ->
+                     state.runtime_lane_name_draft <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
+                     match entry with
+                     | Masc_tui_types.Naming_new_lane _ ->
+                       (* A lane is its candidates, so it comes to exist with
+                          one: the picker that opens here declares it. *)
+                       Masc_tui_types.open_runtime_lane_pick state
+                         (Masc_tui_types.Pick_new_lane name)
+                     | Masc_tui_types.Renaming_lane { lane; _ } ->
+                       (* The rename lands in one write, references and all, so
+                          there is nothing to pick and nothing to follow. *)
+                       launch_runtime_lane_write state ~mailbox:async_messages
+                         ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+                         Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
                  end
                | "\127" | "\b" | "backspace" ->
                  let length = String.length draft in

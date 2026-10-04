@@ -6,7 +6,7 @@ type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
-  installation_id : string option; source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
+  installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration_origin = Parsed_declaration | Issue_only
@@ -141,9 +141,11 @@ let instance json =
   let* owner = optional "configuration" (fun config ->
     let* installation_id = get text "id" config in
     let* source_path = get text "source_path" config in
-    Ok (installation_id, source_path)) json in
-  let installation_id = Option.map fst owner in
-  let source_path = Option.map snd owner in
+    let* configuration_revision = get text "revision" config in
+    Ok (installation_id, source_path, configuration_revision)) json in
+  let installation_id = Option.map (fun (id,_,_) -> id) owner in
+  let source_path = Option.map (fun (_,path,_) -> path) owner in
+  let configuration_revision = Option.map (fun (_,_,revision) -> revision) owner in
   let* binding = field "binding" json in
   let* package = field "package" json in
   let* outputs = get output_ports "outputs" package in
@@ -159,7 +161,7 @@ let instance json =
     | None -> Ok Masc.Lane_addon_presentation.empty
     | Some value -> Masc.Lane_addon_presentation.of_json value in
   Ok { id; run_id; addon_id; title; revision; phase; runtime_presence; observation_seq; rows_count;
-    installation_id;source_path;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
+    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
 let output json =
   let* rows = field "rows" json in
   let* coverage = field "coverage" json in
@@ -867,16 +869,26 @@ let can_observe (instance : instance) = match instance.phase with
   | Row.Detaching | Row.Detached -> false
 
 let removal_block_reason view (instance : instance) =
-  let stale = match view.snapshot, instance.installation_id, instance.source_path with
-    | Some {configuration=Some config;_}, Some id, Some path ->
-        List.exists (fun (d : declaration) ->
-          d.installation_id=Some id && d.source_path=path && d.instance_id=Some instance.id
-          && match d.desired,d.applied with
-             | Some desired,Some applied -> desired<>applied
-             | _ -> false) config.declarations
-    | _ -> false in
-  if stale then Some "Resolve changed TOML with E, then r refresh until its revision is applied before removal; nothing was removed."
-  else None
+  let refusal detail = Some (detail ^ "; correct TOML or refresh before removal; nothing was removed.") in
+  match instance.installation_id, instance.source_path, instance.configuration_revision with
+  | None, None, _ -> None
+  | Some id, Some path, Some revision ->
+      (match view.snapshot with
+       | Some {configuration=Some config;_} when config.complete ->
+           let matches = List.filter (fun (d : declaration) ->
+             d.origin=Parsed_declaration && d.installation_id=Some id) config.declarations in
+           let conflicts = List.exists (fun (d : declaration) ->
+             d.issues<>[] && d.installation_id=Some id) config.declarations in
+           (match matches with
+            | _ when conflicts -> refusal "Lane configuration identity has issues"
+            | [d] when d.desired=Some revision -> None
+            | [_] -> refusal "Lane configuration changed"
+            | [] when List.exists (fun (d : declaration) -> d.source_path=path) config.declarations ->
+                refusal "Lane declaration is invalid"
+            | [] -> None
+            | _ -> refusal "Lane configuration identity is ambiguous")
+       | _ -> refusal "Lane configuration inventory is incomplete")
+  | _ -> refusal "Lane configuration owner is incomplete"
 
 let instance_controls view (instance : instance) =
   let removal = match removal_block_reason view instance with

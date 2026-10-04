@@ -20,5 +20,11 @@ _build/default/test/test_server_lane_inventory.exe
 
 Both focused builds passed. These are local actual HTTP/2 protocol and native
 fixture tests, not a deployed H2_only service, browser, full-suite, CI or release
-result. Parent propagation remains pending; evidence binds this repair baseline.
+result. The baseline RED/GREEN evidence above binds the original repair baseline.
+
+The repair was then checkpointed at `8f13be9963` and cleanly merged with published
+parent #41124 `17149d6137986c3291bcadc2d580fb3771df8d57`. The same focused build
+and complete five-test inventory executable passed on that integrated tree
+(`integrated-build.log`, `integrated-native.log`). No other native targets or
+browser suites were rerun for this integration.
 Raw logs and EOF whitespace are preserved.

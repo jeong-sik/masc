@@ -3,10 +3,17 @@
   "native_tests": 5,
   "red": "admin expected200 received404",
   "files": {
-    "red.log": "1ef0ad33cfc5d6dd19400f308083f033c26a1f07c91b656f1d6cb3115e80cc0a",
-    "green.log": "06c41a12d28dceb61e467faca99bb5438e5d90a6ae415d322e7bb87c6694108b",
+    "README.md": "9098d2091da487b1cd71bf797785b3617126a94bf2ff57216d751beae2be0865",
     "green-build.log": "0e20ea4ec4f6e0d29ed88e9286eaae60a93d7c93df028d7a2bc6c20e58d48ec1",
-    "README.md": "c8253f5df8a6724505d88fc75dc1e60f55ba2aed11bd5fd4af7fe4a4750e8431",
-    "red-build.log": "0e20ea4ec4f6e0d29ed88e9286eaae60a93d7c93df028d7a2bc6c20e58d48ec1"
-  }
+    "green.log": "06c41a12d28dceb61e467faca99bb5438e5d90a6ae415d322e7bb87c6694108b",
+    "integrated-build.log": "0e20ea4ec4f6e0d29ed88e9286eaae60a93d7c93df028d7a2bc6c20e58d48ec1",
+    "integrated-native.log": "8d63ca2492322a89a7320bc02a45d8b7202165c0719d75886e5c898b55125378",
+    "red-build.log": "0e20ea4ec4f6e0d29ed88e9286eaae60a93d7c93df028d7a2bc6c20e58d48ec1",
+    "red.log": "1ef0ad33cfc5d6dd19400f308083f033c26a1f07c91b656f1d6cb3115e80cc0a"
+  },
+  "integrated_parent": "17149d6137986c3291bcadc2d580fb3771df8d57",
+  "integrated_build_exit": 0,
+  "integrated_native_exit": 0,
+  "integrated_native_tests": 5,
+  "integrated_executable_sha256": "29b6f2f1971cd55c71ba3b41b10ddae6b17e8aa9fe44f3b93d3a0bafec557a3f"
 }

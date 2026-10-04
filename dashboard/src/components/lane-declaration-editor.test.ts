@@ -201,6 +201,49 @@ describe('Lane declaration editing through the status surface', () => {
     expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
   })
 
+  it.each(['/workspace-b', null])('requires a new comparison when an idle draft returns from %s', async away => {
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await open(screen)
+    const draft = '# retained idle draft\n' + original
+    fireEvent.input(source(screen), { target: { value: draft } })
+    files.fetchLaneDeclaration.mockResolvedValueOnce({ ...document, source_revision: 'old-comparison' })
+    fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
+    await screen.findByLabelText('Current file comparison')
+    act(() => observeWorkspace(away))
+    await waitFor(() => expect(screen.queryByLabelText('TOML source')).toBeNull())
+    act(() => observeWorkspace('/workspace'))
+    await waitFor(() => expect(source(screen).value).toBe(draft))
+    expect(screen.queryByLabelText('Current file comparison')).toBeNull()
+    expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(true)
+    const fresh = { ...document, source_revision: 'new-authority-revision' }
+    files.fetchLaneDeclaration.mockResolvedValueOnce(fresh)
+    fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
+    await screen.findByText(fresh.source_revision, { exact: false })
+    expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Use current file revision' }))
+    files.saveLaneDeclaration.mockResolvedValueOnce(receipt(draft))
+    fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
+    await waitFor(() => expect(files.saveLaneDeclaration).toHaveBeenCalledWith({
+      mode: 'save', file_name: 'custom.toml', source_text: draft, expected_source_revision: fresh.source_revision,
+    }))
+  })
+
+  it('blocks save after a comparison until its revision is explicitly adopted', async () => {
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await open(screen)
+    const draft = '# compared draft\n' + original
+    fireEvent.input(source(screen), { target: { value: draft } })
+    files.fetchLaneDeclaration.mockResolvedValueOnce({ ...document, source_revision: 'newer-revision' })
+    fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
+    await screen.findByLabelText('Current file comparison')
+    expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
+    expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Use current file revision' }))
+    expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(source(screen).value).toBe(draft)
+  })
+
   it('keeps an old-workspace write outcome uncertain in its own draft and never saves without current authority', async () => {
     let finish!: (value: ReturnType<typeof receipt>) => void
     files.saveLaneDeclaration.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
@@ -242,6 +285,7 @@ describe('Lane declaration editing through the status surface', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
       await screen.findByRole('button', { name: 'Reading current file…' })
     } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Use current file revision' }))
       files.saveLaneDeclaration.mockReturnValueOnce(new Promise(resolve => { finish = () => resolve(receipt(draft)) }))
       fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
       await screen.findByRole('button', { name: 'Saving TOML…' })

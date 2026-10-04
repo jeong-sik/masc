@@ -1,0 +1,50 @@
+{
+  "qualified_head": "7af4279cfcd317b6cf99d3f0b0c3f503ef50613b",
+  "prepared": [
+    {
+      "pr": 40991,
+      "old_head": "bee7a1045803579c4ec6fbb6a73b5c33700eed2d",
+      "head": "6926fc002d589242ec92a176b582d95fb1f0bc22",
+      "branch": "fix/sampling-terminal-contract-20261003"
+    },
+    {
+      "pr": 41033,
+      "old_head": "5c087c0d21e348b6981fcd96da40b4cd262f7735",
+      "head": "4a9c05e7d049c562d59c7776446a17dae92fbf48",
+      "branch": "fix/audit-sampling-cold-recovery-20261004"
+    },
+    {
+      "pr": 41126,
+      "old_head": "45ee503eac72f732daecfada2e92991359fc90dc",
+      "head": "7af4279cfcd317b6cf99d3f0b0c3f503ef50613b",
+      "branch": "fix/sampling-inline-budget-20261004"
+    }
+  ],
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_sampling.ml": "3ff823fd1faf6d68f3f36a882854dab1253888db4512f5c262ebc51b9b6dcad2",
+    "lib/lane_addon/lane_addon_sampling.mli": "442e5a211a32075d6aea5997c6654b86b0897788807f367f3f9f41646f6bf780",
+    "lib/lane_addon/lane_addon_store.ml": "88038ea2267b7381c877902a932835ac81366ea07a96ff72c48e8b7e3484a83d",
+    "lib/lane_addon/lane_addon_store.mli": "a13149a94cf4a44ccbab43d4a4238fcd320caf765d9c025424bc6f9bccfca7e5",
+    "test/test_lane_addon_worker.ml": "784823d230264e00c9dd396845ec110f84eedcfaba174f23831a1b651a65d40a"
+  },
+  "raw_sha256": {
+    "native40961-namespace-composed-build.log": "85c1ccff53cc2283e87baee8ddde111b5525c55f6d5108412668afbe2b41a203",
+    "native40961-namespace-composed-tests.log": "f738c4b7070dc234263cb126b83dad399e02f11374235874a733409e004baf3b"
+  },
+  "binary_sha256": {
+    "test_lane_addon_worker": "ca6ff7da3b872d66f70cce458909bd57008be361aab4cbe0c96d1f5360a3d5ad",
+    "test_lane_addon": "7a9231f83c71c54961fdf466ccdf21cde6e4a6b116ee1100f934ea2827e26fca"
+  },
+  "build": {
+    "handle": 62548,
+    "exit": 0
+  },
+  "tests": {
+    "handle": 92620,
+    "exit": 0,
+    "worker": 51,
+    "runtime": 25
+  },
+  "full_repository_suite": false,
+  "TerminalBench": "unrun"
+}

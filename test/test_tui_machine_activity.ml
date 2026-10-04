@@ -31,7 +31,7 @@ let draft_and_save () =
   let session=A.toggle session in
   shows "Activity draft: Off" session;
   let pending,request,write=A.start_save ~generation:2 session |> ok in
-  same off write.source_text; same "original" write.expected_source_revision;
+  same off write.source_text; same "original" write.expected_source_revision; same "/workspace/runtime.toml" write.expected_source_path;
   Alcotest.(check bool) "busy" true (A.busy pending);
   rejected (A.start_save ~generation:3 pending);
   shows "Activity draft: Off" (A.toggle pending);

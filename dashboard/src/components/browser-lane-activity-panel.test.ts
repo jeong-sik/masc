@@ -229,7 +229,7 @@ describe('Browser activity operator flow', () => {
     expect(reopened.getByRole('switch').getAttribute('aria-checked')).toBe('false')
     fireEvent.click(reopened.getByRole('button', { name: '활동 설정 저장' }))
     await waitFor(() => expect(reopened.getByText(/파일 설정: 꺼짐/)).toBeTruthy())
-    expect(stored).toBe(off); expect(api.saveRuntimeTomlConfig).toHaveBeenCalledWith(off, revision(source), expect.any(Object))
+    expect(stored).toBe(off); expect(api.saveRuntimeTomlConfig).toHaveBeenCalledWith(off, revision(source), expect.objectContaining({ expectedSourcePath: '/workspace/runtime.toml' }))
     expect(reopened.getByText(/파일 설정: 꺼짐/)).toBeTruthy()
     expect(reopened.getByText(/Exact registry 적용됨/)).toBeTruthy()
   })

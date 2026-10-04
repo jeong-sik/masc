@@ -31,7 +31,7 @@ let draft_and_save () =
   let session=A.toggle session in
   shows "Activity draft: Off" session;
   let pending,request,write=A.start_save ~generation:2 session |> ok in
-  same off write.source_text; same "original" write.expected_source_revision;
+  same off write.source_text; same "original" write.expected_source_revision; same "/workspace/runtime.toml" write.expected_source_path;
   Alcotest.(check bool) "busy" true (A.busy pending);
   rejected (A.start_save ~generation:3 pending);
   shows "Activity draft: Off" (A.toggle pending);
@@ -187,8 +187,16 @@ let receipt_keeps_application_failure () =
   let session=read ~generation:3 (doc ~revision:"saved" off) session in
   shows "registry refused" session; shows "Current file: Off" session
 
+let live_guidance () =
+  let lines = A.lines (loaded ~lane:Browser_lane.Lane_name.Live (doc source)) in
+  Alcotest.(check bool) "Live does not promise server session controls" false
+    (has "Server session status and close remain available" lines);
+  shows "Server session status and close remain available" (loaded (doc source));
+  shows "Server session status and close remain available" (loaded ~lane:Browser_lane.Lane_name.Stagehand (doc source))
+
 let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.map (fun (name,f)->Alcotest.test_case name `Quick f)
-  ["explicit save preserves paths, other backend and source",draft_and_save;
+  ["Live guidance respects client-owned sessions",live_guidance;
+   "explicit save preserves paths, other backend and source",draft_and_save;
    "conflict reapplies activity only",conflict_reapply;
    "fresh read retains and discard resets",fresh_read_keeps_draft;
    "clean draft follows external activity and workspace return",clean_read_follows_changed_flag;

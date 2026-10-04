@@ -1,0 +1,40 @@
+Testing `Browser activity draft and save'.
+This run has ID `1SV2YNY3'.
+
+> [FAIL]        operator flow          0   Live guidance respects client-owne...
+  [SKIP]        operator flow          1   explicit save preserves paths, oth...
+  [SKIP]        operator flow          2   conflict reapplies activity only.
+  [SKIP]        operator flow          3   fresh read retains and discard res...
+  [SKIP]        operator flow          4   clean draft follows external activ...
+  [SKIP]        operator flow          5   clean draft preserves latest unrel...
+  [SKIP]        operator flow          6   durable draft follows next file wh...
+  [SKIP]        operator flow          7   uncertain drafts need explicit rea...
+  [SKIP]        operator flow          8   clean draft keeps changed-path bou...
+  [SKIP]        operator flow          9   backend flags and flat automation ...
+  [SKIP]        operator flow         10   unavailable and malformed input.
+  [SKIP]        operator flow         11   workspace roundtrip ignores old ca...
+  [SKIP]        operator flow         12   unconfirmed write and preview refu...
+  [SKIP]        operator flow         13   changed file path needs discard.
+  [SKIP]        operator flow         14   quoted and multiline table shapes.
+  [SKIP]        operator flow         15   stored setting does not hide appli...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        operator flow          0   Live guidance respects client-o...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT Live does not promise server session controls
+File "test/test_tui_browser_activity.ml", line 192, character 2:
+FAIL Live does not promise server session controls
+
+   Expected: `false'
+   Received: `true'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_tui_browser_activity.live_guidance in file "test/test_tui_browser_activity.ml", lines 192-193, characters 2-66
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41187-config-path-cas-20261005/_build/_tests/Browser activity draft and save/operator flow.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41187-config-path-cas-20261005/_build/_tests/Browser activity draft and save'.
+1 failure! in 0.000s. 1 test run.

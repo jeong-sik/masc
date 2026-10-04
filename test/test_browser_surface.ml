@@ -211,6 +211,9 @@ let test_live_read_pins_client_between_hops () =
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
+      let current = ref Browser_lane.Enabled in
+      Browser_lane.install_activity_observer (Some (fun _ -> !current));
+      Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled)));
       let info raw browser : Browser_lane.client_info =
         let client_id = match Browser_lane.client_id_of_string raw with
           | Ok id -> id | Error error -> fail error in
@@ -226,6 +229,7 @@ let test_live_read_pins_client_between_hops () =
         | Ok (Some command) -> command | _ -> fail "selected client command missing" in
       let tabs_command = take first in
       ignore (Browser_lane.take_command ~client_info:second ~window_sec:0.001);
+      current := Browser_lane.Disabled;
       ignore (Browser_lane.deliver_result ~client_id:first.client_id ~id:tabs_command.id
         ~payload:(`Assoc ["ok", `Bool true; "data", `List [tab 1 "https://example.org/first" true]]));
       check bool "new client cannot consume next hop" true
@@ -237,6 +241,8 @@ let test_live_read_pins_client_between_hops () =
           "text", `String "first-owned"; "chars", `Int 11; "truncated", `Bool false]]));
       match Eio.Promise.await pending with
       | Ok (Ok data) ->
+        check bool "new live read is refused after off" true
+          (Result.is_error (Surface.read {route=Browser_lane.Live_route (Some first.client_id);tab_id=Some 1}));
         check bool "reply identifies the original single client" true
           (Yojson.Safe.Util.member "clientId" data = `String (Browser_lane.client_id_to_string first.client_id));
         check bool "page belongs to the pinned browser" true
@@ -527,7 +533,42 @@ let test_scoped_scene_acknowledgement () =
       check bool "duplicate scope fields rejected" true (Result.is_error (Masc.Browser_scene.scope_of_json
         (`Assoc ["documentId",`String "fixture";"nodeId",`String "a";"nodeId",`String "b"])))))
 
+let test_compound_read_keeps_admission () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock env#clock;
+    Eio.Switch.run (fun sw ->
+      let current = ref Browser_lane.Enabled in
+      Browser_lane.install_activity_observer (Some (fun _ -> !current));
+      Eio.Switch.on_release sw (fun () ->
+        Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+        Browser_lane.install_automation_executor None;
+        Browser_lane.install_stagehand_executor None);
+      List.iter (fun (route, install) ->
+        current := Browser_lane.Enabled;
+        let calls = ref [] in
+        install (Some (fun verb ->
+          calls := verb :: !calls;
+          match verb with
+          | Browser_lane.Tabs_list ->
+              current := Browser_lane.Disabled;
+              Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`List [
+                `Assoc ["id",`Int 7;"title",`String "accepted";"url",`String "https://example.org/";"active",`Bool true]]])
+          | Browser_lane.Page_read _ -> Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+              "url",`String "https://example.org/";"title",`String "accepted";
+              "text",`String "accepted page";"chars",`Int 13;"truncated",`Bool false]])
+          | _ -> fail "compound read sent a different command"));
+        let request : Surface.request = {route;tab_id=None} in
+        let result = match Surface.read request with Ok value -> value | Error failure -> fail (Surface.failure_message failure) in
+        check string "accepted page survives activity publication between hops" "accepted page"
+          Yojson.Safe.Util.(member "page" result |> member "text" |> to_string);
+        check int "both read phases execute" 2 (List.length !calls);
+        check bool "new read is refused after off" true (Result.is_error (Surface.read request));
+        check int "refused new request sends no command" 2 (List.length !calls))
+        [Browser_lane.Automation_route,Browser_lane.install_automation_executor;
+         Browser_lane.Stagehand_route,Browser_lane.install_stagehand_executor]))
+
 let () = run "browser surface" ["behavior",[
+  test_case "compound read retains its original admission" `Quick test_compound_read_keeps_admission;
   test_case "input correction resumes on the same connected browser" `Quick test_tool_input_recovery;
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;

@@ -4,8 +4,11 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Action = Lane_addon_action
@@ -34,7 +37,7 @@ type outcome = Confirm | Refuse | Unknown | Lost_reply
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
-  start=(fun ~sw:_ ~instance_id ~(package:Types.package) ~on_created ->
+  start=(fun ~sw:_ ~instance_id ~(package:Types.package) ~binding:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {
       container_id=Store.digest instance_id;
       action_schema=(fun () -> Option.map (fun _ -> schema) package.action_tool);

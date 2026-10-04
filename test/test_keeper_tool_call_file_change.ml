@@ -15,7 +15,7 @@ module Evidence = Keeper_file_change_evidence
    row carries about thirty more, and listing them here would make the test
    about the writer's schema instead of about what the reader needs. *)
 let row ?(keeper = "fixture-keeper") ?(descriptor_id = "agent.edit_file")
-    ?(target_path = "repos/masc/test/test_ci_run_tests_script.ml")
+    ?(target_path = "repos/masc/test/test_keeper_tool_call_file_change.ml")
     ?(outcome_fields = [ ("disposition", `String "completed") ])
     ?(turn = Some 2459) ?(task_id = Some "task-475")
     ?(execution_id = Some "exec-1787533327603-0173") ?line_evidence
@@ -224,7 +224,7 @@ let test_repo_relative_address () =
   match change.Change.location with
   | Change.In_repo { repo_id; relative_path } ->
       check string "repo" "masc" repo_id;
-      check string "path" "test/test_ci_run_tests_script.ml" relative_path
+      check string "path" "test/test_keeper_tool_call_file_change.ml" relative_path
   | Change.In_bundle { bundle_path } -> failf "expected In_repo, got bundle %s" bundle_path
   | Change.At_absolute_path { path } -> failf "expected In_repo, got absolute %s" path
 ;;

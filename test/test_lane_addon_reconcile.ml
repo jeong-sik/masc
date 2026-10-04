@@ -5,8 +5,11 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Types = Lane_addon_types
@@ -62,7 +65,7 @@ let make_backend () =
                 image_available = ref true } in
   let record event = state.events := event :: !(state.events) in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~on_created ->
+    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
       let stopped, release_stop = Eio.Promise.create () in
       let stop_sent = ref false in
       let connection : Runtime.For_testing.connection = {
@@ -373,12 +376,15 @@ let test_restart_recovers_exact_owner_before_replacement () =
     await_ready clock config old_id;
     let captured = instance config old_id in
     let container_id = text "container_id" captured in
+    check string "runtime snapshot marks actual entry live" "live" (text "runtime_presence" captured);
     detach clock config old_id;
     (* All live fake work is stopped before replaying the captured persistent
        binding. Reset alone is never used to abandon an active worker. *)
     Runtime.For_testing.reset ();
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id captured);
+    check string "restart overrides persisted live provenance" "retained"
+      (text "runtime_presence" (instance config old_id));
     write path bytes;
     let recovered, release_recovery = Eio.Promise.create () in
     state.recovery_barrier := Some recovered;
@@ -583,19 +589,23 @@ let test_historical_never_started_leaves_no_binding () =
     let manifest = package packages "ready" in
     let path = Filename.concat directory "observer.toml" in
     let bytes = declaration ~id:"observer" ~manifest () in
+    state.startup_available := false;
     write path bytes;
     ignore (reconcile config directory);
     let old_id = declared_instance config "observer" |> text "instance_id" in
-    await_ready clock config old_id;
-    let captured = instance config old_id in
-    detach clock config old_id;
+    await clock (fun () -> phase (instance config old_id) = "failed");
+    let never_started = instance config old_id in
+    check int "failed startup has no observation history" 0
+      (number "observation_seq" never_started);
+    check bool "failed startup owns no container" true
+      (member "container_id" never_started = `Null);
+    check int "the backend never observed" 0 (List.length !(state.observations));
+    ignore (dispatch config Runtime.Detach ["instance_id", `String old_id]);
+    await clock (fun () ->
+      not (List.exists (fun value -> text "instance_id" value = old_id) (instances config)));
     Runtime.For_testing.reset ();
-    let fields = Yojson.Safe.Util.to_assoc captured in
-    let never_started =
-      `Assoc
-        (("container_id", `Null) :: ("observation_seq", `Int 0)
-         :: List.remove_assoc "observation_seq" (List.remove_assoc "container_id" fields))
-    in
+    state.events := [];
+    state.startup_available := true;
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id never_started);
     let has_binding () =

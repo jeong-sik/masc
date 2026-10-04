@@ -25,6 +25,7 @@ let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
   contributions=[Types.Observe];image="unused";command=["unused"];
   directory=dir;skills_directory=None;action_tool=None;outputs=[];refresh_policy=Types.Every_hint;
+  model_access=Types.Model_disabled;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   resources={cpus=0.5;memory_bytes=134217728L;pids=16;max_reply_bytes=max_bytes}}
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
@@ -70,6 +71,7 @@ let test_duplicate_snapshot_keys_cannot_replace_host_evidence () = with_store (f
   List.iter (fun input ->
     write path (Yojson.Safe.to_string input);
     let source = require (Sources.acquire
+      ~access:Sources.Operator_configuration
       ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
       ~store ~package:(package dir 16384)
       ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
@@ -136,6 +138,49 @@ let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
     check string "source's reason remains visible" "document_html_exceeds_1_mib" (text (member "detail" missing));
     let missing_observation = member "observations" missing |> list |> List.hd in
     check bool "missing document does not become content" true (member "html" missing_observation = `Null)))
+
+let test_completed_port_refresh_identity_preserves_status_and_output () = with_store (fun dir store ->
+  let binding = binding [`Assoc ["source_id",`String "upstream";"kind",`String "lane_output";
+    "installation_id",`String "producer";"selection",`String "latest_completed"]] in
+  let row : Types.row = {id="row";lane_id="owner/result";kind=Types.Value;title="Answer";
+    observed_at=1.;subject_id="subject";clock=None;actor=None;fields=[];evidence=[];related_ids=[]} in
+  let status : Types.coverage = {source_id="owner";incarnation="owner";cursor=Some "1";
+    complete=true;detail=None} in
+  let producer = ref ({installation_id="producer";instance_id="owner";run_id="run";
+    configuration_revision="config-1";package_revision="package-1";outputs=[];
+    observation_seq=1;output={rows=[row];coverage=[status]};status} : Sources.lane_output) in
+  let interest = require (Sources.refresh_interest binding) in
+  let acquire () = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
+    ~resolve_lane_output:(fun ~installation_id:_ -> Ok !producer) ~binding) in
+  let fingerprint value = require (Sources.refresh_fingerprint interest value) in
+  let first = acquire () in
+  let first_key = fingerprint first in
+  check bool "completed ports have a stable automatic identity" true (Option.is_some first_key);
+  let later = match first with
+    | `List [`Assoc fields] -> `List [`Assoc (List.map (fun (key,value) ->
+        if key="observations" then key,`List (List.map (function
+          | `Assoc observation -> `Assoc (("observed_at",`Float 999.) :: List.remove_assoc "observed_at" observation)
+          | _ -> fail "invalid acquired observation") (list value)) else key,value) fields)]
+    | _ -> fail "invalid acquired source array" in
+  check bool "a later host acquisition is the same input" true (fingerprint later=first_key);
+  let changed label update =
+    let original = !producer in producer := update original;
+    check bool label false (fingerprint (acquire ())=first_key);
+    producer := original in
+  changed "new producer generation is different" (fun source -> {source with observation_seq=2});
+  changed "replacement owner is different" (fun source -> {source with instance_id="replacement"});
+  changed "mapping revision is different" (fun source -> {source with configuration_revision="config-2"});
+  changed "worker failure is different even with retained rows" (fun source ->
+    {source with status={status with complete=false;detail=Some "worker failed"}});
+  changed "original output timestamps remain part of input" (fun source ->
+    {source with output={source.output with rows=[{row with observed_at=2.}]}});
+  let file_interest = require (Sources.refresh_interest (`Assoc ["sources",`List [file_source "file" "/fixture/input.json"]])) in
+  check bool "file input timestamps are preserved" false
+    (require (Sources.refresh_fingerprint file_interest first)=require (Sources.refresh_fingerprint file_interest later));
+  let live_interest = require (Sources.refresh_interest (`Assoc ["sources",`List [`Assoc [
+    "source_id",`String "screen";"kind",`String "msx_capture"]]])) in
+  check bool "live capture cannot suppress notification by port identity" true
+    (require (Sources.refresh_fingerprint live_interest first)=None))
 
 let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun dir store ->
   let row id lane_id : Types.row = {id;lane_id;kind=Types.Value;title="Observed";
@@ -519,7 +564,68 @@ let test_fusion_binding_targets_only_exact_run () =
            && member "observations" captured = `List []
        | _ -> false))
 
+let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
+  with_store (fun dir store ->
+    let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+    let reset () =
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test () in
+    Fun.protect ~finally:(fun () ->
+      reset ();
+      match old_base with Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> unsetenv "MASC_BASE_PATH")
+      (fun () ->
+        Unix.putenv "MASC_BASE_PATH" dir;
+        reset ();
+        let registry = Fusion_run_registry.global () in
+        let run_id = "fusion-envelope-" ^ Store.digest dir in
+        Fusion_run_registry.register_running registry ~run_id
+          ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
+          ~topology:Fusion_types.Simple ~started_at:1.;
+        let change_reason marker = Fusion_run_registry.mark_completed registry ~run_id
+          ~outcome:(Fusion_run_registry.Failed {reason=String.make 4096 marker;code="fixture"}) in
+        change_reason 'a';
+        let read cap = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+          ~store ~package:(package dir cap)
+
+          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~binding:(binding [`Assoc ["source_id",`String "fusion";
+            "kind",`String "fusion_run";"run_id",`String run_id]])) in
+        let admitted = read 16384 |> list |> List.hd in
+        let observation = member "observations" admitted |> list |> List.hd in
+        let reference = member "evidence" observation |> list |> List.hd |> own_reference in
+        let frozen = require (Store.read_blob store reference) in
+        check bool "preflight and persisted content addresses agree" true
+          (Store.blob_reference frozen = reference);
+        let inner_size = String.length frozen in
+        let cap = inner_size + 2 in
+        check bool "only full envelope exceeds the single source array capacity" true
+          (String.length (Yojson.Safe.to_string admitted) + 2 > cap);
+        let blob_names () = Sys.readdir (Filename.concat (Store.root store) "evidence")
+          |> Array.to_list |> List.sort String.compare in
+        let before = blob_names () in
+        List.iter (fun marker ->
+          (* Equal-sized changes guarantee distinct detail blobs without a clock
+             sleep, even when all acquisitions occur in the same second. *)
+          change_reason marker;
+          let result = read cap in
+          check bool "unavailable fallback still fits the complete ingress envelope" true
+            (String.length (Yojson.Safe.to_string result) <= cap);
+          let rejected = list result |> List.hd in
+          check bool "an oversized source is explicitly unavailable" true
+            (member "complete" rejected = `Bool false && member "observations" rejected = `List []);
+          check string "inner detail fits but complete capture is refused before retention"
+            "Fusion observation exceeds the available source ingress envelope"
+            (member "detail" rejected |> text);
+          check (Alcotest.list string) "rejected captures create no orphan blobs" before (blob_names ());
+          check string "previous retained evidence remains readable" frozen
+            (require (Store.read_blob store reference))) ['a';'b';'c']))
+
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "completed input identity preserves output, mapping and failure" `Quick
+    test_completed_port_refresh_identity_preserves_status_and_output;
+  test_case "Fusion envelope overflow creates no orphan and preserves existing evidence" `Quick
+    test_fusion_envelope_overflow_does_not_retain_or_remove_blobs;
   test_case "Fusion captures retain earlier state across terminal updates" `Quick
     test_fusion_capture_retains_exact_state_across_terminal_change;
   test_case "Fusion bindings target exact run updates and preserve unavailable coverage" `Quick

@@ -63,8 +63,6 @@ missing or skipped required job is not evidence of full verification.
 `queue-ledger.sh --repo O/R --format tsv` reports source-review readiness and
 native stack scope admission or non-native parent waits. It reads full CI
 evidence only for release heads.
-`python3 scripts/review/test_source_review_policy.py` exercises live-boundary
-controls in an isolated fake-GitHub fixture.
 
 ## Preparing an approved candidate
 

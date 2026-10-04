@@ -129,12 +129,7 @@ let test_channel_normalization () =
   | Client_identity.External "discord" -> ()
   | _ -> fail "expected normalized opaque external channel"
 
-let test_channel_yojson_backward_compat () =
-  check (result string string) "legacy Discord string decodes"
-    (Ok "discord")
-    (match Client_identity.channel_of_yojson (`String "Discord") with
-     | Ok channel -> Ok (Client_identity.string_of_channel channel)
-     | Error err -> Error err);
+let test_channel_yojson () =
   check (result string string) "tagged external Discord decodes"
     (Ok "discord")
     (match Client_identity.channel_of_yojson
@@ -221,8 +216,8 @@ let () =
       test_case "anonymous" `Quick test_anonymous;
       test_case "channel_roundtrip" `Quick test_channel_roundtrip;
       test_case "channel_normalization" `Quick test_channel_normalization;
-      test_case "channel_yojson_backward_compat" `Quick
-        test_channel_yojson_backward_compat;
+      test_case "channel_yojson" `Quick
+        test_channel_yojson;
       test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
       test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;

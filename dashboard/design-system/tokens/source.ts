@@ -25,7 +25,7 @@
  * Keeper 12-slot palette is generated algorithmically (OkLCH L=68 C=0.09,
  * H stride 30°). Status 4-slot semantics are derived from raw. The status
  * canon (--ok/--warn/--err/--info) is locked at #6b9e6b/#c9a24a/#c46a5a/
- * #6a8eb0; check-equivalence.mjs enforces this against tokens.css.
+ * #6a8eb0.
  */
 
 import { oklch, formatHex, type Color } from "culori";

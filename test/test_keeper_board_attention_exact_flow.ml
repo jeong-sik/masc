@@ -1434,10 +1434,14 @@ let with_jev
 (* A System One answer to the adapter's relevance question. *)
 let jev_response
       ?(confidence = 0.6)
-      ?(probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ?probabilities
       ~choice
       ()
   =
+  let probabilities = Option.value probabilities ~default:
+    (if String.equal choice "relevant" then
+       ["relevant", 0.8; "not_relevant", 0.2; "uncertain", 0.]
+     else ["relevant", 0.2; "not_relevant", 0.8; "uncertain", 0.]) in
   Yojson.Safe.to_string
     (`Assoc
         [ "model", `String "jev-latest"
@@ -1527,7 +1531,7 @@ let requeued_after_quarantine (pending : Candidate.candidate) : Candidate.candid
 
 let execute_behind_jev
       ?(jev_confidence = 0.6)
-      ?(jev_probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ?jev_probabilities
       ?(requeued = false)
       ~name
       ~jev_choice
@@ -1546,7 +1550,7 @@ let execute_behind_jev
           (Fixture.Reply
              (jev_response
                 ~confidence:jev_confidence
-                ~probabilities:jev_probabilities
+                ?probabilities:jev_probabilities
                 ~choice:jev_choice
                 ()))
       in
@@ -1663,7 +1667,7 @@ let test_jev_relevant_is_kept () =
       ~name:"board-attention-jev-relevant"
       ~jev_choice:"relevant"
       ~jev_confidence:0.9
-      ~jev_probabilities:[ "relevant", 0.95; "not_relevant", 0.05 ]
+      ~jev_probabilities:[ "relevant", 0.95; "not_relevant", 0.05; "uncertain", 0. ]
       ()
   in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
@@ -1723,7 +1727,7 @@ let test_jev_confident_not_relevant_is_kept () =
       ~name:"board-attention-jev-not-relevant"
       ~jev_choice:"not_relevant"
       ~jev_confidence:0.9
-      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95 ]
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95; "uncertain", 0. ]
       ()
   in
   check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:None run;
@@ -1762,7 +1766,7 @@ let test_jev_settles_a_requeued_candidate () =
       ~name:"board-attention-jev-requeued"
       ~jev_choice:"not_relevant"
       ~jev_confidence:0.9
-      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95 ]
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95; "uncertain", 0. ]
       ()
   in
   check_terminal_jev "requeued" ~answer:"not_relevant" ~rejudged:None run;
@@ -1938,7 +1942,9 @@ let test_jev_event_fanout_settles_and_defers () =
     let missing = make_keeper "missing" in
     let answer choice confidence =
       `Assoc [ "type", `String "choice"; "choice", `String choice
-             ; "probabilities", `Assoc ["relevant", `Float 0.1; "not_relevant", `Float 0.8; "uncertain", `Float 0.1]
+             ; "probabilities", `Assoc
+                 (List.map (fun label -> label, `Float (if String.equal label choice then 0.8 else 0.1))
+                    ["relevant"; "not_relevant"; "uncertain"])
              ; "confidence", `Float confidence ]
     in
     let response = Yojson.Safe.to_string (`Assoc

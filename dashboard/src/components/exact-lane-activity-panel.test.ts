@@ -73,6 +73,31 @@ async function draft() {
 }
 
 describe('Exact activity operator flow', () => {
+  it.each(['success', 'failed', 'authority', 'refresh'])('settles only the resolved setup error after manual retry: %s', async kind => {
+    followup.resumeSavedModelSetup.mockResolvedValueOnce({ kind: 'failed', reason: 'activation_failed' })
+    if (kind === 'refresh') followup.refreshRuntimeConfigConsumers.mockRejectedValueOnce(new Error('fixture refresh failed'))
+    const { authority, session } = await draft()
+    await session.save(authority)
+    session.expanded.value = true
+    let view = render(html`<div><${RuntimeTomlEditor} /><${ExactLaneActivityPanel} lane=${lane} /></div>`)
+    await view.findByText(/재개를 확인하지 못했습니다/)
+    const retry = deferred<{ kind: 'active'; exactOutputAvailable: boolean } | { kind: 'failed'; reason: 'activation_failed' }>()
+    followup.resumeSavedModelSetup.mockReturnValueOnce(retry.promise)
+    fireEvent.click(await view.findByRole('button', { name: '설정 재개' }))
+    if (kind === 'authority') await act(() => { workspace('/fixture/B'); workspace('/fixture/A') })
+    await act(async () => retry.resolve(kind === 'failed'
+      ? { kind: 'failed', reason: 'activation_failed' } : { kind: 'active', exactOutputAvailable: true }))
+    if (kind === 'failed' || kind === 'authority') expect(view.getByText(/재개를 확인하지 못했습니다/)).toBeTruthy()
+    else await waitFor(() => expect(view.queryByText(/재개를 확인하지 못했습니다/)).toBeNull())
+    if (kind === 'refresh') expect(view.getAllByText(/fixture refresh failed/).length).toBeGreaterThan(0)
+    view.unmount()
+    view = render(html`<${ExactLaneActivityPanel} lane=${lane} />`)
+    if (kind === 'failed' || kind === 'authority') expect(await view.findByText(/재개를 확인하지 못했습니다/)).toBeTruthy()
+    else expect(view.queryByText(/재개를 확인하지 못했습니다/)).toBeNull()
+    if (kind === 'refresh') expect(view.getAllByText(/fixture refresh failed/).length).toBeGreaterThan(0)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
   it('does not automatically reload an invalidated raw write with unknown outcome', async () => {
     const authority = executionWorkspaceAuthority.peek()!, raw = runtimeTomlSessionFor(authority)
     await raw.read(authority, 'reload')
@@ -279,7 +304,7 @@ describe('Exact activity operator flow', () => {
     followup.resumeSavedModelSetup.mockResolvedValueOnce({ kind: 'failed', reason: 'activation_failed' })
     const pending = await draft()
     await pending.session.save(pending.authority)
-    expect(pending.session.state.value.followupError).not.toBeNull()
+    expect(pending.session.state.value.setupResumeError).not.toBeNull()
     const view = render(html`<div><${RuntimeTomlEditor} /><${LaneInventoryPanel} /></div>`)
     fireEvent.click(await view.findByTestId('runtime-toml-nav-lanes'))
     fireEvent.click(await view.findByRole('button', { name: `Inspect ${lane.label}` }))
@@ -506,7 +531,7 @@ describe('Exact activity operator flow', () => {
     expect(await session.save(authority)).toBe(true)
     expect(session.state.value.current?.source_text).toBe(off)
     expect(session.state.value.receipt?.application.exact_output_registry.status).toBe('kept')
-    expect(session.state.value.followupError).toMatch(/재개를 확인하지 못했습니다/)
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
   })
   it('keeps uncertain durability separate from the freshly observed file', async () => {
     const { session, authority } = await draft()

@@ -57,9 +57,9 @@ release 브랜치로 치환합니다. 현재 workflow는 `release/v*` 브랜치 
 gh workflow run release-candidate.yml --ref release/vX.Y.Z
 ```
 
-이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 전체 `Test`, 4개 플랫폼 `release-build.yml` 설치
+이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 명시된 출시 필수 동작 검사, 4개 플랫폼 `release-build.yml` 설치
 검증과 최종 배포 자산 조립을 함께 호출합니다. 부분 suite를 선택하는
-입력은 없습니다. 전체 Test는 루트 `@runtest`를 한 번 실행하고 Dune의 종료 코드로
+입력은 없습니다. 별도의 수동 전체 회귀 Test 워크플로는 루트 `@runtest`를 한 번 실행하고 Dune의 종료 코드로
 판정합니다. 실패를 허용하는 목록이나 별도 재컴파일 경로는 없습니다.
 
 `candidate-verification-<sha>-attempt-<n>` artifact는 커밋과 세 결과를 기록합니다.

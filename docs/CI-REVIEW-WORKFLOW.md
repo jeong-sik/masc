@@ -48,10 +48,13 @@ uses `release.yml` with an existing version tag, `rc_run_id`, and explicit
 The publication job verifies its receipt and artifact checksums and uploads the
 existing distribution; it does not rebuild or rerun tests. A publication run is
 not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
-one toolchain job; node behavior runs under the behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
-there is no known-failure exemption list or second standalone compilation pass.
+one toolchain job. The small `release-behavior.yml` workflow runs the explicit
+[`release-essential-v1` selection](../config/release-behavior.json), not root `@runtest`.
+The receipt records the profile, exact suite list and manifest SHA-256; publication
+rejects a missing or different selection even when the behavior job is green.
+There is no known-failure exemption list. Every selected suite must pass.
 The behavior lane runs product suites. CI/review/PTY-helper, build-checker and evidence-validator self-tests are not part of the test suite. The optional credential check runs the scanner directly against the tracked tree.
-Presentation tools are installed only for the behavior lane. The dashboard is
+Presentation tools and the broad sandbox image are prepared only for explicitly requested full regression runs. The dashboard is
 built once with the production configuration and shared by all native targets;
 type checks and dashboard payload-consumer tests stay in their own job. That
 job exercises Goal, schedule, turn-record, verification, portrait, lifecycle and
@@ -61,10 +64,37 @@ job and once on macOS with stock Bash and BSD utilities;
 each of the four native targets still builds and verifies its shipped binaries
 and installation. Native files are uploaded after installation validation;
 early unverified duplicates and the separate fixture-preview bundle are omitted.
-The behavior lane builds its own sandbox image where it is used.
+The release behavior selection uses isolated fixtures; full regression builds its own sandbox image where required.
 TLA model checks run explicitly through `model-check.yml` when state-machine
 specifications change; they are not a prerequisite for shipping a binary.
 Specialized host and packaging proofs remain manual.
+
+### Run behavior locally before submitting a repair
+
+```bash
+opam exec -- bash scripts/run-release-behavior.sh
+```
+
+Use the candidate checkout and its pinned dependencies. The command uses the same
+selected runner as RC, preserves each suite's declared environment/dependencies,
+and actually reruns PTY aliases. The TUI binary is compiled before the scenario
+hang guard starts, so cold compilation does not consume an interaction timeout. GNU `timeout` (or `gtimeout` on macOS), Python,
+ripgrep and the OCaml test dependencies must be available. A local result records
+its platform and candidate; it does not substitute for a different platform's RC.
+
+The release selection covers input FIFO, stop/resume, workspace identity,
+interrupt, chat HTTP/delivery identity, MCP Task lifecycle and verification submission,
+durable chat storage, Goal verification,
+Memory continuity and the Schedule store's upgrade-sensitive format. Native
+installation, server boot and dashboard payload consumers retain their existing
+release jobs. Review changes to this list against the release's public claims.
+
+DOS/Play, voice, presentation generation and the remaining broad feature/visual
+regressions remain available through explicit `workflow_dispatch` on the full Test path (`suite` empty,
+`minimal: false` in `test.yml`). They are not silently skipped inside a run that
+claims full coverage. Reproduce a behavior failure locally, fix it and pass the
+same scenario before submitting another candidate; RC is the integration check,
+not the first debugging loop. Historical receipts retain their original scope.
 
 Prefer short, focused checks: the constitution's "about two minutes"
 describes their intended scale, not a timeout or a pass/fail threshold.

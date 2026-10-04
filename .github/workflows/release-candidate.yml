@@ -22,6 +22,8 @@ jobs:
   validate:
     name: Release candidate ref
     runs-on: ubuntu-24.04
+    outputs:
+      behavior_profile: ${{ steps.behavior.outputs.profile }}
     steps:
       - name: Require a release branch or tag
         run: |
@@ -30,17 +32,26 @@ jobs:
             *) echo "Full verification belongs to release/vX.Y.Z or a version tag" >&2; exit 1 ;;
           esac
 
+      - uses: actions/checkout@v7
+      - name: Read reviewed release behavior selection
+        id: behavior
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, sys
+          sys.path.insert(0, 'scripts/ci')
+          from release_behavior import load_profile
+          profile = load_profile()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('profile=' + json.dumps(profile) + '\n')
+          PYCODE
+
   compile:
     needs: validate
     uses: ./.github/workflows/full-check.yml
 
   behavior:
     needs: validate
-    uses: ./.github/workflows/test.yml
-    with:
-      candidate_verification: true
-      suite: ""
-      eio_backend: ""
+    uses: ./.github/workflows/release-behavior.yml
 
   installation:
     needs: validate
@@ -48,7 +59,7 @@ jobs:
 
   evidence:
     name: Record candidate verification
-    needs: [compile, behavior, installation]
+    needs: [validate, compile, behavior, installation]
     if: always()
     runs-on: ubuntu-24.04
     permissions:
@@ -57,6 +68,7 @@ jobs:
       - name: Record results for this exact commit
         env:
           CANDIDATE_RESULTS: ${{ toJSON(needs) }}
+          CANDIDATE_BEHAVIOR: ${{ needs.validate.outputs.behavior_profile }}
           CANDIDATE_COMMIT: ${{ github.sha }}
           CANDIDATE_REF: ${{ github.ref }}
           CANDIDATE_ATTEMPT: ${{ github.run_attempt }}
@@ -69,14 +81,14 @@ jobs:
           results = {name: needs[name]['result'] for name in ('compile', 'behavior', 'installation')}
           passed = all(result == 'success' for result in results.values())
           receipt = {
-              'schema_version': 1,
+              'schema_version': 2,
               'commit': os.environ['CANDIDATE_COMMIT'],
               'ref': os.environ['CANDIDATE_REF'],
               'run_attempt': int(os.environ['CANDIDATE_ATTEMPT']),
               'run_url': os.environ['CANDIDATE_RUN'],
               'results': results,
               'checks_passed': passed,
-              'behavior_scope': 'full Test workflow with the checked-in known-failure policy',
+              'behavior_scope': json.loads(os.environ['CANDIDATE_BEHAVIOR']),
               'published': False,
           }
           Path('candidate-verification.json').write_text(json.dumps(receipt, indent=2) + '\n')

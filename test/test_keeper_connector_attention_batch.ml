@@ -533,7 +533,9 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
       | entry :: _ -> entry.Log.Ring.seq | [] -> -1 in
     let mixed = intake () in
     let warnings = Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
-      |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn) in
+      |> List.filter (fun (entry : Log.Ring.entry) ->
+        entry.level = Log.Warn
+        && String.starts_with ~prefix:"turn entry: retaining missing connector attention" entry.message) in
     check int "missing backlog produces one aggregate warning" 1 (List.length warnings);
     check (list string) "readable connector and independent work pass a missing prefix"
       [readable.post_id; bootstrap.post_id]

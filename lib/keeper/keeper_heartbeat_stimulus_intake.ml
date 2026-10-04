@@ -960,7 +960,7 @@ let heartbeat_event_intake
         , List.rev selections_rev
         , first_withdrawn
         , None )
-      | _, selection :: _
+      | _, (selection : Keeper_event_queue_state.pending_selection) :: _
         when Option.is_none !connector_snapshot
              && Option.is_some (connector_attention_event_id selection.source) ->
         let selections, missing = prepare_connectors selections in

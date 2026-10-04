@@ -19,6 +19,8 @@ type removal =
    unmeasured because the provider declined for the account's usage. *)
 type unverified = { runtime_id : string; code : string }
 type saved =
+  | Saved_durability_unconfirmed of saved
+  | Saved_lock_release_unconfirmed of saved
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }
@@ -254,6 +256,8 @@ let refresh_retry t result =
   | Ok () -> t.phase <- Models; t.notice <- "최신 설정을 읽었습니다. 선택한 모델을 확인하고 Enter로 다시 저장하세요."
   | Error _ -> t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
 let saved_notice = function
+  | Saved_durability_unconfirmed _ -> "설정은 현재 적용됐지만 디스크 저장 내구성을 확인하지 못했습니다. 재저장하지 말고 저장소 상태를 확인하세요."
+  | Saved_lock_release_unconfirmed _ -> "설정은 저장됐지만 설정 잠금 해제를 확인하지 못했습니다. 재저장하지 말고 서버의 잠금 상태를 확인하세요."
   | Saved_verified -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
   | Saved_unverified _ -> "저장했습니다. 아래 런타임은 사용 한도에 걸려 응답·도구 검증을 못 했습니다."
   | Saved_partly { unverified = []; _ } -> "저장했습니다. 기존 연결은 그대로 유지했습니다."
@@ -261,7 +265,8 @@ let saved_notice = function
     "저장했습니다. 기존 연결은 유지했습니다. 아래 모델은 사용 한도로 검증하지 못했습니다."
 (* A runtime id is two hashes and a model name, longer than what a notice row
    has left at 100 columns, so each unmeasured runtime gets its own row. *)
-let saved_rows = function
+let rec saved_rows = function
+  | Saved_durability_unconfirmed saved | Saved_lock_release_unconfirmed saved -> saved_notice saved :: saved_rows saved
   | Saved_verified -> []
   | Saved_unverified (first, rest) ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest)
@@ -277,7 +282,7 @@ let saved_of_json json =
       | Some runtime_id, Some code when List.mem runtime_id selected -> Some {runtime_id; code}
       | _ -> None) rows in
     if List.for_all Option.is_some parsed then Some (List.filter_map Fun.id parsed) else None in
-  match field "configured" json, field "readiness" json, field "unverified" json, field "not_rechecked" json with
+  let readiness = match field "configured" json, field "readiness" json, field "unverified" json, field "not_rechecked" json with
   | `Bool true, `String "verified", `Null, `Null -> Some Saved_verified
   | `Bool true, `String "usage_limited", `List rows, `Null ->
     (match unverified_rows rows with
@@ -291,6 +296,16 @@ let saved_of_json json =
          | None -> false) ids ->
        Some (Saved_partly { unverified; not_rechecked = List.filter_map Fun.id ids })
      | Some _ | None -> None)
+  | _ -> None in
+  let readiness = match field "warnings" (field "commit" json), readiness with
+    | `List [], saved -> saved
+    | `List rows, Some saved when List.for_all (fun row ->
+        field "code" row = `String "runtime_config_lock_release_unconfirmed") rows ->
+        Some (Saved_lock_release_unconfirmed saved)
+    | _ -> None in
+  match field "durability" (field "commit" json), readiness with
+  | `String "durable", Some saved -> Some saved
+  | `String "unconfirmed", Some saved -> Some (Saved_durability_unconfirmed saved)
   | _ -> None
 let saved t json =
   match saved_of_json json with

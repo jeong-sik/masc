@@ -16,8 +16,8 @@ let report = function
       | Configuration_unavailable -> "configuration_unavailable", `Null, None
       | Child_not_started _ -> "child_not_started", `Null, None
       | Validation_failed _ -> "validation_failed", `Null, None
-      | Write_failed -> "write_failed", `Null, None
-      | Rollback_failed -> "rollback_failed", `Null, None
+      | Commit_refused _ -> "commit_refused", `Null, None
+      | Write_failed _ -> "write_failed", `Null, None
       | Lock_unavailable -> "lock_unavailable", `Null, None in
     let fields =
       [ "schema", `String "masc.runtime_setup_error.v1";

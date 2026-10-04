@@ -83,7 +83,7 @@ type configuration_reading = {
 type cleanup_publication = {
   fields : (string * Yojson.Safe.t) list;
   terminal : Yojson.Safe.t option;
-  phase : phase;
+  terminal_phase : phase;
 }
 type recovery =
   | Cleaning of (string * Yojson.Safe.t) list
@@ -899,7 +899,7 @@ let publish_cleanup m ~id ~writer publication =
   match persisted with
   | Ok () ->
       Hashtbl.remove m.recovering id;
-      if publication.phase = Detached then m.configuration_nudge ()
+      if publication.terminal_phase = Detached then m.configuration_nudge ()
   | Error message ->
       (* Keep the owner even after rename/unlink. The next maintenance beat
          retries only publication: successful resource release is not replayed. *)
@@ -966,7 +966,7 @@ let historical_detach ~sw m fields =
       let terminal =
         if phase = Detached && never_started ~seq ~has_container:(Option.is_some container_id)
         then None else Some (replace_phase fields phase) in
-      let publication = {fields;terminal;phase} in
+      let publication = {fields;terminal;terminal_phase=phase} in
       (* Event publication can yield. The cleanup result already exists, so
          preserve its storage obligation before reporting the resource event. *)
       Hashtbl.replace m.recovering id (Publishing_cleanup publication);

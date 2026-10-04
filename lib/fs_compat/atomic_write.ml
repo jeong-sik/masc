@@ -2623,6 +2623,7 @@ let atomic_replace_failure_to_string failure =
 ;;
 
 let write_file_atomic_with_parent_sync
+  ?(run = blocking_syscalls)
   ~sync_file
   ~sync_parent
   ~(write_temp : string -> unit)
@@ -2634,7 +2635,7 @@ let write_file_atomic_with_parent_sync
   let failure ~backtrace exception_ =
     Error { path; stage = !stage; exception_; backtrace }
   in
-  blocking_syscalls
+  run
     ~label:("fs-compat-atomic-replace " ^ Stdlib.Filename.basename path)
     (fun () ->
     match
@@ -2740,6 +2741,15 @@ let write_temp_channel ~write path =
 
 let write_file_atomic_strict_staged path ~write =
   write_file_atomic_with_parent_sync
+    ~sync_file:fsync_path_strict
+    ~sync_parent:fsync_path_strict
+    ~write_temp:(write_temp_channel ~write)
+    path
+;;
+
+let write_file_atomic_strict_staged_blocking path ~write =
+  write_file_atomic_with_parent_sync
+    ~run:(fun ~label:_ f -> f ())
     ~sync_file:fsync_path_strict
     ~sync_parent:fsync_path_strict
     ~write_temp:(write_temp_channel ~write)

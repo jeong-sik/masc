@@ -37,8 +37,10 @@ scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/lo
 ```
 
 위 명령은 이미 빌드된 바이너리에 사용합니다. 코딩 에이전트는 로컬 빌드 대신
-허용된 `release/v*` 브랜치 또는 태그에서 `Release` workflow의 `workflow_dispatch`로
-바이너리와 증거를 생성합니다.
+허용된 `release/v*` 브랜치 또는 `v*` 태그에서
+[`Release Candidate Verification`](../.github/workflows/release-candidate.yml)의
+`workflow_dispatch`로 바이너리와 증거를 생성합니다. 기존 태그를 대상으로 하는
+[`Release`](../.github/workflows/release.yml)는 검증된 RC 산출물을 가져와 게시합니다.
 
 ## One-commit candidate verification
 
@@ -57,9 +59,8 @@ gh workflow run release-candidate.yml --ref release/vX.Y.Z
 
 이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 전체 `Test`, 4개 플랫폼 `release-build.yml` 설치
 검증과 최종 배포 자산 조립을 함께 호출합니다. 부분 suite를 선택하는
-입력은 없습니다. 기존
-`test/ci-known-failures.txt` 정책은 그대로 적용되므로 전체 Test 통과를
-모든 알려진 결함의 해결로 해석하지 않습니다.
+입력은 없습니다. 전체 Test는 루트 `@runtest`를 한 번 실행하고 Dune의 종료 코드로
+판정합니다. 실패를 허용하는 목록이나 별도 재컴파일 경로는 없습니다.
 
 `candidate-verification-<sha>-attempt-<n>` artifact는 커밋과 세 결과를 기록합니다.
 실패·취소·건너뜀은 성공으로 기록하지 않습니다. 재실행 시 해당 job의

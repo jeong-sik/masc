@@ -6,8 +6,7 @@ import sys
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_planning_detail.ml",
-                  "bin/masc_tui_render_prim.ml", "bin/masc_tui_types.ml")
+
 GOAL_ID = "goal-detail-viewport-distinct-identity-tail"
 TITLE = "TITLEHEAD " + "한 " * 18 + "goal evidence " * 8 + "TITLEEND"
 METRIC = "metric-" + "0123456789abcdef" * 14 + "METRICEND"

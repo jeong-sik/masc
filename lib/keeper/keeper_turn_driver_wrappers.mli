@@ -29,7 +29,7 @@ val run_named_with_masc_tools :
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->
-  ?raw_trace:Agent_core.Raw_trace.t ->
+  raw_trace:Agent_core.Raw_trace.t option ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->

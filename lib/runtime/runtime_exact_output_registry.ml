@@ -177,8 +177,12 @@ let admit_lane_slots resolver_snapshot admitted_by_id
       else if String_set.mem slot_id seen
       then Error (Duplicate_lane_slot { lane_id = lane.id; position; slot_id })
       else if not lane.enabled then
-        loop (position + 1) (String_set.add slot_id seen) admitted_by_id
-          admitted_slots rejected_slots rest
+        (match Exact_output.admit_target_ref resolver_snapshot slot_id with
+         | Error (Exact_output.Target_ref_rejected cause) ->
+             Error (Invalid_lane_slot {lane_id=lane.id;position;slot_id;cause})
+         | Ok _ | Error (Exact_output.Target_not_in_catalog _) ->
+             loop (position + 1) (String_set.add slot_id seen) admitted_by_id
+               admitted_slots rejected_slots rest)
       else
         let admitted = String_map.find_opt slot_id admitted_by_id in
         (match admitted with

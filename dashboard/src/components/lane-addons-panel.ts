@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import {
   attachLaneAddon, detachLaneAddon, fetchLaneAddons, fetchLaneAddonSlice,
   observeLaneAddon, preserveLaneAddonEvidence,
@@ -23,18 +23,32 @@ const sameWorkspace = (left: ExecutionWorkspaceAuthority, right: ExecutionWorksp
   left.workspaceRoot === right.workspaceRoot && left.epoch === right.epoch
 type Owned<T> = { authority: ExecutionWorkspaceAuthority; value: T }
 
+function rawFieldsText(fields: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(fields, null, 2)
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
+    return 'Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.'
+  }
+}
+
 function isDeclarationFile(directory: string, sourcePath: string): boolean {
   const fileName = sourcePath.slice(sourcePath.lastIndexOf('/') + 1)
   const expectedPath = `${directory}${directory.endsWith('/') ? '' : '/'}${fileName}`
-  return sourcePath === expectedPath && fileName.length > '.toml'.length
+  return sourcePath === expectedPath && fileName.length >= '.toml'.length
     && fileName.endsWith('.toml') && !fileName.includes('\\') && !fileName.includes('\0')
 }
 
 function staleRemoval(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
   const owner = item.configuration
-  return owner !== null && configuration !== null && configuration.declarations.some(current =>
-    current.id === owner.id && current.source_path === owner.source_path
-    && current.desired_revision !== owner.revision)
+  if (owner === null) return false
+  if (configuration === null || !configuration.complete) return true
+  const matches = configuration.declarations.filter(current => current.id === owner.id)
+  const conflicts = configuration.issues.filter(issue => issue.id === owner.id)
+  if (conflicts.length > 0 || matches.length > 1) return true
+  if (matches.length === 1) return matches[0]!.desired_revision !== owner.revision
+  return configuration.declarations.some(current => current.source_path === owner.source_path)
+    || configuration.issues.some(issue => issue.source_path === owner.source_path)
 }
 
 function hasCurrentDeclaration(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
@@ -207,10 +221,19 @@ export function LaneAddonsPanel() {
   const [lane, setLane] = useState('')
   const [since, setSince] = useState('')
   const [until, setUntil] = useState('')
-  const [instance, setInstance] = useState('')
+  const [instanceValue, setInstance] = useState('')
   const [keeper, setKeeper] = useState('')
-  const [focusedRow, setFocusedRow] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string[]>([])
+  const [focusedRowValue, setFocusedRow] = useState<string | null>(null)
+  const [selectedValue, setSelected] = useState<string[]>([])
+  const [evidenceAuthority, setEvidenceAuthority] = useState(authority)
+  const evidenceCurrent = evidenceAuthority === authority
+  const instance = evidenceCurrent ? instanceValue : ''
+  const focusedRow = evidenceCurrent ? focusedRowValue : null
+  const selected = evidenceCurrent ? selectedValue : []
+  useLayoutEffect(() => {
+    setEvidenceAuthority(authority)
+    setReceivedSlice(null); setInstance(''); setFocusedRow(null); setSelected([]); setReceivedReceipt(null)
+  }, [authority])
   const reads = useRef<AbortController | null>(null)
   const mounted = useRef(true)
 
@@ -318,7 +341,7 @@ export function LaneAddonsPanel() {
       <p>${focused.lane_id} · ${formatLaneTime(focused.observed_at)}</p>
       <p>Actor: ${focused.actor ?? 'not recorded'} · Subject: ${focused.subject_id}</p>
       <${LaneAddonReadings} row=${focused} instances=${snapshot?.instances ?? []} />
-      <pre class="whitespace-pre-wrap break-all">${JSON.stringify(focused.fields, null, 2)}</pre>
+      <pre class="whitespace-pre-wrap break-all">${rawFieldsText(focused.fields)}</pre>
       <h4>Original evidence</h4>
       ${focused.evidence.length === 0 ? html`<p>No original evidence recorded.</p>` : focused.evidence.map(evidence => html`<p class="break-all" key=${evidence.uri}>${evidence.uri} · sha256 ${evidence.sha256 ?? 'not recorded'}</p>`)}
       ${focused.related_ids.length > 0 && html`<div>Recorded relationships: ${focused.related_ids.map(id => {
@@ -434,7 +457,7 @@ export function LaneAddonsPanel() {
       ${row.clock && html`<p>World time: ${row.clock.domain} ${row.clock.value}</p>`}
       <${LaneAddonReadings} row=${row} instances=${snapshot?.instances ?? []} />
       <details><summary>Fields and original evidence · ${row.id}</summary>
-        <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.fields, null, 2)}</pre>
+        <pre class="whitespace-pre-wrap break-all">${rawFieldsText(row.fields)}</pre>
         ${row.evidence.map(evidence => html`<p key=${evidence.uri} class="break-all">${evidence.uri} · sha256 ${evidence.sha256 ?? 'unknown'}</p>`)}
         ${row.related_ids.length > 0 && html`<p>Related: ${row.related_ids.join(', ')}</p>`}
       </details>

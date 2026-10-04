@@ -4,10 +4,6 @@
  (libraries masc masc.keeper_runtime unix))
 
 (test
- (name test_schema_generation_pins)
- (modules test_schema_generation_pins)
- (libraries masc masc.keeper_runtime str)
- (deps
-  ../../lib/keeper_runtime/keeper_event_queue_persistence.ml
-  ../../lib/keeper_runtime/keeper_event_queue_schema.ml
-  ../../lib/keeper_runtime/keeper_event_queue_state.ml))
+ (name test_schema_boundary)
+ (modules test_schema_boundary)
+ (libraries masc masc.keeper_runtime))

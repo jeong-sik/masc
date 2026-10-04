@@ -58,7 +58,7 @@ it('mounts official account login in production onboarding and refreshes after v
   })
   vi.mocked(post).mockImplementation(async path => path.endsWith('/models')
     ? { models: [{ id: 'model', label: 'Selected model', context: 32000, tools: true }] }
-    : path.endsWith('/connections') ? { configured: true, readiness: 'verified', runtime_id: 'codex.model', runtime_ids: ['codex.model'] }
+    : path.endsWith('/connections') ? { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'codex.model', runtime_ids: ['codex.model'] }
       : { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } })
   render(html`<${OnboardingSettings} />`)
   fireEvent.change(await screen.findByLabelText('공급자'), { target: { value: 'codex' } })
@@ -90,7 +90,7 @@ it('releases parent controls when a failed inventory refresh unmounts a busy pic
     if (path.endsWith('/models')) return { models: [{ id: 'model', label: 'Selected model', context: 32000, tools: true }] }
     if (path.endsWith('/connections')) {
       failInventory = true
-      return { configured: true, readiness: 'verified', runtime_id: 'codex.model', runtime_ids: ['codex.model'] }
+      return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'codex.model', runtime_ids: ['codex.model'] }
     }
     return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
   })

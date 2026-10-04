@@ -1,3 +1,9 @@
+val normalize_http_request_path :
+  kind:Llm_provider.Provider_config.provider_kind -> base_url:string -> request_path:string -> string
+val default_http_request_path :
+  kind:Llm_provider.Provider_config.provider_kind -> base_url:string -> string
+(** The uncatalogued HTTP surface, normalized against the endpoint. *)
+
 (** Single-binding → hot-path [Provider_config.t] materialization (RFC-0206 §5).
 
     Re-homed from the deleted [Runtime_declarative_adapter], keeping only the

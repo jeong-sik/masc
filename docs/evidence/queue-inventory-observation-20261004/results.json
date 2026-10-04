@@ -1,0 +1,88 @@
+{
+  "implementation_head": "c7b705e02bce015ba9c44f1b8de111dff00b160e",
+  "base_head": "a3461f1fb69fc85041ab62ae0d27a60902c1c90d",
+  "compiler_version": "5.5.1",
+  "compiler_sha256": "992315e93646447f2b555bd44fcd359dd247e6dc675a751685a65c94e85ad11f",
+  "validation": "per-file OCaml interface and implementation type checks",
+  "warning_errors": [
+    8,
+    32,
+    69
+  ],
+  "dependencies": "Existing compiled interfaces from the shared checkout build cache and the installed OCaml 5.5.1 switch; dependencies were not rebuilt or certified for this candidate.",
+  "results_recorded_at_utc": "2026-10-03T18:15:16.453897+00:00",
+  "checks": [
+    {
+      "source": "lib/server_keeper_waiting_inventory.mli",
+      "status": "PASS",
+      "log": "masc__Server_keeper_waiting_inventory.cmi.log",
+      "exit_code": 0,
+      "source_sha256": "853ef6485c1f7f547f76c7c030b58ed8517fae35d06af8ddeb8416365b685780"
+    },
+    {
+      "source": "lib/keeper/keeper_composite_observer.mli",
+      "status": "PASS",
+      "log": "masc__Keeper_composite_observer.cmi.log",
+      "exit_code": 0,
+      "source_sha256": "d786170fd204d66e7d20f3f720187b0b685e88eb8960eaf073f8bbee1ca19145"
+    },
+    {
+      "source": "lib/keeper/keeper_composite_observer.ml",
+      "status": "PASS",
+      "log": "masc__Keeper_composite_observer.cmo.log",
+      "exit_code": 0,
+      "source_sha256": "cfe6965a70adbfefb52cf11b2960e527add2217943352057da85574ec2e9c5b4"
+    },
+    {
+      "source": "lib/server_keeper_waiting_inventory.ml",
+      "status": "PASS",
+      "log": "masc__Server_keeper_waiting_inventory.cmo.log",
+      "exit_code": 0,
+      "source_sha256": "484522406d5f45476002efd6c9118f84cef8ad307f730f0bf9717c299a8b0906"
+    },
+    {
+      "source": "bin/masc_tui_queue_inspection.mli",
+      "status": "PASS",
+      "log": "masc_tui_queue_inspection.cmi.log",
+      "exit_code": 0,
+      "source_sha256": "b7e47b00fbd4e0349cb232c789ca87d6a6341beeb5473cb2bb82f88ece4966e8"
+    },
+    {
+      "source": "bin/masc_tui_queue_inspection.ml",
+      "status": "PASS",
+      "log": "masc_tui_queue_inspection.cmo.log",
+      "exit_code": 0,
+      "source_sha256": "884c1ad705d00088221c0bddbf8010f978103d98c18ad064bb24e27d4943011a"
+    },
+    {
+      "source": "test/test_tui_queue_inspection.ml",
+      "status": "PASS",
+      "log": "test_tui_queue_inspection.cmo.log",
+      "exit_code": 0,
+      "source_sha256": "135a0e201cddf3918a606f568155b388614fa628690e02fc5235cbfdbf973e6f"
+    },
+    {
+      "source": "test/test_keeper_composite_live_turn_surface.ml",
+      "status": "PASS",
+      "log": "test_keeper_composite_live_turn_surface.cmo.log",
+      "exit_code": 0,
+      "source_sha256": "2fb3cf84fd69ba8bd276c210b6278a4b954559eb6b3b6fb67d7eb247d0ed4873"
+    }
+  ],
+  "behavior_tests": "not_run",
+  "candidate_pty": "not_run",
+  "candidate_full_build": "not_run",
+  "runtime_mutations": "none",
+  "source_sha256": {
+    "bin/dune": "143a713de19cd40d0136dc73261afd4aa1e03b1091d26e2cd543aeb5fe8ad753",
+    "bin/masc_tui_queue_inspection.ml": "884c1ad705d00088221c0bddbf8010f978103d98c18ad064bb24e27d4943011a",
+    "bin/masc_tui_queue_inspection.mli": "b7e47b00fbd4e0349cb232c789ca87d6a6341beeb5473cb2bb82f88ece4966e8",
+    "docs/TUI-GUIDE.md": "d9a8a9a5f4d32979eacb4de23c8a6f42a3dcd189579145b337bea2be9991f4bf",
+    "lib/keeper/keeper_composite_observer.ml": "cfe6965a70adbfefb52cf11b2960e527add2217943352057da85574ec2e9c5b4",
+    "lib/keeper/keeper_composite_observer.mli": "d786170fd204d66e7d20f3f720187b0b685e88eb8960eaf073f8bbee1ca19145",
+    "lib/server_keeper_waiting_inventory.ml": "484522406d5f45476002efd6c9118f84cef8ad307f730f0bf9717c299a8b0906",
+    "lib/server_keeper_waiting_inventory.mli": "853ef6485c1f7f547f76c7c030b58ed8517fae35d06af8ddeb8416365b685780",
+    "test/test_keeper_composite_live_turn_surface.ml": "2fb3cf84fd69ba8bd276c210b6278a4b954559eb6b3b6fb67d7eb247d0ed4873",
+    "test/test_tui_queue_inspection.ml": "135a0e201cddf3918a606f568155b388614fa628690e02fc5235cbfdbf973e6f"
+  }
+}

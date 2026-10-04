@@ -29,6 +29,12 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+type config_commit_error =
+  | Config_commit_refused of string
+  | Config_commit_write_failed of Fs_compat.atomic_replace_failure
+(** A refusal happens before replacement; a write failure here also precedes
+    rename. A visible replacement returns a receipt, including uncertain durability. *)
+
 (** Where the exact-output registry's targets come from. *)
 type exact_output_target_source =
   | Runtime_binding_targets
@@ -415,6 +421,11 @@ module For_testing : sig
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
 
+  val with_config_lock_observed_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error -> runtime_config_path:string ->
+    (unit -> 'a) -> ('a config_lock_receipt, string) result
+  (** Real writer lock and journal admission, with an injected release result. *)
+
   val with_config_lock_with_journal_sync_parent :
     sync_parent:(string -> unit) -> runtime_config_path:string ->
     (unit -> unit) -> (unit, string) result
@@ -432,6 +443,13 @@ end
 
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
+
+val catalogue_revision : unit -> int
+(** Monotonic revision of the published runtime catalogue. *)
+
+val await_catalogue_change : after:int -> int
+(** Wait for a publication newer than [after], without polling. A publication
+    that precedes the wait is returned immediately. *)
 
 val get_default_and_runtimes : unit -> t option * t list
 (** The default runtime and the runtime list from one read of the loaded
@@ -815,6 +833,19 @@ val save_config_text :
     [\[runtime.lanes.<id>\]] table here is refused while a seat names it, as it
     is through {!remove_runtime_lane}. *)
 
+val commit_config_text_locked :
+  ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+  runtime_config_path:string ->
+  string ->
+  (config_commit_receipt, config_commit_error) result
+(** Validate and commit runtime.toml, then republish the live runtime
+    registry, for a caller that already holds the config write lock:
+    {!with_config_lock} took the durable lock and resolved the keeper
+    journal. Everything else is {!save_config_text}'s -- the same validation,
+    the same atomic replace, the same receipt. Callers outside the lock use
+    {!save_config_text}; replacing the file without this commit leaves the
+    published registry at its previous snapshot until the next restart. *)
+
 val edit_config_text :
   ?runtime_config_path:string ->
   (string -> string) ->
@@ -1032,6 +1063,7 @@ val append_exact_output_lane_slot :
 type exact_slot_move =
   | Move_slot_up
   | Move_slot_down
+  | Move_slot_first
       (** Which way {!move_exact_output_lane_slot} walks a slot through the
           declared order, which is the order the lane walks. *)
 
@@ -1057,11 +1089,21 @@ val move_exact_output_lane_slot :
   move:exact_slot_move ->
   unit ->
   (config_commit_receipt, string) result
-(** Exchange [slot] with its neighbour in the declared order of the list that
+(** Exchange [slot] with its neighbour, or promote it to the first position
+    while preserving the relative order of the other candidates, in the list that
     holds it -- [slots] or [cli_slots] -- read under the write lock like
     {!drop_exact_output_lane_slot}. The two lists do not mix: a slot never moves
     into the other one. Refused when the lane declares no such slot, and when
-    the slot is already at the end of its list the move heads for. *)
+    a neighbour move would pass the end. Promoting an already first candidate
+    keeps the order unchanged. *)
+
+val replace_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane -> slot:string -> replacement:string -> unit ->
+  (config_commit_receipt, string) result
+(** Replace one declared candidate at its current position under the write
+    lock. The replacement must belong to the same HTTP/CLI group and must
+    not already occur in the lane. Other candidates are preserved. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and
@@ -1071,6 +1113,13 @@ val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) resul
 (** Serialize an owner configuration activation with the existing file writers.
     Reject an unresolved configuration journal before invoking the action.
     The action must not recursively invoke a config writer. *)
+
+val with_config_lock_observed : runtime_config_path:string -> (unit -> 'a) ->
+  ('a config_lock_receipt, string) result
+(** The same writer admission, retaining completed action values and lock-release
+    warnings separately. The action must not recursively invoke a config writer. *)
+val attach_lock_warnings : config_lock_warning list -> config_commit_receipt -> config_commit_receipt
+(** Attach the owning lock's observed release warnings to its completed commit. *)
 
 val with_manifest_config_lock :
   runtime_config_path:string -> manifest_path:string ->

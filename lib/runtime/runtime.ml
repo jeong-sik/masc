@@ -36,6 +36,10 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+type config_commit_error =
+  | Config_commit_refused of string
+  | Config_commit_write_failed of Fs_compat.atomic_replace_failure
+
 (* Where the exact-output registry reads its targets. The server builds them
    from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
    full replacement catalog, whose [[targets]] rows are then the whole set and
@@ -1161,9 +1165,22 @@ let empty_loaded_state =
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
+let catalogue_revision_ref = Atomic.make 0
+let catalogue_changed = Eio.Condition.create ()
+let catalogue_revision () = Atomic.get catalogue_revision_ref
+
+let publish_loaded_state state =
+  Atomic.set loaded_state_ref state;
+  ignore (Atomic.fetch_and_add catalogue_revision_ref 1);
+  Eio.Condition.broadcast catalogue_changed
+
+let await_catalogue_change ~after =
+  Eio.Condition.loop_no_mutex catalogue_changed (fun () ->
+    let current = catalogue_revision () in
+    if current > after then Some current else None)
 
 let enter_setup_required ~reason () =
-  Atomic.set loaded_state_ref empty_loaded_state;
+  publish_loaded_state empty_loaded_state;
   Runtime_startup_state.set (Setup_required reason)
 ;;
 
@@ -1208,7 +1225,7 @@ let set_loaded
     | Some declared -> declared
     | None -> media_failover
   in
-  Atomic.set loaded_state_ref
+  publish_loaded_state
     { default_runtime = Some rt
     ; default_route = Some default_route
     ; runtimes
@@ -2228,10 +2245,15 @@ let attach_lock_warnings warnings receipt =
   { receipt with lock_warnings = receipt.lock_warnings @ warnings }
 ;;
 
-let with_config_lock ~runtime_config_path action =
+let with_config_lock_observed ~runtime_config_path action =
   let* locked = with_runtime_config_write_lock runtime_config_path action in
   List.iter (function Config_lock_release_unconfirmed detail ->
     Log.Misc.warn "runtime activation lock release unconfirmed: %s" detail) locked.warnings;
+  Ok locked
+;;
+
+let with_config_lock ~runtime_config_path action =
+  let* locked = with_config_lock_observed ~runtime_config_path action in
   locked.value
 ;;
 
@@ -2266,7 +2288,7 @@ let runtime_config_atomic_failure
     match failure.Fs_compat.exception_ with
     | Eio.Cancel.Cancelled _ ->
       Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)
+    | _ -> Error (Config_commit_write_failed failure)
 ;;
 
 let runtime_config_write_outcome
@@ -2930,14 +2952,15 @@ let record_exact_output_commit ~path ~previous_view (receipt : config_commit_rec
   receipt
 ;;
 
-let commit_runtime_config_text
+let commit_config_text_locked
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
-    ~path
+    ~runtime_config_path:path
     content
   =
   let observation = config_observation ~path content in
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     validate_save_text ~config_path:path content
+    |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   let previous_view = exact_output_report_view () in
   let committed = record_exact_output_commit ~path ~previous_view in
@@ -2952,6 +2975,7 @@ let commit_runtime_config_text
   let runtimes, _, _, _, _, _, _, _ = loaded in
   let* plan =
     plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
+    |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   match plan with
   | Commit_without_registry ->
@@ -2991,8 +3015,8 @@ let commit_runtime_config_text
      with
      | Error error ->
        Error
-         ("exact-output registry replacement reservation rejected: "
-          ^ Runtime_exact_output_registry.publication_error_to_string error)
+         (Config_commit_refused ("exact-output registry replacement reservation rejected: "
+          ^ Runtime_exact_output_registry.publication_error_to_string error))
      | Ok (Runtime_exact_output_registry.Not_committed failure) ->
        runtime_config_atomic_failure
          ~replacement_visible:false
@@ -3012,6 +3036,13 @@ let commit_runtime_config_text
          ~exact_output_registry
          failure
        |> Result.map committed)
+;;
+
+let commit_runtime_config_text ?replace_file ~path content =
+  commit_config_text_locked ?replace_file ~runtime_config_path:path content
+  |> Result.map_error (function
+      | Config_commit_refused detail -> detail
+      | Config_commit_write_failed failure -> Fs_compat.atomic_replace_failure_to_string failure)
 ;;
 
 let save_config_text_with_replace_file
@@ -3072,7 +3103,13 @@ module For_testing = struct
   (* TEL-OK: this module only exposes pure state and validation test helpers. *)
 
   let snapshot () = runtime_state ()
-  let restore snapshot = Atomic.set loaded_state_ref snapshot
+  let restore snapshot = publish_loaded_state snapshot
+  let with_config_lock_observed_with_release_failure ~release_failure ~runtime_config_path action =
+    with_runtime_config_write_lock_using
+      (File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure ~release_failure)
+      runtime_config_path action
+  ;;
+
   let with_config_lock_with_journal_sync_parent ~sync_parent ~runtime_config_path action =
     with_runtime_config_write_lock_using
       ~require_resolved:(Keeper_config_journal.For_testing.require_resolved_with_sync_parent ~sync_parent)
@@ -3967,6 +4004,7 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
 type exact_slot_move =
   | Move_slot_up
   | Move_slot_down
+  | Move_slot_first
 
 (* Both edits below read the declaration under the write lock for the reason
    the append does: the standalone-lane projection shows the slots the
@@ -4040,15 +4078,17 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
   let* edit =
     with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other:_ ~position ->
       let count = List.length slots in
-      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 in
-      if target < 0 || target >= count
+      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 | Move_slot_first -> 0 in
+      if target < 0 || target >= count || (move = Move_slot_first && position = 0)
       then
         Error
           (Printf.sprintf
              "%s is already %s in %s"
              slot
-             (match move with Move_slot_up -> "first" | Move_slot_down -> "last")
+             (match move with Move_slot_up | Move_slot_first -> "first" | Move_slot_down -> "last")
              lane_id)
+      else if move = Move_slot_first then
+        Ok (slot :: List.filteri (fun index _ -> index <> position) slots)
       else
         let at_position = List.nth slots position
         and at_target = List.nth slots target in
@@ -4063,4 +4103,26 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
              slots))
   in
   edit_runtime_lanes ?runtime_config_path edit
+;;
+
+let replace_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~replacement () =
+  let slot = String.trim slot in
+  let replacement = String.trim replacement in
+  if String.equal replacement "" || contains_newline replacement
+  then Error "replacement must be a non-empty runtime id without newlines"
+  else
+    let* edit = with_declared_exact_slots ~lane ~slot
+      (fun ~lane_id:_ ~slot:_ ~slots ~other ~position ->
+        if List.mem replacement (slots @ other)
+        then Error (replacement ^ " is already declared in this lane")
+        else Ok (List.mapi (fun index current ->
+          if index = position then replacement else current) slots)) in
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let current = Option.bind (exact_lane_decl config lane) (fun decl ->
+        if List.mem slot decl.slot_ids then Some Catalog_slots
+        else if List.mem slot decl.cli_slot_ids then Some Cli_slots else None) in
+      match current, exact_slot_list_of_new_slot config replacement with
+      | Some current, Some next when current = next -> edit ~content config
+      | _, None -> Error (no_output_schema_channel_refusal ~slot:replacement ~lane_id:(Standalone_lane.to_id lane))
+      | _ -> Error "Replace a candidate within its HTTP or CLI group; add a candidate to change groups")
 ;;

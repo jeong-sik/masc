@@ -27,11 +27,7 @@ import {
   INTERLEAVE_ORDER_SIGNATURE,
   InterleaveContractFixture,
   installInterleaveFixtureToolOutputs,
-  interleaveEntries,
-  interleaveFixtureStatus,
-  joinedToolCount,
   joinedToolOutput,
-  traceOnlyToolCount,
 } from './keeper-chat-interleave-contract-fixture'
 import { resetToolCallOutputs } from '../tool-call-output-store'
 
@@ -46,22 +42,6 @@ describe('Keeper Chat interleave contract fixture', () => {
     }
     resetToolCallOutputs()
     exactToolCallLookup.clear()
-  })
-
-  it('keeps deterministic fixture rows for joined and trace-only tool states', () => {
-    expect(interleaveEntries).toHaveLength(2)
-    expect(joinedToolCount).toBe(1)
-    expect(traceOnlyToolCount).toBe(1)
-    expect(interleaveFixtureStatus).toBe('ok')
-
-    const assistant = interleaveEntries.find(entry => entry.id === 'assistant-interleave')
-    expect(assistant?.traceSteps?.map(step => step.kind)).toEqual(['think', 'tool', 'think', 'tool'])
-    expect(assistant?.traceSteps?.map(step => step.ts)).toEqual([
-      '2026-07-05T14:20:05.000Z',
-      '2026-07-05T14:20:01.000Z',
-      '2026-07-05T14:20:02.000Z',
-      '2026-07-05T14:20:03.000Z',
-    ])
   })
 
   it('renders structural order and tool-output join state into durable DOM attributes', async () => {

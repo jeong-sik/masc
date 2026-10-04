@@ -211,7 +211,7 @@ let injected_slot ~sw ~net ~timeout_s ~primary_id =
   let admitted_target = match Exact.admit_target_ref snapshot primary_id with
     | Ok target -> target | Error _ -> reject Injection_target_rejected
   in
-  ({Registry.slot_id = primary_id; admitted_target}, requests, server_errors)
+  ({Registry.slot_id = primary_id; admitted_target; runtime_observation = None}, requests, server_errors)
 
 let emit channel json = output_string channel (Yojson.Safe.to_string json ^ "\n"); flush channel
 let json_result = function

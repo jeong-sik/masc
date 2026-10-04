@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from typing import Any, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
-SOURCE_MODULES = (
-    "lib/server/server_standalone_lane_projection.ml",
-    "lib/tui_decode.ml",
-    "bin/masc_tui_render.ml",
-)
+
 
 
 def run(executable: str, captures: Path | None) -> None:
@@ -36,8 +33,8 @@ def run(executable: str, captures: Path | None) -> None:
         ({"state": "lane_unavailable"}, "JEV unavailable: Board lane is not ready"),
     )
     for state, expected in cases:
-        fixtures = h.keeper_runtime_http_fixtures()
-        status, payload = h.standalone_lanes_response()
+        fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+        status, payload = _keyboard_keepers.standalone_lanes_response()
         snapshot = cast(dict[str, Any], payload)
         board = snapshot["lanes"][0]
         board["jev"] = state
@@ -48,7 +45,7 @@ def run(executable: str, captures: Path | None) -> None:
             board["configured"] = False
             board["configuration_state"] = "unconfigured"
             board["status"] = "unavailable"
-        fixtures[h.STANDALONE_LANES_PATH] = (status, snapshot)
+        fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = (status, snapshot)
 
         def interact(
             process: subprocess.Popen[bytes],
@@ -57,12 +54,12 @@ def run(executable: str, captures: Path | None) -> None:
             output: bytearray,
             _base: str,
         ) -> None:
-            h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-            h.wait_for_output(
+            _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+            _keyboard_harness.wait_for_output(
                 process, fd, output, expected.encode(), start=0, timeout=10
             )
-            h.drain_until_quiet(process, fd, output)
-            screen = h.screen_text(bytes(output))
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            screen = _keyboard_harness.screen_text(bytes(output))
             if expected.encode() not in screen:
                 raise AssertionError(f"current screen omitted {expected!r}: {screen!r}")
             for _other_state, other in cases:
@@ -74,7 +71,7 @@ def run(executable: str, captures: Path | None) -> None:
                 (captures / f"{state['state']}.txt").write_bytes(screen)
             os.write(fd, b"q")
 
-        h.run_terminal_scenario(
+        _keyboard_harness.run_terminal_scenario(
             executable,
             description=f"Board JEV {state['state']}",
             interact=interact,

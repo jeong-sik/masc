@@ -14,6 +14,10 @@
  (libraries
   masc_types
   masc_core
+  ; The delivery outbox uses the same Keeper-name grammar as its recipients.
+  masc.keeper_registry
+  ; Explicit dependency: transitive module visibility is disabled.
+  masc_process
   masc.masc_random_id
   masc_log
   masc_backend

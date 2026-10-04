@@ -167,6 +167,11 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
     (required_strings claim_schema);
   check bool "librarian claim schema is closed" false
     (allows_additional_properties claim_schema);
+  let category_schema = schema_property Keeper_librarian.wire_field_category claim_schema in
+  check (list string) "category names are strings" [ "string" ]
+    (type_strings category_schema);
+  check bool "new category names are not excluded by an enum" true
+    (schema_member "enum" category_schema = None);
   (* The two Board provenance fields are answered on every claim, null when
      the claim came from the transcript, so strict schema modes accept it. *)
   let type_tokens schema =

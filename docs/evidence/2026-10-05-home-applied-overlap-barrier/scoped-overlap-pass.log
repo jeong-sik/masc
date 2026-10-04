@@ -1,0 +1,1 @@
+Superseded scoped Home: PASS (1 scenario; two held reads, exact B counts, one post-read identity probe per owner, no mutation)

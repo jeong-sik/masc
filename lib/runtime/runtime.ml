@@ -3035,6 +3035,18 @@ let save_config_text ?runtime_config_path content =
     content
 ;;
 
+(* The write half of {!save_config_text} for a caller already inside the
+   config write lock: [with_config_lock] took the durable lock and resolved
+   the keeper journal, so this goes straight to the commit -- validation, the
+   atomic replace and the registry republish. The setup wizard saves through
+   this rather than replacing the file itself; a plain file write leaves the
+   published runtime list at its previous snapshot until the next restart,
+   so the account the wizard saved was invisible to the running server
+   (task-2054). *)
+let commit_config_text_locked ?replace_file ~runtime_config_path content =
+  commit_runtime_config_text ?replace_file ~path:runtime_config_path content
+;;
+
 (* The read-modify-write form of [save_config_text]. A caller that loads the
    file itself and then hands the edited text to [save_config_text] loses any
    write that landed in between, because only the write is inside the lock.

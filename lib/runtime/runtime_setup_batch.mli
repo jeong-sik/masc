@@ -14,6 +14,11 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Validation_failed of { exit : Unix.process_status; stderr : string }
       (** The native stage validator ran and did not exit 0. Carries how it
           ended and what it wrote to stderr. *)
+  | Commit_refused of string
+      (** The commit that publishes the saved text refused it: the final
+          in-process validation disagreed with what the staged child accepted.
+          The string is the commit's refusal, several lines at most, carried
+          whole by {!error_detail} rather than the one-line summary. *)
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
       (** The runtime's own verification report says it is not verified, for
           a reason other than a spent quota or a rate limit ({!Usage_limited}).

@@ -815,6 +815,19 @@ val save_config_text :
     [\[runtime.lanes.<id>\]] table here is refused while a seat names it, as it
     is through {!remove_runtime_lane}. *)
 
+val commit_config_text_locked :
+  ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+  runtime_config_path:string ->
+  string ->
+  (config_commit_receipt, string) result
+(** Validate and commit runtime.toml, then republish the live runtime
+    registry, for a caller that already holds the config write lock:
+    {!with_config_lock} took the durable lock and resolved the keeper
+    journal. Everything else is {!save_config_text}'s -- the same validation,
+    the same atomic replace, the same receipt. Callers outside the lock use
+    {!save_config_text}; replacing the file without this commit leaves the
+    published registry at its previous snapshot until the next restart. *)
+
 val edit_config_text :
   ?runtime_config_path:string ->
   (string -> string) ->

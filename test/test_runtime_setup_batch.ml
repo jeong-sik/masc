@@ -201,8 +201,8 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
     | Error (Batch.Verification_unreadable { runtime_id; exit = Unix.WEXITED 0; stderr = ""; reason = _ }) -> runtime_id = id
     | Ok _
     | Error (Batch.Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
-            | Child_not_started _ | Validation_failed _ | Verification_failed _ | Verification_unreadable _
-            | Write_failed | Rollback_failed | Lock_unavailable) -> false in
+            | Child_not_started _ | Validation_failed _ | Commit_refused _ | Verification_failed _
+            | Verification_unreadable _ | Write_failed | Rollback_failed | Lock_unavailable) -> false in
   Alcotest.check Alcotest.bool "verified status with a failure attached is refused" true
     (unreadable "print(report(a[3],failure={'code':'timed_out','message':'late','detail':None}))");
   Alcotest.check Alcotest.bool "a key the writer never writes is refused" true
@@ -335,9 +335,25 @@ let test_error_summary_is_one_line () =
   Alcotest.check Alcotest.(option string) "a blank stderr is no detail" None (Batch.error_detail refused);
   Alcotest.check Alcotest.(option string) "an error with no child has no detail" None
     (Batch.error_detail Batch.Lock_unavailable)
+(* task-2054: the wizard save used to replace the file and stop there, so the
+   account it wrote stayed out of the registry the running server serves until
+   a restart. The save now commits through the same path as a routing edit,
+   and the saved binding must be callable in-process the moment it lands. *)
+let test_save_publishes_the_registry () = fixture (fun base _runtime binary spec _original ->
+  let registry = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore registry) (fun () ->
+    fake base binary "pass";
+    let added = spec "registry-account-model" in
+    let id = (Runtime_setup_spec.render added).runtime_id in
+    let ids runtime = List.map (fun (one : Runtime_instance.t) -> one.Runtime_instance.id) runtime in
+    Alcotest.check Alcotest.bool "the account is not callable before the save" false (List.mem id (ids (Runtime.get_runtimes ())));
+    let revision = get (Batch.observe ~base_path:base) in
+    ignore (get (apply base binary [added] [id] revision false));
+    Alcotest.check Alcotest.bool "the saved account is live in the published registry" true (List.mem id (ids (Runtime.get_runtimes ())))))
 let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
+  Alcotest.test_case "the saved account is live in the registry without a restart" `Quick test_save_publishes_the_registry;
   Alcotest.test_case "preserve named default lane and candidate order" `Quick test_named_default_lane;
   Alcotest.test_case "runtime compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;

@@ -3,6 +3,7 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Configuration_unavailable
   | Child_not_started of Process_eio.spawn_refusal
   | Validation_failed of { exit : Unix.process_status; stderr : string }
+  | Commit_refused of string
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
   | Write_failed | Rollback_failed | Lock_unavailable
@@ -53,6 +54,13 @@ let error_message = function
      did not finish. *)
   | Validation_failed { exit; stderr = _ } ->
     Printf.sprintf "Selected runtime configuration did not pass validation (%s)" (exit_text exit)
+  (* The staged child validated this same text, so a refusal here means the
+     commit's validation disagrees with the child's -- an operator-fixable
+     configuration problem, not a write failure. The reason stays in
+     {!error_detail}: like the child's stderr it can run to several lines the
+     setup screen would drop. *)
+  | Commit_refused _ ->
+    "Selected runtime configuration did not pass the final commit validation"
   | Verification_failed { runtime_id; code; detail } ->
     Printf.sprintf "Runtime %S did not pass response and tool verification (%s)%s" runtime_id code (with_detail detail)
   | Verification_unreadable { runtime_id; exit; stderr = _; reason } ->
@@ -62,6 +70,7 @@ let error_message = function
   | Lock_unavailable -> "Another configuration operation is active; retry after it finishes."
 let error_detail = function
   | Validation_failed { stderr; _ } | Verification_unreadable { stderr; _ } -> child_detail stderr
+  | Commit_refused reason -> child_detail reason
   | Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
   | Child_not_started _ | Verification_failed _ | Write_failed | Rollback_failed | Lock_unavailable -> None
 let revision_to_string (Revision value) = value
@@ -268,9 +277,18 @@ let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expect
   let* current = snapshot base in
   if not (same original current) then Error Changed_configuration else
   let _,runtime = paths base in
-  let changes = [runtime,first,validated] in
+  (* The write goes through the same commit every routing edit uses, so the
+     registry this process serves carries the account the moment the rename
+     lands; a plain file replacement here left the published runtime list at
+     its boot-time snapshot until a restart (task-2054). The staged child
+     validated this text; the commit re-runs the same validation in-process.
+     [first] keeps the file's original mode on the replacement. *)
   let* () = Eio.Cancel.protect (fun () ->
-    let* () = publish_using ~write changes in
+    let* _receipt =
+      Runtime.commit_config_text_locked
+        ~replace_file:(fun path text -> write path (mode first) text)
+        ~runtime_config_path:runtime validated
+      |> Result.map_error (fun reason -> Commit_refused reason) in
     List.iter Runtime_setup_credentials.retain pending_credentials;
     Ok ()) in
   match selected with

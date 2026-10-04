@@ -35,7 +35,7 @@ if args[0]=='runtime-muse-models':
     catalog_file=os.path.join(args[4],'fixture-muse-catalog.json')
     if os.path.exists(catalog_file):
         with open(catalog_file) as f: models=json.load(f)
-    else: models=[{'id':'reported-muse','label':'Reported Muse','context':8192}]
+    else: models=[{'id':'reported-muse','label':'Reported Muse','context':32768}]
     print(json.dumps({'schema':'masc.muse_models.v1','source':'providerCatalog',
       'invocation_verified':False,'account_availability_verified':False,
       'models':models}))
@@ -291,7 +291,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     let request=if protocol<>"muse-serve" then request else
       (match request with `Assoc root -> `Assoc (List.map (fun (key,v) ->
         if key<>"connections" then key,v else key,`List [`Assoc ["source",selected;
-          "models",`List [`Assoc ["id",`String "reported-muse";"context",`Int 8192;
+          "models",`List [`Assoc ["id",`String "reported-muse";"context",`Int 32768;
             "streaming",`Bool true]]]]) root)
        | _ -> assert false) in
     let account_reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
@@ -344,7 +344,7 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
       "id",`String id;"context",`Int context;"streaming",`Bool true]]]];
     "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
   let row context=`Assoc ["id",`String "reported-muse";"context",context] in
-  let reported=row (`Int 8192) in
+  let reported=row (`Int 32768) in
   let catalog_path=Filename.concat account_home "fixture-muse-catalog.json" in
   List.iter (fun (name,models,id,context) ->
     save catalog_path (Yojson.Safe.to_string (`List models));
@@ -358,14 +358,14 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
     Alcotest.check Alcotest.bool (name ^ " leaves account lease reusable") true
       (Result.is_ok (Runtime_setup_accounts.resolve ~workspace:base
         ~integration_id:"muse" ~cli_path:"muse" reference)))
-    ["unreported ID",[reported],"invented-muse",8192;
-     "tampered context",[reported],"reported-muse",16384;
-     "catalog lost after discovery",[],"reported-muse",8192;
-     "context absent",[row `Null],"reported-muse",8192;
-     "context nonpositive",[row (`Int 0)],"reported-muse",8192;
-     "ambiguous catalog ID",[reported;reported],"reported-muse",8192];
+    ["unreported ID",[reported],"invented-muse",32768;
+     "tampered context",[reported],"reported-muse",65536;
+     "catalog lost after discovery",[],"reported-muse",32768;
+     "context absent",[row `Null],"reported-muse",32768;
+     "context nonpositive",[row (`Int 0)],"reported-muse",32768;
+     "ambiguous catalog ID",[reported;reported],"reported-muse",32768];
   save catalog_path (Yojson.Safe.to_string (`List [reported]));
-  ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" 8192)));
+  ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" 32768)));
   Alcotest.check Alcotest.bool "matching fresh metadata reaches native verification" true
     (Sys.file_exists (Filename.concat base "save-calls")))
 

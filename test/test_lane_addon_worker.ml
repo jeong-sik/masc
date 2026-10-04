@@ -2025,6 +2025,66 @@ let test_sampling_bounded_root_loop_is_error () = with_fixture (fun _ _ dir _ ->
     | Error (Store.Read_failed _) -> ()
     | Error Store.Read_limit_exceeded | Ok _ -> fail "root loop must return a bounded read error"))
 
+let test_canonical_parent_owns_recovery ~journal ~directory () =
+  with_fixture (fun _ _ dir _ ->
+    let module Store = Masc.Lane_addon_store in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let store = Store.create ~root:(Filename.concat dir "canonical-parent-store") in
+    let bytes = "retained local outcome" in
+    let reference = require (Store.write_blob store bytes) in
+    let name = Store.digest bytes ^ ".json" in
+    let canonical_parent = Filename.concat (Store.root store) "evidence" in
+    let canonical = Filename.concat canonical_parent name in
+    Unix.unlink canonical;
+    Unix.mkdir canonical 0o700;
+    ignore (require (Store.write_sampling_blob store bytes));
+    check string "owned directory obstruction permits recovery" bytes
+      (require (Store.read_blob store reference));
+    let row = `Assoc ["instance_id", `String "parent-test";
+      "request_id", `String "request"; "state", `String "finished";
+      "outcome", Types.evidence_to_json reference; "outcome_bytes", `String bytes] in
+    require (Store.save_sampling_request store ~instance_id:"parent-test" ~request_id:"request" row);
+    let external_parent = Filename.concat dir "external-parent" in
+    Unix.mkdir external_parent 0o700;
+    if directory then Unix.mkdir (Filename.concat external_parent name) 0o700;
+    let saved = canonical_parent ^ ".saved" in
+    Unix.rename canonical_parent saved;
+    Unix.symlink external_parent canonical_parent;
+    Fun.protect ~finally:(fun () -> Unix.unlink canonical_parent; Unix.rename saved canonical_parent)
+      (fun () ->
+        if journal then (
+          let visited = ref 0 in
+          let result = Store.iter_sampling_requests store ~instance_id:"parent-test" ~max_bytes:4096
+            ~f:(fun _ -> incr visited; Ok ()) in
+          check bool "journal recovery rejects a replaced canonical parent" true (Result.is_error result);
+          check int "no recovery callback accepts that boundary" 0 !visited)
+        else (
+          check bool "public read rejects a replaced canonical parent" true
+            (Result.is_error (Store.read_blob store reference));
+          check bool "bounded read rejects a replaced canonical parent" true
+            (Result.is_error (Store.read_blob_bounded ~budget:(Store.read_budget ~max_bytes:4096) store reference)))))
+
+let test_relative_store_root ~sequence () =
+  let module Store = Masc.Lane_addon_store in
+  let previous = Sys.getcwd () in
+  let directory = Filename.temp_file "lane-relative-" ".fixture" in
+  Sys.remove directory;
+  Unix.mkdir directory 0o700;
+  Fun.protect ~finally:(fun () -> Sys.chdir previous; remove_tree directory) (fun () ->
+    Sys.chdir directory;
+    let root = "retained" in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let store = Store.create ~root in
+    if sequence then (
+      let snapshot = require (Store.retain_jsonl store ~history:"relative" ~entry_count:2
+        ~newest_first:["second\n"; "first\n"] ~encode:Fun.id) in
+      check string "relative root retained sequence is readable after reopen" "first\nsecond\n"
+        (require (Store.read_jsonl (Store.create ~root) snapshot.reference)))
+    else (
+      let reference = require (Store.write_blob store "relative blob") in
+      check string "relative root published blob is readable after reopen" "relative blob"
+        (require (Store.read_blob (Store.create ~root) reference))))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "bounded sampling root loop returns error" `Quick test_sampling_bounded_root_loop_is_error;
   test_case "cold read preserves optional marked compaction" `Quick test_sampling_cold_read_keeps_optional_compaction;
@@ -2033,6 +2093,16 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "pending recovery handles crash and failed write orphans" `Quick test_sampling_retry_crash_and_failed_write_orphans;
   test_case "pending recovery preserves other namespace and unread records" `Quick test_sampling_retry_preserves_other_namespace_and_unread_records;
   test_case "pending discovery separates record and enumeration errors" `Quick test_sampling_discovery_separates_record_error_and_enumeration;
+  test_case "canonical missing under external parent refuses public read" `Quick
+    (test_canonical_parent_owns_recovery ~journal:false ~directory:false);
+  test_case "canonical directory under external parent refuses public read" `Quick
+    (test_canonical_parent_owns_recovery ~journal:false ~directory:true);
+  test_case "canonical missing under external parent refuses recovery scan" `Quick
+    (test_canonical_parent_owns_recovery ~journal:true ~directory:false);
+  test_case "canonical directory under external parent refuses recovery scan" `Quick
+    (test_canonical_parent_owns_recovery ~journal:true ~directory:true);
+  test_case "relative store root blob roundtrip" `Quick (test_relative_store_root ~sequence:false);
+  test_case "relative store root sequence roundtrip" `Quick (test_relative_store_root ~sequence:true);
   test_case "sampling publication rejects canonical parent symlink" `Quick
     (test_sampling_publication_rejects_symlink_parent `Canonical);
   test_case "sampling publication rejects recovery parent symlink" `Quick

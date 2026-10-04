@@ -24,7 +24,16 @@ import os
 import sys
 import time
 
-import test_tui_keyboard_input as h
+import tui_keyboard_approvals as _keyboard_approvals
+import tui_keyboard_board as _keyboard_board
+import tui_keyboard_fusion as _keyboard_fusion
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_observer as _keyboard_observer
+import tui_keyboard_repositories as _keyboard_repositories
+import tui_keyboard_runtime as _keyboard_runtime
+import tui_keyboard_schedule as _keyboard_schedule
+import tui_keyboard_workspace as _keyboard_workspace
 import tui_region_harness as region
 
 
@@ -119,11 +128,11 @@ def assert_board_contract(rows, *, left, right, selected_title, where):
 class Counted:
     """A fixture that counts the requests it answers."""
 
-    def __init__(self, response: h.HttpResponse) -> None:
+    def __init__(self, response: _keyboard_harness.HttpResponse) -> None:
         self.response = response
         self.count = 0
 
-    def __call__(self) -> h.HttpResponse:
+    def __call__(self) -> _keyboard_harness.HttpResponse:
         self.count += 1
         return self.response
 
@@ -147,10 +156,10 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     Where nothing is waiting -- no approvals, asks, schedules, pull requests,
     open turns or lanes -- the answer is the empty reading, so no row on a
     measured screen reports a read that failed."""
-    served = h.keeper_runtime_http_fixtures()
+    served = _keyboard_harness.keeper_runtime_http_fixtures()
     roster_path = "/api/v1/gate/keepers?detailed=true"
     keeper_roster = served[roster_path]
-    served.update(h.board_reference_http_fixtures())
+    served.update(_keyboard_board.board_reference_http_fixtures())
     # Keep Board's four posts while restoring the observed Keepers and their
     # portraits over Board's empty Overview roster.
     served[roster_path] = keeper_roster
@@ -159,20 +168,20 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
         served[roster_path] = (status, {**payload, "count": 0, "total": 0,
                                       "truncated": False, "keepers": []})
     served["/api/v1/board/hearths"] = (200, {"hearths": []})
-    served["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
+    served["/api/v1/dashboard/gate"] = _keyboard_harness.empty_gate_snapshot()
     served["/api/v1/dashboard/gate/keeper-settings"] = (200, {
         "modes": [], "modes_state": {"state": "ready"},
         "exact_lanes": [], "exact_lanes_state": {"state": "ready"},
     })
     served["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
     served["/api/v1/keepers/tool-approvals"] = (200, {"pending": []})
-    served[h.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
-    served[h.SCHEDULES_PATH] = (200, {
-        "status": "ok", "schedule_runner": h.SCHEDULE_RUNNER_OK,
+    served[_keyboard_harness.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+    served[_keyboard_schedule.SCHEDULES_PATH] = (200, {
+        "status": "ok", "schedule_runner": _keyboard_schedule.SCHEDULE_RUNNER_OK,
         "schedule_store_read_error": None, "request_count": 0,
         "truncated": False, "fsm": {"next_due_at": None}, "requests": [],
     })
-    served[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
+    served[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
     served["/api/v1/keepers/turns"] = (200, {
         "schema": "masc.keeper_turns.v1",
         "keepers": [
@@ -187,22 +196,22 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
         "repositories": [],
     })
     # The screens the Tab walk passes on its way to Config.
-    served[h.FUSION_RUNS_PATH] = h.fusion_runs_response([])
-    served[h.REPOSITORIES_PATH] = (200, {"repositories": [], "total": 0})
-    served[h.VERIFICATION_QUEUE_PATH] = (200, h.verification_snapshot([]))
+    served[_keyboard_fusion.FUSION_RUNS_PATH] = _keyboard_fusion.fusion_runs_response([])
+    served[_keyboard_repositories.REPOSITORIES_PATH] = (200, {"repositories": [], "total": 0})
+    served[_keyboard_approvals.VERIFICATION_QUEUE_PATH] = (200, _keyboard_approvals.verification_snapshot([]))
     served["/api/v1/keepers/alpha/board-attention/quarantines"] = (
         200, {"items": [], "errors": []})
-    served[h.RUNTIME_CONFIG_RAW_PATH] = (200, {
-        **h.runtime_config_read_metadata(),
+    served[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (200, {
+        **_keyboard_runtime.runtime_config_read_metadata(),
         "path": "/workspace/config/runtime.toml",
-        "source_text": h.config_navigation_source(),
+        "source_text": _keyboard_runtime.config_navigation_source(),
     })
     served["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
         200, {"keeper": "alpha", "entries": []})
     # The MCP session the live feed opens: its handshake, and an observer
     # stream that stays open with nothing to say.
-    served["/mcp"] = h.observer_http_fixtures()["/mcp"]
-    served["/mcp?sse_kind=observer"] = h.StreamingHttpResponse(observer_stream)
+    served["/mcp"] = _keyboard_observer.observer_http_fixtures()["/mcp"]
+    served["/mcp?sse_kind=observer"] = _keyboard_harness.StreamingHttpResponse(observer_stream)
     served["/api/v1/keepers/alpha/chat/history"] = (200, [{
         "id": "region-gate", "role": "system", "content": GATE_ARGUMENT,
         "ts": 1787348491.3,
@@ -214,7 +223,7 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     served["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
         200, {"keeper": "alpha", "count": 0, "health": "ok", "entries": []},
     )
-    served[h.FILE_CHANGES_ALPHA_PATH] = FILE_CHANGE_READS
+    served[_keyboard_workspace.FILE_CHANGES_ALPHA_PATH] = FILE_CHANGE_READS
     return region.ServedFixtures(served)
 
 
@@ -228,8 +237,8 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         region.assert_answered(served, where)
         region.assert_whole(rows, where)
         left = ROSTER_PANE_COLUMNS if screen in ROSTER_SCREENS else 0
-        right = (columns - h.ACTING_PANE_NARROW_COLUMNS
-                 if columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else columns)
+        right = (columns - _keyboard_harness.ACTING_PANE_NARROW_COLUMNS
+                 if columns >= _keyboard_harness.ACTING_PANE_THRESHOLD_COLUMNS else columns)
         if left:
             region.assert_pane_edge(rows, left - 1, where)
         if right < columns:
@@ -284,9 +293,9 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
 
     def sweep(process, fd, output, screen: str, loaded, widths) -> None:
         for columns in widths:
-            h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
                               columns=columns, needle=loaded,
-                              controls=(h.FULL_REDRAW,))
+                              controls=(_keyboard_harness.FULL_REDRAW,))
             take(process, fd, output, screen, columns)
 
     def press(fd, row: int) -> None:
@@ -295,77 +304,77 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
 
     def handled(process, fd, output) -> None:
         """Every key and press sent so far has been handled."""
-        h.send_and_wait(process, fd, output, INPUT_SENTINEL, INPUT_SENTINEL)
+        _keyboard_harness.send_and_wait(process, fd, output, INPUT_SENTINEL, INPUT_SENTINEL)
         for _ in INPUT_SENTINEL:
             os.write(fd, BACKSPACE)
         region.settle(process, fd, output)
-        if INPUT_SENTINEL in h.screen_text(bytes(output)):
+        if INPUT_SENTINEL in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError("the input sentinel was not erased")
 
     def interact(process, fd, _slave, output, _base):
         if absent_live_roster:
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
             sweep(process, fd, output, "keeper-detail", INFO_TAB, WIDTHS)
-            h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
-                              columns=157, needle=INFO_TAB, controls=(h.FULL_REDRAW,))
-            h.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                              columns=157, needle=INFO_TAB, controls=(_keyboard_harness.FULL_REDRAW,))
+            _keyboard_harness.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
             sweep(process, fd, output, "keeper-detail-roster", ROSTER_HEADING, ROSTER_WIDTHS)
             region.print_measured(measured)
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
             return
-        h.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
         sweep(process, fd, output, "keepers", b"beta", WIDTHS)
 
-        board = h.screen_header(b"MASC Board", b" (4)")
-        h.palette_go(process, fd, output, b"go board", board)
+        board = _keyboard_harness.screen_header(b"MASC Board", b" (4)")
+        _keyboard_harness.palette_go(process, fd, output, b"go board", board)
         sweep(process, fd, output, "board", b"Hostile", WIDTHS)
         os.write(fd, b"j")
         board_columns = WIDTHS[-1]
-        board_right = (board_columns - h.ACTING_PANE_NARROW_COLUMNS
-                       if board_columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else board_columns)
+        board_right = (board_columns - _keyboard_harness.ACTING_PANE_NARROW_COLUMNS
+                       if board_columns >= _keyboard_harness.ACTING_PANE_THRESHOLD_COLUMNS else board_columns)
         def selected(title):
-            drawn = h.screen_rows(bytes(output))
+            drawn = _keyboard_harness.screen_rows(bytes(output))
             return any(region.body_row(drawn, row, left=0, right=board_right)
                 == "Selected post · " + title for row in drawn)
-        if not h.wait_for_fixture_state(process, fd, output, lambda: selected("Rollout"),
+        if not _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: selected("Rollout"),
                 timeout=region.QUIET_LIMIT_SECONDS):
             raise AssertionError("moving Board selection did not update the selected title")
         take(process, fd, output, "board", WIDTHS[-1], selected_post="Rollout")
         os.write(fd, b"\r")
-        if not h.wait_for_fixture_state(process, fd, output,
+        if not _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: any(b"MASC Board" in text and b"post-r2" in text
-                    for text in h.screen_rows(bytes(output)).values()),
+                    for text in _keyboard_harness.screen_rows(bytes(output)).values()),
                 timeout=region.QUIET_LIMIT_SECONDS):
             raise AssertionError("Enter did not open the post named by Board selection")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Selected post")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Selected post")
         os.write(fd, b"k")
-        if not h.wait_for_fixture_state(process, fd, output, lambda: selected("Retry"),
+        if not _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: selected("Retry"),
                 timeout=region.QUIET_LIMIT_SECONDS):
             raise AssertionError("returning Board selection did not restore its title")
         take(process, fd, output, "board", WIDTHS[-1])
 
-        h.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
         sweep(process, fd, output, "config", CONFIG_LOADED, WIDTHS)
 
-        h.tab_until(process, fd, output, b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
         sweep(process, fd, output, "keeper-detail", INFO_TAB, WIDTHS)
 
         # The roster opens only where it fits: back to 157 before asking.
-        h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
-                          columns=157, needle=INFO_TAB, controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                          columns=157, needle=INFO_TAB, controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
         sweep(process, fd, output, "keeper-detail-roster", ROSTER_HEADING, ROSTER_WIDTHS)
 
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"c", ALPHA_CHAT)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", ALPHA_CHAT)
         sweep(process, fd, output, "keeper-chat-roster", GATE_HEAD, ROSTER_WIDTHS)
-        h.send_and_wait(process, fd, output, CTRL_B, ALPHA_CHAT)
+        _keyboard_harness.send_and_wait(process, fd, output, CTRL_B, ALPHA_CHAT)
         sweep(process, fd, output, "keeper-chat", GATE_HEAD, WIDTHS)
 
         # The chat maps a press to a history row from the row its history
@@ -374,22 +383,22 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         # unfolds it only when that mapping is right, and a press on the rows
         # either side does nothing. What an unfold does that nothing else in
         # this chat does is read the keeper's file changes.
-        h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
                           columns=CHAT_PRESS_WIDTH, needle=GATE_HEAD,
-                          controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, CTRL_D, b"tools:results")
+                          controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, CTRL_D, b"tools:results")
         region.settle(process, fd, output)
-        gate_row = h.screen_row_of(region.whole_screen(output), GATE_HEAD)
+        gate_row = _keyboard_harness.screen_row_of(region.whole_screen(output), GATE_HEAD)
         measured[("chat-gate-row", CHAT_PRESS_WIDTH)] = {"row": gate_row}
         region.print_measured(measured)
         if gate_row < 0:
             raise AssertionError(f"the folded Gate row is not on screen: "
-                                 f"{h.screen_text(bytes(output))!r}")
+                                 f"{_keyboard_harness.screen_text(bytes(output))!r}")
         reads_before = FILE_CHANGE_READS.count
         for beside in (gate_row - 1, gate_row + 1):
             press(fd, beside)
             handled(process, fd, output)
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             if (FILE_CHANGE_READS.count != reads_before or GATE_TAIL in screen
                     or b"tools:results" not in screen):
                 raise AssertionError(f"a press on row {beside} unfolded the Gate "
@@ -397,10 +406,10 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         unfolded_from = len(output)
         press(fd, gate_row)
         handled(process, fd, output)
-        h.wait_for_output(process, fd, output, GATE_TAIL, start=unfolded_from,
+        _keyboard_harness.wait_for_output(process, fd, output, GATE_TAIL, start=unfolded_from,
                           timeout=region.QUIET_LIMIT_SECONDS)
         region.settle(process, fd, output)
-        if b"tools:full" not in h.screen_text(bytes(output)):
+        if b"tools:full" not in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError(f"a press on row {gate_row} did not unfold the Gate row")
         if FILE_CHANGE_READS.count == reads_before:
             raise AssertionError(f"the unfold at row {gate_row} read no file changes")
@@ -408,22 +417,22 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         board_widths = {width for (screen, width) in measured if screen == "board"}
         if board_widths != set(WIDTHS):
             raise AssertionError(f"Board functional checks did not cover every width: {board_widths!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
 
     return interact
 
 
 if __name__ == "__main__":
     served = fixtures()
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         os.path.abspath(sys.argv[1]),
         description="Region baseline: Board, Config, keeper detail and chat",
         interact=interaction(served),
         http_fixtures=served,
     )
     absent = fixtures(absent_live_roster=True)
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         os.path.abspath(sys.argv[1]),
         description="Region baseline: Info refuses equipment absent from live roster",
         interact=interaction(absent, absent_live_roster=True),

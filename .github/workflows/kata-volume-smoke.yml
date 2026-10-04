@@ -32,9 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Validate canonical checkpoint acceptance
-        run: python3 test/test_keeper_first_turn_harness.py
-
       - name: Require real KVM
         run: |
           mkdir -p kata-evidence

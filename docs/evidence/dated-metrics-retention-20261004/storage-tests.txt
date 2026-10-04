@@ -1,0 +1,22 @@
+Testing `Keeper dated metrics'.
+This run has ID `IUJLBT74'.
+
+  [OK]          Stdlib filesystem          0   zero retains all.
+  [OK]          Stdlib filesystem          1   rotation keeps accepting.
+  [OK]          Stdlib filesystem          2   old days are pruned.
+  [OK]          Stdlib filesystem          3   reopen applies smaller target.
+  [OK]          Stdlib filesystem          4   oversized row is preserved.
+  [OK]          Stdlib filesystem          5   Keeper and auxiliary isolation.
+  [OK]          Stdlib filesystem          6   append refusal is observable.
+  [OK]          Stdlib filesystem          7   I/O failure can recover.
+  [OK]          Eio filesystem             0   zero retains all.
+  [OK]          Eio filesystem             1   rotation keeps accepting.
+  [OK]          Eio filesystem             2   old days are pruned.
+  [OK]          Eio filesystem             3   reopen applies smaller target.
+  [OK]          Eio filesystem             4   oversized row is preserved.
+  [OK]          Eio filesystem             5   Keeper and auxiliary isolation.
+  [OK]          Eio filesystem             6   append refusal is observable.
+  [OK]          Eio filesystem             7   I/O failure can recover.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-dated-metrics-native-928fbfsy/_build/_tests/Keeper dated metrics'.
+Test Successful in 0.022s. 16 tests run.

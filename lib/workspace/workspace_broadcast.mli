@@ -170,7 +170,7 @@ val find_broadcast : request_id:string -> Workspace_utils_backend_setup.config -
 val validate_deferred_fleet_content : string -> (unit,broadcast_error) result
 (** Check before durable admission. The Lane caller supplies a host-authored
     stored-artifact marker; selected report text is kept inside its artifact. *)
-type fleet_delivery_mode = Immediate_fleet | Deferred_fleet
+type fleet_delivery_mode = Immediate_fleet | Deferred_fleet | Deferred_passive_fleet
 val broadcast_once :
   ?fleet_delivery:fleet_delivery_mode -> request_id:string ->
   Workspace_utils_backend_setup.config -> from_agent:string -> content:string ->
@@ -187,7 +187,11 @@ val broadcast_once :
     an identity with different content or sender is rejected. This path always
     declares [Fleet_conversation]; callers cannot replay a different audience.
     [Deferred_fleet] is only for a host with durable recipient obligations:
-    it commits without synchronous projection and refuses mention-bearing text. *)
+    it commits without synchronous projection and refuses mention-bearing text.
+    [Deferred_passive_fleet] is for host-owned informational notifications with
+    durable recipient obligations: content is literal, mention syntax never
+    creates a queue/wake, and the caller owns all recipient projection. Replays
+    require a stored passive row as well as matching sender/content. *)
 
 module For_testing : sig
   val replace_on_exact_request_wait : (string -> unit) -> (string -> unit)

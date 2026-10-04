@@ -2015,6 +2015,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "model_id", `String rt.model.id
     ; "model_api_name", `String rt.model.api_name
     ; "protocol", `String rt.provider.protocol
+    ; "usage_read_configured", `Bool (Option.is_some rt.provider.usage_read)
     ; "transport", `String (runtime_transport_string rt.provider.transport)
     ; "kind", `String (runtime_dashboard_kind_of_runtime_kind runtime_kind)
     ; "runtime_kind", `String (runtime_kind_to_string runtime_kind)

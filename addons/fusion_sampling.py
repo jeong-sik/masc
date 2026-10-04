@@ -1,7 +1,7 @@
 """Shared consistency contract for a retained Fusion sampling result."""
 import json
 
-from protocol import InvalidInput, boolean, evidence, object_value, optional_string, string
+from protocol import InvalidInput, boolean, decode_json, evidence, object_value, optional_string, string
 
 
 def coverage(value, label):
@@ -39,7 +39,7 @@ def terminal_error(error, computation, refs):
             or error.get("data") is not None):
         raise InvalidInput("Sampling error envelope differs from the host callback error")
     try:
-        terminal = object_value(json.loads(string(error.get("message"), "sampling_error.message")), "sampling terminal error")
+        terminal = object_value(decode_json(string(error.get("message"), "sampling_error.message")), "sampling terminal error")
     except (json.JSONDecodeError, TypeError) as cause:
         raise InvalidInput("Sampling error must retain the host terminal outcome") from cause
     if terminal.get("status") != computation["status"]:

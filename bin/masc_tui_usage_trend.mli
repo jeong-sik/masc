@@ -2,11 +2,11 @@
     arrives. The rows only change when a new answer does, so the frame draws
     them as they are instead of regrouping every point on every repaint. *)
 
-type sample = {
-  observed_at : float;
-  value : Masc.Tui_decode_usage.provider_usage_utilization;
-  share : float;
-}
+type day_report =
+  | Measured of Masc.Tui_decode_usage.provider_usage_utilization * float option
+  | Reported_no_windows
+
+type sample = { observed_at : float; report : day_report }
 
 type row = {
   scope_id : string;  (** The server's opaque scope id. *)
@@ -32,12 +32,17 @@ val no_report_mark : string
 (** What a day without a report draws. Never a zero-height bar: a missing
     report is not an idle day. *)
 
+val empty_report_mark : string
+(** A successful complete report with no windows, distinct from zero usage or no report. *)
+
 val of_history :
-  share:(Masc.Tui_decode_usage.provider_usage_utilization -> float) ->
+  share:(Masc.Tui_decode_usage.provider_usage_utilization -> float option) ->
   Masc.Tui_decode_usage.provider_usage_history ->
   t
-(** [share] reads a reported value as a part of its full window. A point
-    outside the answered window keeps its row and draws no day. When one day
+(** [share] reads a reported value as a part of its full window. An uncapped
+    monetary report has no share and draws [$], distinct from no report. A report
+    without windows draws [empty_report_mark] and counts as a reported day.
+    A point outside the answered window keeps its row and draws no day. When one day
     holds several points for a row, the last one in the answer is drawn. *)
 
 val latest : row -> sample option
@@ -46,4 +51,4 @@ val latest : row -> sample option
 val plot : width:int -> t -> row -> string list
 (** A four-row, fixed 0–100% daily bar plot with UTC day labels. Missing days
     draw a dot at the baseline; reported zero draws 0. Values outside the scale
-    are clipped only for drawing and retain their original [sample.value]. *)
+    are clipped only for drawing and retain their original [sample.report]. *)

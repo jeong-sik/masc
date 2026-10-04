@@ -358,7 +358,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?agent_core_checkpoint
                            ?runtime_manifest_context
                            ?runtime_manifest_append
-                           ?raw_trace
+                           ~raw_trace
                            ?on_official_client_native_action
                            ?on_official_client_usage_report
                            ?on_request_attribution

@@ -139,6 +139,7 @@ val task_assignee_of_status : task_status -> string option
 val task_performer_of_status : task_status -> string option
 val task_status_is_terminal : task_status -> bool
 val task_status_is_done : task_status -> bool
+(** Wire names from the same closed vocabulary used by the status parser. *)
 val valid_task_status_strings : string list
 val task_status_to_yojson : task_status -> Yojson.Safe.t
 val task_status_of_yojson : Yojson.Safe.t -> (task_status, string) result

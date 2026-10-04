@@ -113,6 +113,17 @@ class MethodHttpResponse:
         self.resolve = resolve
 
 
+class ConnectionHttpResponse:
+    """Expose the peer socket while a fixture holds an admitted response.
+
+    The resolver may observe cancellation before releasing its response. The
+    handler retains socket ownership; a fixture must not close or consume it.
+    """
+
+    def __init__(self, resolve: Callable[[str, socket.socket], HttpResponse]) -> None:
+        self.resolve = resolve
+
+
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
@@ -120,6 +131,7 @@ HttpFixture = (
     | DroppedHttpResponse
     | RequestHttpResponse
     | MethodHttpResponse
+    | ConnectionHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
     | Callable[[], HttpResponse]
@@ -290,6 +302,8 @@ def test_http_endpoint(
                     resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
+            elif isinstance(fixture, ConnectionHttpResponse):
+                resolved = fixture.resolve(self.command, self.connection)
             elif isinstance(fixture, PathHttpResponse):
                 resolved = fixture.resolve(self.path)
             elif isinstance(fixture, HeadersHttpResponse):
@@ -15149,7 +15163,7 @@ def run_http_badge_refresh_regression(executable: str) -> None:
     health_response = fixtures["/health?full=1"]
     if not isinstance(health_response, tuple):
         raise AssertionError("health fixture must be a response tuple")
-    health_requested_at = 0.0
+    health_requested_at: float | None = None
     prompt_started_at: dict[str, float] = {}
 
     def answer_health() -> HttpResponse:
@@ -15157,6 +15171,8 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         health_requested_at = time.monotonic()
         return health_response
 
+    # Full refresh starts with the compact identity probe, not fleet safety.
+    fixtures["/health"] = answer_health
     fixtures["/health?full=1"] = answer_health
 
     def answer_briefing() -> HttpResponse:
@@ -15166,6 +15182,8 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         if fail_next.is_set():
             return (503, {"error": "refresh refused"})
         if prompt_health is not None:
+            if health_requested_at is None:
+                raise AssertionError("briefing arrived before the refresh identity probe")
             prompt_started_at.setdefault(prompt_health, health_requested_at)
             payload = json.loads(json.dumps(briefing[1]))
             payload["summary"]["workspace_health"] = prompt_health
@@ -15176,7 +15194,7 @@ def run_http_badge_refresh_regression(executable: str) -> None:
     # The badge reports a full failure only when every requested surface fails.
     # A failed briefing beside successful Board/Planning reads is "partial".
     for path, response in tuple(fixtures.items()):
-        if path in ("/health?full=1", "/api/v1/dashboard/briefing"):
+        if path in ("/health", "/health?full=1", "/api/v1/dashboard/briefing"):
             continue
         if isinstance(response, tuple):
             fixtures[path] = lambda response=response: (

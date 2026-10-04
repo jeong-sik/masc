@@ -1,0 +1,70 @@
+Testing `candle_appraiser_transport'.
+This run has ID `CVTN3KMX'.
+
+  [OK]          declared transports          0   Codex reasoning admission re...
+  [OK]          declared transports          1   recoverable HTTP survives pe...
+  [OK]          declared transports          2   mixed HTTP candidates recove...
+  [OK]          declared transports          3   opaque provider failure rema...
+  [OK]          declared transports          4   hard quota requires a recove...
+  [OK]          declared transports          5   RPC refusals retain typed re...
+  [OK]          declared transports          6   permanent admission refusal ...
+  [OK]          declared transports          7   bookkeeping terminal remains...
+> [FAIL]        declared transports          8   HTTP bad request waits for a...
+  [OK]          declared transports          9   HTTP rate limit remains bind...
+  [OK]          declared transports         10   HTTP errored choice without ...
+  [OK]          declared transports         11   CLI setup failure is not bin...
+  [OK]          declared transports         12   known CLI timeout remains re...
+  [FAIL]        declared transports         13   HTTP refusal preserves resti...
+  [OK]          declared transports         14   invalid HTTP then unavailabl...
+  [OK]          declared transports         15   all unavailable transports r...
+  [OK]          declared transports         16   valid HTTP successor preserv...
+  [OK]          declared transports         17   provider rejects unchanged r...
+  [OK]          declared transports         18   provider refuses authorization.
+  [FAIL]        declared transports         19   provider payment rest remain...
+  [OK]          declared transports         20   provider rate limit remains ...
+  [FAIL]        declared transports         21   declared official CLI can an...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        declared transports          8   HTTP bad request waits fo...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT HTTP request refusal lost its execution cause: execution_failed: slot=candle-request-refused call_id=42e20c907e97dfc555208e81ad7a0397 cause=provider refused (http_status=400 refusal=invalid_request) raw_response={"error":{"message":"fixture bad request","type":"invalid_request_error"}}; flow=[slot=candle-request-refused call_id=42e20c907e97dfc555208e81ad7a0397]
+FAIL HTTP request refusal lost its execution cause: execution_failed: slot=candle-request-refused call_id=42e20c907e97dfc555208e81ad7a0397 cause=provider refused (http_status=400 refusal=invalid_request) raw_response={"error":{"message":"fixture bad request","type":"invalid_request_error"}}; flow=[slot=candle-request-refused call_id=42e20c907e97dfc555208e81ad7a0397]
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_candle_appraiser_transport.test_http_bad_request_waits_for_chang in file "test/test_candle_appraiser_transport.ml", line 316, characters 7-71
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `<worktree>/_build/default/test/_build/_tests/candle_appraiser_transport/declared transports.008.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `<worktree>/_build/default/test/_build/_tests/candle_appraiser_transport'.
+4 failures! in 0.105s. 22 tests run.

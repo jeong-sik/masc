@@ -301,7 +301,7 @@ type async_msg =
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
       * (unit, string) result
   | Runtime_catalog_loaded of
-      ( Masc.Tui_decode.runtime_option list
+      int * ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
         * Masc.Tui_decode.runtime_assignment list,
         string )
@@ -446,7 +446,10 @@ type async_msg =
   | Keeper_sandbox_logs_loaded of
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Runtime_config_view_loaded of
-      (string * string list * Masc_tui_runtime_config_view.metadata, string) result
+      int * string option
+      * (string * string list * Masc_tui_runtime_config_view.metadata, string) result
+      (* Read generation and captured runtime ID to edit; [None] is a source
+         refresh without a model-settings entry request. *)
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
   | Runtime_param_written of

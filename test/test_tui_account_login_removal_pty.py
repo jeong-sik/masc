@@ -13,16 +13,10 @@ import json
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 from test_tui_account_login_pty import leave_login_and_arm_quit
 
-SOURCE_MODULES = (
-    "bin/masc_tui_account_login.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_render.ml",
-    "lib/runtime/runtime_account_removal_setup.ml",
-)
+
 
 PREVIEW = "/api/v1/setup/accounts/removal"
 REMOVE = "/api/v1/setup/accounts/remove"
@@ -90,7 +84,7 @@ def run(binary: str) -> None:
             raise AssertionError(f"the first removal carried the wrong body: {removals!r}")
 
         # Enter over what the file says now removes it.
-        h.send_and_wait(process, fd, output, b"\r", "codex_two 계정을 지웠습니다".encode())
+        h.send_and_wait(process, fd, output, b"\r", "codex_two 연결 (codex_two)을 설정에서 지웠습니다".encode())
         if removals[1:] != [{"integration_id": "codex_two", "revision": "rev-2"}]:
             raise AssertionError(f"the second removal did not carry the new revision: {removals!r}")
         screen = h.screen_text(bytes(output))

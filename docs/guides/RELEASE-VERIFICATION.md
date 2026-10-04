@@ -45,7 +45,7 @@ in the release does not become untested merely because its tests are expensive.
 | Test class | Appropriate lane |
 | --- | --- |
 | Source wording, occurrence counts or ordering of source fragments | Remove or replace with actual behavior/protocol evidence; do not use as release behavior proof. |
-| Log-analysis script and benchmark-tool implementation tests | Run when those tools change, separately from product readiness. Examples: `test_tool_call_sequence_miner.py`, `test_benchmark_scripts.py`. |
+| Log-analysis script and benchmark-tool implementation tests | Run when those tools change, separately from product readiness. Example: `test_tool_call_sequence_miner.py`. |
 | Exhaustive screenshots, width sweeps and accessory combinations | Rendering/feature validation when relevant. Keep representative interaction and boundary checks in the selected release scope. |
 | Long-running performance and live-provider comparisons | Dedicated measurement; required for a release only when an explicit performance/runtime claim or affected contract depends on them. |
 

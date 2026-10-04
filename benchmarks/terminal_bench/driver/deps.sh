@@ -14,7 +14,6 @@
 # aarch64 binary in an amd64 container (2026-09-12).
 #
 # Separated from the reporting so it can be exercised without a container, a
-# package manager or a binary — test/test_bench_deps_diagnosis.py feeds it the
 # loader messages verbatim.
 bench_masc_failure_reason() {
   case "$1" in

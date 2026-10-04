@@ -2388,7 +2388,7 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
       Keeper_registry.For_testing.clear ();
       let config = Masc.Workspace.default_config base_path in
       let meta_path = Masc.Keeper_types_profile.keeper_meta_path config "alpha" in
-      Masc.Fs.ensure_dir (Filename.dirname meta_path);
+      Fs_compat.mkdir_p (Filename.dirname meta_path);
       Yojson.Safe.to_file meta_path (Masc.Keeper_meta_json.meta_to_json (make_keeper_meta "alpha"));
       let token = Auth.ensure_internal_keeper_token base_path in
       let access ~internal_keeper_runtime ~token ~name =
@@ -2400,10 +2400,10 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
           ~workspace_initialized:(fun () -> false) ~log_mcp_exn:(fun ~label:_ _ -> ()) in
         Masc.Mcp_server_eio_execute.lane_access_for_caller ~config caller in
       Alcotest.(check bool) "verified runtime resolves existing Keeper" true
-        (access ~internal_keeper_runtime:true ~token ~name:"alpha" = Lane_addon_sources.Keeper "alpha");
+        (access ~internal_keeper_runtime:true ~token ~name:"alpha" = Masc.Lane_addon_sources.Keeper "alpha");
       List.iter (fun (internal_keeper_runtime, token, name) ->
         Alcotest.(check bool) "unverified or missing Keeper stays unauthenticated" true
-          (access ~internal_keeper_runtime ~token ~name = Lane_addon_sources.Unauthenticated))
+          (access ~internal_keeper_runtime ~token ~name = Masc.Lane_addon_sources.Unauthenticated))
         [false, token, "alpha"; true, "invalid-token", "alpha"; true, token, "missing"])
 
 let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools

@@ -63,6 +63,19 @@ let source_to_string = function
   | Read_error -> "read_error"
 ;;
 
+let source_of_string = function
+  | "event_queue_pending" -> Ok Event_queue_pending
+  | "chat_operation_queued" -> Ok Chat_operation_queued
+  | "chat_operation_running" -> Ok Chat_operation_running
+  | "hitl_pending" -> Ok Hitl_pending
+  | "fusion_running" -> Ok Fusion_running
+  | "schedule_waiting" -> Ok Schedule_waiting
+  | "owner_shutdown" -> Ok Owner_shutdown
+  | "operator_pending_confirm" -> Ok Operator_pending_confirm
+  | "read_error" -> Ok Read_error
+  | value -> Error (Printf.sprintf "Unknown Keeper inventory source: %S" value)
+;;
+
 let all_waiting_sources =
   [ Event_queue_pending
   ; Chat_operation_queued
@@ -564,7 +577,7 @@ let chat_operation_rows ~base_path keeper_name =
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_queued
           ; waiting_on = "owner_fifo"
-          ; what = Printf.sprintf "운영자 채팅 %d건 대기" projection.queued_count
+          ; what = Printf.sprintf "대화 요청 %d건 대기" projection.queued_count
           ; wake_producer = Keeper_owner_actor
           ; since = None
           ; due_at = None
@@ -580,7 +593,7 @@ let chat_operation_rows ~base_path keeper_name =
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_running
           ; waiting_on = "keeper_turn"
-          ; what = "운영자와 진행 중인 대화"
+          ; what = "진행 중인 대화 요청"
           ; wake_producer = Keeper_owner_actor
           ; since = None
           ; due_at = None
@@ -761,29 +774,37 @@ let pending_confirm_row ?keeper_name
   }
 ;;
 
-let pending_confirm_keeper_target keeper_names
+let pending_confirm_keeper_target
       (entry : Workspace_hooks.operator_pending_confirm_request)
   =
-  match entry.target_type, entry.target_id with
-  | "keeper", Some keeper_name when List.exists (String.equal keeper_name) keeper_names ->
+  match Operator_action_constants.target_type_of_string entry.target_type, entry.target_id with
+  | Some Keeper, Some keeper_name ->
     Some keeper_name
-  | _, (None | Some _) -> None
+  | (Some Workspace | Some Goal | None), _ | Some Keeper, None -> None
+;;
+
+let scope_includes_actor ~keeper_name actor_id =
+  match keeper_name, actor_id with
+  | None, _ | Some _, None -> true
+  | Some requested, Some owner -> String.equal requested owner
 ;;
 
 let pending_confirm_rows keeper_names pending_confirms =
   pending_confirms
   |> List.filter_map (fun (entry : Workspace_hooks.operator_pending_confirm_request) ->
-    match pending_confirm_keeper_target keeper_names entry with
-    | Some keeper_name -> Some (pending_confirm_row ~keeper_name entry)
-    | None -> None)
+    match pending_confirm_keeper_target entry with
+    | Some keeper_name when List.mem keeper_name keeper_names -> Some (pending_confirm_row ~keeper_name entry)
+    | Some _ | None -> None)
 ;;
 
-let global_pending_confirm_rows keeper_names pending_confirms =
+let global_pending_confirm_rows ?keeper_name keeper_names pending_confirms =
   pending_confirms
+  |> List.filter (fun entry ->
+    scope_includes_actor ~keeper_name (pending_confirm_keeper_target entry))
   |> List.filter_map (fun entry ->
-    if Option.is_some (pending_confirm_keeper_target keeper_names entry)
-    then None
-    else Some (pending_confirm_row entry))
+    match pending_confirm_keeper_target entry with
+    | Some target when List.mem target keeper_names -> None
+    | Some _ | None -> Some (pending_confirm_row entry))
 ;;
 
 let schedule_active (request : Schedule_domain.schedule_request) =
@@ -804,17 +825,19 @@ let schedule_waiting_on (request : Schedule_domain.schedule_request) =
   | None -> request.schedule_id
 ;;
 
-let schedule_keeper_owner keeper_names (request : Schedule_domain.schedule_request) =
-  match request.scheduled_by.kind with
-  | Human_operator | System -> None
-  | Automated_actor ->
-    let keeper_name = request.scheduled_by.id in
-    if List.exists (String.equal keeper_name) keeper_names then Some keeper_name else None
+let schedule_keeper_owner keeper_names request =
+  (* A fleet inventory counts each reservation once, preferring its creator.
+     A scoped inventory contains only its selected Keeper, so a wake target
+     receives the same reservation locally even when another Keeper made it. *)
+  Schedule_payload_projection.keeper_participants request
+  |> List.find_opt (fun name -> List.mem name keeper_names)
 ;;
 
-let schedule_rows ~keeper_names state =
+let schedule_rows ?keeper_name ~keeper_names state =
   state.Schedule_store.schedules
-  |> List.filter schedule_active
+  |> List.filter (fun request ->
+    schedule_active request
+    && Schedule_payload_projection.visible_to_keeper keeper_name request)
   |> List.map (fun (request : Schedule_domain.schedule_request) ->
     { keeper_name = schedule_keeper_owner keeper_names request
     ; source = Schedule_waiting
@@ -831,6 +854,9 @@ let schedule_rows ~keeper_names state =
         `Assoc
           [ "schedule_instance_id", `String request.schedule_instance_id
           ; "schedule_id", `String request.schedule_id
+          ; "keeper_participants",
+            `List (List.map (fun name -> `String name)
+              (Schedule_payload_projection.keeper_participants request))
           ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
           ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
           ; ( "payload_kind"
@@ -841,9 +867,9 @@ let schedule_rows ~keeper_names state =
     })
 ;;
 
-let schedule_rows_or_error config ~keeper_names =
+let schedule_rows_or_error ?keeper_name config ~keeper_names =
   match Schedule_store.read_state_result config with
-  | Ok state -> schedule_rows ~keeper_names state
+  | Ok state -> schedule_rows ?keeper_name ~keeper_names state
   | Error err ->
     [ read_error_row
         ~waiting_on:"schedule_store"
@@ -910,20 +936,10 @@ let source_counts rows =
   |> List.map (fun (source, count) -> source, `Int count)
 ;;
 
-let global_pending_confirm_count keeper_names pending_confirms =
-  pending_confirms
-  |> List.fold_left
-       (fun count (entry : Workspace_hooks.operator_pending_confirm_request) ->
-          if Option.is_some (pending_confirm_keeper_target keeper_names entry)
-          then count
-          else count + 1)
-       0
-;;
-
 let busy_keeper_names ~base_path =
   Keeper_registry.all ~base_path ()
   |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-    match entry.current_turn_observation with
+    match Keeper_composite_observer.live_turn_observation entry with
     | Some _ -> Some entry.name
     | None -> None)
 ;;
@@ -1001,7 +1017,7 @@ let record_metrics ~now ~per_keeper ~global_rows =
 
 let current_execution_json ~base_path keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
-  | Some ({ current_turn_observation = Some _; _ } as entry) ->
+  | Some entry when Option.is_some (Keeper_composite_observer.live_turn_observation entry) ->
     let latest_tool =
       Keeper_registry.StringMap.bindings entry.tool_usage
       |> List.fold_left
@@ -1030,7 +1046,7 @@ let current_execution_json ~base_path keeper_name =
                ])
           :: fields)
      | value -> value)
-  | None | Some { current_turn_observation = None; _ } -> `Null
+  | None | Some _ -> `Null
 ;;
 
 let source_next_actions rows =
@@ -1156,7 +1172,7 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
   let pending_confirms, pending_confirm_read_error_rows =
     pending_confirms_or_error_rows config
   in
-  let schedule_rows = schedule_rows_or_error config ~keeper_names in
+  let schedule_rows = schedule_rows_or_error ?keeper_name config ~keeper_names in
   let busy_names = busy_keeper_names ~base_path:config.Workspace.base_path in
   let per_keeper =
     keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
@@ -1165,9 +1181,10 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in
       keeper_name, keeper_is_busy busy_names keeper_name, rows)
   in
+  let global_confirm_rows = global_pending_confirm_rows ?keeper_name keeper_names pending_confirms in
   let global_rows =
     global_rows_from schedule_rows
-    @ global_pending_confirm_rows keeper_names pending_confirms
+    @ global_confirm_rows
     @ keeper_name_read_error_rows
     @ pending_confirm_read_error_rows
     @ pending_approval_read_error_rows
@@ -1228,7 +1245,7 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     ; "oldest_age_seconds", oldest_age_seconds
     ; ( "global_pending_confirm_count_known"
       , `Bool (List.length pending_confirm_read_error_rows = 0) )
-    ; "global_pending_confirm_count", `Int (global_pending_confirm_count keeper_names pending_confirms)
+    ; "global_pending_confirm_count", `Int (List.length global_confirm_rows)
     ; "pending_approval_state", pending_approval_state
     ; "source_counts", `Assoc (source_counts (all_keeper_rows @ global_rows))
     ; "rows", `List (List.map waiting_row_json all_rows)

@@ -37,8 +37,10 @@ scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/lo
 ```
 
 위 명령은 이미 빌드된 바이너리에 사용합니다. 코딩 에이전트는 로컬 빌드 대신
-허용된 `release/v*` 브랜치 또는 태그에서 `Release` workflow의 `workflow_dispatch`로
-바이너리와 증거를 생성합니다.
+허용된 `release/v*` 브랜치 또는 `v*` 태그에서
+[`Release Candidate Verification`](../.github/workflows/release-candidate.yml)의
+`workflow_dispatch`로 바이너리와 증거를 생성합니다. 기존 태그를 대상으로 하는
+[`Release`](../.github/workflows/release.yml)는 검증된 RC 산출물을 가져와 게시합니다.
 
 ## One-commit candidate verification
 

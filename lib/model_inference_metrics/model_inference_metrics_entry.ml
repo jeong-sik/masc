@@ -64,6 +64,14 @@ type model_bucketed =
   ; mb_buckets : bucket_metric list
   }
 
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
+
 type model_stats =
   { model_id : string
   ; entry_count : int
@@ -93,6 +101,7 @@ type model_stats =
   ; total_input_tokens : int option
   ; total_output_tokens : int option
   ; total_cache_read_tokens : int option
+  ; cached_input : cached_input option
   ; total_cache_creation_tokens : int option
   ; total_reasoning_tokens : int option
   ; usage_sample_count : int
@@ -128,6 +137,15 @@ type cost_read_diagnostics =
 type cost_read_result =
   (cost_read_diagnostics, Dated_jsonl.read_error) result
 
+type decision_read_error =
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+
+type read_error =
+  | Decisions_unavailable of decision_read_error
+  | Costs_unavailable of Dated_jsonl.read_error
+
 type aggregate =
   { window_minutes : int
   ; bucket_minutes : int
@@ -140,8 +158,19 @@ type aggregate =
 
 (* ── Internal: in-memory representation of a parsed JSONL row ─────── *)
 
+let read_error_to_string = function
+  | Decisions_unavailable Decision_directory_unavailable -> "decision log directory unavailable"
+  | Decisions_unavailable (Decision_files_unreadable count) ->
+      Printf.sprintf "%d decision log files unreadable" count
+  | Decisions_unavailable (Decision_rows_invalid { malformed_rows; schema_violation_rows }) ->
+      Printf.sprintf "decision logs incomplete: %d malformed and %d schema-invalid rows"
+        malformed_rows schema_violation_rows
+  | Costs_unavailable error -> Dated_jsonl.read_error_to_string error
+
 type raw_entry =
   { model : string
+  ; executed_runtime_id : string option
+    (** Exact observed answerer from the decision, never inferred from an API model name. *)
   ; inference_key : Cost_ledger.inference_key option
   ; ts_unix : float
   ; outcome : string
@@ -187,6 +216,7 @@ type raw_entry =
    the compiler refuses to silently coalesce it with parse failures. *)
 type parse_error =
   | Not_assoc                      (* root JSON value not an object *)
+  | Invalid_ts_unix
   | Missing_ts_unix                (* ts_unix field absent or non-numeric *)
   | Out_of_window                  (* ts_unix older than [since_unix] *)
   | No_telemetry_object            (* decisions.jsonl entry without telemetry { ... } *)
@@ -201,6 +231,7 @@ type parse_error =
 
 let parse_error_label = function
   | Not_assoc -> "not_assoc"
+  | Invalid_ts_unix -> "invalid_ts_unix"
   | Missing_ts_unix -> "missing_ts_unix"
   | Out_of_window -> "out_of_window"
   | No_telemetry_object -> "no_telemetry_object"
@@ -225,6 +256,7 @@ let parse_error_detail = function
    silent defaults. *)
 let parse_error_is_schema_violation = function
   | Out_of_window | Not_assoc | No_telemetry_object -> false
+  | Invalid_ts_unix
   | Missing_ts_unix
   | Missing_outcome
   | Missing_usage_reported

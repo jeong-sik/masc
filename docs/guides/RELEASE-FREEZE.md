@@ -11,11 +11,13 @@ SHA for verification. Main advancing is not a reason to change this candidate.
 Do not merge or rebase main, bulk-update dependencies, add features, refactor
 unrelated code, or import unrelated test cleanup into a frozen release.
 
-For the current v0.49.0 preparation, the operator has explicitly stopped main
-inflow. Candidate `1123d7bebf45983f6222caeb171896e8469335a6` and RC
+During the v0.49.0 preparation, the operator explicitly stopped main inflow.
+Historical candidate `1123d7bebf45983f6222caeb171896e8469335a6` and RC
 [37136996120](https://github.com/jeong-sik/masc/actions/runs/37136996120) identify
-the selected scope, not a successful verification result. This policy change
-belongs to its own main-targeted PR; it does not extend that candidate.
+that earlier selected scope, not the published candidate or a successful result.
+[v0.49.0](https://github.com/jeong-sik/masc/releases/tag/v0.49.0) has since been
+published. Keep each candidate and its evidence separate; this policy change
+belongs to its own main-targeted PR and does not alter published release assets.
 
 ## Admit only release blockers
 

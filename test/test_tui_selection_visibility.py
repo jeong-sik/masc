@@ -3,47 +3,48 @@
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_runtime as _keyboard_runtime
 
-SOURCE_MODULES = ('bin/masc_tui.ml', 'bin/masc_tui_render.ml', 'lib/tui_decode_runtime_probe.ml', 'lib/tui_decode_runtime_probe.mli')
+
 
 
 def run_models(executable: str) -> None:
-    fixtures = h.overview_event_http_fixtures()
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
     source = "\n".join(
         f"[models.model{i:02d}]\ntemperature = 0.7\n"
         f"[ollama_cloud.model{i:02d}]\nmax-tokens = 16384"
         for i in range(12)
     )
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {
-            **h.runtime_config_read_metadata(),
+            **_keyboard_runtime.runtime_config_read_metadata(),
             "path": "/workspace/config/runtime.toml",
             "source_text": source,
         },
     )
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
-        h.wait_for_output(process, fd, output, b"temperature = ", start=0, timeout=3)
-        h.send_and_wait(process, fd, output, b"p", b"MASC Models")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.wait_for_output(process, fd, output, b"temperature = ", start=0, timeout=3)
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"MASC Models")
         for i in range(1, 12):
-            h.send_and_wait(process, fd, output, b"j", f"model{i:02d}".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"j", f"model{i:02d}".encode())
         # The detail also names the model. Assert the marked TABLE row, not
         # merely a model name present somewhere in the output history.
         for rows in (20, 16, 30):
-            h.resize_and_wait(
+            _keyboard_harness.resize_and_wait(
                 process,
                 fd,
                 output,
                 rows=rows,
                 columns=100,
                 needle=b"MASC Models",
-                controls=(h.FULL_REDRAW,),
+                controls=(_keyboard_harness.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             if not any(
                 b"> " in row and b"model11" in row for row in screen.splitlines()
             ):
@@ -52,7 +53,7 @@ def run_models(executable: str) -> None:
                 )
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Models selected row survives resize",
         interact=interact,
@@ -61,26 +62,26 @@ def run_models(executable: str) -> None:
 
 
 def run_runtime(executable: str) -> None:
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
-    fixtures[h.RUNTIME_RESOLVED_PATH] = h.runtime_resolved_response()
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = _keyboard_runtime.runtime_resolved_response()
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
-        h.send_and_wait(process, fd, output, b"9", b"1/2 runtime-a")
-        h.send_and_wait(process, fd, output, b"p", b"All runtimes (5)")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"1/2 runtime-a")
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"All runtimes (5)")
         # Select catalog row 5: beyond the four rows of the lane listing.
-        h.send_and_wait(process, fd, output, b"\x1b[F", b"runtime-e")
-        h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-e")
-        h.send_and_wait(process, fd, output, b"\x1b", b"All runtimes (5)")
-        h.send_and_wait(process, fd, output, b"p", b"MASC Lanes")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", b"runtime-e")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-e")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"All runtimes (5)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"MASC Lanes")
         # The tab strip may clip its count at this terminal width. Selection
         # restoration is proved by the actual lane row and the detail it opens.
-        h.send_and_wait(process, fd, output, b"p", b"1/2 runtime-a")
-        h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-a")
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"1/2 runtime-a")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-a")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Runtime mode resets selection with scroll",
         interact=interact,

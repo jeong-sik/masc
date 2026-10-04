@@ -359,6 +359,138 @@ let test_missing_connector_pointer_does_not_preempt () =
       | None -> Alcotest.fail "readable connector did not preempt"));
 ;;
 
+let record_attention ~base_path ~keeper_name event_id =
+  (match Masc.Keeper_registry.get ~base_path keeper_name with
+   | Some _ -> ()
+   | None ->
+     let meta = make_meta keeper_name in
+     (match Masc.Keeper_owner_registry.create_meta ~base_path meta with
+      | Ok _ -> ()
+      | Error error -> fail (Masc.Keeper_owner_registry.command_error_to_string error));
+     ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta));
+  let item = { (external_attention_item ()) with A.event_id; keeper_name } in
+  match A.record ~base_path item with
+  | `Recorded -> ()
+  | `Duplicate _ -> fail "duplicate fixture attention"
+  | `Error detail -> fail detail
+
+let enqueue_attention ~base_path ~keeper_name event_id =
+  match Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+          ~base_path keeper_name (connector_stimulus ~event_id ~arrived_at:1.0) with
+  | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
+  | _ -> fail "fixture stimulus was not durably enqueued"
+
+let probe_head probe =
+  match probe () with
+  | Error detail -> fail detail
+  | Ok None -> None
+  | Ok (Some { Masc.Keeper_agent_run.reason = Durable_stimulus_waiting summary }) ->
+    Option.map (fun (s : Keeper_event_queue.stimulus) -> s.post_id) summary.head
+  | Ok (Some { Masc.Keeper_agent_run.reason = Operation_queued }) ->
+    fail "fixture has no Owner chat operation"
+
+let pending_ids ~base_path ~keeper_name =
+  Keeper_event_queue_persistence.load ~base_path ~keeper_name
+  |> Keeper_event_queue.to_list
+  |> List.map (fun (s : Keeper_event_queue.stimulus) -> s.post_id)
+  |> List.sort String.compare
+
+let with_attention_workspace f =
+  let base_path = Filename.temp_dir "connector-turn-probe" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.all ~base_path ()
+      |> List.iter (fun entry -> ignore (Masc.Keeper_registry.unregister_exact entry));
+      rm_rf base_path)
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio.Switch.run (fun sw ->
+          let config = Masc.Workspace.default_config base_path in
+          (match Masc.Keeper_owner_registry.install_from_store ~sw
+                   ~operation_runner:None ~on_turn_slot_released:None config with
+           | Ok _ -> ()
+           | Error error -> fail (Masc.Keeper_owner_registry.install_error_to_string error));
+          f base_path)))
+
+let test_late_enqueue_invalidates_subset wake () =
+  with_attention_workspace (fun base_path ->
+    let keeper_name = "late-enqueue" in
+    (* Ingress has recorded the new body but has not enqueued its pointer. *)
+    record_attention ~base_path ~keeper_name "present";
+    enqueue_attention ~base_path ~keeper_name "missing";
+    let probe, reads = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
+        ~wake ~base_path ~keeper_name in
+    check (option string) "missing does not preempt" None (probe_head probe);
+    check (option string) "unchanged negative result is reusable" None (probe_head probe);
+    check int "one history scan" 1 (reads ());
+    let path = A.attention_path ~base_path ~keeper_name in
+    let before = Unix.stat path in
+    enqueue_attention ~base_path ~keeper_name "present";
+    let after = Unix.stat path in
+    check bool "enqueue did not change attention version" true
+      (before.st_ino = after.st_ino && before.st_mtime = after.st_mtime
+       && before.st_ctime = after.st_ctime && before.st_size = after.st_size);
+    check (option string) "new pointer to already recorded body preempts"
+      (Some "present") (probe_head probe);
+    check int "new queried set rescans" 2 (reads ());
+    check (list string) "probe neither ACKs nor deletes either durable pointer"
+      ["missing"; "present"] (pending_ids ~base_path ~keeper_name))
+
+let test_interleaved_turn_caches () =
+  with_attention_workspace (fun base_path ->
+    let make keeper_name =
+      record_attention ~base_path ~keeper_name "seed-not-queued";
+      enqueue_attention ~base_path ~keeper_name "missing";
+      Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
+        ~wake:(Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap])
+        ~base_path ~keeper_name
+    in
+    let a, reads_a = make "keeper-a" in
+    let b, reads_b = make "keeper-b" in
+    List.iter (fun probe ->
+      check (option string) "missing pointer stays non-preempting" None (probe_head probe))
+      [a; b; a; b];
+    check int "A retains its memo across B's probe" 1 (reads_a ());
+    check int "B retains its memo across A's probe" 1 (reads_b ());
+    record_attention ~base_path ~keeper_name:"keeper-a" "missing";
+    check (option string) "restored body invalidates A's store version"
+      (Some "missing") (probe_head a);
+    check int "A rereads restored store" 2 (reads_a ());
+    check (option string) "B remains unaffected" None (probe_head b);
+    check int "B did not rescan" 1 (reads_b ());
+    check (list string) "restoration probe does not ACK" ["missing"]
+      (pending_ids ~base_path ~keeper_name:"keeper-a");
+    let a_next, reads_next = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
+        ~wake:(Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap])
+        ~base_path ~keeper_name:"keeper-a" in
+    check (option string) "next turn sees the same restored body"
+      (Some "missing") (probe_head a_next);
+    check int "next turn of A owns a fresh memo" 1 (reads_next ()))
+
+let test_attention_read_failure_stays_open wake () =
+  with_attention_workspace (fun base_path ->
+    let keeper_name = "read-failure" in
+    record_attention ~base_path ~keeper_name "seed-not-queued";
+    enqueue_attention ~base_path ~keeper_name "missing";
+    let probe, reads = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
+        ~wake ~base_path ~keeper_name in
+    check (option string) "initial readable store excludes missing" None (probe_head probe);
+    let path = A.attention_path ~base_path ~keeper_name in
+    let size = (Unix.stat path).st_size in
+    let oc = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{torn");
+    check (option string) "torn store fails open" (Some "missing") (probe_head probe);
+    check (option string) "read error is not cached" (Some "missing") (probe_head probe);
+    check int "each failed read remains retryable" 3 (reads ());
+    Unix.truncate path size;
+    check (option string) "repaired readable store excludes missing again"
+      None (probe_head probe);
+    check int "recovery performs a fresh read" 4 (reads ());
+    check (list string) "read failure leaves durable pointer pending" ["missing"]
+      (pending_ids ~base_path ~keeper_name))
+
 let test_external_attention_projects_to_prompt_event () =
   let meta = make_meta "conn-keeper" in
   let item = external_attention_item () in
@@ -423,6 +555,20 @@ let () =
             test_distinct_connector_events_are_not_collapsed
         ; test_case "missing pointer does not preempt; readable still does"
             `Quick test_missing_connector_pointer_does_not_preempt
+        ] )
+    ; ( "source-turn cache",
+        [ test_case "late enqueue during proactive turn" `Quick
+            (test_late_enqueue_invalidates_subset Masc.Keeper_registry.Proactive_tick)
+        ; test_case "late enqueue during selected-source turn" `Quick
+            (test_late_enqueue_invalidates_subset
+               (Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap]))
+        ; test_case "interleaved Keepers retain independent caches" `Quick
+            test_interleaved_turn_caches
+        ; test_case "proactive read failure and recovery" `Quick
+            (test_attention_read_failure_stays_open Masc.Keeper_registry.Proactive_tick)
+        ; test_case "selected-source read failure and recovery" `Quick
+            (test_attention_read_failure_stays_open
+               (Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap]))
         ] )
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick

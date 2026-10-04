@@ -2230,8 +2230,11 @@ function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | 
   })
 }
 
-export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+export type RuntimeTomlRequestOptions = { beforeDispatch?: () => void }
+
+export async function fetchRuntimeTomlConfig(options: RuntimeTomlRequestOptions = {}): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
 }
 
@@ -2314,11 +2317,13 @@ export class RuntimeTomlRevisionConflict extends Error {
 export async function saveRuntimeTomlConfig(
   sourceText: string,
   expectedSourceRevision: string,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   if (!/^[0-9a-f]{64}$/.test(expectedSourceRevision)) {
     throw new Error('runtime.toml 저장 기준 revision이 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
   }
   await ensureDevToken()
+  options.beforeDispatch?.()
   try {
     const raw = await post<unknown>('/api/v1/runtime/config/raw', {
       source_text: sourceText,
@@ -2369,8 +2374,10 @@ export type RuntimeRoutingLane =
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
   runtimeId: string | null,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
     runtime_id: runtimeId,
@@ -2434,8 +2441,10 @@ export async function patchRuntimeExactSlot(
   action: RuntimeExactSlotAction,
   runtimeId: string,
   direction?: RuntimeExactSlotDirection,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: `exact/${laneId}`,
     action,
@@ -2448,12 +2457,14 @@ export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,
   expectedAssignmentRevision: KeeperRuntimeAssignmentRevision,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig | {
   ok: true
   applied: false
   assignment_revision: KeeperRuntimeAssignmentRevision
 }> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   const raw = await post<unknown>('/api/v1/runtime/config/assignment', {
     keeper_name: keeperName,
     runtime_id: runtimeId,

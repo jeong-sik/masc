@@ -3,7 +3,7 @@ import { RuntimeTomlRevisionConflict } from '../api/dashboard-runtime'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { fireEvent, waitFor } from '@testing-library/preact'
+import { act, fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   committedRuntimeTomlConfigFixture,
@@ -40,7 +40,15 @@ vi.mock('../lib/runtime-config-refresh', () => ({
 }))
 
 import { RuntimeTomlEditor } from './runtime-toml-editor'
-import { keepers } from '../store'
+import { keepers, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import { resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
+let workspaceEpoch = 0
+let workspaceGeneration = 0
+function workspace(root: string | null) {
+  hydrateExecutionSnapshot({ execution_publication_epoch: `runtime-editor-${workspaceEpoch}`,
+    execution_publication_generation: ++workspaceGeneration,
+    status: { project: 'test', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])
+}
 import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 
 const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
@@ -203,8 +211,12 @@ describe('RuntimeTomlEditor', () => {
   }
 
   beforeEach(() => {
+    resetRuntimeTomlSessionsForTesting()
+    const epoch = `runtime-editor-${++workspaceEpoch}`
+    invalidateExecutionSnapshotGeneration(epoch, 0)
+    workspaceGeneration = 0; workspace('/test/A')
     modelSetupResumeState.value = { kind: 'idle' }
-    vi.spyOn(coreApi, 'post').mockResolvedValue({ runtime_ready: true,
+    vi.spyOn(coreApi, 'postControlPlane').mockResolvedValue({ runtime_ready: true,
       exact_output_authority_available: true, model_setup: { status: 'available' } })
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -254,6 +266,175 @@ describe('RuntimeTomlEditor', () => {
     setConfirm(realConfirm)
     vi.restoreAllMocks()
     keepers.value = []
+  })
+
+  it('retains an unsaved runtime draft and section across component navigation', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(baseConfig.source_text))
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
+    const draft = baseConfig.source_text + '# unsaved operator configuration\n'
+    fireEvent.input(container.querySelector('textarea') as HTMLTextAreaElement, { target: { value: draft } })
+    render(null, container)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(draft))
+    expect(container.querySelector('[data-testid="runtime-toml-nav-toml"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the unload guard while the dirty editor is unmounted', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: baseConfig.source_text + '# local\n' } })
+    render(null, container)
+    const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-reset"]')!)
+    const reset = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(reset)
+    expect(reset.defaultPrevented).toBe(false)
+  })
+
+  it('settles a save after unmount without losing newer edits or calling a stale parent', async () => {
+    let finish!: (saved: ReturnType<typeof committedRuntimeTomlConfigFixture>) => void
+    apiMocks.saveRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const onSaved = vi.fn()
+    render(html`<${RuntimeTomlEditor} onSaved=${onSaved} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const submitted = baseConfig.source_text + '# submitted\n', newer = submitted + '# newer\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: submitted } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    expect(container.querySelector('textarea')?.disabled).toBe(false)
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: newer } })
+    render(null, container)
+    const saved = committedRuntimeTomlConfigFixture({ ...baseConfig, source_text: submitted })
+    await act(async () => { finish(saved); await Promise.resolve() })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(newer))
+    await waitFor(() => expect(container.textContent).toContain('저장 중 추가한 초안'))
+    expect(onSaved).not.toHaveBeenCalled()
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(newer, saved.source_revision, expect.any(Object)))
+  })
+
+  it('isolates identical file paths across workspaces and compares before saving on return', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draftA = baseConfig.source_text + '# workspace A\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draftA } })
+    const configB = { ...baseConfig, source_text: baseConfig.source_text + '# server B\n' }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(configB)
+    await act(() => workspace('/test/B'))
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(configB.source_text))
+    const draftB = configB.source_text + '# local B\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draftB } })
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValue({ ...baseConfig, source_text: baseConfig.source_text + '# external writer A\n', source_revision: 'e'.repeat(64) })
+    await act(() => workspace('/test/A'))
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(draftA))
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).not.toBeNull())
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')!)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(configB)
+    await act(() => workspace('/test/B'))
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(draftB))
+  })
+
+  it('keeps a pending A write uncertain after A-B-A and refuses stale comparison adoption', async () => {
+    let finish!: (saved: ReturnType<typeof committedRuntimeTomlConfigFixture>) => void
+    apiMocks.saveRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = baseConfig.source_text + '# pending A\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    await act(() => workspace('/test/B'))
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    await act(() => workspace('/test/A'))
+    await act(async () => { finish(committedRuntimeTomlConfigFixture({ ...baseConfig, source_text: draft })); await Promise.resolve() })
+    await waitFor(() => expect(container.textContent).toContain('작업공간 연결이 바뀌었습니다'))
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).toBeNull()
+    expect(coreApi.postControlPlane).not.toHaveBeenCalled()
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-read-current"]')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).not.toBeNull())
+  })
+
+  it('retains a hidden dirty draft when an external write is announced', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = baseConfig.source_text + '# hidden local\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    render(null, container); announceRuntimeTomlWritten()
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(draft))
+    expect(container.textContent).toContain('다른 화면에서 저장되었습니다')
+    expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('keeps file identity and the draft when a compare read resolves another path', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = baseConfig.source_text + '# keep this file\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValue({ ...baseConfig, path: '/other/runtime.toml', source_text: '# other file\n' })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-read-current"]')!)
+    await waitFor(() => expect(container.textContent).toContain('현재 파일 경로가 편집 중인 runtime.toml과 다릅니다'))
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    expect(container.querySelector('[data-testid="runtime-toml-path"]')?.textContent).toContain(MOCK_RUNTIME_PATH)
+    expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).toBeNull()
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('withdraws the editor without fetching or losing its draft until workspace verification', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = baseConfig.source_text + '# retained during disconnect\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    await act(() => workspace(null))
+    expect(container.querySelector('textarea')).toBeNull()
+    expect(container.textContent).toContain('보관된 초안은 유지됩니다')
+    expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    await act(() => workspace('/test/A'))
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(draft))
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(false))
+    expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).toBeNull()
+  })
+
+  it('reloads exact projections with the file and ignores an older projection response', async () => {
+    let finishOld!: (value: ReturnType<typeof laneSnapshot>) => void
+    apiMocks.fetchStandaloneLanes.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValue(laneSnapshot(['openai.gpt'], []))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    await waitFor(() => expect(apiMocks.fetchStandaloneLanes).toHaveBeenCalledTimes(1))
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValue({ ...baseConfig, source_revision: 'b'.repeat(64) })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-refresh"]')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')?.textContent).toContain('1. openai.gpt'))
+    await act(async () => { finishOld(laneSnapshot(['runpod_mtp.qwen'], [])); await Promise.resolve() })
+    expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')?.textContent).toContain('1. openai.gpt')
+    expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')?.textContent).not.toContain('1. runpod_mtp.qwen')
+  })
+
+  it('refreshes exact projections after delayed setup resume even after editor remount', async () => {
+    let finishResume!: (value: unknown) => void
+    let published = false
+    vi.mocked(coreApi.postControlPlane).mockImplementationOnce(() => new Promise(resolve => { finishResume = resolve }))
+    apiMocks.fetchStandaloneLanes.mockImplementation(async () => laneSnapshot(published ? ['openai.gpt'] : ['runpod_mtp.qwen'], []))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: baseConfig.source_text + '# setup\n' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(coreApi.postControlPlane).toHaveBeenCalledTimes(1))
+    render(null, container); render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')?.textContent).toContain('1. runpod_mtp.qwen'))
+    published = true
+    await act(async () => { finishResume({ runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }); await Promise.resolve() })
+    await waitFor(() => expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')?.textContent).toContain('1. openai.gpt'))
   })
 
   it('loads and displays the full runtime.toml source', async () => {
@@ -366,7 +547,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(container.textContent).toContain('Skill catalog 게시됨')
       expect(container.textContent).toContain('파일 내구성 확인됨')
     })
@@ -543,6 +724,26 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.patchRuntimeAssignment).not.toHaveBeenCalled()
   })
 
+  it('prevents raw edits during a typed patch from reverting the accepted routing', async () => {
+    let finish!: (value: ReturnType<typeof committedRuntimeTomlConfigFixture>) => void
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    apiMocks.patchRuntimeRouting.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(richConfig.source_text))
+    fireEvent.change(container.querySelector('[aria-label="default runtime"]')!, { target: { value: 'openai.gpt' } })
+    await waitFor(() => expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledTimes(1))
+    expect(container.querySelector('textarea')?.disabled).toBe(true)
+    // A queued input handler from before the disabled render must also refuse it.
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: richConfig.source_text + '# during patch\n' } })
+    const patched = richConfig.source_text.replace('default = "runpod_mtp.qwen"', 'default = "openai.gpt"')
+    await act(async () => { finish(committedRuntimeTomlConfigFixture({ ...richConfig, source_text: patched })); await Promise.resolve() })
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(patched))
+    const next = patched + '# after patch\n'
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: next } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(next, expect.any(String), expect.any(Object)))
+  })
+
   it('switches the default runtime through the typed backend routing patch', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
@@ -557,10 +758,10 @@ describe('RuntimeTomlEditor', () => {
     })
 
     await waitFor(() => {
-      expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledWith('default', 'openai.gpt')
+      expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledWith('default', 'openai.gpt', expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('default = "openai.gpt"')
     })
-    expect(coreApi.post).toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
+    expect(coreApi.postControlPlane).toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {}, undefined, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved'))
     expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
@@ -591,6 +792,7 @@ describe('RuntimeTomlEditor', () => {
           source_revision: baseConfig.source_revision,
           assignment: { state: 'missing' },
         },
+        expect.objectContaining({ beforeDispatch: expect.any(Function) }),
       )
     })
 
@@ -640,7 +842,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.keyDown(textarea, { key: 's', metaKey: true })
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
     })
   })
 
@@ -809,7 +1011,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.textContent).toContain('missing_deadline')
     fireEvent.click(container.querySelector('[aria-label="openai.gpt 위로"]') as HTMLButtonElement)
     await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
-      .toHaveBeenCalledWith('librarian_exact', 'move', 'openai.gpt', 'up'))
+      .toHaveBeenCalledWith('librarian_exact', 'move', 'openai.gpt', 'up', expect.objectContaining({ beforeDispatch: expect.any(Function) })))
     await waitFor(() => expect((container.querySelector('[aria-label="openai.gpt 위로"]') as HTMLButtonElement).disabled).toBe(true))
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent)
       .toContain('saved'))
@@ -854,12 +1056,12 @@ describe('RuntimeTomlEditor', () => {
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-lanes"]')).not.toBeNull())
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-lanes"]') as HTMLButtonElement)
-    const select = await waitFor(() => container.querySelector(
-      '[aria-label="workspace_curator_exact 추가할 runtime"]') as HTMLSelectElement)
+    await waitFor(() => expect(container.querySelector('[aria-label="workspace_curator_exact 추가할 runtime"]')).not.toBeNull())
+    const select = container.querySelector('[aria-label="workspace_curator_exact 추가할 runtime"]') as HTMLSelectElement
     fireEvent.change(select, { target: { value: 'next.client' } })
     fireEvent.click(container.querySelector('[data-testid="exact-lane-workspace_curator_exact"] button[aria-label="workspace_curator_exact 후보 추가"]') as HTMLButtonElement)
     await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
-      .toHaveBeenCalledWith('workspace_curator_exact', 'append', 'next.client', undefined))
+      .toHaveBeenCalledWith('workspace_curator_exact', 'append', 'next.client', undefined, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
     expect(container.textContent).toContain('CLI tail is not supported')
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
@@ -875,7 +1077,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.change(select, { target: { value: 'openai.gpt' } })
     fireEvent.click(container.querySelector('[data-testid="exact-lane-candle_appraiser"] button[aria-label="candle_appraiser 후보 추가"]') as HTMLButtonElement)
     await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
-      .toHaveBeenCalledWith('candle_appraiser', 'append', 'openai.gpt', undefined))
+      .toHaveBeenCalledWith('candle_appraiser', 'append', 'openai.gpt', undefined, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
@@ -964,7 +1166,7 @@ describe('RuntimeTomlEditor', () => {
 
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
     })
     expect((container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value).toBe(nextSource)
   })
@@ -979,7 +1181,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).not.toBeNull())
-    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, baseConfig.source_revision)
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
     expect(container.querySelector('textarea')?.value).toBe(draft)
     expect(container.querySelector('[aria-label="현재 서버 원문"]')?.textContent).toBe(current.source_text)
     expect(container.querySelector('[aria-label="편집 기준 원문"]')?.textContent).toBe(baseConfig.source_text)
@@ -990,7 +1192,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('textarea')?.value).toBe(draft)
     expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(draft, current.source_revision))
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(draft, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
   })
 
   it('replaces the draft with the displayed current file only on the separate replace action', async () => {
@@ -1009,7 +1211,7 @@ describe('RuntimeTomlEditor', () => {
     const amended = `${current.source_text}# after explicit replace\n`
     fireEvent.input(container.querySelector('textarea')!, { target: { value: amended } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(amended, current.source_revision))
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(amended, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
   })
 
   it('reads current text for comparison without replacing a dirty draft or its save basis', async () => {
@@ -1037,7 +1239,7 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => expect(container.textContent).toContain('파일 변경 여부를 확인하지 못했습니다'))
     expect(container.querySelector('textarea')?.value).toBe(draft)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenNthCalledWith(2, draft, baseConfig.source_revision))
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenNthCalledWith(2, draft, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
   })
 
   it('keeps the dirty draft when save validation fails', async () => {
@@ -1433,7 +1635,7 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).toContain('max-context = 1000000'))
   })
 
-  it('keeps invalid context drafts across tabs, blocks save, and discards them on reset', async () => {
+  it('keeps invalid context drafts across tabs and remount, blocks save, and discards them on reset', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('[aria-label="qwen max-context"]')).not.toBeNull())
@@ -1442,6 +1644,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
     expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
     expect(container.textContent).toContain('unsaved')
+    render(null, container); render(html`<${RuntimeTomlEditor} />`, container)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
     expect((container.querySelector('[aria-label="qwen max-context"]') as HTMLInputElement).value).toBe('invalid')
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-reset"]') as HTMLButtonElement)
@@ -1593,7 +1796,7 @@ is-non-interactive = true
     fireEvent.click(save)
     await waitFor(() => {
       expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce()
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited, baseConfig.source_revision)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
     })
 

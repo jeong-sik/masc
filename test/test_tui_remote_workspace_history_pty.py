@@ -219,7 +219,7 @@ def run(binary: str, captures: Path | None) -> None:
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text and b"[workspace mismatch]" in text,
                          "fresh B roster after the late response was not applied")
-            _keyboard_harness.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=35, columns=300,
                              needle=b"b.settled", controls=(_keyboard_harness.FULL_REDRAW,))
             assert BEFORE not in screen(output) and LATE not in screen(output)
             assert DRAFT not in screen(output), "A's input was relabelled as a remote draft"
@@ -227,7 +227,7 @@ def run(binary: str, captures: Path | None) -> None:
                 assert not [event for event in wire.events
                     if event["event"] == "memory" and str(event["phase"]).startswith("b")],                     "a withdrawn A history read continued into B's memory journal"
             refusal = b"Chat requires a matching workspace"
-            for key in (b"m", b"i"):
+            def clear_refusal():
                 # A repeated refusal leaves identical footer cells, so the
                 # incremental renderer need not emit those bytes again.
                 # Require the previous notice to leave the current screen
@@ -236,8 +236,13 @@ def run(binary: str, captures: Path | None) -> None:
                     _keyboard_harness.write_all(fd, output, b"\x1b")
                     await_screen(lambda text: refusal not in text,
                                  "previous chat refusal did not clear")
+                    _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+                    _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            for key in (b"m", b"i"):
+                clear_refusal()
                 _keyboard_harness.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
+            clear_refusal()
             _keyboard_harness.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:
                 assert not [event for event in wire.events
@@ -254,11 +259,18 @@ def run(binary: str, captures: Path | None) -> None:
             metadata_path.write_text("{not-json", encoding="utf-8")
             wire.publish("a-returned")
             await_screen(lambda text: b"[workspace mismatch]" not in text
-                         and b"no Keeper selected" in text and b"keeper metadata read failed" in text,
+                         and b"MASC Keepers (1)" in text
+                         and "Keepers ▸ alpha".encode() not in text
+                         and b"keeper metadata read failed: alpha:" in text,
                          "failed A metadata reload retained B's Keeper detail")
             metadata_path.write_bytes(metadata_bytes)
             os.write(fd, b"r")
-            _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=TERMINAL_COLUMNS,
+            await_screen(lambda text: b"a.returned" in text
+                         and b"keeper metadata read failed" not in text,
+                         "repaired A metadata was not reloaded")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=300,
                              needle=b"Total Turns:", controls=(_keyboard_harness.FULL_REDRAW,))
             await_screen(lambda text: b"Total Turns:" in text
                          and b"no Keeper selected" not in text,
@@ -729,12 +741,24 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         def open_identity(marker):
+            # Workspace withdrawal returns to the roster, so re-enter detail.
+            _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Identity")
+            if marker in screen(output):
+                return
             # The same marked title strip as keyboard [/] navigation; no
             # hardcoded index or tab count selects a different detail surface.
             title_rows = [row for row, text in _keyboard_harness.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Identity" in text]
             assert len(title_rows) == 1, _keyboard_harness.screen_rows(bytes(output))
-            _keyboard_keepers.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
+            row = title_rows[0]
+            text = _keyboard_harness.screen_rows(bytes(output))[row]
+            column = len(text[:text.index(b"Identity")].decode("utf-8")) + 1
+            _keyboard_harness.write_all(fd, output, b"\x1b[<0;%d;%dM\x1b[<0;%d;%dm" % (column, row, column, row))
+            # A retained tab may finish loading before the click. Observe its
+            # current phase instead of requiring another incremental repaint.
+            await_screen(lambda text: marker in text, "current Identity providers were not drawn")
         try:
             _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=45, columns=300, needle=b"MASC Dashboard",
@@ -760,9 +784,9 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             # ran; per-request guards/cancellation are also source contracts.
             assert submitted == [("a", "first")], submitted
             wire.publish("a-returned")
-            await_screen(lambda text: b"Base: " + wire.local_base.encode() in text
+            await_screen(lambda text: b"a.returned" in text
                          and b"[workspace mismatch]" not in text,
-                         "A identity was not restored in the current footer")
+                         "A identity and roster were not restored")
             open_identity(b"a-returned-identity-second")
             os.write(fd, b"R")
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: len(submitted) == 3,
@@ -1063,8 +1087,7 @@ def github_workspace_withdrawal(binary: str) -> None:
             wire.publish("b-after-late")
             # Re-entering obtains a fresh, stamped B observation after the
             # server released the stale stream; it cannot recreate A's view.
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"b.settled" in text)
+            await_screen(lambda text: b"MASC Keepers" in text and b"b.settled" in text)
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"GitHub")
             if b"Login scopes" not in screen(output):
@@ -1121,7 +1144,13 @@ def connector_workspace_withdrawal(binary: str) -> None:
             title_rows = [row for row, text in _keyboard_harness.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Channels" in text]
             assert len(title_rows) == 1, _keyboard_harness.screen_rows(bytes(output))
-            _keyboard_keepers.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
+            # The selected detail tab survives authority withdrawal. A
+            # fresh reading already on screen needs no second click.
+            if marker not in screen(output):
+                row = title_rows[0]
+                text = _keyboard_harness.screen_rows(bytes(output))[row]
+                column = len(text[:text.index(b"Channels")].decode("utf-8")) + 1
+                _keyboard_harness.write_all(fd, output, b"\x1b[<0;%d;%dM\x1b[<0;%d;%dm" % (column, row, column, row))
             await_screen(lambda text: marker in text and b"333 (name unknown)" in text,
                          "fresh connector targets are not visible")
         try:
@@ -1137,8 +1166,9 @@ def connector_workspace_withdrawal(binary: str) -> None:
             wire.publish("b")
             await_screen(lambda text: b"[workspace mismatch]" in text and b"a-Discord" not in text,
                          "workspace B did not withdraw A's connector projection")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"b.current" in text, "B roster not ready")
+            # Workspace withdrawal already returned the detail to its roster.
+            await_screen(lambda text: b"MASC Keepers" in text and b"b.current" in text,
+                         "B roster not ready")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"b-Discord")
@@ -1151,8 +1181,9 @@ def connector_workspace_withdrawal(binary: str) -> None:
                          "returning authority did not retire the held connector write")
             released.set()
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"a.returned" in text, "returned roster not ready")
+            # Workspace withdrawal already returned the detail to its roster.
+            await_screen(lambda text: b"MASC Keepers" in text and b"a.returned" in text,
+                         "returned roster not ready")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"a-returned-Discord")

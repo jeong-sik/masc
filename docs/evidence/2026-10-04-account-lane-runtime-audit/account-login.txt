@@ -1,0 +1,384 @@
+workflow.000.output
+ASSERT two homes display as two accounts
+ASSERT requested nonrepresentative provider selects its account group
+ASSERT group selects an actual provider for model discovery
+ASSERT D opens a member chooser, never a partial account deletion
+ASSERT member chooser lists both original providers
+ASSERT removal preview targets the explicitly selected provider only
+ASSERT Esc returns to grouped account list
+ASSERT unknown grouping member cannot redirect account selection
+
+workflow.001.output
+ASSERT usable models start selected in catalog order
+ASSERT unsupported model gives its reason
+ASSERT Enter submits all selected models in screen order
+ASSERT one connection carries both models in order
+ASSERT selection uses model indexes after existing defaults
+ASSERT unsupported model remains unselected
+ASSERT a clears all usable selections
+ASSERT a restores both usable selections
+ASSERT Space toggles just the focused model
+
+workflow.002.output
+ASSERT invalid account selection is refused
+ASSERT selected account is reused without login
+ASSERT bound models remain visible for codex_hA
+ASSERT only the new model is selected
+ASSERT connected model is labelled
+ASSERT connected model cannot be selected
+ASSERT select all excludes connected models
+ASSERT save submits only the new model
+ASSERT invalid account selection is refused
+ASSERT selected account is reused without login
+ASSERT bound models remain visible for codex_hB
+ASSERT only the new model is selected
+ASSERT connected model is labelled
+ASSERT connected model cannot be selected
+ASSERT select all excludes connected models
+ASSERT save submits only the new model
+
+workflow.003.output
+ASSERT pasted spaces and Unicode are byte exact
+ASSERT dedicated input payload preserves bytes
+ASSERT pasted spaces and Unicode are byte exact
+ASSERT dedicated input payload preserves bytes
+ASSERT pasted spaces and Unicode are byte exact
+ASSERT dedicated input payload preserves bytes
+ASSERT pasted spaces and Unicode are byte exact
+ASSERT dedicated input payload preserves bytes
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+ASSERT unsupported paste never alters existing credential
+ASSERT rejected paste reports its reason
+
+workflow.004.output
+ASSERT save failure leads with the request's own reason
+ASSERT save failure requests current configuration despite login receipt
+ASSERT failed refresh remains retriable and cannot save stale config
+ASSERT refresh awaits deliberate retry on retained model
+ASSERT refresh retains authenticated account
+ASSERT same model retained
+ASSERT documented context survives failed save
+ASSERT retry uses new revision
+ASSERT retry preserves new default
+ASSERT retry uses current selection
+ASSERT retry uses same account
+
+workflow.005.output
+ASSERT every row fits
+ASSERT the code and the way back are on screen
+
+workflow.006.output
+ASSERT named default remains an explicit lane identity
+ASSERT lane identity is not submitted as a concrete candidate
+
+workflow.007.output
+ASSERT typed scalar and space preserved
+ASSERT backspace removes a whole scalar
+ASSERT draft remains valid UTF8
+ASSERT acknowledged input failure cannot erase current draft
+ASSERT old failure cannot release newer pending input
+ASSERT current failure allows correction
+
+workflow.008.output
+ASSERT transport failure cannot revoke verified save
+ASSERT retry refreshes inventory instead of old login receipt
+ASSERT bad inventory cannot revoke verified save
+ASSERT successful refresh retains saved screen
+
+workflow.009.output
+ASSERT pending activation cannot dispatch another save
+ASSERT pending activation cannot duplicate activation
+ASSERT unconfirmed activation is not active
+ASSERT retry activates without another save
+ASSERT inventory cannot turn saved configuration into active runtime
+ASSERT unconfirmed activation is not active
+ASSERT retry activates without another save
+ASSERT inventory cannot turn saved configuration into active runtime
+ASSERT unconfirmed activation is not active
+ASSERT retry activates without another save
+ASSERT inventory cannot turn saved configuration into active runtime
+ASSERT chat runtime can activate before exact output becomes available
+ASSERT active result survives a failed inventory refresh
+ASSERT active refresh is read-only
+
+workflow.010.output
+ASSERT the unmeasured runtime and its code have their own row
+ASSERT the save is not reported as verified
+ASSERT retry keeps what the save published
+ASSERT a failed list read is its own row
+ASSERT a refreshed list keeps the unmeasured account
+ASSERT an empty unmeasured list is unreadable
+ASSERT an unmeasured row without a code is unreadable
+ASSERT an unmeasured runtime the save did not select is unreadable
+ASSERT a verified receipt with an unmeasured list is unreadable
+
+workflow.011.output
+ASSERT retained runtime is explicitly not rechecked
+ASSERT the save is not reported as verified
+ASSERT the notice says existing connections were retained
+ASSERT retry keeps what the save published
+ASSERT quota failure and not-rechecked runtime are separately listed
+ASSERT small result starts with its save notice
+ASSERT every result fragment is reachable by scrolling
+ASSERT every result fragment is reachable by scrolling
+ASSERT every result fragment is reachable by scrolling
+ASSERT every result fragment is reachable by scrolling
+ASSERT every result fragment is reachable by scrolling
+ASSERT coalesced down down up moves from the bottom
+ASSERT one up key moves after repeated down keys at the bottom
+ASSERT scroll can return to the initial result
+ASSERT an empty not_rechecked list is unreadable
+ASSERT a not_rechecked runtime the save did not select is unreadable
+ASSERT a missing not_rechecked list is unreadable
+ASSERT a verified receipt with a not_rechecked list is unreadable
+ASSERT a malformed row beside a valid kept runtime rejects the entire receipt
+ASSERT a rejected receipt cannot finish the save
+ASSERT a rejected receipt cannot announce a saved configuration
+ASSERT a malformed row beside a valid kept runtime rejects the entire receipt
+ASSERT a rejected receipt cannot finish the save
+ASSERT a rejected receipt cannot announce a saved configuration
+ASSERT a malformed row beside a valid kept runtime rejects the entire receipt
+ASSERT a rejected receipt cannot finish the save
+ASSERT a rejected receipt cannot announce a saved configuration
+ASSERT a malformed row beside a valid kept runtime rejects the entire receipt
+ASSERT a rejected receipt cannot finish the save
+ASSERT a rejected receipt cannot announce a saved configuration
+ASSERT a malformed row beside a valid kept runtime rejects the entire receipt
+ASSERT a rejected receipt cannot finish the save
+ASSERT a rejected receipt cannot announce a saved configuration
+ASSERT a malformed row beside a valid kept runtime rejects the entire receipt
+ASSERT a rejected receipt cannot finish the save
+ASSERT a rejected receipt cannot announce a saved configuration
+
+workflow.012.output
+ASSERT explicit documented limit requested
+ASSERT empty context cannot save
+ASSERT documented context returns to model selection
+ASSERT operator documented value still goes through save verification
+ASSERT explicit documented limit requested
+ASSERT empty context cannot save
+ASSERT documented context returns to model selection
+ASSERT operator documented value still goes through save verification
+ASSERT native observation available
+ASSERT unreported Muse context is not invented
+ASSERT Muse can refresh native metadata
+
+workflow.013.output
+ASSERT terminal event survives byte fragmentation
+ASSERT ordered events preserve Unicode and identity
+ASSERT nothing can follow terminal completion
+
+workflow.014.output
+ASSERT invalid event permanently fails stream
+ASSERT no completion after failure
+ASSERT invalid event permanently fails stream
+ASSERT no completion after failure
+ASSERT invalid event permanently fails stream
+ASSERT no completion after failure
+ASSERT truncated EOF is not completion
+
+workflow.015.output
+ASSERT requested client selected
+ASSERT requested client selected
+ASSERT requested client selected
+ASSERT requested client selected
+ASSERT unknown client refused
+ASSERT current default stays first
+ASSERT only declared fallback order is preserved
+ASSERT save excludes unrelated enabled runtimes
+ASSERT selected account survives model save
+ASSERT slash login is never Keeper text
+
+workflow.016.output
+ASSERT render masks private input
+ASSERT input goes to dedicated endpoint payload
+ASSERT submitted code cleared
+ASSERT late previous input ACK cannot unlock new input
+ASSERT late account cannot replace current attempt
+ASSERT actual terminal Tab forwarded
+ASSERT cancel available while input pending
+
+workflow.017.output
+ASSERT missing or invalid configured fallback selection is refused
+ASSERT missing or invalid configured fallback selection is refused
+ASSERT missing or invalid configured fallback selection is refused
+ASSERT missing or invalid configured fallback selection is refused
+ASSERT missing or invalid configured fallback selection is refused
+ASSERT fresh setup has no inferred fallback
+
+workflow.018.output
+ASSERT each account row leads with its email or why not
+ASSERT an account with no email row draws its name alone
+ASSERT an unknown state is that row's own
+ASSERT read without an email
+ASSERT an email beside a cause
+ASSERT an unknown cause
+ASSERT not read without a cause
+ASSERT one account listed twice has no single state
+ASSERT a bad row leaves the other rows readable
+ASSERT rows for no listed integration are counted, not shown
+ASSERT the clients list each client once with its account count
+ASSERT an inventory without a readable email list still lists the clients
+
+workflow.019.output
+ASSERT one row per client; a catalog entry is not an account
+ASSERT Enter opens the client's accounts
+ASSERT a new-account row, then the accounts
+ASSERT a new account goes through the catalog entry
+ASSERT Enter opens the account without login
+ASSERT e still explicitly reauthenticates
+ASSERT n adds a new account from any row
+ASSERT D previews the account under the cursor
+ASSERT the new-account row cannot be removed
+ASSERT Esc goes back to the clients, on the same client
+ASSERT Esc on the clients closes
+ASSERT /login <account> opens its client on that account
+
+workflow.020.output
+ASSERT the new-account row, then the account
+ASSERT n logs in a new account through the account's row
+ASSERT so does Enter on + 새 계정
+
+workflow.021.output
+ASSERT r reads the list again on the same view
+ASSERT a first read that cannot find the request refuses
+ASSERT a read after the removal stays on the client's accounts
+
+workflow.022.output
+ASSERT a bare /login takes any row
+ASSERT /login <id> takes that row
+ASSERT /login <id> refuses another account
+ASSERT /login <client> takes the client's rows
+ASSERT a client name that is also a row's id is that row
+
+workflow.023.output
+ASSERT n asks for the list first
+ASSERT so does e
+
+workflow.024.output
+ASSERT read emails, and the rows this build cannot read
+ASSERT no readable list is an error
+
+workflow.025.output
+ASSERT server row decodes to its own state
+ASSERT server row decodes to its own state
+ASSERT server row decodes to its own state
+ASSERT server row decodes to its own state
+ASSERT server row decodes to its own state
+ASSERT server row decodes to its own state
+
+workflow.026.output
+ASSERT spawn failure is terminal but not successful
+ASSERT receipt can be requested before any started frame
+ASSERT failed prepared account remains available
+ASSERT receipt identity retained
+
+workflow.027.output
+ASSERT retry captures only explicitly selected account
+ASSERT new attempt never retains previous session
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT old started frame cannot reopen previous session
+ASSERT input targets the new server session
+ASSERT preserved draft submits once ready
+ASSERT submitted draft cleared
+ASSERT submission waits for actual ACK
+ASSERT retry captures only explicitly selected account
+ASSERT new attempt never retains previous session
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT no input before new server identity
+ASSERT early submit retains code draft
+ASSERT early submit does not await an impossible ACK
+ASSERT old started frame cannot reopen previous session
+ASSERT input targets the new server session
+ASSERT preserved draft submits once ready
+ASSERT submitted draft cleared
+ASSERT submission waits for actual ACK
+
+workflow.028.output
+ASSERT selected model visible in short viewport
+ASSERT selected model visible in short viewport
+ASSERT selected model visible in short viewport
+ASSERT selected model visible in short viewport
+ASSERT selected model visible in short viewport
+ASSERT selected model visible in short viewport
+ASSERT completion without auth observation rejected
+ASSERT bad receipt cannot replace selected account
+
+workflow.029.output
+ASSERT half an escape is not drawn while the rest is on its way
+ASSERT no escape is spelled out as text
+ASSERT the link keeps its words
+ASSERT the link is drawn in the client's blue
+ASSERT the one-time code is drawn in the client's blue
+ASSERT the version is drawn in the client's grey
+ASSERT the pane's own prompt is still there
+
+workflow.030.output
+ASSERT cursor moves, hyperlinks, titles and charsets are dropped, their text kept
+ASSERT nothing the client wrote is sent as an escape
+ASSERT a sequence the stream ends inside waits for the rest
+ASSERT an ESC that starts nothing is shown, not sent
+ASSERT a colour carries over the line end
+ASSERT reset ends it
+ASSERT 38;5 cube index
+ASSERT a background's numbers are not read as codes
+ASSERT 38;2 truecolor
+ASSERT colon sub-parameters
+
+workflow.031.output
+ASSERT the provider under the cursor
+ASSERT shows [providers.codex]
+ASSERT shows lane coding
+ASSERT shows keeper tester
+ASSERT shows /home/op/.codex-two
+ASSERT the account
+ASSERT the revision the preview read
+ASSERT the login store for the notice
+ASSERT Esc goes back to the account's list
+
+workflow.032.output
+ASSERT the reason is shown
+ASSERT with why the preview was read again
+ASSERT Enter does not remove a refused account
+ASSERT an answer for another account is refused
+ASSERT an unknown change is refused

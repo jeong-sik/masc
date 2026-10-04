@@ -5,6 +5,20 @@ let bool = Alcotest.bool
 
 module T = Masc_tui_model_runtime_table
 
+let parse lines =
+  let providers = ["ollama_cloud"; "local"] in
+  let declared = List.concat_map (fun id ->
+    if List.exists (fun line -> String.equal line ("[providers." ^ id ^ "]")) lines
+    then [] else ["[providers." ^ id ^ "]";
+      "protocol = \"openai-compatible-http\""; "kind = \"openai_compat\"";
+      "endpoint = \"http://localhost:9000/v1\""]) providers in
+  let lines = List.filter (fun line -> line <> "base-url = \"https://ollama.com\"") lines in
+  let lines = List.concat_map (fun line -> if line = "[providers.ollama_cloud]" then
+    [line; "protocol = \"openai-compatible-http\""; "kind = \"openai_compat\"";
+     "endpoint = \"http://localhost:9000/v1\""] else [line]) lines in
+  match T.parse (lines @ declared) with
+  | Ok rows -> rows | Error detail -> Alcotest.fail detail
+
 let sample =
   [ "[models.alpha]"
   ; "api-name = \"alpha-v2\""
@@ -13,7 +27,7 @@ let sample =
   ; "temperature = 0.7"
   ; ""
   ; "[models.alpha.capabilities]"
-  ; "max-tokens = 999"
+  ; "max-output-tokens = 999"
   ; ""
   ; "[ollama_cloud.alpha]"
   ; "max-tokens = 16384"
@@ -37,7 +51,7 @@ let row_named rows name =
   | None -> Alcotest.failf "row %S is missing" name
 
 let test_reads_both_tables () =
-  let alpha = row_named (T.parse sample) "alpha" in
+  let alpha = row_named (parse sample) "alpha" in
   check string "provider" "ollama_cloud" alpha.T.provider;
   check string "api name" "alpha-v2" (Option.get alpha.T.api_name);
   check
@@ -50,7 +64,7 @@ let test_reads_both_tables () =
   check int "max-tokens comes from the binding" 16384 (Option.get alpha.T.max_tokens)
 
 let test_absent_knobs_stay_absent () =
-  let beta = row_named (T.parse sample) "beta" in
+  let beta = row_named (parse sample) "beta" in
   check bool "no effort" true (Option.is_none beta.T.reasoning_effort);
   check bool "no temperature" true (Option.is_none beta.T.temperature);
   check bool "no max-tokens" true (Option.is_none beta.T.max_tokens)
@@ -59,7 +73,7 @@ let test_absent_knobs_stay_absent () =
    Before the models-table pairing they landed in the table as rows with two
    empty knob columns, which reads as "a model nobody configured". *)
 let test_non_model_sections_are_not_rows () =
-  let names = List.map (fun (r : T.row) -> r.T.model) (T.parse sample) in
+  let names = List.map (fun (r : T.row) -> r.T.model) (parse sample) in
   check bool "no provider row" false (List.mem "ollama_cloud" names);
   check bool "no voice row" false (List.mem "tts" names);
   check int "only the two models" 2 (List.length names)
@@ -68,18 +82,18 @@ let test_non_model_sections_are_not_rows () =
    sub-table as a continuation of [models.alpha] would read 999 for a
    binding whose real cap is 16384. *)
 let test_sub_tables_do_not_leak () =
-  let alpha = row_named (T.parse sample) "alpha" in
+  let alpha = row_named (parse sample) "alpha" in
   check int "binding value wins" 16384 (Option.get alpha.T.max_tokens)
 
 let test_commented_lines_are_not_values () =
   let lines =
     [ "[models.gamma]"; "# reasoning-effort = \"max\""; "[ollama_cloud.gamma]"; "max-tokens = 1" ]
   in
-  let gamma = row_named (T.parse lines) "gamma" in
+  let gamma = row_named (parse lines) "gamma" in
   check bool "comment ignored" true (Option.is_none gamma.T.reasoning_effort)
 
 let test_render_columns_line_up () =
-  let rendered = T.render ~width:80 (T.parse sample) in
+  let rendered = T.render ~width:80 (parse sample) in
   match rendered with
   | header :: rows ->
     let effort_col =
@@ -120,14 +134,15 @@ let test_a_wide_name_is_padded_by_cells_not_bytes () =
     ; "[local.abcd]"
     ; "max-tokens = 100"
     ; ""
-    ; "[models.\"\xed\x95\x9c\xea\xb8\x80\"]"
+    ; "[models.wide]"
+    ; "api-name = \"한글\""
     ; "temperature = 0.7"
     ; ""
-    ; "[local.\"\xed\x95\x9c\xea\xb8\x80\"]"
+    ; "[local.wide]"
     ; "max-tokens = 100"
     ]
   in
-  match T.render ~width:80 (T.parse lines) with
+  match T.render ~width:80 (parse lines) with
   | _ :: [ ascii; wide ] ->
       let width text = Masc_tui_message_layout.display_width text in
       check int "both rows are the same width in cells" (width ascii) (width wide)
@@ -140,14 +155,15 @@ let test_a_wide_name_is_padded_by_cells_not_bytes () =
 let test_a_clipped_wide_name_keeps_its_scalars_whole () =
   let long = String.concat "" (List.init 30 (fun _ -> "\xed\x95\x9c")) in
   let lines =
-    [ "[models.\"" ^ long ^ "\"]"
+    [ "[models.wide]"
+    ; "api-name = \"" ^ long ^ "\""
     ; "temperature = 0.7"
     ; ""
-    ; "[local.\"" ^ long ^ "\"]"
+    ; "[local.wide]"
     ; "max-tokens = 100"
     ]
   in
-  match T.render ~width:40 (T.parse lines) with
+  match T.render ~width:40 (parse lines) with
   | _ :: [ row ] ->
       (* Every scalar decodes: a byte cut leaves a replacement here. *)
       let rec whole i =
@@ -172,7 +188,7 @@ let test_a_clipped_wide_name_keeps_its_scalars_whole () =
   | _ -> Alcotest.fail "expected a header and one row"
 
 let test_narrow_layout_preserves_mandatory_values () =
-  let rows = T.parse sample in
+  let rows = parse sample in
   check bool "narrow pane does not fit fixed table" false (T.fits ~width:30 rows);
   let rendered = T.render ~width:40 ~pane:30 rows in
   check bool "stacked output keeps max-tokens" true
@@ -183,7 +199,7 @@ let test_narrow_layout_preserves_mandatory_values () =
        rendered)
 
 let test_stacked_item_starts_are_monotonic () =
-  let rows = T.parse sample in
+  let rows = parse sample in
   match T.stacked_item_starts ~pane:30 rows with
   | [ first; second ] ->
       check int "first item starts at zero" 0 first;
@@ -198,7 +214,7 @@ let test_empty_input () =
     (List.hd (T.render ~width:80 []))
 
 let test_detail_names_owners_and_api_override () =
-  let alpha = row_named (T.parse sample) "alpha" in
+  let alpha = row_named (parse sample) "alpha" in
   check
     (Alcotest.list string)
     "selected binding detail"
@@ -206,19 +222,21 @@ let test_detail_names_owners_and_api_override () =
     ; "API model: alpha-v2 (api-name override)"
     ; "[models.alpha]  reasoning-effort=low  temperature=0.7"
     ; "[ollama_cloud.alpha]  max-tokens=16384"
+    ; "Context: undeclared; Runtime shows the resolved catalog value"
     ; "- means that key is absent; add or edit it in the section shown above."
     ]
     (T.detail_lines alpha)
 
 let test_detail_explains_absent_values () =
-  let beta = row_named (T.parse sample) "beta" in
+  let beta = row_named (parse sample) "beta" in
   check
     (Alcotest.list string)
     "absent values and default API name"
     [ "Binding: provider=ollama_cloud  model=beta"
-    ; "API model: beta (default; api-name key absent)"
+    ; "API model: beta (same as binding)"
     ; "[models.beta]  reasoning-effort=-  temperature=-"
     ; "[ollama_cloud.beta]  max-tokens=-"
+    ; "Context: undeclared; Runtime shows the resolved catalog value"
     ; "- means that key is absent; add or edit it in the section shown above."
     ]
     (T.detail_lines beta)
@@ -231,6 +249,7 @@ let test_detail_quotes_dotted_model_section () =
     ; reasoning_effort = None
     ; temperature = None
     ; max_tokens = None
+    ; context = None; model_context = None
     }
   in
   let detail = T.detail_lines row in
@@ -241,10 +260,46 @@ let test_detail_quotes_dotted_model_section () =
     "[glm-coding.\"glm-5.2\"]  max-tokens=-"
     (List.nth detail 3)
 
+let test_accounts_and_sets () =
+  let lines = [
+    "[models.shared]"; "max-context = 500000";
+    "[model_sets.family]"; "models = ['shared']";
+    "[providers.first]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+    "is-non-interactive = true"; "model-set = 'family'";
+    "[providers.second]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+    "is-non-interactive = true"; "model-set = 'family'";
+    "[second.shared]"; "max-context = 272000";
+  ] in
+  let rows = parse lines in
+  check (Alcotest.list string) "both account bindings, including implicit set member"
+    ["first"; "second"] (List.map (fun (r:T.row) -> r.provider) rows);
+  check (Alcotest.list (Alcotest.option (Alcotest.pair string int))) "binding context is account scoped"
+    [Some ("model", 500000); Some ("binding", 272000)]
+    (List.map (fun (r:T.row) -> r.context) rows)
+
+let test_invalid_is_error () =
+  match T.parse ["[models.broken"] with
+  | Error _ -> () | Ok _ -> Alcotest.fail "bad source was presented as an empty model list"
+
+let test_exact_runtime_lookup () =
+  let row = row_named (parse sample) "alpha" in
+  let rows = [{row with provider = "account-one"; model = "model.6"};
+              {row with provider = "account-two"; model = "model.6"}] in
+  let selected = T.find_runtime ~runtime_id:"account-two.model.6" rows in
+  check (Alcotest.option int) "exact account and dotted model" (Some 1)
+    (Option.map fst selected);
+  check bool "no prefix guess" true
+    (Option.is_none (T.find_runtime ~runtime_id:"account-two.model" rows));
+  check bool "missing binding stays missing" true
+    (Option.is_none (T.find_runtime ~runtime_id:"account-three.model.6" rows))
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
-    [ ( "parse"
+    [ ( "accounts", [ Alcotest.test_case "settings target exact account" `Quick test_exact_runtime_lookup;
+       Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
+       Alcotest.test_case "invalid source is visible" `Quick test_invalid_is_error ])
+    ; ( "parse"
       , [ Alcotest.test_case "reads both tables" `Quick test_reads_both_tables
         ; Alcotest.test_case "absent knobs stay absent" `Quick test_absent_knobs_stay_absent
         ; Alcotest.test_case

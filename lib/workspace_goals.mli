@@ -46,7 +46,13 @@ val handle_goal_measure
     {!Goal_phase.Public_action.all}). [request_complete] moves an executing
     Goal to [Verifying]. Repeating it while a proof remains pending preserves
     the idempotent [Already] response and emits a fresh verifier scan wake;
-    verifier verdicts are not public actions. *)
+    verifier verdicts are not public actions.
+
+    [drop] decides against the current Goal under its store lock and commits
+    the phase and audit intent together. A committed cancellation remains a
+    success when effect delivery is deferred; [effect_delivery] reports that
+    separately. A repeated drop preserves the original Goal and drains the
+    pending outbox without duplicating its event or verifier cancellation. *)
 val handle_goal_transition
   :  tool_name:string
   -> start_time:Tool_timing.started

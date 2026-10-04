@@ -105,6 +105,33 @@ let clean_draft_does_not_adopt_different_path () =
   let _,_,write=A.start_save ~generation:4 (A.discard session |> A.toggle) |> ok in
   same "fresh" write.expected_source_revision; same source write.source_text
 
+let flat_paths_preserve_operator_comments () =
+  let source = "[browser] # deployment\n# managed driver\n  'geckodriver' = '/fixture/driver' # pinned driver\n# custom browser\nbinary = '/fixture/browser' # operator build\nstagehand = { chrome = '/fixture/chrome', extension = '/fixture/extension' }\n" in
+  let _,_,write=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let lines=String.split_on_char '\n' write.source_text in
+  List.iter (fun comment -> Alcotest.(check bool) comment true (has comment lines))
+    ["# deployment";"# managed driver";"# pinned driver";"# custom browser";"# operator build"];
+  let config=Otoml.Parser.from_string_result write.source_text |> ok |> Browser_configuration.parse |> ok in
+  Alcotest.(check bool) "only Automation activity changes" true
+    (not config.automation_enabled && config.live_enabled && config.stagehand_enabled);
+  Alcotest.(check bool) "backend paths remain configured" true
+    (config.automation = Some {Browser_configuration.driver="/fixture/driver";binary=Some "/fixture/browser"});
+  let before_comment needle key =
+    let rec adjacent = function
+      | comment :: assignment :: _ when String.trim comment=needle -> has key [assignment]
+      | _ :: rest -> adjacent rest
+      | [] -> false in
+    Alcotest.(check bool) "operator comment remains beside its setting" true (adjacent lines) in
+  before_comment "# managed driver" "geckodriver";
+  before_comment "# custom browser" "binary";
+  let _,_,again=A.start_save ~generation:3 (A.toggle (loaded (doc write.source_text))) |> ok in
+  let config=Otoml.Parser.from_string_result again.source_text |> ok |> Browser_configuration.parse |> ok in
+  Alcotest.(check bool) "migrated source can be toggled back on" true config.automation_enabled;
+  Alcotest.(check bool) "dotted table is not redeclared on a later toggle" false
+    (has "[browser.automation]" (String.split_on_char '\n' again.source_text));
+  Alcotest.(check bool) "repeated toggle retains inline comment" true
+    (has "# pinned driver" (String.split_on_char '\n' again.source_text))
+
 let backend_flags_and_flat_paths () =
   let flat = "# paths\n[browser]\ngeckodriver = '/fixture/driver'\nbinary = '/fixture/browser'\nstagehand = { chrome = '/fixture/chrome', extension = '/fixture/extension' }\n\n[browser.live]\nenabled = false\n" in
   let _,_,write=A.start_save ~generation:2 (A.toggle (loaded (doc flat))) |> ok in
@@ -205,6 +232,7 @@ let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.ma
    "uncertain drafts need explicit reapply",uncertain_drafts_require_explicit_reapply;
    "clean draft keeps changed-path boundary",clean_draft_does_not_adopt_different_path;
    "backend flags and flat automation migration",backend_flags_and_flat_paths;
+   "flat paths retain operator comments",flat_paths_preserve_operator_comments;
    "unavailable and malformed input",unavailable;
    "workspace roundtrip ignores old callbacks",workspace_roundtrip;
    "unconfirmed write and preview refusal",ambiguous_write_and_refusal;

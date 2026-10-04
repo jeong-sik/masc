@@ -1,3 +1,35 @@
+import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { parseLaneInventory } from '../api/lane-inventory'
+import inventoryFixture from '../api/fixtures/lane-inventory.json'
+import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import * as runtimeApi from '../api/dashboard-runtime'
+import { patchRuntimeRouting as actualPatchRuntimeRouting } from '../api/dashboard-runtime'
+import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
+import * as modelSetup from '../lib/model-setup-resume'
+const tokenGate = vi.hoisted(() => ({ ensure: vi.fn(async (): Promise<void> => undefined) }))
+vi.mock('../api/dev-token', async () => ({
+  ...await vi.importActual<typeof import('../api/dev-token')>('../api/dev-token'), ensureDevToken: tokenGate.ensure,
+}))
+let settingsEpoch = 0
+function workspace(name: string | null) {
+  const epoch = `settings-owner-${++settingsEpoch}`
+  invalidateExecutionSnapshotGeneration(epoch, 0)
+  if (name !== null) hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+    status: { project: name, workspace_root: `/fixture/${name}` },
+  } as Parameters<typeof hydrateExecutionSnapshot>[0])
+  return executionWorkspaceAuthority.peek()
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(yes => { resolve = yes })
+  return { promise, resolve }
+}
+beforeEach(() => {
+  resetRuntimeTomlSessionsForTesting(); workspace('A')
+  tokenGate.ensure.mockReset().mockResolvedValue(undefined)
+  vi.spyOn(modelSetup, 'resumeSavedModelSetup').mockResolvedValue({ kind: 'active', exactOutputAvailable: true })
+})
+afterEach(() => { resetRuntimeTomlSessionsForTesting(); vi.restoreAllMocks() })
 import * as coreApi from '../api/core'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
 // @vitest-environment happy-dom
@@ -61,6 +93,7 @@ const apiMock = vi.hoisted(() => ({
   fetchDashboardTools: vi.fn(),
   fetchRuntimeDefaults: vi.fn(),
   fetchRuntimeResolved: vi.fn(),
+  fetchStandaloneLanes: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeTomlConfig: vi.fn(),
   fetchFusionConfig: vi.fn(),
@@ -109,6 +142,7 @@ vi.mock('../api/dashboard.js', async () => {
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
     fetchRuntimeResolved: apiMock.fetchRuntimeResolved,
+    fetchStandaloneLanes: apiMock.fetchStandaloneLanes,
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
     fetchRuntimeTomlConfig: apiMock.fetchRuntimeTomlConfig,
     fetchFusionConfig: apiMock.fetchFusionConfig,
@@ -421,6 +455,7 @@ function stubEmptyApi() {
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
   stubRuntimeResolved()
+  apiMock.fetchStandaloneLanes.mockResolvedValue(parseLaneInventory(inventoryFixture).exact_snapshot)
   apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders())
   apiMock.fetchRuntimeTomlConfig.mockResolvedValue({
     ok: true,
@@ -559,6 +594,181 @@ describe('SettingsSurface', () => {
     tweaksDensity.value = 'spacious'
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
+  })
+
+  async function openOwnedRouting() {
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement)?.disabled).toBe(false))
+    return container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement
+  }
+  it('withdraws A settings immediately and reloads B on the same mounted surface', async () => {
+    await openOwnedRouting()
+    const pending = deferred<RuntimeResolvedResponse>()
+    apiMock.fetchRuntimeResolved.mockReturnValueOnce(pending.promise)
+    workspace('B')
+    await waitFor(() => {
+      const select = container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement
+      expect(select.disabled).toBe(true); expect([...select.options].some(option => option.value === 'rt-a')).toBe(false)
+    })
+    pending.resolve(makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c' } }))
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).value).toBe('rt-c'))
+    expect(apiMock.fetchRuntimeDefaults).toHaveBeenCalledTimes(2)
+    expect(apiMock.fetchRuntimeProviders).toHaveBeenCalledTimes(2)
+  })
+  it('withdraws Runtime paths and controls while workspace authority is unknown', async () => {
+    await openOwnedRouting(); workspace(null)
+    await waitFor(() => {
+      const select = container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement
+      expect(select.disabled).toBe(true); expect([...select.options].some(option => option.value === 'rt-a')).toBe(false)
+      expect(container.textContent).toContain('현재 작업공간을 확인')
+    })
+    expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(1)
+  })
+  it('ignores a late A resolved response after a fresh A-B-A connection', async () => {
+    const pending = deferred<RuntimeResolvedResponse>()
+    apiMock.fetchRuntimeResolved.mockReturnValueOnce(pending.promise)
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement)
+    await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(1))
+    workspace('B'); workspace('A')
+    await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(2))
+    pending.resolve(makeRuntimeResolved({ config_path: '/stale-A/runtime.toml' }))
+    await waitFor(() => expect(container.textContent).toContain('/cfg/runtime.toml'))
+    expect(container.textContent).not.toContain('/stale-A/runtime.toml')
+  })
+  it('stops the actual routing API after token await crosses a workspace boundary', async () => {
+    const select = await openOwnedRouting(), token = deferred<void>()
+    tokenGate.ensure.mockClear().mockReturnValueOnce(token.promise)
+    apiMock.patchRuntimeRouting.mockImplementation(actualPatchRuntimeRouting)
+    vi.mocked(coreApi.post).mockClear()
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(tokenGate.ensure).toHaveBeenCalledTimes(1))
+    workspace('B'); token.resolve(undefined)
+    await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(2))
+    expect(coreApi.post).not.toHaveBeenCalled(); expect(modelSetup.resumeSavedModelSetup).not.toHaveBeenCalled()
+  })
+  it('ignores an old receipt without resuming B or clearing B write state', async () => {
+    const select = await openOwnedRouting(), old = deferred<ReturnType<typeof committedRuntimeTomlConfigFixture>>()
+    apiMock.patchRuntimeRouting.mockReturnValueOnce(old.promise)
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(apiMock.patchRuntimeRouting).toHaveBeenCalledTimes(1))
+    workspace('B')
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).disabled).toBe(false))
+    const next = deferred<ReturnType<typeof committedRuntimeTomlConfigFixture>>()
+    apiMock.patchRuntimeRouting.mockReturnValueOnce(next.promise)
+    await fireEvent.input(container.querySelector('[data-testid="runtime-routing-default"]')!, { target: { value: 'rt-c' } })
+    old.resolve(committedRuntimeTomlConfigFixture({ ok: true, path: '/old/runtime.toml', file_name: 'runtime.toml', source_text: '# old' }))
+    await waitFor(() => expect(apiMock.patchRuntimeRouting).toHaveBeenCalledTimes(2))
+    expect(container.querySelector('[data-testid="runtime-routing-saving"]')).not.toBeNull()
+    expect(modelSetup.resumeSavedModelSetup).not.toHaveBeenCalled()
+    next.resolve(committedRuntimeTomlConfigFixture({ ok: true, path: '/new/runtime.toml', file_name: 'runtime.toml', source_text: '# new' }))
+    await waitFor(() => expect(modelSetup.resumeSavedModelSetup).toHaveBeenCalledTimes(1))
+  })
+
+  it('requires a new file read after uncertain save even if an older initial refresh finishes', async () => {
+    const providers = deferred<DashboardRuntimeProvidersResponse>()
+    apiMock.fetchRuntimeProviders.mockReturnValueOnce(providers.promise)
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]')!)
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement)?.disabled).toBe(false))
+    apiMock.patchRuntimeRouting.mockImplementationOnce(async (_lane, _id, options) => {
+      options.beforeDispatch(); throw new Error('response lost')
+    })
+    await fireEvent.input(container.querySelector('[data-testid="runtime-default-runtime"]')!, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(container.textContent).toContain('저장 결과가 불확실'))
+    providers.resolve(makeRuntimeProviders())
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-catalog-summary"]')).not.toBeNull())
+    expect((container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement).disabled).toBe(true)
+    expect(apiMock.fetchRuntimeTomlConfig).not.toHaveBeenCalled()
+    await fireEvent.click(container.querySelector('[data-testid="settings-runtime-refresh"]')!)
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement).disabled).toBe(false))
+    expect(apiMock.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+  it('settles a sent write after Settings unmount while the workspace is unchanged', async () => {
+    const authority = executionWorkspaceAuthority.peek()!, raw = runtimeTomlSessionFor(authority)
+    await raw.ensure(authority)
+    const draft = raw.state.peek().draft + '# independent raw draft\n'
+    raw.edit('draft', draft)
+    const select = await openOwnedRouting(), receipt = deferred<ReturnType<typeof committedRuntimeTomlConfigFixture>>()
+    apiMock.patchRuntimeRouting.mockImplementationOnce(async (_lane, _id, options) => { options.beforeDispatch(); return receipt.promise })
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(apiMock.patchRuntimeRouting).toHaveBeenCalledTimes(1))
+    const generation = runtimeTomlSourceGeneration.peek()
+    const reads = apiMock.fetchRuntimeResolved.mock.calls.length
+    render(null, container)
+    receipt.resolve(committedRuntimeTomlConfigFixture({ ok: true, path: MOCK_RUNTIME_PATH, file_name: 'runtime.toml', source_text: '# saved after navigation' }))
+    await waitFor(() => expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1))
+    expect(modelSetup.resumeSavedModelSetup).toHaveBeenCalledTimes(1)
+    expect(runtimeTomlSourceGeneration.peek()).toBe(generation + 1)
+    expect(raw.state.peek().draft).toBe(draft); expect(raw.state.peek().needsRead).toBe(true)
+    expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(reads)
+  })
+  it('withdraws an unsent Settings write on unmount before token acquisition', async () => {
+    const select = await openOwnedRouting(), token = deferred<void>()
+    tokenGate.ensure.mockClear().mockReturnValueOnce(token.promise)
+    apiMock.patchRuntimeRouting.mockImplementation(actualPatchRuntimeRouting)
+    vi.mocked(coreApi.post).mockClear()
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(tokenGate.ensure).toHaveBeenCalledTimes(1))
+    render(null, container); token.resolve(undefined)
+    await token.promise
+    expect(coreApi.post).not.toHaveBeenCalled()
+    expect(modelSetup.resumeSavedModelSetup).not.toHaveBeenCalled()
+  })
+  it('aborts post-save resume after a workspace change without refreshing the new workspace from A', async () => {
+    const select = await openOwnedRouting(), resumed = deferred<ReturnType<typeof modelSetup.modelSetupResumeState.peek>>()
+    vi.mocked(modelSetup.resumeSavedModelSetup).mockReturnValueOnce(resumed.promise)
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(modelSetup.resumeSavedModelSetup).toHaveBeenCalledTimes(1))
+    const options = vi.mocked(modelSetup.resumeSavedModelSetup).mock.calls[0]![0]!
+    workspace('B')
+    expect(options.signal?.aborted).toBe(true)
+    resumed.resolve({ kind: 'active', exactOutputAvailable: true })
+    await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(2))
+    expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('저장됨 · 커밋')
+  })
+
+  it('refreshes remounted Settings after an older Settings save finishes setup resume', async () => {
+    const select = await openOwnedRouting(), resumed = deferred<ReturnType<typeof modelSetup.modelSetupResumeState.peek>>()
+    vi.mocked(modelSetup.resumeSavedModelSetup).mockReturnValueOnce(resumed.promise)
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(modelSetup.resumeSavedModelSetup).toHaveBeenCalledTimes(1))
+    render(null, container)
+    await openOwnedRouting()
+    expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).value).toBe('rt-a')
+    const generation = runtimeTomlSourceGeneration.peek()
+    apiMock.fetchRuntimeResolved.mockResolvedValue(makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c' } }))
+    resumed.resolve({ kind: 'active', exactOutputAvailable: true })
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).value).toBe('rt-c'))
+    expect(runtimeTomlSourceGeneration.peek()).toBe(generation)
+    expect(modelSetup.resumeSavedModelSetup).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes a Runtime editor mounted during the previous Settings save resume', async () => {
+    vi.spyOn(runtimeApi, 'fetchRuntimeTomlConfig').mockImplementation(async () => ({ ...await apiMock.fetchRuntimeTomlConfig(), source_revision: 'a'.repeat(64) }))
+    let published = false
+    apiMock.fetchStandaloneLanes.mockImplementation(async () => {
+      const snapshot = parseLaneInventory(inventoryFixture).exact_snapshot
+      snapshot.lanes = snapshot.lanes.map(lane => lane.laneId === 'librarian_exact' ? { ...lane, status: published ? 'off' : 'idle' } : lane)
+      return snapshot
+    })
+    const select = await openOwnedRouting(), resumed = deferred<ReturnType<typeof modelSetup.modelSetupResumeState.peek>>()
+    vi.mocked(modelSetup.resumeSavedModelSetup).mockReturnValueOnce(resumed.promise)
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => expect(modelSetup.resumeSavedModelSetup).toHaveBeenCalledTimes(1))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-lanes"]')).not.toBeNull())
+    await fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-lanes"]')!)
+    const lane = () => container.querySelector('[data-testid="exact-lane-librarian_exact"]')!
+    await waitFor(() => expect(lane()).not.toBeNull())
+    await fireEvent.click(lane().querySelector('button[aria-expanded]')!)
+    await waitFor(() => expect(lane().textContent).toContain('관측 상태: idle'))
+    const generation = runtimeTomlSourceGeneration.peek()
+    published = true; resumed.resolve({ kind: 'active', exactOutputAvailable: true })
+    await waitFor(() => expect(lane().textContent).toContain('관측 상태: off'))
+    expect(runtimeTomlSourceGeneration.peek()).toBe(generation)
   })
 
   it('renders the surface and category navigation', () => {
@@ -1535,7 +1745,7 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(q('runtime-lane-coding-down-rt-a')!)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'], expectedSourceRevision: 'runtime-source-revision' })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'], expectedSourceRevision: 'runtime-source-revision' }, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(q('runtime-lane-message')?.textContent).toContain('runtime.toml lane set (coding) 저장됨')
     })
     // Success refreshes the resolved projection like the default routing patch,
@@ -1546,7 +1756,7 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(q('runtime-lane-coding-remove-rt-b')!)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a'], expectedSourceRevision: 'runtime-source-revision' })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a'], expectedSourceRevision: 'runtime-source-revision' }, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(q('runtime-lane-saving')).toBeNull()
     })
 
@@ -1558,7 +1768,7 @@ describe('SettingsSurface', () => {
     expect(Array.from(add.options).map(option => option.value)).toEqual(['', 'rt-b', 'rt-c'])
     await fireEvent.input(add, { target: { value: 'rt-c' } })
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a', 'rt-c'], expectedSourceRevision: 'runtime-source-revision' })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a', 'rt-c'], expectedSourceRevision: 'runtime-source-revision' }, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
     })
     expect(lanes.get('coding')).toEqual(['rt-a', 'rt-c'])
   })
@@ -1668,7 +1878,7 @@ describe('SettingsSurface', () => {
       expect(message?.textContent).toContain('저장됨')
       expect(message?.textContent).toContain('대시보드 런타임 갱신 실패: resolved runtime unavailable')
     })
-    expect(apiMock.patchRuntimeLane).toHaveBeenCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'], expectedSourceRevision: 'runtime-source-revision' })
+    expect(apiMock.patchRuntimeLane).toHaveBeenCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'], expectedSourceRevision: 'runtime-source-revision' }, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
   })
 
   it('routing section renames with Enter, cancels with Escape, deletes, and creates lanes', async () => {
@@ -1698,7 +1908,7 @@ describe('SettingsSurface', () => {
     }))
     await fireEvent.keyDown(renameInput, { key: 'Enter' })
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'rename', to: 'builder' })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'rename', to: 'builder' }, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(q('runtime-lane-message')?.textContent).toContain('coding → builder')
     })
 
@@ -1711,7 +1921,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(q('runtime-lane-builder-delete')!)
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('builder', { action: 'remove' })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('builder', { action: 'remove' }, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       const message = q('runtime-lane-message')
       expect(message?.className).toBe('set-err')
       expect(message?.textContent).toContain('still assigned to keeper analyst')
@@ -1735,7 +1945,7 @@ describe('SettingsSurface', () => {
     })
     await fireEvent.click(submit)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('review', { action: 'create', runtimeIds: ['rt-c'] })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('review', { action: 'create', runtimeIds: ['rt-c'] }, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
     })
     setConfirm(realConfirm)
   })
@@ -1776,7 +1986,7 @@ describe('SettingsSurface', () => {
 
     await fireEvent.input(select, { target: { value: 'rt-b' } })
     await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b')
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b', expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
         .toContain('Skill catalog 게시됨')
       expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
@@ -1799,7 +2009,7 @@ describe('SettingsSurface', () => {
     const select = container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement
     await fireEvent.input(select, { target: { value: 'rt-b' } })
     await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b')
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b', expect.objectContaining({ beforeDispatch: expect.any(Function) }))
     })
   })
 
@@ -1844,7 +2054,7 @@ describe('SettingsSurface', () => {
     await fireEvent.input(add, { target: { value: 'rt-c' } })
 
     await waitFor(() => {
-      expect(apiMock.patchRuntimeMediaFailover).toHaveBeenCalledWith(['rt-b', 'rt-c'])
+      expect(apiMock.patchRuntimeMediaFailover).toHaveBeenCalledWith(['rt-b', 'rt-c'], expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')?.textContent)
         .toContain('rt-c')
       expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)

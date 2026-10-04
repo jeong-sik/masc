@@ -1,0 +1,194 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-04T16:22:03.446Z",
+  "browser": "149.0.7827.55",
+  "scope": "Actual Settings/workspace store/router/API and synthetic HTTP. No production/backend/native execution; held A read may be transport-aborted. Unit tests also deliver late responses ignoring cancellation.",
+  "checks": [
+    "initial Settings reads current A via actual API decoders",
+    "workspace B replaces A options; late A request cannot restore them",
+    "late B receipt neither resumes A nor replaces its Settings",
+    "sent same-workspace save survives navigation; remounted Settings refreshes after resume",
+    "unknown workspace withdraws Runtime options and disables writes",
+    "mobile has no horizontal overflow",
+    "only two explicit routing writes and one matching resume, zero page errors/unexpected routes"
+  ],
+  "reads": [
+    {
+      "path": "/api/v1/dashboard/dev-token",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/tools",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/tools",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/shell",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/keepers/deletions",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    }
+  ],
+  "writes": [
+    {
+      "path": "/api/v1/runtime/config/routing",
+      "owner": "B",
+      "body": {
+        "lane": "default",
+        "runtime_id": "B.second"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/routing",
+      "owner": "B",
+      "body": {
+        "lane": "default",
+        "runtime_id": "B.second"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/setup/resume",
+      "owner": "B",
+      "body": {}
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

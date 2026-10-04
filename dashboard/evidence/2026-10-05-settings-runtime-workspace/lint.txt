@@ -1,0 +1,2 @@
+Command (dashboard cwd): node node_modules/eslint/bin/eslint.js src/lib/settings-runtime-session.ts src/components/settings-surface.ts src/components/settings-surface.test.ts src/api/dashboard-runtime-routing-lifetime.test.ts
+Exit: 0

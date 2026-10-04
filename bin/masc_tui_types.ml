@@ -7434,20 +7434,10 @@ let keeper_chat_control_generation state keeper_name =
 
 (* These messages never paused the server. Explicit local resume authorizes
    their first POST; an actual stop still needs the server's resume receipt. *)
-let resume_preflight_keeper_input ~owner_paused state keeper_name =
+let can_resume_preflight_keeper_input state keeper_name =
   let holds = List.filter_map (fun (name, _, intervention) ->
     if name = keeper_name then Some intervention else None) state.keeper_interactive_waiting in
-  if not owner_paused
-     && List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
-  then begin
-    let generation = keeper_chat_control_generation state keeper_name in
-    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-      let intervention = match intervention with
-        | Retained_before_dispatch when name = keeper_name -> Awaiting_control {generation; target=None}
-        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
-      name, id, intervention) state.keeper_interactive_waiting;
-    true
-  end else false
+  List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
 
 (* A temporary identity outage preserves existing local holds without
    converting unrelated ordinary NEXT input into a manual-resume queue. *)
@@ -7470,7 +7460,8 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
-let begin_keeper_chat_control state keeper_name =
+let begin_keeper_chat_control ?(preserve_input_holds = false) state keeper_name =
+  let previous_generation = keeper_chat_control_generation state keeper_name in
   let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
@@ -7499,8 +7490,14 @@ let begin_keeper_chat_control state keeper_name =
     (fun (name, _) -> not (String.equal name keeper_name))
     state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-    name, id, (if name = keeper_name then Retained_after_stop else intervention))
-    state.keeper_interactive_waiting;
+    let intervention =
+      if name <> keeper_name then intervention
+      else if not preserve_input_holds then Retained_after_stop
+      else match intervention with
+        | Awaiting_control held when held.generation = previous_generation ->
+            Awaiting_control {held with generation}
+        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
+    name, id, intervention) state.keeper_interactive_waiting;
   generation
 
 let keeper_run_next_receipt_provisional state request =
@@ -7569,9 +7566,13 @@ let finish_keeper_chat_control state keeper_name ~generation =
   end
 
 let release_retained_keeper_input state keeper_name =
-  state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
-    name <> keeper_name || match intervention with
-    | Retained_after_stop | Retained_before_dispatch -> false | Awaiting_control _ -> true)
+  let generation = keeper_chat_control_generation state keeper_name in
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    let intervention = match intervention with
+      | Retained_after_stop | Retained_before_dispatch when name = keeper_name ->
+          Awaiting_control {generation; target=None}
+      | Retained_after_stop | Retained_before_dispatch | Awaiting_control _ -> intervention in
+    name, id, intervention)
     state.keeper_interactive_waiting
 
 (* A receipt callback finishes control before its outcome arrives, advancing

@@ -47,7 +47,12 @@ in the release does not become untested merely because its tests are expensive.
 | Source wording, occurrence counts or ordering of source fragments | Remove or replace with actual behavior/protocol evidence; do not use as release behavior proof. |
 | Log-analysis script and benchmark-tool implementation tests | Run when those tools change, separately from product readiness. Examples: `test_tool_call_sequence_miner.py`, `test_benchmark_scripts.py`. |
 | Exhaustive screenshots, width sweeps and accessory combinations | Rendering/feature validation when relevant. Keep representative interaction and boundary checks in the selected release scope. |
-| Long-running performance and live-provider comparisons | Dedicated measurement; required for a release only when an explicit performance/runtime claim or affected contract depends on them. |
+| Long-running performance and live-provider comparisons | Dedicated measurement when an explicit performance/runtime claim or affected contract depends on them. The required performance SLO readiness evidence still applies to every release-ready verdict. |
+
+[Release evidence](../RELEASE-EVIDENCE.md) retains the mandatory quantitative
+readiness bundle, including [performance SLO results](../PRODUCTION-READINESS-GATES.md#gate-3-performance-slo).
+Separating extended comparisons does not waive that evidence. If the performance
+harness cannot run, record `blocked` or `not evaluated`; missing data is not green.
 
 For example, `test_tui_region_baseline_pty.py` includes click targeting and pane
 boundaries, not just pictures. Preserve that functional coverage before

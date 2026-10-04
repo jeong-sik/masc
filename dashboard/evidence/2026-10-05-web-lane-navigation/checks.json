@@ -1,5 +1,5 @@
 {
-  "direct_base": "b80555d8ce98e5c74f2a78257f716a266665877e",
+  "direct_base": "27dcdcbbf7a67d719875d707cf65e1e13f11eb1c",
   "final_source_identity": "manifest.json hashes; source unchanged after qualified merge commit",
   "regressions": [
     {
@@ -60,5 +60,6 @@
     "files": 10,
     "status": "historical; not reused for the changed parent"
   },
-  "parent_recheck": "Raw save now requires the saved source path; setup-resume completion clears exact activity errors. Read the changed API/editor/activity consumers and reran the focused union and browser. Native parent scope was not exercised."
+  "parent_recheck": "Raw save now requires the saved source path; setup-resume completion clears exact activity errors. Read the changed API/editor/activity consumers and reran the focused union and browser. Native parent scope was not exercised.",
+  "subsequent_parent": "Package H1/H2 catalog/preview handlers now share workspace-root payloads. Dashboard source, dependencies and Vite/Vitest configuration are byte-identical to the executed 443b017e source; no backend execution is claimed."
 }

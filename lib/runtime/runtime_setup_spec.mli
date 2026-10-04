@@ -40,6 +40,12 @@ val for_provider : t -> Runtime_schema.provider -> t option
     credential, request surface and account selection match this specification,
     and it is enabled. CLI providers must also declare [is-non-interactive=true]. A new account
     reference or changed connection returns [None]. This is not a JSON field. *)
+val for_existing_inline_provider : t -> Runtime_schema.provider -> t option
+(** Explicitly reuse the selected HTTP provider's inline credential when the
+    specification carries no replacement credential. Only a trusted caller
+    selecting the existing account may call this; JSON cannot request it.
+    Captures the provider ID and inline value for [resolve_provider] to compare
+    again against the locked configuration. Never reads a credential file. *)
 val resolve_provider : t -> Runtime_schema.provider list -> (t, error) result
 (** Bind to the matching enabled configured account before rendering. Refuse
     disabled, interactive CLI or ambiguous accounts; never enable or overwrite
@@ -47,7 +53,9 @@ val resolve_provider : t -> Runtime_schema.provider list -> (t, error) result
 val render : ?include_provider:bool -> ?wizard_default:bool -> t -> rendered
 (** [include_provider=false] appends a model to an already declared connection.
     [wizard_default=false] avoids adding a second installation default on that
-    provider. Standalone rendering includes both declarations by default. *)
+    provider. Standalone rendering includes both declarations by default.
+    Existing-inline selections always render only the model and binding: their
+    original provider block remains authoritative and its secret is not exported. *)
 val render_json : rendered -> Yojson.Safe.t
 (** Private native CLI/Python ABI only: TOML may contain credential paths.
     Web receipts must project only safe runtime/model identities. *)

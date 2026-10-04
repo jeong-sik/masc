@@ -604,7 +604,7 @@ let for_surface = function
             "open this lane's runtime.exact_output_lanes section in the \
              preview-checked runtime.toml editor; slots is a catalog-ref array \
              and cli_slots an official-client runtime-id array, either may be \
-             left out, and the lane needs one slot across the two"
+             left out, and an enabled lane needs one slot across the two"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "dashboard" ~help:"back to Dashboard"

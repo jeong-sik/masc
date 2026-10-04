@@ -201,6 +201,11 @@
       "path": "test/test_verifier_exact_lane.ml",
       "exit": 0,
       "diagnostics": ""
+    },
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "exit": 0,
+      "diagnostics": ""
     }
   ]
 }

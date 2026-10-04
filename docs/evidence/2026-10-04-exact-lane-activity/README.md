@@ -14,7 +14,7 @@ observed running count, including off lanes with accepted work still finishing.
 
 Executed checks:
 
-- OCaml 5.5.1 parsing: 40 changed ML/MLI files. This is not native typechecking.
+- OCaml 5.5.1 parsing: 41 changed ML/MLI files. This is not native typechecking.
 - Isolated actual inventory decoder/display plus production exact decoder/type
   excerpts: 14 tests. `check-inventory.py` copies named files/blocks into a scratch
   directory and uses namespace aliases; provenance lists every hash and command.

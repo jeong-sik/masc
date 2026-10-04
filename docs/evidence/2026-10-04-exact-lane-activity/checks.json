@@ -1,7 +1,7 @@
 {
   "base": "6e9b992f7cbbe497ceb098ebd9eea9a537af346c",
   "checked_at": "2026-10-04T11:15:22.435500+00:00",
-  "ocaml_parser_files": 40,
+  "ocaml_parser_files": 41,
   "isolated_inventory_tests": 14,
   "web_tests": 38,
   "web_test_files": 4,
@@ -61,6 +61,7 @@
     "docs/evidence/2026-10-04-exact-lane-activity/check-inventory.py": "6c9b6ab1c2234af5a4fe9eb927c55346dbdeab0de4f1f39fb023506639195ac7",
     "dashboard/evidence/2026-10-04-exact-lane-activity/browser-fixture.mjs": "18c4516057b6fc04e0711c09fb522eed17ef6df7b4145d73fc269383400737f4",
     "dashboard/evidence/2026-10-04-exact-lane-activity/fixture.ts": "eaa6c88baeb3d263561956d09f8fb673084bf28fee2905bbc5c37a3d44c24ce9",
-    "dashboard/evidence/2026-10-04-exact-lane-activity/fixture.html": "7fc6354ee8011e01bedb9d7964252e3a7c5595aea06806f36ce0871576ad706f"
+    "dashboard/evidence/2026-10-04-exact-lane-activity/fixture.html": "7fc6354ee8011e01bedb9d7964252e3a7c5595aea06806f36ce0871576ad706f",
+    "bin/masc_tui_keys.ml": "388c2f87b880f34d1d1845d2a9240dbfb0d584f89329147aa9e2da0b053e0836"
   }
 }

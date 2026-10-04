@@ -21,5 +21,5 @@ let append t json =
     raise
       (Sys_error
          (Printf.sprintf
-            "Keeper metric append refused: %d rotation segments already exist under %s"
+            "Keeper metric append refused: rotation sequence reached %d under %s"
             sequence_limit (Dated_jsonl.base_dir t.store)))

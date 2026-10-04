@@ -82,6 +82,57 @@ let test_io_failure_can_recover () = with_dir @@ fun dir ->
   Storage.append store (row 2);
   check (list int) "I/O refusal leaves store reusable" [2] (values store)
 
+let test_continues_across_sequence_width_and_reopen () = with_dir @@ fun dir ->
+  (* Fixed-width values keep exactly two rows in the configured byte target. *)
+  let row i = `Assoc ["i", `String (Printf.sprintf "%04d" i)] in
+  let bytes = String.length (Yojson.Safe.to_string (row 1)) + 1 in
+  let write storage first last =
+    for i = first to last do Storage.append storage (row i) done in
+  let storage = Storage.create ~base_dir:dir ~max_bytes:(bytes * 2) in
+  write storage 1 1002;
+  let reopened = Storage.create ~base_dir:dir ~max_bytes:(bytes * 2) in
+  write reopened 1003 1010;
+  let store = Storage.read_store reopened in
+  let values rows = List.map (fun json -> Yojson.Safe.Util.(json |> member "i" |> to_string)) rows in
+  let expected = ["1009"; "1010"] in
+  check (list string) "retention still accepts the newest rows after reopening" expected
+    (values (Dated_jsonl.read_recent store 100));
+  let strict = match Dated_jsonl.read_recent_result store 100 with
+    | Ok rows -> List.map (function Dated_jsonl.Parsed json -> json
+        | Malformed_json _ -> fail "writer produced malformed JSON") rows
+    | Error err -> fail (Dated_jsonl.read_error_to_string err) in
+  check (list string) "strict recent reader sees the same newest values" expected (values strict)
+
+let test_segment_order_across_digit_boundary () = with_dir @@ fun dir ->
+  let tm = Unix.gmtime (Unix.gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) in
+  let day = Printf.sprintf "%02d" tm.Unix.tm_mday in
+  let month_dir = Filename.concat dir month in
+  Fs_compat.mkdir_p month_dir;
+  List.iter (fun sequence ->
+    Fs_compat.save_file (Filename.concat month_dir (Printf.sprintf "%s.%03d.jsonl" day sequence))
+      (Yojson.Safe.to_string (row sequence) ^ "\n")) [998; 999; 1000];
+  Fs_compat.save_file (Filename.concat month_dir (day ^ ".jsonl"))
+    (Yojson.Safe.to_string (row 1001) ^ "\n");
+  let store = Storage.create ~base_dir:dir ~max_bytes:0 |> Storage.read_store in
+  let expected = [998; 999; 1000; 1001] in
+  let values rows = List.map (fun json -> Yojson.Safe.Util.(json |> member "i" |> to_int)) rows in
+  let date = month ^ "-" ^ day in
+  check (list int) "recent reader sorts numeric sequences" expected
+    (values (Dated_jsonl.read_recent store 10));
+  check (list int) "range reader sorts numeric sequences" expected
+    (values (Dated_jsonl.read_range store ~since:date ~until:date));
+  let paths = match Dated_jsonl.range_day_file_paths_result store ~since:date ~until:date with
+    | Ok paths -> paths | Error err -> fail (Dated_jsonl.read_error_to_string err) in
+  check (list string) "strict range paths agree with row ordering"
+    (List.map (fun seq -> Printf.sprintf "%s.%03d.jsonl" day seq) [998;999;1000] @ [day ^ ".jsonl"])
+    (List.map Filename.basename paths);
+  let row_bytes = String.length (Yojson.Safe.to_string (row 1001)) + 1 in
+  let bounded = Storage.create ~base_dir:dir ~max_bytes:(row_bytes * 2) in
+  Storage.append bounded (row 1002);
+  check (list int) "prune removes 998/999/1000 before 1001" [1001;1002]
+    (values (Dated_jsonl.read_recent (Storage.read_store bounded) 10))
+
 let with_fs use_eio test () =
   let previous = Fs_compat.get_fs_opt () in
   Fun.protect ~finally:(fun () ->
@@ -92,7 +143,9 @@ let with_fs use_eio test () =
 
 let () =
   let cases =
-    [ "zero retains all", test_disabled_keeps_all
+    [ "sequence width and reopen", test_continues_across_sequence_width_and_reopen
+    ; "numeric reader and prune order", test_segment_order_across_digit_boundary
+    ; "zero retains all", test_disabled_keeps_all
     ; "rotation keeps accepting", test_rotation_keeps_accepting_rows
     ; "old days are pruned", test_prunes_old_days
     ; "reopen applies smaller target", test_reopen_lower_target

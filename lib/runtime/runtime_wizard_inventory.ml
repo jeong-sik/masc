@@ -137,8 +137,9 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   `List (configured @ prototypes @ clients)
 ;;
 
-(* Reuse the runtime's quota ownership, never a display name or an email.
-   Providers without an authoritative native account remain separate. *)
+(* Reuse the runtime's selected credential location, never a display name or
+   email. This groups connections; it does not identify the provider account
+   currently authenticated at that location. *)
 let account_scope (provider : Runtime_schema.provider) =
   let native home scope = Option.bind home (fun home ->
     match Runtime_account_home.of_string home with
@@ -169,7 +170,7 @@ let account_groups_json (config : Runtime_schema.config) =
           if Runtime_quota_window.scope_equal scope known then ids @ [provider.id] else ids) groups
       else groups @ [scope, [provider.id]]) [] config.providers in
   `List (List.map (fun (scope, ids) ->
-    let id = Digestif.SHA256.(to_hex (digest_string (Runtime_quota_window.scope_to_string scope))) in
+    let id = Runtime_quota_window.scope_id scope in
     let runtimes = List.filter_map (fun (binding : Runtime_schema.binding) ->
       if List.mem binding.provider_id ids then Some (`String (Runtime_schema.binding_key binding)) else None) config.bindings in
     `Assoc ["id", `String id;

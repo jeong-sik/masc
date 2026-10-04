@@ -5,8 +5,9 @@
 val scope_id : Runtime_quota_window.scope -> string
 (** The opaque identity of a quota scope, as both this store and the
     [provider_usage_windows] rows of [/api/v1/runtime/resolved] name it. One
-    digest, taken here, so a history point and the current window row it
-    belongs to always agree; readers compare it and never recompute it. *)
+    digest from [Runtime_quota_window.scope_id], so history, current windows
+    and Setup groups agree; readers compare it and never recompute it.
+    A credential-location scope is not an authenticated provider account ID. *)
 
 val install : Workspace.config -> unit
 (** Register the server-side sink before runtimes begin reporting. *)

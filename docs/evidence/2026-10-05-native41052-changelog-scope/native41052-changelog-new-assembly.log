@@ -1,0 +1,10 @@
+folded 1 fragment(s) into ## [Unreleased] of /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/native41052-changelog-scope-jsegt0wo/new-CHANGELOG.md
+
+Actual targeted Unreleased output:
+
+
+### Changed
+
+- Preserve historical partial-roster Item reproduction evidence and clarify its already released implementation scope. (#41037)
+
+Assertions: only documentation addition; no consumed product fragments.

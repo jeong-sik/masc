@@ -78,6 +78,71 @@ a = {max-tokens=8192, price-input=0.075}
   check bool "failure visible on short terminal" true
     (List.exists (fun line -> String.starts_with ~prefix:"Error: Context" line) lines)
 
+let test_inline_edit_refusal () =
+  let inline_binding = {|
+[providers.codex1]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models.a]
+max-context = 272000
+[codex1]
+a = {max-tokens=8192}
+|} in
+  let edit_inline source =
+    let form = F.create F.Edit (row source)
+      |> fun f -> edit f "tab" |> fun f -> edit f "tab" |> fun f -> edit f "tab"
+      |> fun f -> set f "" in
+    check bool "inline clear is refused, never a successful no-op" true
+      (Result.is_error (F.apply form source)) in
+  edit_inline inline_binding;
+  edit_inline {|
+[providers.codex1]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models]
+a = {max-context=272000, temperature=0.5}
+[codex1.a]
+max-tokens = 8192
+|}
+
+let test_dotted_parent_refusal () =
+  let dotted = {|
+[providers.codex1]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models]
+a.max-context = 272000
+a.temperature = 0.5
+[models.a.capabilities]
+supports-image-input = true
+[codex1.a]
+max-tokens = 8192
+|} in
+  let form = F.create F.Edit (row dotted) |> fun f -> edit f "tab"
+    |> fun f -> edit f "tab" |> fun f -> set f "" in
+  check bool "descendant header does not make dotted model editable" true
+    (Result.is_error (F.apply form dotted));
+  check bool "copy does not discard dotted parent settings" true
+    (Result.is_error (F.apply (F.create F.Copy (row dotted)) dotted))
+
+let test_error_height_bound () =
+  let form = F.refused (F.create F.Edit (row source))
+      (String.concat " " (List.init 100 (fun _ -> "configuration failure"))) in
+  List.iter (fun (width,height) ->
+    let lines = F.rows ~width ~height form in
+    check bool "error obeys the frame height" true (List.length lines <= height);
+    check bool "every line obeys the frame width" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines))
+    [24,0;24,1;24,5;48,8;80,12];
+  let lines = F.rows ~width:48 ~height:8 form in
+  check bool "cancel remains reachable in visible hints" true
+    (List.exists (fun line -> Astring.String.is_infix ~affix:"Esc cancel" line) lines);
+  check bool "failure remains visible" true
+    (List.exists (fun line -> String.starts_with ~prefix:"Error:" line) lines)
+
 let test_ollama_context () =
   let source = {|
 [providers.local]
@@ -102,4 +167,7 @@ let () = run "Account model variants" ["model editing", [
   test_case "copy retains account, API model and settings" `Quick test_copy_variant;
   test_case "edit context and cancel" `Quick test_edit_and_cancel;
   test_case "inline copy refusal is visible" `Quick test_inline_refusal_and_visible_error;
+  test_case "inline edit clear cannot be a no-op" `Quick test_inline_edit_refusal;
+  test_case "dotted parent cannot lose settings" `Quick test_dotted_parent_refusal;
+  test_case "wrapped error obeys form height" `Quick test_error_height_bound;
   test_case "Ollama requested context follows variant" `Quick test_ollama_context]]

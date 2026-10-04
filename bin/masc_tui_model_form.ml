@@ -52,12 +52,24 @@ let rows ~width ~height t =
     | Copy -> "Same account and API model; independent settings. Add the saved variant to a Lane to use it."
     | Edit -> "Context/output apply to this account. Effort/temperature affect every account sharing this model; use Copy for independent settings.") in
   let content = wrap heading @ List.concat_map wrap field_rows @ wrap notes in
-  let footer = (match t.error with None -> [] | Some error -> wrap ("Error: " ^ error)) @ wrap hint in
-  let room = max 1 (height - List.length footer) in
-  (* A short terminal follows the active field; errors remain nearest the footer. *)
+  (* Keep navigation visible even when a server error spans many rows. The
+     field window, error prefix and key hint share one bounded height. *)
+  let height = max 0 height in
+  let hints = wrap hint in
+  let hints = if List.length hints < height then hints
+    else List.take height (wrap "Esc cancel · Enter next/save") in
+  let available = max 0 (height - List.length hints) in
+  let errors = match t.error with None -> [] | Some error -> wrap ("Error: " ^ error) in
+  let error_room = max 0 (available - (if available > 1 then 1 else 0)) in
+  let errors = if List.length errors <= error_room then errors
+    else if error_room = 0 then []
+    else if error_room = 1 then List.take 1 errors
+    else List.take (error_room - 1) errors
+      @ [Masc_tui_message_layout.fit_middle (max 1 width) "… error continues; edit or Esc"] in
+  let room = max 0 (available - List.length errors) in
   let selected_line = List.length (wrap heading) + List.fold_left (fun n row -> n + List.length (wrap row)) 0 (List.take t.selected field_rows) in
   let first = max 0 (selected_line - room + 1) in
-  List.take room (List.drop first content) @ footer
+  List.take room (List.drop first content) @ errors @ hints
 
 let path parts = String.concat "." (List.map Edit_text.render_key parts)
 let errors errors = String.concat "; " (List.map (fun (e:Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)
@@ -92,6 +104,21 @@ let apply t current =
     | Some model -> Ok model | None -> Error "The source model no longer exists; reload Models" in
   let* () = if List.exists (fun (b:Runtime_schema.binding) -> b.provider_id = t.source.provider && b.model_id = t.source.model) config.bindings
     then Ok () else Error "The account/model binding no longer exists; reload Models" in
+  let* toml = Otoml.Parser.from_string_result current in
+  let lines, _ = Edit_text.split_lines current in
+  let explicit_table parts =
+    List.exists (fun (line, structural) -> structural &&
+      match Edit_text.header_of_line line with
+      | Some (Edit_text.Table found) -> List.equal String.equal found parts
+      | Some (Edit_text.Table_array _) | None -> false)
+      (List.combine lines (Edit_text.structural_lines lines)) in
+  let require_editable parts label =
+    match Otoml.find_opt toml Fun.id parts with
+    | Some _ when not (explicit_table parts) ->
+      Error ("This " ^ label ^ " uses inline or dotted TOML; expand its table in the source before editing or copying")
+    | Some _ | None -> Ok () in
+  let* () = require_editable [Runtime_toml_namespace.(key Models); source.id] "model" in
+  let* () = require_editable [t.source.provider; t.source.model] "binding" in
   let name = value t Name in
   let* () = match t.mode with
     | Copy when String.trim name = "" || String.trim name <> name -> Error "Enter a nonempty variant name without surrounding spaces"

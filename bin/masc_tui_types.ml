@@ -5240,6 +5240,7 @@ type state = {
      while the pane drew 49 table rows, so [j] left the view still and [k]
      needed thousands of presses to come back. *)
   mutable config_models_rows: Masc_tui_model_runtime_table.row list;
+  mutable config_models_error: string option;
   (* Which row [e] acts on. The pane cannot write a value itself -- the two
      columns come from two tables and a writer would have to know which --
      so [e] hands the file to $EDITOR the way the runtime.toml pane does,
@@ -6685,6 +6686,11 @@ type text_input_target =
    experiences: a preset name being typed holds every letter, and the two
    identity fields come last because the surface under them reads letters as
    commands. *)
+let config_models_read_error (state : state) =
+  match state.runtime_config_view_error with
+  | Some _ as error -> error
+  | None -> state.config_models_error
+
 let text_input_target (state : state) ~compact_viewport =
   let identity_surface =
     state.view = Keepers Keeper_detail
@@ -8177,6 +8183,7 @@ let create_state
   runtime_model_form = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
+  config_models_error = None;
   config_models_cursor = 0;
   runtime_config_view_error = None;
   runtime_config_cursor = 0;
@@ -11297,7 +11304,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       in
       (match state.config_pane with
        | Config_models ->
-         listing ~error:state.runtime_config_view_error
+         listing ~error:(config_models_read_error state)
            (match state.runtime_config_view with
             | None -> 0
             | Some _ -> List.length state.config_models_rows + 1)

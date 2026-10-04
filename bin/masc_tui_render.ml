@@ -12035,7 +12035,7 @@ let render_config_models (state : state) =
        let lines = Masc_tui_model_form.rows ~width:(max 1 (cols - 6)) ~height:content_height form in
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
-   | None -> match state.runtime_config_view_error, state.runtime_config_view with
+   | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols
          (Theme.bad () ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);

@@ -590,6 +590,8 @@ let for_surface = function
           ~help:"open exact runs, the selected Browser or machine, or a package configuration/instance"
       ; b Act "a" "exact: add slot"
           ~help:"add a candidate to the selected exact-output lane's walk order"
+      ; b Act "Space" "exact: activity"
+          ~help:"open activity settings; Space changes the draft, s saves explicitly; Required lanes cannot be off"
       ; b Act "s" "exact: models"
           ~help:"edit the model order: r replaces the selected model/effort, \
                  a adds a fallback, 1 makes it first within its HTTP/CLI group, \
@@ -1862,9 +1864,23 @@ let workspace_activity_bindings ~context =
   ] @ (if context then [b Navigate "Home/End / g/G" "edges"]
        else [b Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
 
+let exact_activity_bindings =
+  [ b Act "Space" "change activity draft" ~help:"preserve candidates; no write until s"
+  ; b Act "s" "save" ~help:"preview and save against the original file revision"
+  ; b Act "r" "read current" ~help:"read the file without replacing the draft"
+  ; b Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
+  ; b Act "x" "discard draft" ~help:"use the displayed current file; no write"
+  ; b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "top/bottom"
+  ; b Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
+  ]
+
 let help_sections_for_state (state : state) =
   let active =
     if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
+    else if state.view = Lanes && Option.is_some state.exact_activity_open then
+      Some ("Exact activity", exact_activity_bindings)
     else if Option.is_some state.voice_agent_voices then
       let bindings =
         match state.voice_agent_voices with

@@ -55,3 +55,37 @@ not require new tables/keys in every deployment or edit operator configuration.
 
 Native backend and TUI execution evidence is separate from parser, isolated
 decoder/display and synthetic Web evidence in the corresponding evidence folders.
+
+## TUI activity draft
+
+In **Lanes**, select an Exact row and press **Space**. Opening the activity
+screen reads `runtime.toml`; it does not change the file. The existing **s**
+model-order editor and **a** candidate picker remain available on the list.
+
+Inside **Exact activity**:
+
+- **Space** changes the on/off draft. Candidates and their order are retained.
+- **s** previews and saves using the original source revision. Required lanes
+  cannot be switched off; an empty lane needs a candidate before enabling it.
+- **r** reads the current file without replacing the draft.
+- After a concurrent edit, **u** reapplies only the desired activity to that
+  current file; **s** then saves. Other current settings are preserved.
+- **x** discards the draft. **Esc** or **q** closes the screen while retaining
+  the draft for this workspace and lane. **?** explains the controls.
+- **j/k**, arrows, **PgUp/PgDn** and **Home/End** scroll the reading.
+
+Drafts survive navigation and workspace roundtrips within the TUI process.
+Reconnecting requires a fresh read; a callback from an earlier workspace
+request cannot complete the new request. An uncertain save retains the draft
+and requires a current-file read before retrying. TUI process restart recovery
+is not provided.
+
+The screen distinguishes the current file setting from the write receipt's
+live-application result. A saved file may still report that Exact configuration
+was kept or could not be published. It rereads both the file and Lane inventory
+after a save; this is not proof that a model or parked Curator has run.
+
+Activity editing handles a lane's own TOML table, including quoted headers.
+Inline or dotted lane declarations can be changed with the existing source
+editor (**e** on Lanes). If the server changes the configuration path, discard
+the old activity draft before editing the newly read file.

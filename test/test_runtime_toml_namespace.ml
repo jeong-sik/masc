@@ -278,10 +278,123 @@ codex = "sol"
 |}
     ]
 
+let model_set_provider key =
+  Printf.sprintf {|[providers.first]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+%s = "codex"
+|} key
+
+let model_set_members = {|[model_sets.codex]
+models = ["sol"]
+|}
+
+let test_provider_request_path_survives_unknown_key_validation () =
+  let config field = shared_model ^ Printf.sprintf {|[providers.first]
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid"
+%s = "/v1/messages"
+[first.sol]
+|} field in
+  let valid = parse_config (config "request-path") in
+  Alcotest.(check (option string)) "valid provider request path reaches its decoder"
+    (Some "/v1/messages") (List.hd valid.providers).Runtime_schema.request_path;
+  match Runtime_toml.parse_string (config "request_path") with
+  | Ok _ -> Alcotest.fail "misspelled provider request path was silently accepted"
+  | Error errors -> Alcotest.(check bool) "request path typo identifies its provider field"
+      true (refused_at "providers.first.request_path" errors)
+
+let test_provider_fields_are_declared_and_healthcheck_is_retained () =
+  let config extra = shared_model ^ provider_named "first" ^
+    "[providers.first.healthcheck]\npath = \"/health\"\n" ^ extra ^ "[first.sol]\n" in
+  let valid = parse_config (config "") in
+  Alcotest.(check (option string)) "healthcheck remains retained provider metadata"
+    (Some "/health") (List.hd valid.providers).Runtime_schema.healthcheck_path;
+  match Runtime_toml.parse_string (config "[providers.first.log]\nlevel = \"debug\"\n") with
+  | Ok _ -> Alcotest.fail "undeclared provider log table was accepted"
+  | Error errors -> Alcotest.(check bool) "unsupported table has its exact provider path"
+      true (refused_at "providers.first.log" errors)
+
+let test_provider_typos_do_not_hide_behind_explicit_bindings () =
+  let config explicit field = shared_model ^ Printf.sprintf {|[providers.first]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-first"
+%s = "codex"
+[models.next]
+api-name = "next-sol"
+max-context = 272000
+[model_sets.codex]
+models = ["sol", "next"]
+|} field ^ explicit in
+  List.iter (fun explicit ->
+  let config = config explicit in
+  let valid = parse_config (config "model-set") in
+  Alcotest.(check (list string)) "declared shared models augment explicit bindings"
+    ["first.next"; "first.sol"]
+    (List.sort String.compare (List.map Runtime_schema.binding_key valid.bindings));
+  List.iter (fun key ->
+    match Runtime_toml.parse_string (config key) with
+    | Ok _ -> Alcotest.failf "provider typo %s was silently accepted" key
+    | Error errors -> Alcotest.(check bool) "refusal identifies the exact provider key"
+        true (refused_at ("providers.first." ^ key) errors))
+    ["model_set"; "model-sets"])
+    [""; "[first.sol]\nenabled = true\n"]
+
+let test_unknown_provider_fields_are_refused_in_all_table_forms () =
+  List.iter
+    (fun (path, text) ->
+      match Runtime_toml.parse_string text with
+      | Ok _ -> Alcotest.failf "unknown provider field %s was accepted" path
+      | Error errors -> Alcotest.(check bool) path true (refused_at path errors))
+    [ "providers.first.model_set",
+        "[providers]\nfirst = {protocol = \"codex-app-server\", command = \"codex\", model_set = \"codex\"}\n"
+    ; "providers.first.model_set",
+        "providers.first.protocol = \"codex-app-server\"\nproviders.first.command = \"codex\"\nproviders.first.model_set = \"codex\"\n"
+    ; "providers.first.account_home",
+        model_set_provider "model-set" ^ "account_home = \"/tmp/codex\"\n"
+        ^ shared_model ^ model_set_members
+    ; "providers.first.model_set",
+        model_set_provider "model-set" ^ "[providers.first.model_set]\nname = \"codex\"\n"
+        ^ shared_model ^ model_set_members
+    ];
+  match Runtime_toml.parse_string "[providers]\nfirst = 1\n" with
+  | Ok _ -> Alcotest.fail "scalar provider accepted"
+  | Error errors ->
+    Alcotest.(check bool) "non-table provider is a structured error" true
+      (refused_at "providers.first" errors)
+
+let test_provider_typo_is_refused_by_file_loader () =
+  let path = Filename.temp_file "provider-field-typo-" ".toml" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let content = shared_model ^ model_set_provider "model_set" ^ model_set_members
+      ^ "[first.sol]\nenabled = true\n[runtime]\ndefault = \"first.sol\"\n" in
+    Out_channel.with_open_bin path (fun channel -> output_string channel content);
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> Alcotest.fail "file loader silently dropped a misspelled model set"
+    | Error failure ->
+      let message = Runtime_config_error.to_diagnostic_text ~config_path:path failure in
+      Alcotest.(check bool) "diagnostic includes the configuration file" true
+        (String_util.contains_substring message path);
+      Alcotest.(check bool) "diagnostic includes the misspelled field" true
+        (String_util.contains_substring message "providers.first.model_set"))
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
-      , [ Alcotest.test_case "no provider takes a table another reader owns" `Quick
+      , [ Alcotest.test_case "provider request path retains its decoder" `Quick
+            test_provider_request_path_survives_unknown_key_validation
+        ; Alcotest.test_case "provider fields retain supported healthcheck metadata" `Quick
+            test_provider_fields_are_declared_and_healthcheck_is_retained
+        ; Alcotest.test_case "provider typos cannot hide behind explicit bindings" `Quick
+            test_provider_typos_do_not_hide_behind_explicit_bindings
+        ; Alcotest.test_case "unknown provider fields in all table forms" `Quick
+            test_unknown_provider_fields_are_refused_in_all_table_forms
+        ; Alcotest.test_case "provider typo is refused by the file loader" `Quick
+            test_provider_typo_is_refused_by_file_loader
+        ; Alcotest.test_case "no provider takes a table another reader owns" `Quick
             test_no_provider_takes_a_table_another_reader_owns
         ; Alcotest.test_case "the names that loaded as providers are refused" `Quick
             test_the_names_that_loaded_as_providers_are_refused

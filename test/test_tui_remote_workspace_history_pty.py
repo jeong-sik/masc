@@ -546,7 +546,9 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             attached = actual["attachments"][0]
             assert attached["name"] == _keyboard_chat.IMAGE_NAME and attached["data"] == image_data[0], attached
             images = [block for block in actual["user_blocks"] if block.get("type") == "image"]
-            assert images == [{"type": "image", "attachment_id": attached["id"]},
+            assert images == [{"type": "image", "attachment_id": attached["id"],
+                               "name": _keyboard_chat.IMAGE_NAME, "mime_type": "image/png",
+                               "size": len(base64.b64decode(image_data[0]))},
                               {"type": "image", "url": reference}], actual
             leave_chat_for_roster(process, fd, output)
             os.write(fd, b"q")

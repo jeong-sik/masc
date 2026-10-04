@@ -1,6 +1,6 @@
 import { effect, signal } from '@preact/signals'
 import { fetchRuntimeTomlConfig, type CommittedRuntimeTomlConfig, type RuntimeTomlConfig } from '../api/dashboard'
-import { RuntimeTomlRevisionConflict, type RuntimeTomlCurrentSource, type RuntimeTomlRequestOptions } from '../api/dashboard-runtime'
+import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlCurrentSource, type RuntimeTomlRequestOptions } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 import { runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { runtimeConfigCommitReceiptNotice } from './runtime-config-receipt'
@@ -183,6 +183,8 @@ export class RuntimeTomlSession {
       else if (error instanceof RuntimeTomlRevisionConflict && error.current.source_path === before.config.path) {
         this.update({ currentSource: error.current, section: 'toml',
           error: `${error.message} 저장하지 않았습니다. 초안과 기존 저장 기준을 유지했습니다.` })
+      } else if (error instanceof RuntimeTomlSaveRejected) {
+        this.update({ uncertainWrite: false, error: `${errorToString(error)} 저장 전에 거절되었습니다. 초안과 저장 기준은 유지됩니다.` })
       } else this.update({ uncertainWrite: true, error: `${errorToString(error)} 초안은 유지됩니다. 파일 변경 여부를 확인하지 못했습니다. 현재 파일을 읽고 비교한 뒤 다시 저장하세요.` })
       return false
     } finally { this.resumeController = null; this.update({ phase: 'idle' }) }

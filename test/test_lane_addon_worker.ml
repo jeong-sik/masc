@@ -787,7 +787,8 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check bool "out-of-observation callback creates no durable request" true
     (before_records = sampling_requests store ~instance_id:"sampling-worker");
   let tiny_package = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=2}} in
+    resources={(package dir "sampling").resources with
+      max_reply_bytes=String.length (Yojson.Safe.to_string (`String "refused"))}} in
   let bounded = match Masc.Lane_addon_sampling.create ~store ~package:tiny_package
       ~instance_id:"bounded-model" ~route:"fixture-route" ~invoke () with
     | Ok handler -> handler | Error detail -> fail detail in
@@ -1580,11 +1581,12 @@ pids=1
 max_reply_bytes=%d
 |} model_access max_reply_bytes);
     Masc.Lane_addon_manifest.load ~path in
+  let minimum = String.length (Yojson.Safe.to_string (`String "refused")) in
   List.iter (fun bytes ->
-    check bool "sampling manifest rejects an unrepresentable error string" true
-      (Result.is_error (load "host_sampling" bytes))) [0; 1];
-  check bool "smallest JSON error string is representable" true
-    (Result.is_ok (load "host_sampling" 2));
+    check bool "sampling manifest requires a complete nonempty refusal" true
+      (Result.is_error (load "host_sampling" bytes))) (List.init minimum Fun.id);
+  check bool "fixed nonempty refusal is representable at the boundary" true
+    (Result.is_ok (load "host_sampling" minimum));
   check bool "sampling minimum does not change model-disabled admission" true
     (Result.is_ok (load "disabled" 1)))
 
@@ -1598,20 +1600,26 @@ let test_sampling_broker_reply_minimum () = with_fixture (fun _ _ dir _ ->
     resources={base.resources with max_reply_bytes=bytes}} in
   let create package = Sampling.create ~store ~package ~instance_id:"reply-bound"
     ~route:"fixture-route" ~invoke () in
-  List.iter (fun bytes ->
-    check bool "direct broker rejects an unrepresentable error string" true
-      (Result.is_error (create (bounded bytes)))) [1; 0];
-  let package = bounded 2 in
-  let broker = match create package with Ok value -> value | Error detail -> fail detail in
-  let handler = match Sampling.for_worker broker ~package ~instance_id:"reply-bound" with
-    | Ok value -> value | Error detail -> fail detail in
+  let minimum = String.length (Yojson.Safe.to_string (`String "refused")) in
   let params = match Mcp_protocol.Sampling.create_message_params_of_yojson
       (`Assoc ["messages", `List []; "maxTokens", `Int 1]) with
     | Ok value -> value | Error detail -> fail detail in
-  (match handler params with
-   | Ok _ -> fail "out-of-observation call must be refused"
-   | Error detail -> check int "smallest refusal fits its encoded envelope" 2
-       (String.length (Yojson.Safe.to_string (`String detail))));
+  List.iter (fun bytes ->
+    let package = bounded bytes in
+    match create package with
+    | Error _ -> check bool "only undersized envelopes are refused" true (bytes < minimum)
+    | Ok broker ->
+        let handler = match Sampling.for_worker broker ~package ~instance_id:"reply-bound" with
+          | Ok value -> value | Error detail -> fail detail in
+        (match handler params with
+         | Ok _ -> fail "out-of-observation call must be refused"
+         | Error detail ->
+             check bool "admitted broker never returns a blank refusal" true (String.trim detail <> "");
+             check string "smallest admitted envelope returns the complete fixed refusal" "refused" detail;
+             check bool "refusal fits its actual encoded envelope" true
+               (String.length (Yojson.Safe.to_string (`String detail)) <= bytes));
+        check bool "broker admits only complete refusal envelopes" true (bytes >= minimum))
+    (List.init (minimum + 1) Fun.id);
   check int "admission and refusal never invoke a provider" 0 !calls)
 
 let test_sampling_blob_read_preserves_canonical_failure () = with_fixture (fun _env _sw dir _docker ->

@@ -1,0 +1,42 @@
+Testing `browser_stagehand_executor'.
+This run has ID `VR7R6QDB'.
+
+  [SKIP]        tabs                  0   pages become tabs with ids that stay.
+  [SKIP]        tabs                  1   ids are not given again in a later ...
+  [SKIP]        goto                  0   navigates a listed or the active tab.
+  [SKIP]        goto                  1   a failure after the navigation is n...
+> [FAIL]        capture               0   a capture passes the surface's checks.
+  [SKIP]        capture               1   a page that moved during capture is...
+  [SKIP]        sentences             0   each sentence verb sends one Stageh...
+  [SKIP]        sentences             1   an act Stagehand did not carry out ...
+  [SKIP]        reads                 0   reads run the page scripts.
+  [SKIP]        interactions          0   scripts and native pointer input.
+  [SKIP]        refusals              0   an unserved verb sends nothing.
+  [SKIP]        evaluate              0   the expression calls its body.
+  [SKIP]        evaluate              1   a page script's throw keeps its rea...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        capture               0   a capture passes the surface's c...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT Browser activity configuration is unavailable
+FAIL Browser activity configuration is unavailable
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/browser_stagehand_executor/capture.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/browser_stagehand_executor'.
+1 failure! in 0.001s. 1 test run.

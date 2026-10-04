@@ -1221,7 +1221,7 @@ let declared_layers_use_exact_configured_owners () =
       "  project-input · snapshot /data/research.json -> a";
       "  project-input · snapshot /data/second.json -> b";
       "  [a]  |  [b]";"Layer 1";"  [judge]";
-      "    a: attached · last completed: 1 result row";
+      "    a: attached · last completed: 1 record";
       "    b: observing · no completed observation received";
       "    judge: failed: provider unavailable · last completed: 2 records";
       "No evidence sharing receipt in this session."];

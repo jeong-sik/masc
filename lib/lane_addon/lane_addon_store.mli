@@ -71,9 +71,23 @@ val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
     memory. Terminal recovery links are visited first, then unresolved requests.
     The callback can stop immediately with [Error]; directory and decoding errors
     are explicit. Call from a system thread. No ordering is guaranteed. *)
+type sampling_recovery_report = {
+  discovery_complete : bool;
+  outcome : (unit, string) result;
+}
+val discover_sampling_requests : t -> instance_id:string -> max_reply_bytes:int ->
+  sampling_recovery_report
+(** Seed durable retry markers from both historical journal namespaces. Only
+    complete enumeration and marker publication sets [discovery_complete]; an
+    unread or corrupt individual record instead remains a pending retry. *)
+val retry_sampling_requests : t -> instance_id:string -> max_reply_bytes:int ->
+  (unit, string) result
+(** Visit durable pending markers only, retrying unfinished discovery when its
+    durable sentinel remains. All journal writers and recovery/compaction share
+    a stable per-request cross-process lock. No provider invocation occurs. *)
 val recover_sampling_requests : t -> instance_id:string -> max_reply_bytes:int ->
   (unit, string) result
-(** Explicit startup/maintenance recovery, outside a query's aggregate allowance.
+(** Compatibility startup recovery, outside a query's aggregate allowance.
     Stream records with a per-record bound derived from the producer's reply
     limit and JSON string escaping. Verify journal identity and durability,
     recover exact outcomes, and durably compact their indexes. Existing intact
@@ -137,6 +151,12 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val save_sampling_request : after_marker:(unit -> unit) -> t -> instance_id:string ->
+    request_id:string -> Yojson.Safe.t -> (unit, string) result
+  val retry_sampling_requests : on_read:(string -> unit) -> t -> instance_id:string ->
+    max_reply_bytes:int -> (unit, string) result
+  val discover_sampling_requests : on_read:(string -> unit) -> t -> instance_id:string ->
+    max_reply_bytes:int -> sampling_recovery_report
   val iter_sampling_requests :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     t -> instance_id:string -> max_bytes:int ->

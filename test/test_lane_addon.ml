@@ -1481,7 +1481,51 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "released surviving container retains exact cleanup ownership" 1 (List.length !(state.recovery)))
 
+let test_runtime_sampling_maintenance_uses_pending_index () = with_fixture (fun env _ config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let instance_id = unwrap (dispatch config Runtime.Attach [
+    "manifest_path", `String (manifest ~max_reply_bytes:65536 dir "pending-runtime");
+    "run_id", `String "pending-run"; "binding", `Assoc ["sources", `List []]]) |> text "instance_id" in
+  await clock (fun () -> int "observation_seq" (instance config instance_id) = 1);
+  detach config instance_id; await_phase clock config instance_id "detached";
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let save store request_id answer =
+    let request = unwrap (Store.write_blob store ("request:" ^ request_id)) in
+    let bytes = Yojson.Safe.to_string (`Assoc ["kind", `String "model_outcome";
+      "instance_id", `String instance_id; "request", Types.evidence_to_json request;
+      "status", `String "answered"; "response", `Assoc ["role", `String "assistant";
+        "model", `String "retained"; "content", `Assoc ["type", `String "text"; "text", `String answer]]]) in
+    let outcome = Store.blob_reference bytes in
+    unwrap (Store.save_sampling_request store ~instance_id ~request_id (`Assoc [
+      "instance_id", `String instance_id; "request_id", `String request_id; "state", `String "finished";
+      "request", Types.evidence_to_json request; "outcome", Types.evidence_to_json outcome;
+      "outcome_bytes", `String bytes]));
+    outcome, bytes in
+  let old_outcome, old_bytes = save store "legacy" "legacy result" in
+  let marker request_id = Filename.concat (Store.root store)
+    ("sampling-recovery/" ^ Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json") in
+  if Sys.file_exists (marker "legacy") then Unix.unlink (marker "legacy");
+  Runtime.For_testing.reset ();
+  unwrap (Runtime.For_testing.retry_sampling ~config);
+  check string "first maintenance discovers legacy data" old_bytes (unwrap (Store.read_blob store old_outcome));
+  let legacy = Filename.concat (Store.root store)
+    ("sampling/" ^ Store.digest instance_id ^ "/" ^ Store.digest "legacy" ^ ".json") in
+  (* An unmarked changed historical record is a read detector, not a supported
+     writer. Every public writer below persists its own retry marker. *)
+  write legacy "null";
+  unwrap (Runtime.For_testing.retry_sampling ~config);
+  let second = Store.create ~root:(Store.root store) in
+  let next_outcome, next_bytes = save second "new" "new second-Store result" in
+  let before = Hashtbl.fold (fun _ n total -> n + total) state.calls 0 in
+  unwrap (Runtime.For_testing.retry_sampling ~config);
+  check string "steady maintenance sees another Store's newly durable marker" next_bytes
+    (unwrap (Store.read_blob store next_outcome));
+  check string "completed history was not re-read or rewritten" "null" (Fs_compat.load_file legacy);
+  check Alcotest.int "maintenance never invokes observers/providers" before
+    (Hashtbl.fold (fun _ n total -> n + total) state.calls 0))
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "maintenance uses durable pending index" `Quick test_runtime_sampling_maintenance_uses_pending_index;
   test_case "startup recovery precedes bounded historical sampling reads" `Quick
     test_runtime_sampling_recovery_precedes_bounded_historical_reads;
   test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;

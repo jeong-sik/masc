@@ -1,7 +1,7 @@
 # Release freeze and candidate repair
 
 Release preparation has a finite scope. Freeze a version's source and included
-changes before its full RC; keep developing the next version on main.
+changes before complete candidate verification; keep developing the next version on main.
 
 ## Freeze
 
@@ -69,9 +69,14 @@ Changing this verification architecture is a separate next-version change.
 
 ## Publish the verified candidate
 
-Require independent review of the final candidate and successful exact-SHA full
-RC. A source approval, partial pass, cancelled run or old candidate is not full
-verification. Release tags and published assets identify that verified commit;
+Require independent review of the final candidate and successful exact-SHA
+verification of every declared candidate stage. The current implementation uses
+full root `@runtest`; a reviewed versioned essential profile may replace that
+behavior selection for a later release while retaining full type/compile and
+four-platform install checks. Its exact profile identity belongs in the receipt.
+A source approval, partial pass, cancelled run or old candidate is not complete
+verification. Production-ready additionally requires every quantitative gate in
+[Production readiness](../PRODUCTION-READINESS-GATES.md). Release tags and published assets identify that verified commit;
 publish its existing RC assets with `rc_run_id`, without a fresh rebuild.
 
 Integration back into main is a separate obligation. Moving main does not

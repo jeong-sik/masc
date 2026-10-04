@@ -28,7 +28,13 @@ let utilization_json = function
 let record_json ~scope ~observed_at (report : Usage.report) =
   let scope_id = scope_id scope in
   let source = Usage.source_to_string report.source in
-  List.map
+  let snapshot = match Usage.report_shape report.source with
+    | Sparse_update -> []
+    | Complete_snapshot ->
+        [ `Assoc [ "record", `String "complete_snapshot";
+            "scope_id", `String scope_id; "source", `String source;
+            "observed_at", `Float observed_at ] ] in
+  snapshot @ List.map
     (fun (window : Usage.window) ->
       `Assoc
         ([ "scope_id", `String scope_id
@@ -156,11 +162,38 @@ let read config ~now ~window =
     let since_at = window_start ~now ~window in
     let journal = store config in
     let latest = Hashtbl.create 128 in
+    let snapshots = Hashtbl.create 32 in
     let unreadable = ref 0 in
     let skip ~where detail =
       Log.Server.warn "provider usage history unreadable report: %s: %s" where
         detail;
       incr unreadable
+    in
+    let in_window observed_at = observed_at >= since_at && observed_at <= now in
+    let snapshot json =
+      let* scope_id = string "scope_id" json in
+      let* source = string "source" json in
+      let* observed_at = number "observed_at" json in
+      if in_window observed_at then (
+        let key = scope_id, source, Log.format_utc_date_of observed_at in
+        match Hashtbl.find_opt snapshots key with
+        | Some held when held >= observed_at -> ()
+        | Some _ | None -> Hashtbl.replace snapshots key observed_at);
+      Ok ()
+    in
+    let consume_item item =
+      match member "record" item with
+      | Some (`String "complete_snapshot") -> snapshot item
+      | Some _ -> Error "provider usage history: unknown record kind"
+      | None ->
+          let* point = decode item in
+          if in_window point.observed_at then (
+            let day = Log.format_utc_date_of point.observed_at in
+            let key = point.scope_id, point.kind, point.limit_id, day in
+            match Hashtbl.find_opt latest key with
+            | Some held when held.observed_at >= point.observed_at -> ()
+            | Some _ | None -> Hashtbl.replace latest key point);
+          Ok ()
     in
     let consume = function
       | Dated_jsonl.Malformed_json { path; line_number; detail } ->
@@ -172,15 +205,9 @@ let read config ~now ~window =
       | Dated_jsonl.Parsed (`List items) ->
           List.iter
             (fun item ->
-              match decode item with
+              match consume_item item with
               | Error detail -> skip ~where:"stored report" detail
-              | Ok point when point.observed_at >= since_at && point.observed_at <= now ->
-                  let day = Log.format_utc_date_of point.observed_at in
-                  let key = point.scope_id, point.kind, point.limit_id, day in
-                  (match Hashtbl.find_opt latest key with
-                   | Some held when held.observed_at >= point.observed_at -> ()
-                   | Some _ | None -> Hashtbl.replace latest key point)
-              | Ok _ -> ())
+              | Ok () -> ())
             items
       | Dated_jsonl.Parsed _ ->
           skip ~where:"stored line" "expected a report list"
@@ -196,7 +223,15 @@ let read config ~now ~window =
           (Dated_jsonl.read_error_to_string read_error);
         Error "provider usage history store unavailable"
     | Ok () ->
-        let points = Hashtbl.fold (fun _ point acc -> point :: acc) latest [] in
+        (* A complete report supersedes every older window from its source on
+           that day, including an omitted window. Keep prior days as history.
+           Filtering after reading also handles observer writes that arrive
+           out of timestamp order. Old list-only records remain readable. *)
+        let points = Hashtbl.fold (fun _ point acc ->
+          let key = point.scope_id, point.source, Log.format_utc_date_of point.observed_at in
+          match Hashtbl.find_opt snapshots key with
+          | Some at when point.observed_at < at -> acc
+          | Some _ | None -> point :: acc) latest [] in
         let points =
           List.sort
             (fun a b ->

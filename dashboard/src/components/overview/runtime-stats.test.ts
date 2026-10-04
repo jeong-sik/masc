@@ -21,6 +21,33 @@ const response = { window_minutes: 60,
     total_input_tokens: 1234, total_output_tokens: 0, p50_latency_ms: 125, p95_latency_ms: 900,
     usage_sample_count: 6, usage_missing_count: 2, telemetry_sample_count: 5, telemetry_missing_count: 3 }],
 }
+it.each([false, true])('reads and renders HTTP dollar usage with official clients present=%s', async mixed => {
+  const http = { provider: 'openrouter.one', runtime_id: 'openrouter.one', provider_id: 'openrouter',
+    provider_display_name: 'OpenRouter account', protocol: 'openai-compatible-http', models: [] }
+  runtimeCatalogState.value = { status: 'loaded', data: [http,
+    { ...http, provider: 'openrouter.two', runtime_id: 'openrouter.two' },
+    ...(mixed ? [{ provider: 'codex.one', provider_id: 'codex', protocol: 'codex-app-server', models: [] }] : []),
+  ] }
+  let utilization: { unit: 'usd'; value: number; limit: number | null } = { unit: 'usd', value: 7.5, limit: 20 }
+  vi.mocked(get).mockImplementation(async path => path === '/api/v1/runtime/resolved' ? {
+    config_path: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
+    provider_usage_windows: [{ scope: 'account:openrouter', providers: [{ id: 'openrouter', display_name: 'OpenRouter account' }],
+      state: 'reported', windows: [{ limit_id: null, window: { kind: 'provider_label', label: 'credit limit' },
+        utilization, resets_at: null, observed_at: 1_100, source: 'openrouter.key_read', role: 'gates_model_calls' }] }],
+  } : response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByTestId('overview-client-usage-openrouter').textContent).toContain('$7.5000 사용 / $20.0000 한도 · $12.5000 남음'))
+  expect(get).toHaveBeenCalledWith('/api/v1/runtime/resolved', expect.anything())
+  expect(view.getAllByTestId('overview-client-openrouter')).toHaveLength(1)
+  expect(view.getByTestId('overview-client-openrouter').querySelector('button')).toBeNull()
+  expect(view.getByTestId('overview-client-openrouter').textContent).not.toContain('로그인 미측정')
+  expect(view.queryAllByRole('button', { name: '로그인 확인' })).toHaveLength(mixed ? 1 : 0)
+  utilization = { unit: 'usd', value: 21.5, limit: null }
+  fireEvent.click(view.getByRole('button', { name: '통계 새로 읽기' }))
+  await waitFor(() => expect(view.getByTestId('overview-client-usage-openrouter').textContent).toContain('$21.5000 사용 · 키 한도 없음'))
+  expect(view.getByTestId('overview-client-usage-openrouter').textContent).not.toContain('$20.0000 한도')
+  expect(post).not.toHaveBeenCalled()
+})
 it('shows each official client account once with its provider-reported usage', async () => {
   runtimeCatalogState.value = { status: 'loaded', data: [
     { provider: 'claude_one.shared', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
@@ -41,7 +68,7 @@ it('shows each official client account once with its provider-reported usage', a
   } : response)
   const view = render(html`<${OverviewRuntimeStats} />`)
   await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())
-  const accounts = view.getByTestId('overview-official-client-accounts')
+  const accounts = view.getByTestId('overview-provider-accounts')
   expect(accounts.textContent).toContain('Claude · one')
   expect(accounts.textContent).toContain('Codex · two')
   expect(accounts.textContent?.match(/Claude · one/g)).toHaveLength(1)
@@ -49,7 +76,7 @@ it('shows each official client account once with its provider-reported usage', a
   await waitFor(() => expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('5시간 67% 사용'))
   expect(view.getByTestId('overview-client-usage-codex_two').textContent).toContain('서버 시작 이후 미보고')
   expect(view.getByTestId('overview-client-usage-claude_alias').textContent).toContain('5시간 67% 사용')
-  expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('공유 Client 홈: Claude · one, Claude · alias')
+  expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('공유 사용량 계정: Claude · one, Claude · alias')
   expect(view.getByText(/아래 토큰·지연 표는 모델명 기준 집계/)).toBeTruthy()
   vi.mocked(post).mockResolvedValue({
     schema: 'masc.dashboard.official-client-probe.v1',
@@ -77,8 +104,8 @@ it('shows a catalog failure instead of silently omitting account monitoring', as
   vi.mocked(get).mockResolvedValue(response)
   const view = render(html`<${OverviewRuntimeStats} />`)
   await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())
-  expect(view.getByRole('alert').textContent).toContain('공식 Client 계정 목록을 읽지 못했습니다: HTTP 503')
-  expect(view.queryByTestId('overview-official-client-accounts')).toBeNull()
+  expect(view.getByRole('alert').textContent).toContain('제공자 계정 목록을 읽지 못했습니다: HTTP 503')
+  expect(view.queryByTestId('overview-provider-accounts')).toBeNull()
 })
 it('keeps stale values explicit until a refresh returns fresh cache metadata', async () => {
   vi.mocked(get).mockResolvedValueOnce({ ...response,

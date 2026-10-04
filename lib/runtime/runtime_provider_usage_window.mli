@@ -204,6 +204,11 @@ val recording_since : float
     process start).  Every {!Not_reported_since_start} means "nothing heard
     since this time". *)
 
+type report_shape = Complete_snapshot | Sparse_update
+val report_shape : source -> report_shape
+(** Whether absent windows revoke earlier observations from this source.
+    Durable readers use the same contract as the live table. *)
+
 val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit
 (** HTTP and Antigravity reads are complete snapshots: windows omitted by a
     newer report from the same source are removed. Claude/Codex events and

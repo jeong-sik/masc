@@ -2774,6 +2774,8 @@
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)
+
+(include stanzas/test_provider_usage_history_snapshots.inc)
 (include stanzas/test_provider_usage_snapshots.inc)
 
 (include stanzas/test_runtime_resolved_fleet.inc)

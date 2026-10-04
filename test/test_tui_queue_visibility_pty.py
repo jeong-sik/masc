@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 import threading
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
 
 
 CHAT = "Keepers ▸ alpha ▸ chat".encode()
@@ -20,9 +21,9 @@ class AcceptedQueueReconnectFixture:
     """
 
     def __init__(self):
-        self.queue = h.AtomicChatFixture()
+        self.queue = _keyboard_chat.AtomicChatFixture()
         self.fixtures = self.queue.fixtures
-        self.fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(self.stream)
+        self.fixtures["/api/v1/keepers/chat/stream"] = _keyboard_harness.RequestHttpResponse(self.stream)
         self.disconnect = threading.Event()
         self.reconnect_requested = threading.Event()
         self.release_run_start = threading.Event()
@@ -52,7 +53,7 @@ class AcceptedQueueReconnectFixture:
                 finally:
                     chunks.close()
 
-            return h.StreamingHttpResponse(accepted_then_disconnect)
+            return _keyboard_harness.StreamingHttpResponse(accepted_then_disconnect)
         if attempt == 1:
             original = self.attempts[0]
             if request["request_id"] != original["request_id"] or request["message"] != original["message"]:
@@ -60,7 +61,7 @@ class AcceptedQueueReconnectFixture:
             self.reconnect_requested.set()
             if not self.release_run_start.wait(timeout=30):
                 raise AssertionError("reconnect run-start gate was never released")
-            response = h.keeper_chat_succeeded_response(body)
+            response = _keyboard_chat.keeper_chat_succeeded_response(body)
             blocks = [block for block in response.body.split(b"\n\n") if block]
 
             def run_then_terminal():
@@ -75,7 +76,7 @@ class AcceptedQueueReconnectFixture:
                 self.terminal_sent.set()
                 yield b"\n\n".join(blocks[2:]) + b"\n\n"
 
-            return h.StreamingHttpResponse(run_then_terminal)
+            return _keyboard_harness.StreamingHttpResponse(run_then_terminal)
         if attempt != 2 or request["message"] != "held-local-next":
             raise AssertionError(f"unexpected additional chat POST: {request!r}")
         return self.queue.stream(body)
@@ -89,7 +90,7 @@ class AcceptedQueueReconnectFixture:
 
 
 def run(executable: str, evidence_dir: Path | None = None) -> None:
-    fixture = h.AtomicChatFixture(hold_first_acceptance=True)
+    fixture = _keyboard_chat.AtomicChatFixture(hold_first_acceptance=True)
     second_post_received = threading.Event()
     release_second_acceptance = threading.Event()
 
@@ -100,15 +101,15 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
                 raise AssertionError("second admission receipt was never released")
         return fixture.stream(body)
 
-    fixture.fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(stream)
+    fixture.fixtures["/api/v1/keepers/chat/stream"] = _keyboard_harness.RequestHttpResponse(stream)
     fixture.fixtures["/api/v1/keepers/beta/chat/history"] = (200, [])
 
     def current_screen(output):
-        end = output.rfind(h.FRAME_END)
+        end = output.rfind(_keyboard_harness.FRAME_END)
         if end < 0:
             raise AssertionError("no completed terminal frame to capture")
-        raw = bytes(output[:end + len(h.FRAME_END)])
-        return raw, h.screen_text(raw)
+        raw = bytes(output[:end + len(_keyboard_harness.FRAME_END)])
+        return raw, _keyboard_harness.screen_text(raw)
 
     def capture(output, name, *, columns=120):
         raw, text = current_screen(output)
@@ -120,34 +121,34 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
 
     def interact(process, fd, _slave_fd, output, _base_path):
         try:
-            h.open_atomic_chat(process, fd, output)
-            h.send_and_wait(process, fd, output, b"\x04\x04", CHAT)
-            h.send_and_wait(process, fd, output, b"queued-one", h.composer_showing(b"queued-one"))
+            _keyboard_chat.open_atomic_chat(process, fd, output)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x04\x04", CHAT)
+            _keyboard_harness.send_and_wait(process, fd, output, b"queued-one", _keyboard_harness.composer_showing(b"queued-one"))
             os.write(fd, b"\r")
-            if not h.wait_for_fixture_event(process, fd, output, fixture.first_post_received, timeout=5):
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, fixture.first_post_received, timeout=5):
                 raise AssertionError("first request did not reach the server")
-            h.send_and_wait(process, fd, output, b"queued-two", h.composer_showing(b"queued-two"))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
+            _keyboard_harness.send_and_wait(process, fd, output, b"queued-two", _keyboard_harness.composer_showing(b"queued-two"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
             if b"1 awaiting receipt" not in capture(output, "local-waiting"):
                 raise AssertionError("pending POST was not distinguished from a queued receipt")
 
             fixture.release_first_acceptance.set()
-            if not h.wait_for_fixture_event(process, fd, output, second_post_received, timeout=5):
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, second_post_received, timeout=5):
                 raise AssertionError("the locally queued request was not dispatched")
             # Ownership changed without changing the count. A draft edit
             # forces a completed frame while the second POST is still held.
-            h.send_and_wait(process, fd, output, b"admission-check", h.composer_showing(b"admission-check"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"admission-check", _keyboard_harness.composer_showing(b"admission-check"))
             if b"Queue (2 pending" not in capture(output, "awaiting-second-admission"):
                 raise AssertionError("dispatch lost the waiting request before its receipt arrived")
-            h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x15", _keyboard_harness.composer_showing(b""))
 
             start = len(output)
             release_second_acceptance.set()
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 2)
-            h.wait_for_output(process, fd, output, b"2 messages in the keeper's queue", start=start, timeout=10)
-            receipt_end = h.end_of_needle(output, b"2 messages in the keeper's queue", start)
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=receipt_end, timeout=5)
-            h.drain_until_quiet(process, fd, output)
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, fixture, 2)
+            _keyboard_harness.wait_for_output(process, fd, output, b"2 messages in the keeper's queue", start=start, timeout=10)
+            receipt_end = _keyboard_harness.end_of_needle(output, b"2 messages in the keeper's queue", start)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=receipt_end, timeout=5)
+            _keyboard_harness.drain_until_quiet(process, fd, output)
             screen = capture(output, "server-waiting")
             if b"Queue (2 pending" not in screen or b"2 queued at Keeper" not in screen:
                 raise AssertionError(
@@ -158,29 +159,29 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             # An unchanged queue row is retained without being emitted again.
             # The draft change after each scroll key provides an ordered frame
             # barrier; assertions use the reconstructed screen, not new bytes.
-            h.send_and_wait(process, fd, output, b"\x1b[5~scroll-check", h.composer_showing(b"scroll-check"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[5~scroll-check", _keyboard_harness.composer_showing(b"scroll-check"))
             if b"Queue (2 pending" not in capture(output, "reading-back"):
                 raise AssertionError("reading older rows hid the waiting queue")
-            h.send_and_wait(process, fd, output, b"\x05\x15newest-check", h.composer_showing(b"newest-check"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x05\x15newest-check", _keyboard_harness.composer_showing(b"newest-check"))
             if b"Queue (2 pending" not in capture(output, "newest"):
                 raise AssertionError("returning to newest hid the waiting queue")
-            h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x15", _keyboard_harness.composer_showing(b""))
 
             # A held stop receipt keeps the next Enter local while both
             # existing requests remain accepted. This is an isolated HTTP
             # fixture; the test never sends control to a live Keeper.
             os.write(fd, b"\x1b")
-            if not h.wait_for_fixture_event(process, fd, output, fixture.interrupted, timeout=5):
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("the mixed queue's control receipt was not held")
-            h.send_and_wait(process, fd, output, b"local-three", h.composer_showing(b"local-three"))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (3 pending")
-            h.resize_and_wait(process, fd, output, rows=40, columns=80,
-                              needle=b"Queue (3 pending", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
+            _keyboard_chat.send_and_wait(process, fd, output, b"local-three", _keyboard_chat.composer_showing(b"local-three"))
+            _keyboard_chat.send_and_wait(process, fd, output, b"\r", b"Queue (3 pending")
+            _keyboard_chat.resize_and_wait(process, fd, output, rows=40, columns=80,
+                              needle=b"Queue (3 pending", controls=(_keyboard_chat.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
             screen = capture(output, "mixed-queue", columns=80)
-            rows = h.screen_rows(current_screen(output)[0])
-            queue_row = h.screen_row_of(rows, b"Queue (3 pending")
-            accepted_row = h.screen_row_of(rows, b"2 queued at Keeper")
-            local_row = h.screen_row_of(rows, b"Local NEXT")
+            rows = _keyboard_harness.screen_rows(current_screen(output)[0])
+            queue_row = _keyboard_harness.screen_row_of(rows, b"Queue (3 pending")
+            accepted_row = _keyboard_harness.screen_row_of(rows, b"2 queued at Keeper")
+            local_row = _keyboard_harness.screen_row_of(rows, b"Local NEXT")
             if not (0 < queue_row < accepted_row < local_row):
                 raise AssertionError("mixed queue status/preview rows overlap: " + repr(screen))
             if b"Ctrl-T:queue" not in rows[queue_row] or b'"local-three"' not in rows[local_row]:
@@ -188,18 +189,18 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
 
             # Ctrl-Q leaves without issuing another interrupt. Queue identity
             # must survive a different screen and a different chat target.
-            h.send_and_wait(process, fd, output, b"\x11", b"Info")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"beta")
-            h.send_and_wait(process, fd, output, b"\r", "Keepers ▸ \x1b[1mbeta".encode())
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x11", b"Info")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"beta")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "Keepers ▸ \x1b[1mbeta".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode())
             if b"Queue (" in capture(output, "other-keeper", columns=80):
                 raise AssertionError("alpha's pending queue leaked into beta's chat")
-            h.send_and_wait(process, fd, output, b"\x11", b"Info")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", "Keepers ▸ \x1b[1malpha".encode())
-            h.send_and_wait(process, fd, output, b"m", CHAT)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x11", b"Info")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "Keepers ▸ \x1b[1malpha".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", CHAT)
             restored = capture(output, "restored-pending", columns=80)
             for expected in (b"Queue (3 pending", b"2 queued at Keeper", b'Local NEXT: "local-three"', b"Ctrl-T:queue"):
                 if expected not in restored:
@@ -207,25 +208,25 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             if len(fixture.submitted) != 2:
                 raise AssertionError("navigation dispatched local input before the stop receipt")
             fixture.release_interrupt.set()
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 3)
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, fixture, 3)
             start = len(output)
             fixture.release.set()
             replies = (b"reply-queued-one", b"reply-queued-two", b"reply-local-three")
             for reply in replies:
-                h.wait_for_output(process, fd, output, reply, start=start, timeout=10)
-            reply_end = max(h.end_of_needle(output, reply, start) for reply in replies)
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=reply_end, timeout=5)
+                _keyboard_harness.wait_for_output(process, fd, output, reply, start=start, timeout=10)
+            reply_end = max(_keyboard_harness.end_of_needle(output, reply, start) for reply in replies)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=reply_end, timeout=5)
             # A reply delta may precede its terminal event. Wait until a
             # completed frame reflects both settled streams before asserting.
-            settled = h.wait_for_fixture_state(
+            settled = _keyboard_harness.wait_for_fixture_state(
                 process, fd, output,
                 lambda: b"Queue (" not in current_screen(output)[1],
                 timeout=5,
             )
             if b"Queue (" in capture(output, "settled", columns=80) or not settled:
                 raise AssertionError("settled requests are still reported as queued")
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             fixture.release_first_acceptance.set()
@@ -233,7 +234,7 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             fixture.release_interrupt.set()
             fixture.release.set()
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Queue remains visible across local and server admission",
         interact=interact,
@@ -241,12 +242,12 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
         refresh=0.2,
     )
 
-    fixtures, gate = h.chat_reconcile_http_fixtures()
+    fixtures, gate = _keyboard_chat.chat_reconcile_http_fixtures()
     requests = []
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Pending queue distinguishes unknown admission during reconnect",
-        interact=h.chat_reconcile_interaction(gate, requests),
+        interact=_keyboard_chat.chat_reconcile_interaction(gate, requests),
         http_fixtures=fixtures,
         http_requests=requests,
     )
@@ -264,10 +265,10 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             return screen
 
         try:
-            h.open_atomic_chat(process, fd, output)
-            h.send_and_wait(process, fd, output, b"\x04\x04", CHAT)
-            h.send_and_wait(process, fd, output, b"accepted-before-cut", h.composer_showing(b"accepted-before-cut"))
-            h.send_and_wait(process, fd, output, b"\r", b"1 queued at Keeper")
+            _keyboard_chat.open_atomic_chat(process, fd, output)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x04\x04", CHAT)
+            _keyboard_harness.send_and_wait(process, fd, output, b"accepted-before-cut", _keyboard_harness.composer_showing(b"accepted-before-cut"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"1 queued at Keeper")
             accepted = capture(output, "accepted-before-disconnect")
             if b"Queue (1 pending" not in accepted or b"rechecking delivery" in accepted:
                 raise AssertionError("initial queued receipt was not visible: " + repr(accepted))
@@ -275,19 +276,19 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             # This explicit control receipt, not reconnect state, is what
             # keeps the next Enter local across RUN_STARTED and terminal.
             os.write(fd, b"\x1b")
-            if not h.wait_for_fixture_event(process, fd, output, reconnect.queue.interrupted, timeout=5):
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, reconnect.queue.interrupted, timeout=5):
                 raise AssertionError("Esc control receipt was not held")
-            h.send_and_wait(process, fd, output, b"held-local-next", h.composer_showing(b"held-local-next"))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
+            _keyboard_harness.send_and_wait(process, fd, output, b"held-local-next", _keyboard_harness.composer_showing(b"held-local-next"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
             assert_local_pending("accepted-with-local-next", count=2, delivery=b"1 queued at Keeper")
 
             disconnected_from = len(output)
             reconnect.disconnect.set()
-            if not h.wait_for_fixture_event(process, fd, output, reconnect.reconnect_requested, timeout=5):
+            if not _keyboard_harness.wait_for_fixture_event(process, fd, output, reconnect.reconnect_requested, timeout=5):
                 raise AssertionError("accepted operation was not re-subscribed")
-            h.wait_for_output(process, fd, output, b"1 rechecking delivery", start=disconnected_from, timeout=5)
-            rechecking_end = h.end_of_needle(output, b"1 rechecking delivery", disconnected_from)
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=rechecking_end, timeout=5)
+            _keyboard_harness.wait_for_output(process, fd, output, b"1 rechecking delivery", start=disconnected_from, timeout=5)
+            rechecking_end = _keyboard_harness.end_of_needle(output, b"1 rechecking delivery", disconnected_from)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=rechecking_end, timeout=5)
             rechecking = assert_local_pending("accepted-rechecking", count=2, delivery=b"1 rechecking delivery")
             if b"queued at Keeper" in rechecking:
                 raise AssertionError("the old queued receipt still appeared current after disconnect")
@@ -296,9 +297,9 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
 
             running_from = len(output)
             reconnect.release_run_start.set()
-            h.wait_for_output(process, fd, output, b"Queue (1 pending", start=running_from, timeout=5)
-            running_end = h.end_of_needle(output, b"Queue (1 pending", running_from)
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=running_end, timeout=5)
+            _keyboard_harness.wait_for_output(process, fd, output, b"Queue (1 pending", start=running_from, timeout=5)
+            running_end = _keyboard_harness.end_of_needle(output, b"Queue (1 pending", running_from)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=running_end, timeout=5)
             running = assert_local_pending("reconnected-running", count=1)
             if any(stale in running for stale in (b"queued at Keeper", b"rechecking delivery", b"awaiting receipt")):
                 raise AssertionError("RUN_STARTED left the accepted request in pending delivery: " + repr(running))
@@ -309,17 +310,17 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
 
             terminal_from = len(output)
             reconnect.release_terminal.set()
-            h.wait_for_output(process, fd, output, b"reply-accepted-before-cut", start=terminal_from, timeout=5)
+            _keyboard_harness.wait_for_output(process, fd, output, b"reply-accepted-before-cut", start=terminal_from, timeout=5)
             # Release the explicit Esc receipt only after the original reply.
             # The remaining local input must enter the server exactly once.
             local_reply_from = len(output)
             reconnect.queue.release.set()
             reconnect.queue.release_interrupt.set()
-            h.wait_for_atomic_admissions(process, fd, output, reconnect.queue, 2)
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, reconnect.queue, 2)
             local_reply = b"reply-held-local-next"
-            h.wait_for_output(process, fd, output, local_reply, start=local_reply_from, timeout=10)
-            local_reply_end = h.end_of_needle(output, local_reply, local_reply_from)
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=local_reply_end, timeout=5)
+            _keyboard_harness.wait_for_output(process, fd, output, local_reply, start=local_reply_from, timeout=10)
+            local_reply_end = _keyboard_harness.end_of_needle(output, local_reply, local_reply_from)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=local_reply_end, timeout=5)
             original, retry, later = reconnect.attempts
             if original["request_id"] != retry["request_id"] or later["request_id"] == original["request_id"]:
                 raise AssertionError("reconnect or later input changed request identity")
@@ -333,13 +334,13 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             drained = capture(output, "reconnect-pending-drained")
             if local_reply not in drained or b"Queue (" in drained:
                 raise AssertionError("the local reply frame did not show a drained pending queue: " + repr(drained))
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             reconnect.release_all()
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Accepted queue rechecks delivery and leaves pending at RUN_STARTED",
         interact=accepted_reconnect_interaction,
@@ -349,7 +350,7 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
 
 
 def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_priority=False) -> None:
-    fixture = h.AtomicChatFixture()
+    fixture = _keyboard_chat.AtomicChatFixture()
     priority_seen = threading.Event()
     priority_release = threading.Event()
     priority_calls = []
@@ -365,36 +366,36 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
         return 200, {"request_id": request["request_id"], "prioritized": True,
                      "signalled": False, "detail": "fixture priority confirmed"}
 
-    fixture.fixtures["/api/v1/keepers/turn/run-next"] = h.RequestHttpResponse(priority)
+    fixture.fixtures["/api/v1/keepers/turn/run-next"] = _keyboard_harness.RequestHttpResponse(priority)
 
     def interact(process, fd, _slave, output, _base):
         try:
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"Info")
-            h.send_and_wait(process, fd, output, b"m", CHAT)
-            h.wait_for_output(process, fd, output, "기존 작업 처리 중".encode(), start=0, timeout=10)
-            h.send_and_wait(process, fd, output, b"/priority on", h.composer_showing(b"/priority on"))
-            h.send_and_wait(process, fd, output, b"\r", b"User input auto-next priority: ON")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Info")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", CHAT)
+            _keyboard_harness.wait_for_output(process, fd, output, "기존 작업 처리 중".encode(), start=0, timeout=10)
+            _keyboard_harness.send_and_wait(process, fd, output, b"/priority on", _keyboard_harness.composer_showing(b"/priority on"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"User input auto-next priority: ON")
             for message in (b"compact-one", b"compact-two"):
-                h.send_and_wait(process, fd, output, message, h.composer_showing(message))
+                _keyboard_harness.send_and_wait(process, fd, output, message, _keyboard_harness.composer_showing(message))
                 os.write(fd, b"\r")
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 2)
-            assert h.wait_for_fixture_event(process, fd, output, priority_seen, timeout=5)
-            pending = h.resize_and_wait(process, fd, output, rows=30, columns=80,
-                needle="내 메시지 2건 대기".encode(), controls=(h.FULL_REDRAW,))
-            text = h.screen_text(pending)
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, fixture, 2)
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, priority_seen, timeout=5)
+            pending = _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=80,
+                needle="내 메시지 2건 대기".encode(), controls=(_keyboard_harness.FULL_REDRAW,))
+            text = _keyboard_harness.screen_text(pending)
             assert "다음 순서로 접수됨".encode() not in text, "unconfirmed priority shown as confirmed"
             priority_release.set()
             expected = "다음 순서 확인 불가" if fail_priority else "다음 순서로 접수됨"
-            h.wait_for_output(process, fd, output, expected.encode(), start=0, timeout=10)
+            _keyboard_harness.wait_for_output(process, fd, output, expected.encode(), start=0, timeout=10)
             # A changed geometry owns a redraw; repeated 80x30 does not.
-            h.resize_and_wait(process, fd, output, rows=30, columns=100,
-                needle=expected.encode(), controls=(h.FULL_REDRAW,))
-            final = h.resize_and_wait(process, fd, output, rows=30, columns=80,
-                needle=expected.encode(), controls=(h.FULL_REDRAW,))
-            text = h.screen_text(final)
-            rows = h.screen_rows(final)
+            _keyboard_chat.resize_and_wait(process, fd, output, rows=30, columns=100,
+                needle=expected.encode(), controls=(_keyboard_chat.FULL_REDRAW,))
+            final = _keyboard_chat.resize_and_wait(process, fd, output, rows=30, columns=80,
+                needle=expected.encode(), controls=(_keyboard_chat.FULL_REDRAW,))
+            text = _keyboard_chat.screen_text(final)
+            rows = _keyboard_chat.screen_rows(final)
             status = [row for row in rows.values() if "내 메시지 2건 대기".encode() in row]
             assert len(status) == 1, "pending input has duplicate status owners"
             assert expected.encode() in status[0], "receipt evidence clipped from composite status"
@@ -408,21 +409,21 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
                 (evidence_dir / f"{name}-80x30.ansi").write_bytes(bytes(output))
                 (evidence_dir / f"{name}-80x30.txt").write_bytes(text)
             fixture.release.set()
-            h.wait_for_output(process, fd, output, b"reply-compact-two", start=0, timeout=10)
-            if not h.wait_for_fixture_state(
+            _keyboard_chat.wait_for_output(process, fd, output, b"reply-compact-two", start=0, timeout=10)
+            if not _keyboard_harness.wait_for_fixture_state(
                 process, fd, output,
-                lambda: b"Esc:detail" in h.screen_text(bytes(output)),
+                lambda: b"Esc:detail" in _keyboard_chat.screen_text(bytes(output)),
                 timeout=5,
             ):
                 raise AssertionError("settled chat did not restore detail navigation")
-            h.send_and_wait(process, fd, output, b"\x1b", b"Info")
+            _keyboard_chat.send_and_wait(process, fd, output, b"\x1b", b"Info")
             os.write(fd, b"q")
         finally:
             priority_release.set()
             fixture.release.set()
             fixture.release_interrupt.set()
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
         description="Compact chat pending input priority refusal" if fail_priority else "Compact chat pending input confirmed priority",
         interact=interact, http_fixtures=fixture.fixtures, refresh=0.2,
         extra_env={"NO_COLOR": "1"})

@@ -2296,6 +2296,54 @@ let test_write_boundary_emits_typed_audience () =
      | _ -> Alcotest.fail "expected one exact Board target")
 ;;
 
+let test_post_audience_survives_edit_and_restart () =
+  let get = function
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let targets (post : Board.post) =
+    match post.audience with
+    | Some (Board.Targets ids) -> List.map Board.Agent_id.to_string ids
+    | _ -> Alcotest.fail "persisted target audience missing"
+  in
+  let created = get (Board_dispatch.create_post ~author:"audience-owner"
+      ~content:"@first-reader private evidence" ~visibility:Board.Direct
+      ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string created.id in
+  Alcotest.(check (list string)) "creation retains audience" ["first-reader"]
+    (targets created);
+  let edited = get (Board_dispatch.update_post ~post_id ~editor:"audience-owner"
+      ~content:"@second-reader revised evidence" ()) in
+  Alcotest.(check (list string)) "edit replaces audience with its content" ["second-reader"]
+    (targets edited);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let reloaded = get (Board_dispatch.get_post ~post_id) in
+  Alcotest.(check (list string)) "restart keeps exact edited audience" ["second-reader"]
+    (targets reloaded);
+  let wire = Board.post_to_yojson reloaded in
+  let without_audience = match wire with
+    | `Assoc fields -> `Assoc (List.remove_assoc "audience" fields)
+    | _ -> Alcotest.fail "post wire must be an object"
+  in
+  (match Board.post_of_yojson without_audience with
+   | Some post -> Alcotest.(check bool) "missing audience is not inferred from body" true
+       (Option.is_none post.audience)
+   | None -> Alcotest.fail "post without recorded audience was lost");
+  List.iter (fun audience ->
+    let invalid = match wire with
+      | `Assoc fields -> `Assoc (("audience", audience) :: List.remove_assoc "audience" fields)
+      | _ -> Alcotest.fail "post wire must be an object"
+    in
+    Alcotest.(check bool) "invalid audience cannot become valid read authority" true
+      (Option.is_none (Board.post_of_yojson invalid)))
+    [ `Assoc ["kind", `String "targets"; "targets", `List []]
+    ; `Assoc ["kind", `String "targets"; "targets", `List [`String "bad/id"]]
+    ; `Assoc ["kind", `String "broadcast"; "kind", `String "discoverable"]
+    ; `Null ]
+;;
+
 let test_target_case_is_identity_level () =
   (* #25601: the shared grammar (Board_addressing) preserves target case;
      case normalization is an identity-level concern.  Board agent ids are
@@ -2792,6 +2840,8 @@ let () =
         (with_eio test_unlisted_post_is_not_discoverable);
       Alcotest.test_case "write emits typed audience" `Quick
         (with_eio test_write_boundary_emits_typed_audience);
+      Alcotest.test_case "post audience survives edit and restart" `Quick
+        (with_eio test_post_audience_survives_edit_and_restart);
       Alcotest.test_case "target case is identity-level" `Quick
         (with_eio test_target_case_is_identity_level);
     ];

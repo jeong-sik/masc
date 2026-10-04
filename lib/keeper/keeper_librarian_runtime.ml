@@ -1237,9 +1237,24 @@ let run_best_effort
                   ; "current_fact_count", `Int current_fact_count
                   ]));
         let observed_context_review = ref None in
+        let observed_preflight = ref None in
+        let full_llm_skipped = ref false in
+        let full_lane_entered = ref false in
+        let preflight_domain_rejection = ref None in
         let context_write = ref Not_attempted in
         let continuity_write = ref (`Assoc ["status", `String "not_attempted"]) in
         let complete ?selected_slot outcome output =
+          let selected_slot = if !full_llm_skipped then None else selected_slot in
+          let output = match !observed_preflight, output with
+            | Some observation, `Assoc fields ->
+              `Assoc (("jev_preflight", Typesafeai_librarian_preflight.to_yojson observation)
+                :: ("full_llm_skipped", `Bool !full_llm_skipped)
+                :: ("generation_path", `String
+                    (if !full_llm_skipped then "jev_no_change"
+                     else if !full_lane_entered then "full_lane" else "not_entered"))
+                :: ("preflight_domain_rejection", match !preflight_domain_rejection with
+                    | None -> `Null | Some detail -> `String detail) :: fields)
+            | (None | Some _), _ -> output in
           let output = match continuity, output with
             | Some _, `Assoc fields -> `Assoc (("continuity_write", !continuity_write) :: fields)
             | _ -> output in
@@ -1373,18 +1388,38 @@ let run_best_effort
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
              let* (answer, exact_output), served_slot =
-               execute_answer
-                 ~requirement:(output_requirement_of_pass pass)
-                 ~validate:(validate_answer pass prompt_input)
-                 ?cli_runner
-                 ~clock
-                 ~net
-                 ~base_path
-                 ~keeper_id
-                 ~messages:[ message Agent_core.Types.User prompt ]
-                 ()
+               let eligible = match pass with
+                 | Memory_pass None ->
+                   prompt_input.working_context = Keeper_librarian_context.empty
+                 | Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _ -> false in
+               let observation = Typesafeai_librarian_preflight.assess
+                 ~observe:(fun observation -> observed_preflight := Some observation)
+                 ~clock ~keeper_id ~eligible ~prompt () in
+               observed_preflight := Some observation;
+               let execute_full () =
+                 full_lane_entered := true;
+                 execute_answer
+                   ~requirement:(output_requirement_of_pass pass)
+                   ~validate:(validate_answer pass prompt_input)
+                   ?cli_runner ~clock ~net ~base_path ~keeper_id
+                   ~messages:[ message Agent_core.Types.User prompt ] ()
+                 |> Result.map (fun (accepted, source) -> (accepted, Some source)) in
+               if Typesafeai_librarian_preflight.keeps_current observation then (
+                 let output = `Assoc
+                   [ "new_claims", `List []; "dropped", `List []
+                   ; "working_contexts", `List []; "working_state", `Null ] in
+                 match validate_answer pass prompt_input output with
+                 | Ok answer ->
+                   full_llm_skipped := true;
+                   Ok ((answer, output), None)
+                 | Error error ->
+                   preflight_domain_rejection := Some (Keeper_librarian.parse_error_to_string error);
+                   execute_full ())
+               else execute_full ()
              in
-             let selected_slot = served_slot_id served_slot in
+             let selected_slot = match served_slot with
+               | Some slot -> served_slot_id slot
+               | None -> "JEV memory preflight" in
 
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
@@ -1441,6 +1476,11 @@ let run_best_effort
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn)))
              in
              let publish_continuity prepared working_state =
+                match served_slot with
+                | None ->
+                  Continuity_not_committed
+                    "a no-change judgment cannot generate a continuity snapshot"
+                | Some served_slot ->
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
                 commit_continuity
                   ~commit:(fun () ->
@@ -1481,7 +1521,7 @@ let run_best_effort
                 recorded on the run; the Memory decision below is kept. *)
              (match selection.working_contexts, continuity_answer with
               | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
-                organize_working_context pockets
+               if not !full_llm_skipped then organize_working_context pockets
               | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
               | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
                 context_write := Answer_missing;

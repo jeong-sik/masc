@@ -1,0 +1,117 @@
+name: Main minimal build
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Serialize before the receipt lookup. A queued run rechecks the successful
+# receipt after the previous build finishes; never cancel a working build.
+concurrency:
+  group: main-minimal-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # Cold compiler/dependency installation can take much longer than a warm
+    # build. This is a stalled-job backstop, not the expected build duration.
+    timeout-minutes: 90
+    env:
+      DUNE_JOBS: '4'
+      # Keep user-written rules (including generated build identity) live.
+      DUNE_CACHE: enabled-except-user-rules
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Identify build inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Conservatively include every tracked file except documentation
+          # and changelog. In particular include scripts, assets, dashboard,
+          # sandbox images, all Dune files and external dependency pins.
+          digest=$(python3 - <<'PY'
+          import hashlib, subprocess
+          entries = subprocess.check_output(['git', 'ls-tree', '-r', '-z', 'HEAD']).split(b'\0')
+          inputs = []
+          for entry in entries:
+              if not entry:
+                  continue
+              path = entry.split(b'\t', 1)[1]
+              if path.startswith((b'docs/', b'docs-site/', b'changelog.d/')) or path == b'CHANGELOG.md':
+                  continue
+              inputs.append(entry + b'\0')
+          print(hashlib.sha256(b''.join(inputs)).hexdigest())
+          PY
+          )
+          echo "receipt=main-build-receipt-v1-${ImageOS}-${ImageVersion}-${digest}" >> "$GITHUB_OUTPUT"
+          echo "dune=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+          echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
+
+      - name: Look for a successful build of these inputs
+        id: receipt
+        uses: actions/cache/restore@v5
+        with:
+          path: .ci-main-build-receipt
+          key: ${{ steps.inputs.outputs.receipt }}
+
+      - uses: ./.github/actions/setup-ocaml-toolchain
+        if: steps.receipt.outputs.cache-hit != 'true'
+      - uses: ./.github/actions/pin-ocaml-deps
+        if: steps.receipt.outputs.cache-hit != 'true'
+      - uses: ./.github/actions/install-ocaml-deps
+        if: steps.receipt.outputs.cache-hit != 'true'
+
+      - name: Reuse Dune build artifacts
+        if: steps.receipt.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/masc-dune-cache
+          key: ${{ steps.inputs.outputs.dune }}-${{ github.sha }}
+          restore-keys: |
+            ${{ steps.inputs.outputs.dune }}-
+
+      - name: Build the operator executables
+        if: steps.receipt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          opam exec -- dune build --root . \
+            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/deployment_preflight_helper.exe
+          printf '%s\n' "$GITHUB_SHA" > .ci-main-build-receipt
+
+      # Only a completed successful build creates a receipt. Failures retry
+      # at the next scheduled check; cache eviction also causes a rebuild.
+      - name: Remember successful build inputs
+        if: success() && steps.receipt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .ci-main-build-receipt
+          key: ${{ steps.inputs.outputs.receipt }}
+
+      - name: Record checked scope
+        if: always()
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "Checked main SHA: $GITHUB_SHA"
+            if [ "$RECEIPT_HIT" = true ]; then
+              echo 'Build skipped: non-documentation inputs already built successfully.'
+              echo "Previously built SHA: $(cat .ci-main-build-receipt)"
+              echo 'This skip is not compilation evidence for the checked SHA.'
+            else
+              echo "Build job status: $BUILD_STATUS"
+              echo 'Scope: server, TUI, browser host, deployment preflight; no tests.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

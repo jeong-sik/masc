@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
 
 
@@ -37,10 +38,10 @@ def visible_window(output: bytearray, *, split: bool) -> Window:
     # Presenters update changed rows only. Replay all completed frames so an
     # unchanged payload row remains visible, but an unfinished frame cannot
     # contribute a new range with old payload rows.
-    end = output.rfind(h.FRAME_END)
+    end = output.rfind(_keyboard_harness.FRAME_END)
     if end < 0:
         raise AssertionError("lane run has no completed terminal frame")
-    screen = h.screen_text(bytes(output[: end + len(h.FRAME_END)]))
+    screen = _keyboard_harness.screen_text(bytes(output[: end + len(_keyboard_harness.FRAME_END)]))
     if split:
         # The input and output titles share one physical row. The output
         # window is the one after OUTPUT, not the short input's first range.
@@ -48,10 +49,10 @@ def visible_window(output: bytearray, *, split: bool) -> Window:
             match
             for row in screen.splitlines()
             if b"OUTPUT" in row
-            for match in h.WINDOW_TEXT_RE.finditer(row.split(b"OUTPUT", 1)[1])
+            for match in _keyboard_harness.WINDOW_TEXT_RE.finditer(row.split(b"OUTPUT", 1)[1])
         ]
     else:
-        ranges = list(h.WINDOW_TEXT_RE.finditer(screen))
+        ranges = list(_keyboard_harness.WINDOW_TEXT_RE.finditer(screen))
     if len(ranges) != 1:
         raise AssertionError(f"expected one payload window: {screen!r}")
     first, last, total = (int(value) for value in ranges[0].groups())
@@ -94,13 +95,13 @@ def turn_page(
 ) -> Window:
     # An unrelated refresh can finish after the key is sent. Wait for the
     # completed screen's window to move, not a marker that every frame has.
-    h.write_all(master, output, b"\x1b[6~" if down else b"\x1b[5~")
+    _keyboard_harness.write_all(master, output, b"\x1b[6~" if down else b"\x1b[5~")
 
     def moved() -> bool:
         first = visible_window(output, split=split).first
         return first > before.first if down else first < before.first
 
-    if not h.wait_for_fixture_state(process, master, output, moved, timeout=3.0):
+    if not _keyboard_harness.wait_for_fixture_state(process, master, output, moved, timeout=3.0):
         raise AssertionError(f"page key did not move the completed window: {before}")
     return visible_window(output, split=split)
 
@@ -120,10 +121,10 @@ def run(
     if preflight is not None:
         scenario = "preflight-" + preflight
     run_id = "paging-" + scenario.replace(" ", "-")
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-    detail = cast(dict[str, Any], copy.deepcopy(h.hitl_lane_run_detail_response()[1]))
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    detail = cast(dict[str, Any], copy.deepcopy(_keyboard_keepers.hitl_lane_run_detail_response()[1]))
     record = cast(dict[str, Any], detail["run"])
     record.update(
         run_id=run_id,
@@ -213,14 +214,14 @@ def run(
         )
         if key in record
     }
-    fixtures[h.lane_runs_path("librarian_exact")] = (
+    fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (
         200,
         {"runs": [summary], "has_more": False, "total": 1},
     )
     detail_reads: list[int] = []
     fail_refresh = False
 
-    def read_detail() -> h.HttpResponse:
+    def read_detail() -> _keyboard_harness.HttpResponse:
         status = 503 if fail_refresh else 200
         detail_reads.append(status)
         return status, {
@@ -237,36 +238,36 @@ def run(
         _base_path: str,
     ) -> None:
         nonlocal fail_refresh
-        h.palette_go(process, master, output, b"go lanes", b"Librarian")
-        h.send_and_wait(
+        _keyboard_harness.palette_go(process, master, output, b"go lanes", b"Librarian")
+        _keyboard_harness.send_and_wait(
             process,
             master,
             output,
             b"/Librarian",
             re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian"),
         )
-        h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
-        h.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained")
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
+        _keyboard_harness.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained")
+        _keyboard_harness.send_and_wait(
             process, master, output, b"\r", b"JEV" if preflight else b"INPUT"
         )
         if preflight is not None:
-            h.resize_and_wait(
+            _keyboard_harness.resize_and_wait(
                 process,
                 master,
                 output,
                 rows=80,
                 columns=columns,
                 needle=b"JEV",
-                controls=(h.FULL_REDRAW,),
+                controls=(_keyboard_harness.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
 
             def completed_screen() -> bytes:
-                end = output.rfind(h.FRAME_END)
+                end = output.rfind(_keyboard_harness.FRAME_END)
                 if end < 0:
                     raise AssertionError("preflight has no completed terminal frame")
-                return h.screen_text(bytes(output[: end + len(h.FRAME_END)]))
+                return _keyboard_harness.screen_text(bytes(output[: end + len(_keyboard_harness.FRAME_END)]))
 
             screen = completed_screen()
             marker = b"retained-generation-answer"
@@ -291,26 +292,26 @@ def run(
                         raise AssertionError(f"default context result hid {key!r}")
                 if preflight == "continuity" and b"continuity_write" not in screen:
                     raise AssertionError("default continuity result was hidden")
-            h.send_and_wait(process, master, output, b"d", marker)
+            _keyboard_harness.send_and_wait(process, master, output, b"d", marker)
             if marker not in completed_screen():
                 raise AssertionError("expanded evidence lost the recorded output")
             print(f"Librarian {preflight} default and expanded readings: PASS")
             os.write(master, b"q")
             return
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process,
             master,
             output,
             rows=42,
             columns=columns,
-            needle=h.WINDOW_TEXT_RE,
-            controls=(h.FULL_REDRAW,),
+            needle=_keyboard_harness.WINDOW_TEXT_RE,
+            controls=(_keyboard_harness.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
         initial = visible_window(output, split=split)
         if refresh_error:
             fail_refresh = True
-            h.send_and_wait(
+            _keyboard_harness.send_and_wait(
                 process, master, output, b"r", b"cached-detail-refresh-error"
             )
             cached = visible_window(output, split=split)
@@ -347,14 +348,14 @@ def run(
             )
         # A new frame must replace the previous frame's paging height.
         # Keep the width stable so wrapping and row identities stay unchanged.
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process,
             master,
             output,
             rows=34,
             columns=columns,
-            needle=h.WINDOW_TEXT_RE,
-            controls=(h.FULL_REDRAW,),
+            needle=_keyboard_harness.WINDOW_TEXT_RE,
+            controls=(_keyboard_harness.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
         resized = visible_window(output, split=split)
@@ -403,7 +404,7 @@ def run(
         )
         os.write(master, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Lane run page keys follow the visible payload: " + scenario,
         interact=interact,

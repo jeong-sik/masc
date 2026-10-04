@@ -1725,6 +1725,7 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_quota_scope_id : string option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
 }
@@ -1904,7 +1905,7 @@ let decode_runtime_context_source = function
   | "binding_override_clamped_by_capability" -> Ok Runtime_context_binding_clamped
   | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
 
-let decode_runtime_option ~default_id json =
+let decode_runtime_option ~usage ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
   let* ro_provider_id = required_string_field json "provider_id" in
@@ -1951,6 +1952,16 @@ let decode_runtime_option ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
+  let ro_quota_scope_id =
+    match usage, ro_quota_scope with
+    | Error _, _ | Ok _, None -> None
+    | Ok usage, Some scope ->
+        (match List.filter (fun account ->
+           String.equal account.Tui_decode_usage.pua_scope scope)
+           usage.Tui_decode_usage.puws_accounts with
+         | [account] -> Some account.pua_scope_id
+         | [] | _ :: _ :: _ -> None)
+  in
   let* ro_rate_limited = required_bool_field json "rate_limited" in
   let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
@@ -1969,6 +1980,7 @@ let decode_runtime_option ~default_id json =
     ; ro_quota_exhausted
     ; ro_quota_resets_at
     ; ro_quota_scope
+    ; ro_quota_scope_id
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
     }
@@ -2041,10 +2053,13 @@ let decode_runtime_resolved_snapshot json =
   let* default_json, rrs_default_runtime_id =
     decode_runtime_default_member json
   in
+  (* Capture the credential/quota scope before catalogue/surface projections split.
+     quota_scope itself is only an ordinal within this response. *)
+  let rrs_usage = Tui_decode_usage.decode_provider_usage_windows json in
   let* runtime_items = required_list_field json "runtimes" in
   let* rrs_runtimes =
     decode_list "runtimes"
-      (decode_runtime_option ~default_id:rrs_default_runtime_id)
+      (decode_runtime_option ~usage:rrs_usage ~default_id:rrs_default_runtime_id)
       runtime_items
   in
   let runtime_by_id = Hashtbl.create (max 1 (List.length rrs_runtimes)) in
@@ -2066,7 +2081,7 @@ let decode_runtime_resolved_snapshot json =
     | None -> Ok None
     | Some value ->
         let* runtime =
-          decode_runtime_option ~default_id:rrs_default_runtime_id value
+          decode_runtime_option ~usage:rrs_usage ~default_id:rrs_default_runtime_id value
         in
         Ok (Some runtime)
   in
@@ -2115,7 +2130,7 @@ let decode_runtime_resolved_snapshot json =
     loop rrs_lanes
   in
   Ok
-    { rrs_usage = Tui_decode_usage.decode_provider_usage_windows json
+    { rrs_usage
     ; rrs_generated_at_iso
     ; rrs_config_path
     ; rrs_default_runtime_id

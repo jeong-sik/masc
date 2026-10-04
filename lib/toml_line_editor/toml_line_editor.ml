@@ -564,6 +564,141 @@ let edit_table_bool content ~path ~key ~value =
   edit_table_value content ~path ~key ~value:(Some (Bool value))
 ;;
 
+type nested_edit_error = Invalid_document | Unreachable_table
+
+module Exact_number = struct
+  include Otoml.Base.OCamlNumber
+  let float_to_string = float_text
+end
+module Exact_toml = Otoml.Base.Make (Exact_number) (Otoml.Base.StringDate)
+
+let edit_nested_bool content ~path ~key ~value =
+  let module T = Exact_toml in
+  let rec relative prefix path = match prefix, path with
+    | [], rest -> Some rest
+    | first :: prefix, next :: path when first = next -> relative prefix path
+    | _ -> None in
+  let rec set ~create ~inline path node =
+    let fields, rebuild, inline = match node with
+      | T.TomlTable fields -> fields, (fun fields -> T.TomlTable fields), inline
+      | T.TomlInlineTable fields -> fields, (fun fields -> T.TomlInlineTable fields), true
+      | _ -> [], (fun _ -> node), inline in
+    match node with
+    | T.TomlTable _ | T.TomlInlineTable _ ->
+      (match path with
+       | [] -> Some (rebuild ((key, T.TomlBoolean value) :: List.remove_assoc key fields), inline)
+       | name :: rest ->
+         let child = match List.assoc_opt name fields with
+           | Some child -> Some child
+           (* Once an existing inline ancestor is reached, its missing
+              descendants must be created inside that same sealed value. *)
+           | None when inline -> Some (T.TomlInlineTable [])
+           | None when create -> Some (T.TomlTable [])
+           | None -> None in
+         Option.bind child (fun child ->
+           Option.map (fun (child, inline) ->
+             rebuild ((name, child) :: List.remove_assoc name fields), inline)
+             (set ~create ~inline rest child)))
+    | _ -> None in
+  (* Compare maps without depending on the printer's field order. *)
+  let rec ordered = function
+    | T.TomlTable fields -> T.TomlTable (order_fields fields)
+    | T.TomlInlineTable fields -> T.TomlInlineTable (order_fields fields)
+    | T.TomlArray values -> T.TomlArray (List.map ordered values)
+    | T.TomlTableArray values -> T.TomlTableArray (List.map ordered values)
+    | value -> value
+  and order_fields fields = List.map (fun (key, value) -> key, ordered value) fields
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right) in
+  let parse = T.Parser.from_string_result in
+  let path_text path = String.concat "." (List.map render_key path) in
+  match parse content with
+  | Error _ -> Error Invalid_document
+  | Ok original ->
+    match set ~create:true ~inline:false path original with
+    | None -> Error Unreachable_table
+    | Some (expected, _) ->
+    let confirms candidate = match parse candidate with
+      | Ok actual -> compare (ordered actual) (ordered expected) = 0
+      | Error _ -> false in
+    let lines, trailing_newline = split_lines content in
+    let rec inline_ancestor path = function
+      | T.TomlInlineTable _ -> true
+      | T.TomlTable fields -> (match path with
+          | [] -> false
+          | name :: rest -> Option.fold ~none:false ~some:(inline_ancestor rest)
+              (List.assoc_opt name fields))
+      | _ -> false in
+    (* Dotted keys already declare their table: Otoml accepts a later header
+       for it, but TOML does not. Only a real header or an absent path may use
+       the ordinary section editor. *)
+    let header_exists = Option.is_some
+      (find_structural_index (is_table ~path:(path_text path)) lines) in
+    let simple_allowed = header_exists ||
+      (T.find_opt original Fun.id path = None && not (inline_ancestor path original)) in
+    let simple = edit_table_bool content ~path:(path_text path) ~key ~value in
+    if simple_allowed && confirms simple then Ok simple else
+    let comment statement parsed =
+      let rec find from = match String.index_from_opt statement from '#' with
+        | None -> ""
+        | Some at -> (match parse (String.sub statement 0 at) with
+          | Ok prefix when compare prefix parsed = 0 ->
+              " " ^ String.sub statement at (String.length statement - at)
+          | Ok _ | Error _ -> find (at + 1)) in
+      find 0 in
+    (* Read whole assignments through the grammar, including multiline values.
+       An inline ancestor is rewritten as that one assignment, never as a
+       second header that would redefine its sealed table. *)
+    let rec assignments context state before = function
+      | [] -> None
+      | line :: rest ->
+        if not (is_structural state) then
+          assignments context (scan_line state line) (line :: before) rest
+        else match header_of_line line with
+        | Some (Table context) -> assignments context outside (line :: before) rest
+        | Some (Table_array _) -> assignments [] outside (line :: before) rest
+        | None ->
+          let tail = skip_value ~opening:line rest in
+          let count = List.length rest - List.length tail in
+          let continuation, _ = split_at count rest in
+          let block = line :: continuation in
+          let statement = String.concat "\n" block in
+          let changed = match relative context path, parse statement with
+            | Some remaining, Ok document ->
+              (match set ~create:false ~inline:false remaining document with
+               | Some (updated, true) ->
+                   Some (String.trim (T.Printer.to_string ~indent_width:0 ~collapse_tables:true updated)
+                     ^ comment statement document)
+               | Some (_, false) | None ->
+                 (match T.find_opt document Fun.id (remaining @ [key]) with
+                  | Some (T.TomlBoolean _) -> Some
+                      (path_text (remaining @ [key]) ^ " = " ^ string_of_bool value
+                        ^ comment statement document)
+                  | Some _ | None -> None))
+            | Some _, Error _ | None, _ -> None in
+          (match changed with
+           | Some replacement ->
+             let candidate = join_lines (List.rev before @ [replacement] @ tail) ~trailing_newline in
+             if confirms candidate then Some candidate
+             else assignments context outside (List.rev_append block before) tail
+           | None -> assignments context outside (List.rev_append block before) tail) in
+    match assignments [] outside [] lines with
+    | Some candidate -> Ok candidate
+    | None ->
+      (* Dotted declarations extend from their existing ancestor section. *)
+      let ancestor = List.fold_left2 (fun best line structural ->
+        match structural, header_of_line line with
+        | true, Some (Table candidate) when List.length candidate > List.length best
+            && Option.is_some (relative candidate path) -> candidate
+        | _ -> best) [] lines (structural_lines lines) in
+      let remaining = match relative ancestor path with Some path -> path | None -> path in
+      let assignment = path_text (remaining @ [key]) ^ " = " ^ string_of_bool value in
+      let candidate = if ancestor = [] then
+          join_lines (assignment :: lines) ~trailing_newline
+        else with_table content ~path:(path_text ancestor) ~on_missing:Fun.id
+          ~edit:(fun body -> body @ [assignment]) in
+      if confirms candidate then Ok candidate else Error Unreachable_table
+;;
+
 let edit_table_float content ~path ~key ~value =
   edit_table_value content ~path ~key ~value:(Some (Float value))
 ;;

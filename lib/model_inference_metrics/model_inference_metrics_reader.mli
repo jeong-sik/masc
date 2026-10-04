@@ -6,6 +6,7 @@ type decision_read =
   | Decisions_read
   | Decision_directory_unavailable
   | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
 (** A missing store is an empty readable inventory. A directory or file that
     cannot be read never confirms absence of runtime activity. *)
 

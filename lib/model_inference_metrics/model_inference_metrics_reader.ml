@@ -20,6 +20,7 @@ type decision_read =
   | Decisions_read
   | Decision_directory_unavailable
   | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
 
 let decision_files directory =
   let log exn = Log.Model_inference_metrics.error
@@ -44,7 +45,7 @@ let decision_files directory =
    JSONL helper's existence check can hide denied stat calls and dangling
    symlinks as an empty file. Keep streaming and propagate every open/read
    failure to the typed decision diagnostics below. *)
-let fold_decision_file ~init ~f path =
+let fold_decision_file ~init ~on_malformed ~f path =
   let line_no = ref 0 in
   let consume acc raw =
     let line = String.trim raw in
@@ -52,7 +53,7 @@ let fold_decision_file ~init ~f path =
     else begin
       incr line_no;
       match Fs_compat.parse_jsonl_line ~source:path ~line_no:!line_no line with
-      | None -> acc
+      | None -> on_malformed (); acc
       | Some json -> f acc ~line_no:!line_no json
     end in
   match Fs_compat.get_fs_opt (), Fs_compat.execution_context () with
@@ -76,6 +77,8 @@ let read_all_decisions ~base_path ~since_unix =
   | Error () -> [], Decision_directory_unavailable
   | Ok files ->
     let unreadable = ref 0 in
+    let malformed_rows = ref 0 in
+    let schema_violation_rows = ref 0 in
     let files =
       files
       |> List.filter (fun f ->
@@ -88,16 +91,19 @@ let read_all_decisions ~base_path ~since_unix =
          try
            fold_decision_file
              ~init:[]
+             ~on_malformed:(fun () -> incr malformed_rows)
              ~f:(fun acc ~line_no json ->
                match parse_telemetry_entry json ~since_unix with
                | Ok e -> e :: acc
                | Error err ->
                  if parse_error_is_schema_violation err
-                 then
+                 then begin
+                   incr schema_violation_rows;
                    Log.Model_inference_metrics.warn "decisions.jsonl parse drop: %s:%d reason=%s"
                      path
                      line_no
-                     (parse_error_label err);
+                     (parse_error_label err)
+                 end;
                  acc)
              path
          with
@@ -112,7 +118,13 @@ let read_all_decisions ~base_path ~since_unix =
              (Printexc.to_string exn);
            [])
       files in
-    entries, (if !unreadable = 0 then Decisions_read else Decision_files_unreadable !unreadable)
+    let reading =
+      if !unreadable > 0 then Decision_files_unreadable !unreadable
+      else if !malformed_rows > 0 || !schema_violation_rows > 0 then
+        Decision_rows_invalid { malformed_rows = !malformed_rows;
+          schema_violation_rows = !schema_violation_rows }
+      else Decisions_read in
+    entries, reading
 ;;
 
 let read_cost_entries_dated ~base_path ~since_unix

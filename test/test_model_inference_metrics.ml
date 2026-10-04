@@ -1795,6 +1795,43 @@ let test_runtime_history_dangling_decision_file () =
     check string "removed broken entry leaves a genuinely empty store" "ready"
       (recovered |> member "state" |> to_string))
 
+let test_runtime_history_invalid_decision_rows () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "invalid-history" in
+    let now = now_unix () in
+    let valid = success_entry ~model:"model" ~ts:now () in
+    let schema_invalid = `Assoc ["ts_unix", `Float now; "telemetry", `Assoc []] in
+    let ignored = [`Assoc ["ts_unix", `Float (now -. 172800.); "telemetry", `Assoc []];
+      `Assoc ["ts_unix", `Float now; "event", `String "keeper_started"]] in
+    let open Yojson.Safe.Util in
+    let read () = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    write_decisions path (valid :: ignored);
+    check string "outside-window and valid non-inference rows do not degrade history"
+      "ready" (read () |> member "state" |> to_string);
+    let malformed = "{broken json\n" in
+    List.iter (fun (rows, raw, malformed_count, invalid_count) ->
+      write_decisions path rows;
+      Out_channel.with_open_gen [Open_append; Open_binary] 0o600 path (fun channel ->
+        output_string channel raw);
+      let history = read () in
+      check string "dropped decision evidence cannot confirm complete history"
+        "unavailable" (history |> member "state" |> to_string);
+      let diagnostics = history |> member "decision_read" in
+      check string "dropped rows have a typed cause" "rows_invalid"
+        (diagnostics |> member "cause" |> to_string);
+      check int "malformed rows counted" malformed_count
+        (diagnostics |> member "malformed_rows" |> to_int);
+      check int "schema-invalid rows counted" invalid_count
+        (diagnostics |> member "schema_violation_rows" |> to_int);
+      check bool "partial totals are not exposed as authoritative" true
+        (history |> member "runtimes" = `Null))
+      [[], malformed, 1, 0; [schema_invalid], "", 0, 1;
+       valid :: schema_invalid :: ignored, malformed, 1, 1];
+    write_decisions path [valid];
+    check string "repair restores readable history" "ready"
+      (read () |> member "state" |> to_string))
+
 let test_runtime_history_directory_read_failure () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1868,6 +1905,7 @@ let () =
       test_case "runtime history keeps account attribution" `Quick test_runtime_history_keeps_account_attribution;
       test_case "runtime history refuses partial decision reads and recovers" `Quick test_runtime_history_unreadable_decision_file;
       test_case "runtime history reports dangling decision files" `Quick test_runtime_history_dangling_decision_file;
+      test_case "runtime history reports malformed and schema-invalid rows" `Quick test_runtime_history_invalid_decision_rows;
       test_case "runtime history distinguishes missing and unreadable store" `Quick test_runtime_history_directory_read_failure;
     ];
     "thinking_fraction", [

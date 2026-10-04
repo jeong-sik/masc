@@ -59,7 +59,9 @@ let decision_store_failure () =
     check bool "an unread file never claims no attributed samples" false (List.mem_assoc "Runtime samples" lines);
     check bool "an unread file never claims no recent success" false (List.mem_assoc "Last success" lines))
     [["cause", `String "directory_unavailable"], "directory could not be read";
-     ["cause", `String "files_unreadable"; "unreadable_files", `Int 2], "2 decision log files could not be read"]
+     ["cause", `String "files_unreadable"; "unreadable_files", `Int 2], "2 decision log files could not be read";
+     ["cause", `String "rows_invalid"; "malformed_rows", `Int 1; "schema_violation_rows", `Int 2],
+       "1 malformed and 2 schema-invalid decision rows"]
 let () = run "TUI runtime evidence" ["operator reading", [
   test_case "attribution, missing evidence and specification" `Quick attributed_view;
   test_case "failed cold snapshot" `Quick cold_failure;

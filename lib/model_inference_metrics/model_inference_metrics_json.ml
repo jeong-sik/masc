@@ -351,6 +351,10 @@ let compute_runtime_metrics_json ~base_path ~window_minutes =
   | Decision_directory_unavailable -> unavailable ["cause", `String "directory_unavailable"]
   | Decision_files_unreadable count ->
       unavailable ["cause", `String "files_unreadable"; "unreadable_files", `Int count]
+  | Decision_rows_invalid { malformed_rows; schema_violation_rows } ->
+      unavailable ["cause", `String "rows_invalid";
+        "malformed_rows", `Int malformed_rows;
+        "schema_violation_rows", `Int schema_violation_rows]
   | Decisions_read ->
   let attributed = List.filter_map (fun (entry : raw_entry) ->
     match entry.executed_runtime_id with

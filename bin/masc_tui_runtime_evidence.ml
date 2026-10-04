@@ -10,6 +10,7 @@ type specification = {
 }
 type history = Loading | Unavailable
   | Decision_directory_unavailable | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed : int; schema_invalid : int }
   | Observed of {
   window : int; generated_at : float; stale : bool; refresh_failed : bool; unattributed : int;
   store_note : string; runtimes : stats list;
@@ -88,6 +89,11 @@ let history json =
        let* count = member nat "unreadable_files" diagnostic in
        if count > 0 then Ok (Decision_files_unreadable count)
        else Error "runtime history has an invalid unreadable file count"
+     | "rows_invalid" ->
+       let* malformed = member nat "malformed_rows" diagnostic in
+       let* schema_invalid = member nat "schema_violation_rows" diagnostic in
+       if malformed > 0 || schema_invalid > 0 then Ok (Decision_rows_invalid {malformed; schema_invalid})
+       else Error "runtime history has an invalid dropped row count"
      | _ -> Error "runtime history has an unrecognized decision read failure")
   | "ready" ->
     let* window = member nat "window_minutes" json in
@@ -142,6 +148,10 @@ let lines t ~runtime_id =
     | Decision_files_unreadable count ->
         ["Runtime history", Printf.sprintf
           "incomplete; %d decision log files could not be read; runtime totals unavailable" count]
+    | Decision_rows_invalid { malformed; schema_invalid } ->
+        ["Runtime history", Printf.sprintf
+          "incomplete; %d malformed and %d schema-invalid decision rows; runtime totals unavailable"
+          malformed schema_invalid]
     | Observed observed ->
       ["History window", Printf.sprintf "last %d min, snapshot %s%s"
         observed.window (timestamp observed.generated_at)

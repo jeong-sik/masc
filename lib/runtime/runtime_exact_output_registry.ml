@@ -151,6 +151,7 @@ type reservation_error = Reservation_inactive
 let published : t option Atomic.t = Atomic.make None
 let publication_mutex = Mutex.create ()
 let active_reservation : reservation option ref = ref None
+let availability_change = ref (Eio.Promise.create ())
 
 let ( let* ) = Result.bind
 
@@ -299,6 +300,27 @@ let with_publication_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
 ;;
 
+let next_availability_change () =
+  with_publication_lock (fun () -> fst !availability_change)
+;;
+
+(* Each mutation takes exactly one resolver under the publication lock. No
+   caller callback or waiter runs here; resolution only enqueues waiting fibers
+   after the lock is released, on their own schedulers. *)
+let rotate_availability_change () =
+  let _, resolver = !availability_change in
+  availability_change := Eio.Promise.create ();
+  resolver
+;;
+
+let with_changed_publication f =
+  let* value, resolver = with_publication_lock (fun () ->
+    let* value = f () in
+    Ok (value, rotate_availability_change ())) in
+  Eio.Promise.resolve resolver ();
+  Ok value
+;;
+
 (* A required lane rule 3 emptied is excused at this one publication: it is
    unavailable alone and every other lane still publishes. The registry keeps
    the full required list, so the next publication requires the lane again
@@ -335,7 +357,7 @@ let check_publication ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes 
 ;;
 
 let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
-  with_publication_lock
+  with_changed_publication
   @@ fun () ->
   match !active_reservation with
   | Some _ -> Error Publication_busy
@@ -357,7 +379,7 @@ let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(excused_lan
 ;;
 
 let unpublish () =
-  with_publication_lock (fun () ->
+  with_changed_publication (fun () ->
     match !active_reservation with
     | Some _ -> Error Publication_busy
     | None -> Atomic.set published None; Ok ())
@@ -450,17 +472,18 @@ let reserve_replacement prepared =
 let same_reservation left right = left.identity == right.identity
 
 let close_private_transaction reservation ~publish =
-  with_publication_lock
-  @@ fun () ->
-  (* [reservation] never leaves [transact_replacement]'s closure. Other
-     publication operations can only observe the active fence, so no external
-     caller can consume or replace this exact token while [apply_write] runs. *)
-  active_reservation := None;
-  if publish
-  then
-    Option.iter
-      (fun registry -> Atomic.set published (Some registry))
-      reservation.candidate
+  let resolver = with_publication_lock (fun () ->
+    (* [reservation] never leaves [transact_replacement]'s closure. Other
+       publication operations can only observe the active fence, so no external
+       caller can consume or replace this exact token while [apply_write] runs. *)
+    active_reservation := None;
+    if publish
+    then
+      Option.iter
+        (fun registry -> Atomic.set published (Some registry))
+        reservation.candidate;
+    rotate_availability_change ()) in
+  Eio.Promise.resolve resolver ()
 ;;
 
 let transact_replacement prepared ~apply_write =
@@ -479,7 +502,7 @@ let transact_replacement prepared ~apply_write =
 ;;
 
 let finish_replacement reservation =
-  with_publication_lock
+  with_changed_publication
   @@ fun () ->
   match !active_reservation with
   | Some active when same_reservation active reservation ->
@@ -492,7 +515,7 @@ let finish_replacement reservation =
 ;;
 
 let abort_replacement reservation =
-  with_publication_lock
+  with_changed_publication
   @@ fun () ->
   match !active_reservation with
   | Some active when same_reservation active reservation ->

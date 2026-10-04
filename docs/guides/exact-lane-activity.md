@@ -42,9 +42,15 @@ work still finishing. `running_count` describes retained observation coverage,
 not an atomic census of all processes. Browser Stagehand has no standalone run
 history. The inventory read never starts or stops work.
 
-The TUI and Web provide the activity drafts described below. Enabling a lane
-allows its next request; this does not send a new wake to a parked
-Workspace Curator owner. Its next owner request resumes processing.
+The TUI and Web provide the activity drafts described below. Publishing an
+enabled Workspace Curator declaration wakes its parked owner to reconsider
+retained facts without another memory commit or manual request. First registry
+publication does the same. Work deferred while a configuration replacement
+fenced registry access is reconsidered when that fence closes, including a
+failed write that leaves the previous registry serving. The owner rereads
+current admission, so a failed attempt to enable an off lane cannot run it.
+This wake does not establish that model execution or curation succeeded; the
+Exact run reading records that outcome.
 
 ## Upgrade notes
 

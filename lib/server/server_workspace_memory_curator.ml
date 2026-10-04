@@ -261,6 +261,10 @@ let start_with ~sw ~base_path ~enabled ~prepare =
     if Hashtbl.mem owners base_path then false
     else (Hashtbl.add owners base_path owner; true)) in
   if admitted then (
+    (* All Curator owners in this process acquire from the same global Exact
+       registry. Capture before the first drain so a concurrent publication
+       cannot fall between checking admission and beginning to watch it. *)
+    let availability = Runtime_exact_output_registry.next_availability_change () in
     let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
       (* fire-and-forget: wake reports admission only; notifications have no response consumer. *)
       if String.equal event.keepers_dir keepers_dir then ignore (wake owner)) in
@@ -268,6 +272,13 @@ let start_with ~sw ~base_path ~enabled ~prepare =
       Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
       unsubscribe ();
       Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.remove owners base_path));
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      let rec watch change =
+        Eio.Promise.await change;
+        let next = Runtime_exact_output_registry.next_availability_change () in
+        ignore (wake owner);
+        watch next in
+      watch availability);
     (* A daemon, because the switch is this owner's whole life and the loop
        parks on [owner.wake] whenever the backlog is empty. Nothing wakes it on
        the way down: the release hook below sets [stopped] and drops the
@@ -296,21 +307,27 @@ let start_with ~sw ~base_path ~enabled ~prepare =
       drain ();
       `Stop_daemon))
 
-let start ~sw ~base_path =
-  let enabled () = match Runtime_exact_output_registry.current () with
+let registry_enabled () = match Runtime_exact_output_registry.current () with
     | Error _ -> false
     | Ok registry ->
       (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
        | Error (Runtime_exact_output_registry.Exact_lane_off _)
        | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
-       | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true) in
-  start_with ~sw ~base_path ~enabled ~prepare:(fun () -> prepare_execution ~base_path)
+       | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true)
+
+let start ~sw ~base_path =
+  start_with ~sw ~base_path ~enabled:registry_enabled ~prepare:(fun () -> prepare_execution ~base_path)
 
 module For_testing = struct
   let execute = execute
 
   let start ~sw ~base_path ~max_input_bytes ~execute =
     start_with ~sw ~base_path ~enabled:(fun () -> true)
+      ~prepare:(fun () -> Ok { configuration = `Assoc ["injected_runner", `Bool true];
+                              max_input_bytes; execute })
+
+  let start_with_registry ~sw ~base_path ~max_input_bytes ~execute =
+    start_with ~sw ~base_path ~enabled:registry_enabled
       ~prepare:(fun () -> Ok { configuration = `Assoc ["injected_runner", `Bool true];
                               max_input_bytes; execute })
 

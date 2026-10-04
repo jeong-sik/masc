@@ -197,6 +197,18 @@ val current : unit -> (t, publication_error) result
     a replacement reservation fences new acquisitions, and
     [Registry_not_published] before bootstrap has published one. *)
 
+val next_availability_change : unit -> unit Eio.Promise.t
+(** Observe the next publication, withdrawal, or end of a replacement fence.
+    Capture this promise before inspecting {!current}; await it outside any
+    locks. On wake, capture the next promise before rereading current state.
+    Several changes may coalesce into one wake; this is not a commit receipt.
+
+    Failed/aborted and retained transactions also wake observers after closing
+    their fence: work deferred by [Publication_busy] can acquire again. Failed
+    admission and rejected reservations do not change availability or signal.
+    Resolution only enqueues waiters, outside the publication mutex. The owner
+    of each waiting fiber controls its cancellation and lifetime. *)
+
 val rejected_slots : t -> rejected_slot list
 
 val rejected_target_bindings

@@ -194,7 +194,13 @@ export class RuntimeTomlSession {
         this.update({ uncertainWrite: false, error: `${errorToString(error)} 저장 전에 거절되었습니다. 초안과 저장 기준은 유지됩니다.` })
       } else this.update({ uncertainWrite: true, error: `${errorToString(error)} 초안은 유지됩니다. 파일 변경 여부를 확인하지 못했습니다. 현재 파일을 읽고 비교한 뒤 다시 저장하세요.` })
       return false
-    } finally { this.resumeController = null; this.update({ phase: 'idle' }) }
+    } finally {
+      this.resumeController = null
+      this.update({ phase: 'idle' })
+      // Another editor may commit while this write owns setup/refresh follow-up.
+      // Re-read only an owned, certain session; ensure preserves dirty drafts.
+      if (this.admits(authority) && !this.state.peek().uncertainWrite) await this.ensure(authority)
+    }
   }
 }
 

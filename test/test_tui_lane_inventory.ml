@@ -125,7 +125,32 @@ let repeated_instance () =
   let two = one |> set "id" (str "declaration//config/other.toml")
     |> set "selection" (object_ ["kind",str "declaration";"source_path",str "/config/other.toml"]) in
   rejects "same worker cannot have two source owners" (snapshot [one;two])
+let running_observation_survives_inventory () =
+  let decoded = ok (Decode.decode (snapshot [])) in
+  let exact = decoded.exact_snapshot in
+  let exact = {exact with Tui_decode.sls_lanes=List.map (fun (lane : Tui_decode.standalone_lane) ->
+    if Standalone_lane.equal lane.sl_lane Librarian then
+      {lane with sl_status=Tui_decode.Standalone_running;sl_running_count=2}
+    else lane) exact.sls_lanes} in
+  let decoded = {decoded with exact_snapshot=exact} in
+  Alcotest.(check string) "admission does not hide ongoing exact work"
+    "2 running · 1 admitted slots"
+    (Display.row_summary_in decoded (find "exact/librarian_exact" decoded))
+
+let bounded_run_reading_is_visible () =
+  let decoded = ok (Decode.decode (snapshot [])) in
+  let exact = {decoded.exact_snapshot with Tui_decode.sls_exact_run_projection_count=4;
+    sls_exact_run_source_total=9;sls_exact_run_projection_truncated=true} in
+  let decoded = {decoded with exact_snapshot=exact} in
+  let note = "Exact run observations are windowed: 4/9 retained runs. Counts and timings describe this window." in
+  Alcotest.(check bool) "overview retains the bounded observation warning" true
+    (List.mem note (Display.overview_notices decoded));
+  Alcotest.(check bool) "full diagnostics retain the same observation scope" true
+    (List.mem note (Display.snapshot_notices decoded))
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
+  Alcotest.test_case "running observation survives inventory" `Quick running_observation_survives_inventory;
+  Alcotest.test_case "bounded run reading remains visible" `Quick bounded_run_reading_is_visible;
   Alcotest.test_case "all builtins and manual identity" `Quick complete_inventory;
   Alcotest.test_case "invalid declaration and live worker" `Quick invalid_and_running;
   Alcotest.test_case "partial reading and unknown owner" `Quick partial_owner_unknown;

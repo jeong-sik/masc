@@ -1,9 +1,10 @@
 # TUI에서 TOML Lane Add-on 설치·연결하기
 
 같은 서버를 사용하는 `masc-tui --base-path <base-path> --port <server-port>`를 연다.
-`Lanes` 화면에서 `o` 또는 `A`로 Lane Add-ons를 연다. 둘은 같은 화면을 열며, Lanes 머리글과 아래 키 줄이 `o / A`로 함께 적는다.
+`Lanes` 화면에서 `o` 또는 `A`로 Lane Add-ons를 연다. 둘은 같은 화면을 열며, Lanes 하단 키 줄이 `o / A`로 함께 적는다.
 입력창의 `/addons`나 `:` 팔레트의 `go Lane Add-ons`로도 연다.
-`Lanes`는 standalone 실행과 실행 상세를 다룬다. Add-ons는 패키지 설치·연결·여러 Lane의 관측을 다룬다.
+`Lanes`는 Exact·Browser·기계·패키지를 한 목록에서 읽는다. Add-ons를 먼저 열지 않아도 선언과 설정 오류가 나온다. 선언 행 Enter는 원문을 표시하고 `E`로 편집한다. 수동 설치 행 Enter는 해당 인스턴스를 연다. Add-ons는 패키지 설치·연결·관측·이력의 상세 관리를 담당한다.
+`Lanes`의 `d`는 선택한 행의 전체 읽기, `i`는 목록 조회 진단이다. Add-ons 안에서 `i`를 누르면 패키지 설치기를 연다.
 
 ## 설치 목록
 

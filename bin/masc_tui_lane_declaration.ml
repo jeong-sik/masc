@@ -68,6 +68,20 @@ let create file_name =
 let editable_source_path ~directory source_path =
   let file_name = Filename.basename source_path in
   source_path=Filename.concat directory file_name && Result.is_ok (create file_name)
+let find_for_path ~path sessions =
+  match List.find_opt (fun (session : session) ->
+    session.file_name = Filename.basename path) sessions with
+  | None -> Ok None
+  | Some session ->
+      let source = match session.base with
+        | Some base -> Some base.source_path
+        | None -> Option.map (fun (current : document) -> current.source_path) session.current in
+      (match source with
+       | Some source when source = path -> Ok (Some session)
+       | Some source -> Error ("Draft retained for " ^ source
+           ^ "; it cannot be opened as " ^ path)
+       | None -> Error ("Create-only draft " ^ session.file_name
+           ^ " retained; it cannot be opened as " ^ path))
 let from_document (document : document) =
   {file_name=document.file_name;base=Some document;current=Some document;text=document.source_text;message=None}
 let write_json (session : session) =

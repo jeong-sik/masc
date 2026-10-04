@@ -76,11 +76,36 @@ let reading_notices (snapshot : snapshot) =
   (if snapshot.package_read.complete then [] else ["Package inventory is incomplete; missing entries do not prove removal."])
   @ (if snapshot.package_read.owner_present then [] else ["Package runtime owner has not been observed; declarations and retained bindings remain listed."])
 
+let exact_notices (snapshot : snapshot) =
+  if snapshot.exact_snapshot.sls_exact_run_projection_truncated then
+    [Printf.sprintf "Exact run observations are windowed: %d/%d retained runs. Counts and timings describe this window."
+      snapshot.exact_snapshot.sls_exact_run_projection_count snapshot.exact_snapshot.sls_exact_run_source_total]
+  else []
+
 let overview_notices (snapshot : snapshot) =
+  exact_notices snapshot @
   reading_notices snapshot
   @ (match snapshot.package_read.issues with
      | [] -> []
      | issues -> [Printf.sprintf "%d inventory issues · i: details" (List.length issues)])
 let snapshot_notices (snapshot : snapshot) =
+  exact_notices snapshot @
   reading_notices snapshot
   @ List.map (fun (path,message) -> path ^ ": " ^ message) snapshot.package_read.issues
+
+let row_summary_in (snapshot : snapshot) (row : row) =
+  let admission = row_summary row in
+  match row.selection with
+  | Exact target ->
+      (match List.find_opt (fun (lane : Masc.Tui_decode.standalone_lane) ->
+           Masc.Standalone_lane.equal lane.sl_lane target) snapshot.exact_snapshot.sls_lanes with
+       | None -> admission
+       | Some lane ->
+           let observation = match lane.sl_status with
+             | Masc.Tui_decode.Standalone_running -> Printf.sprintf "%d running" lane.sl_running_count
+             | Standalone_idle -> "idle"
+             | Standalone_degraded -> "needs attention"
+             | Standalone_unavailable -> "unavailable"
+             | Standalone_no_retained_observation -> "no retained runs" in
+           observation ^ " · " ^ admission)
+  | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> admission

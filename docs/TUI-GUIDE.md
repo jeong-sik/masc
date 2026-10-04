@@ -16,7 +16,7 @@ Additional surfaces hang off parents instead of holding Tab stops:
 Work's `t` switches Goals and Tasks, and `v` cycles through Task Review and
 Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
-Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
+Automation, and Runs as tabs. Runtime reaches the common Lanes inventory with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
 System reaches Runtime with `9` (Esc returns to System), Resources with `s` and Tools with `t`, and Activity
@@ -609,24 +609,35 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
-The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output execution path — the same thing this section's UI label `Lanes` shows — and Runtime Candidate Order for the order in which a Keeper turn tries runtime candidates. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes.
+Lanes is the common operator inventory for exact-output services, Browser
+backends, shared MSX/DOS machines and package installations. Runtime candidate
+orders remain a separate Runtime tab. Keeper lifecycle and turn-cycle facts
+remain on Keepers.
 
-For TOML package installations, open `/addons` from the composer or choose
-`go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
-covers configuration editing, connections, Skills, actions and cross-Lane evidence.
-These are three different customization surfaces: Config → Runtime edits named
-Keeper candidate orders; the six exact-output work purposes on this screen are
-fixed, although their runtime slots can be edited; Lane Add-ons load custom
-TOML packages and require a working image before a worker is active.
+The inventory is loaded on entry from `GET /api/v1/lanes`; opening Add-ons first
+is unnecessary. Invalid TOML and workers with unconfirmed cleanup stay visible.
+A saved declaration and an observed worker have separate readings. Missing data
+from a partial read does not mean a Lane was removed or disabled.
 
-Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
-Keepers, so this surface no longer repeats a second Keeper table. It hangs
-off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
-lanes, all runtimes, and then this surface. From the lane overview, `p` or
-`Esc` returns to Runtime; inside the run list and run detail, `Esc` first
-backs out one drill-down level as before. The palette keeps `go Lanes`.
+`j/k`, Page Up/Down, Home/End and `/` move through the same scrollable list. A
+mouse press selects the row actually drawn, and pressing the selected row opens
+it. Right or Enter opens exact runs, the selected Browser backend, the shared
+machine spectator, a declaration document or the exact manual instance.
+Declaration documents open for inspection: `E` edits and `s` saves explicitly.
+Existing drafts are retained. `&` still opens the machine media menu.
 
-On Lanes, select a lane and press `s` to edit its model order. Arrow keys or
+`d` reads the selected row's full observation; `i` reads inventory diagnostics.
+Both readers scroll, and Esc/Left returns to the list. `o` or `A`, `/addons`, and
+`go Lane Add-ons` keep the full package management surface available. Its `i`
+key opens the existing schema-based installation form; its scope differs from
+the inventory's diagnostics key. See the [Lane Add-on guide](guides/tui-lane-addons.md).
+
+This inventory does not provide enable/disable controls. Browser registration
+is not process health, a machine publication does not identify its controller,
+and an unapplied declaration is not a running worker. The
+[inventory contract](guides/lane-inventory.md) names each observation precisely.
+
+On Lanes, select an exact-output lane and press `s` to edit its model order. Arrow keys or
 `j/k` select a candidate. Press `r` to replace it at the same position;
 type a configured model and reasoning effort such as `luna medium`, select
 with arrows and press Enter. The choices show the declared reasoning effort,
@@ -671,43 +682,20 @@ inactive rows stay in the roster, receded, because "who left" is part of
 the reading. This is a registry view, not a socket list - a leftover
 process holding a connection is still an `lsof` question.
 
-```
- MASC Lanes (6 lanes)  17:02:53  [connected]
-  Lanes · observed 17:02:52
-  Lane Add-ons: 2 declared · 0 active · 2 config issues
-    LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
- >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
-```
+### Exact-output Lane detail
 
-Rows come from `GET /api/v1/dashboard/standalone-lanes`. One dim header
-carries the column names; a row carries the lane's mark and name, its status
-(with the elapsed time of a running lane), the running count, retained run
-count, execution outcomes, latency, the admitted slots, and the slots actually
-selected. The name and slot columns are as wide as the widest row needs, so
-a long name moves every row's columns together rather than one row's. The
-counts come before the slots because they are what a reader compares down
-the column; beside the Activity pane the slot column is the one cut, and the
-block under the list prints the selected lane's slots in full. This build
-projects six fixed consumers:
-`Board Attention` judges one durable Board attention candidate, `HITL Auto
-Judge` judges one held approval, `Librarian` selects the next Memory OS
-snapshot from immutable Keeper history, and `Verifier` reviews Task completion
-and Goal proof evidence. `Workspace Curator` classifies changed Keeper facts,
-and `Browser Stagehand` handles model-driven browser operations. The Add-on
-summary counts declared TOML files separately from active workers; a saved
-file can remain unapplied when its package image is unavailable.
+The common inventory's `exact_snapshot` preserves the exact execution reading:
+retained runs and their window/source counts, admitted and declared model order,
+failures and elapsed-time measurements. An exact row expands underneath the
+scrolling inventory. `d` shows complete configuration readings, and Enter opens
+its retained runs.
 
-The selected row expands underneath the matrix instead of forcing its long
-identifiers through the clipped comparison row. It names the exact
-`[runtime.exact_output_lanes.<lane-id>]` table, every admitted catalog slot in
-attempt order, the official-client runtime suffix used only after catalog
-exhaustion, publication-dropped slots that will not execute, and any admission
-error. In `runtime.toml`, `slots` is a required non-empty array of opaque
-catalog references; `cli_slots` is an optional array of official-client runtime
-ids. Blank values and duplicates are rejected. The lane tries admitted catalog
-slots in declaration order, then CLI runtimes in declaration order. The
-configuration is TOML; an individual run's Input and Output are retained JSON
-evidence, not another lane configuration format.
+The `[runtime.exact_output_lanes.<lane-id>]` table supplies `slots` for catalog
+references and `cli_slots` for official-client runtime IDs. At least one slot
+across the two groups is required. The lane tries admitted catalog slots in
+declaration order, then CLI runtimes in declaration order. Configuration is
+TOML; a run's retained Input and Output are JSON evidence. File durability,
+registry application and subsequent observation remain separate results.
 
 `s` opens the selected lane's provider editor. `a`, there or on the matrix,
 picks a runtime, and the runtime's kind decides the list it joins: an HTTP
@@ -2026,7 +2014,8 @@ Per surface:
 | `b` | Board read | Switch focus between the post body and comments |
 | Right / `Enter` | Keepers | Open keeper detail |
 | Mouse click | Keepers | Select a row; click the selected row again to open its detail |
-| Right / `Enter` | Lanes | Open the selected standalone lane's exact runs |
+| Right / `Enter` | Lanes | Open the selected Lane's management surface |
+| `d` / `i` | Lanes overview | Read full selected-row observation / inventory diagnostics |
 | `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
 | Right / `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
@@ -2085,7 +2074,7 @@ Tab cycles the surfaces:
 Within a surface:
 
   Keepers   --Right/Enter-->  Keeper detail  --o-->  Keeper logs
-  Lanes     --Right/Enter-->  Standalone exact runs
+  Lanes     --Right/Enter-->  Selected Lane management
 
   Keeper list/detail  --c-->  Message input
 

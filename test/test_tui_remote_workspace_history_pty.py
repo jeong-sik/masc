@@ -9,13 +9,17 @@ from __future__ import annotations
 import base64
 import copy
 import hashlib
+import http.client
 import json
 import os
+import select
+import socket
 import shlex
 import tempfile
 from pathlib import Path
 import sys
 import threading
+import time
 
 import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_chat as _keyboard_chat
@@ -996,12 +1000,41 @@ def runtime_config_editor_workspace_change(binary: str) -> None:
             refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
+def connection_disconnected(connection: socket.socket) -> bool:
+    """Observe EOF/reset without consuming or closing the held peer socket."""
+    if not select.select([connection], [], [], 0)[0]:
+        return False
+    try:
+        pending = connection.recv(1, socket.MSG_PEEK)
+    except ConnectionResetError:
+        return True
+    assert pending == b"", "unexpected input on the held Ask connection"
+    return True
+
+
 def ask_workspace_withdrawal(binary: str) -> None:
     # Exercise both the armed editor and an already admitted, held POST.
     for submit in (False, True):
         fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         answer = _keyboard_harness.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
+        admitted_answers: list[tuple[str, str]] = []
+        answer_connections: list[socket.socket] = []
+        def answer_request(method, connection):
+            if method != "POST":
+                return 405, {"error": "POST required"}
+            # The client may cancel its connection while the response is
+            # held. Count admission before responding: the harness's POST
+            # receipt is only appended after the held response handler returns.
+            with wire.lock:
+                admitted_answers.append((method, wire.phase))
+                answer_connections.append(connection)
+            return answer()
+        def answer_disconnected():
+            with wire.lock:
+                assert len(answer_connections) == 1, answer_connections
+                connection = answer_connections[0]
+            return connection_disconnected(connection)
         b_asks = threading.Event()
         def asks():
             with wire.lock:
@@ -1013,7 +1046,21 @@ def ask_workspace_withdrawal(binary: str) -> None:
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, _keyboard_harness.KEEPER_ASKS_PATH: asks,
-            _keyboard_approvals.KEEPER_ASK_ANSWER_PATH: answer})
+            _keyboard_approvals.KEEPER_ASK_ANSWER_PATH: _keyboard_harness.ConnectionHttpResponse(answer_request)})
+        # A read must not satisfy the mutation-admission gate.
+        with _keyboard_harness.test_http_endpoint({
+            _keyboard_approvals.KEEPER_ASK_ANSWER_PATH: fixtures[
+                _keyboard_approvals.KEEPER_ASK_ANSWER_PATH]}, None) as (port, start, _set_base):
+            start()
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=WAIT_SECONDS)
+            try:
+                connection.request("GET", _keyboard_approvals.KEEPER_ASK_ANSWER_PATH)
+                response = connection.getresponse()
+                assert response.status == 405, response.status
+                response.read()
+                assert not answer.requested.is_set() and not admitted_answers
+            finally:
+                connection.close()
         posts: _keyboard_harness.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
@@ -1024,20 +1071,45 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Enter:answer")
                 _keyboard_harness.send_and_wait(process, fd, output, b"1", b"1 (o) ")
                 _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Press Enter again to send")
+                answer_deadline = time.monotonic() + WAIT_SECONDS
                 if submit:
+                    # This precedes client dispatch, including a delayed
+                    # server admission. Starting at the fixture gate would
+                    # incorrectly extend the client's timeout observation.
                     os.write(fd, b"\r")
                     assert _keyboard_harness.wait_for_fixture_event(process, fd, output, answer.requested,
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
+                    assert not answer_disconnected(), "Ask connection closed before workspace withdrawal"
                 wire.publish("b")
                 assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    # Approvals withdraws its decision authority in the
+                    # body; the composer can occupy the mismatch footer.
                     lambda: b"workspace identity is unverified" in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
+                        and b"Enter:answer" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
                 assert _keyboard_harness.wait_for_fixture_event(process, fd, output, b_asks,
                     timeout=WAIT_SECONDS), "B failing asks read was not observed"
+                if submit:
+                    # Prove cancellation on the transport while no response
+                    # bytes can leave the held gate. A fixture-return event
+                    # alone cannot establish that the old client is gone.
+                    assert not answer.release.is_set() and not answer.completed.is_set()
+                    # Bound the whole request from before dispatch:
+                    # the existing 8s fixture bound is below the TUI's 10s
+                    # HTTP timeout, which must not masquerade as withdrawal.
+                    remaining = answer_deadline - time.monotonic()
+                    assert remaining > 0, "Ask withdrawal exceeded its dispatch deadline"
+                    assert _keyboard_harness.wait_for_fixture_state(process, fd, output, answer_disconnected,
+                        timeout=remaining), "withdrawn Ask client kept its held connection alive"
+                    assert time.monotonic() < answer_deadline, \
+                        "Ask disconnect was too late to establish workspace cancellation"
                 _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()
+                if submit:
+                    assert _keyboard_harness.wait_for_fixture_event(process, fd, output, answer.completed,
+                        timeout=WAIT_SECONDS), "held Ask response did not leave its fixture gate"
                 wire.publish("b-after-late")
                 assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
@@ -1046,7 +1118,10 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 _keyboard_harness.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
                 assert b"Enter:answer" not in screen(output)
                 assert b"ship the cold-start change now?" not in screen(output)
-                assert len([p for p, _ in posts if p == _keyboard_approvals.KEEPER_ASK_ANSWER_PATH]) == int(submit)
+                with wire.lock:
+                    assert len(admitted_answers) == int(submit), admitted_answers
+                    assert all(method == "POST" and phase == "a"
+                               for method, phase in admitted_answers), admitted_answers
                 os.write(fd, b"q")
             finally:
                 answer.release.set()

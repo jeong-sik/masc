@@ -1,0 +1,11 @@
+{
+  "raw_output_sha256": "f9096be1ff21ff31b4df3873c854f33c9eef9f37421e59883132bef4d269ab52",
+  "files_analyzed": 2,
+  "errors": 273,
+  "rule_counts": {
+    "reportIndexIssue": 214,
+    "reportArgumentType": 27,
+    "reportPossiblyUnboundVariable": 2,
+    "reportCallIssue": 30
+  }
+}

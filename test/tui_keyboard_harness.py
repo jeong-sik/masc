@@ -109,6 +109,17 @@ class MethodHttpResponse:
         self.resolve = resolve
 
 
+class ConnectionHttpResponse:
+    """Expose the peer socket while a fixture holds an admitted response.
+
+    The resolver may observe cancellation before releasing its response. The
+    handler retains socket ownership; a fixture must not close or consume it.
+    """
+
+    def __init__(self, resolve: Callable[[str, socket.socket], HttpResponse]) -> None:
+        self.resolve = resolve
+
+
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
@@ -116,6 +127,7 @@ HttpFixture = (
     | DroppedHttpResponse
     | RequestHttpResponse
     | MethodHttpResponse
+    | ConnectionHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
     | Callable[[], HttpResponse]
@@ -286,6 +298,8 @@ def test_http_endpoint(
                     resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
+            elif isinstance(fixture, ConnectionHttpResponse):
+                resolved = fixture.resolve(self.command, self.connection)
             elif isinstance(fixture, PathHttpResponse):
                 resolved = fixture.resolve(self.path)
             elif isinstance(fixture, HeadersHttpResponse):

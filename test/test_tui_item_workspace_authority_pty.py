@@ -60,6 +60,7 @@ class ItemWire(authority.WorkspaceWire):
         payload = json.loads(response.body)
         with self.lock:
             booting = self.booting
+            self.events.append({"event": "item-health", "booting": booting})
         payload["startup"] = {"state_ready": not booting}
         return _keyboard_harness.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
 
@@ -120,7 +121,8 @@ class ItemWire(authority.WorkspaceWire):
                 self.hold_next = False
             self.events.append({"event": "items", "phase": phase, "state": state, "held": held,
                 "roster_unavailable": self.roster_unavailable,
-                "denied_retry_observation": self.observing_denied_retry})
+                "denied_retry_observation": self.observing_denied_retry,
+                "missing_revision": self.missing_revision, "malformed_revision": self.malformed_revision})
         if held:
             self.held_started.set()
             if not self.release_held.wait(timeout=30.0):
@@ -245,6 +247,7 @@ def run(binary, captures):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = ItemWire(fixtures[authority.ROSTER_PATH][1])
     fixtures[authority.ROSTER_PATH] = wire.roster
+    fixtures["/api/v1/gate/keepers"] = wire.roster
     fixtures["/health"] = wire.health
     fixtures["/health?full=1"] = wire.health
     fixtures[ITEM_PATH] = wire.items
@@ -264,6 +267,18 @@ def run(binary, captures):
                 (captures / (name + ".txt")).write_bytes(visible())
                 (captures / (name + ".pty")).write_bytes(output)
             print("ITEM_AUTHORITY_FRAME " + name + "\n" + visible().decode(errors="replace"), flush=True)
+
+        def item_read_observed(*, missing=False, malformed=False):
+            with wire.lock:
+                return any(event["event"] == "items"
+                    and event["missing_revision"] == missing
+                    and event["malformed_revision"] == malformed
+                    for event in wire.events)
+
+        def booting_observed():
+            with wire.lock:
+                return any(event["event"] == "item-health" and event["booting"]
+                    for event in wire.events)
 
         def item_row(name):
             rows = [line for line in visible().splitlines() if name in line]
@@ -344,7 +359,9 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "admitted A account did not recover")
             capture("a-recovered")
             wire.set_roster_unavailable(True)
-            wait(lambda text: b"Keeper account revision" in text,
+            wait(lambda text: b"Account unavailable:" in text
+                 and (b"Keeper is not observed in the current roster" in text
+                      or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
             with wire.lock:
                 # The rendered refusal establishes that the client applied
@@ -378,33 +395,35 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
             wire.set_missing_revision(True)
-            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
-                 "missing revision retained Item monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            wait(lambda text: item_read_observed(missing=True) and b"Balance 3.250 Candle" in text,
+                 "missing public revision blocked the authenticated Item account")
             wire.set_missing_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "restored revision did not reload Item facts")
             wire.set_malformed_revision(True)
-            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
-                 "malformed revision retained Item monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            wait(lambda text: item_read_observed(malformed=True) and b"Balance 3.250 Candle" in text,
+                 "malformed public revision blocked the authenticated Item account")
             capture("a-revision-malformed")
             wire.set_malformed_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "valid revision recovery did not reload Item facts")
             wire.set_booting(True)
-            wait(lambda text: b"MASC Keepers" in text and b"server booting" in text
+            wait(lambda text: booting_observed() and b"No keeper selected." in text
                  and "▸Items".encode() not in text,
                  "booting server did not withdraw the Item detail")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-booting")
             wire.set_booting(False)
-            wait(lambda text: b"a.boot.ready" in text and b"server booting" not in text
+            # Item authority requires a fresh explicit detail read; unlike
+            # other detail tabs, it is not automatically restored on recovery.
+            wait(lambda text: b"MASC Keepers" in text and b"a.boot.ready" in text
                  and "▸Items".encode() not in text,
-                 "ready roster did not follow the booting authority withdrawal")
+                 "ready server did not publish its fresh roster after boot")
+            assert b"Balance " not in visible() and b"owned" not in visible()
             open_items()
-            wait(lambda text: b"Balance 3.250 Candle" in text,
-                 "ready server did not re-read Item account after boot")
+            wait(lambda text: "▸ alpha".encode() in text and "▸Items".encode() in text
+                 and b"Balance 3.250 Candle" in text,
+                 "explicit readmission did not reload the Keeper Item account")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \
                 "read-only Item navigation submitted Keeper work"
             os.write(fd, b"q")

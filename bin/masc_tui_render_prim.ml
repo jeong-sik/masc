@@ -4831,7 +4831,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
       (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
        | None -> ["Account/model configuration unavailable in the current catalogue"]
        | Some runtime ->
-         [ Printf.sprintf "Account %s · %s" runtime.ro_provider_id runtime.ro_provider
+         [ Printf.sprintf "Account %s · %s" (runtime_account_label runtime) runtime.ro_provider
+         ; "Connection " ^ runtime.ro_provider_id
          ; Printf.sprintf "Configured context %d tokens (%s) · model %s"
              runtime.ro_effective_max_context (Tui_decode.runtime_context_source_label runtime.ro_max_context_source) runtime.ro_model
          ; "Current configuration; the captured turn above retains its own runtime and context." ])

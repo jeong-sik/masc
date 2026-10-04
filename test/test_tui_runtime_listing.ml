@@ -1426,6 +1426,28 @@ let test_credit_cap_removal_clears_spent_warning () =
   record 100.5 {|{"data":{"limit":20,"limit_remaining":0}}|};
   expect "late older snapshot cannot resurrect the removed cap" 0 (snd (reading ()))
 
+let test_runtime_account_scope_is_shared_but_connection_keys_remain () =
+  let first = { (runtime "first.luna") with ro_provider_id = "first";
+    ro_quota_scope = Some "account:1"; ro_account_scope_id = Some "shared-codex-account";
+    ro_effective_max_context = 272000 } in
+  let wide = { first with ro_id = "first_wide.luna"; ro_provider_id = "first_wide";
+    ro_effective_max_context = 500000 } in
+  let other = { first with ro_id = "second.luna"; ro_provider_id = "second";
+    ro_quota_scope = Some "account:2"; ro_account_scope_id = Some "other-codex-account" } in
+  Alcotest.(check string) "one account scope spans both provider connections"
+    (runtime_account_label first) (runtime_account_label wide);
+  Alcotest.(check bool) "a distinct scope stays a distinct account" true
+    (runtime_account_label first <> runtime_account_label other);
+  List.iter (fun (runtime, context) ->
+    let label = runtime_model_picker_label runtime in
+    List.iter (fun fact -> Alcotest.(check bool) ("picker retains " ^ fact) true
+      (Astring.String.is_infix ~affix:fact label))
+      ["Account shared-codex-account"; "Connection " ^ runtime.ro_provider_id; runtime.ro_id; context])
+    [first, "272k context"; wide, "500k context"];
+  Alcotest.(check string) "missing stable identity is explicit without using the ordinal scope"
+    "unknown (Usage account identity unavailable)"
+    (runtime_account_label {first with ro_account_scope_id=None})
+
 let test_selected_status_wraps_and_reserves_rows () =
   let open Masc.Tui_decode_usage in
   let state = lane_state () in
@@ -1509,6 +1531,8 @@ let () = Alcotest.run "runtime list geometry"
         test_account_label_tracks_quota_scope;
       Alcotest.test_case "short viewport retains selected list row" `Quick
         test_short_viewport_preserves_selected_list_row;
+      Alcotest.test_case "account scope spans provider connections" `Quick
+        test_runtime_account_scope_is_shared_but_connection_keys_remain;
       Alcotest.test_case "account usage survives reset until new report" `Quick
         test_account_usage_stays_spent_until_new_report;
         Alcotest.test_case "selected status wraps with shared scroll geometry" `Quick

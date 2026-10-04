@@ -2566,9 +2566,19 @@ let launch_voice_config_load state ~mailbox =
          , None ))
 ;;
 
+let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
+  let request = { live_view = !msx_poll_view; live_port = state.port } in
+  state.msx_live_in_flight <- Some request;
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Msx_live_loaded (request, result))
+    (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
+      ~port:request.live_port Masc.Machine_lane.Msx ~since:None)
+;;
+
 let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
   match state.msx_live, state.msx_live_in_flight with
-  | (Masc_tui_machine_live.Unread | Failed _), _ | _, Some _ -> ()
+  | _, Some _ | Masc_tui_machine_live.Unread, None -> ()
+  | Failed _, None -> launch_msx_live_read state ~mailbox
   | (Not_loaded | Showing _), None ->
   match !msx_pending_poll with
   | Poll_pending _ | Poll_failed -> ()
@@ -2594,14 +2604,6 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
            (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
 ;;
 
-let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
-  let request = { live_view = !msx_poll_view; live_port = state.port } in
-  state.msx_live_in_flight <- Some request;
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Msx_live_loaded (request, result))
-    (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
-      ~port:request.live_port Masc.Machine_lane.Msx ~since:None)
-;;
 
 let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
   let current_view = !msx_poll_view in

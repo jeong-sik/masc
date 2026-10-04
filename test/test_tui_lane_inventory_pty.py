@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import tempfile
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -310,6 +311,47 @@ def run_destinations(executable):
             terminal_cols=100, terminal_rows=35, extra_env={"EDITOR": str(editor), "VISUAL": str(editor)})
 
 
+def run_msx_live_recovery(executable):
+    """One open MSX spectator recovers through live GET after a transient failure."""
+    fixtures = terminal.keeper_runtime_http_fixtures()
+    fixtures[lanes.LANE_INVENTORY_PATH] = inventory_response()
+    recovered = threading.Event()
+    reads = []
+    requests = []
+
+    def machine_read(path):
+        query = parse_qs(urlsplit(path).query)
+        if set(query) != {"source_kind"}:
+            raise AssertionError(f"initial/recovery read carried an unobserved mark: {query!r}")
+        reads.append(path)
+        if not recovered.is_set():
+            return 503, {"error": "fixture live read unavailable"}
+        return 200, {"source_kind": query["source_kind"][0], "state": "no_machine"}
+
+    fixtures[LIVE_PATH] = terminal.PathHttpResponse(machine_read)
+
+    def interact(process, fd, _slave, output, _base):
+        terminal.palette_go(process, fd, output, b"go lanes", b"All lanes")
+        select(process, fd, output, "machine/msx", b"MSX")
+        terminal.send_and_wait(process, fd, output, b"\r", b"fixture live read unavailable")
+        terminal.read_available(fd, output)
+        start = len(output)
+        recovered.set()
+        # No key closes/reopens or manually refreshes the spectator.
+        terminal.wait_for_output(process, fd, output, b"no machine loaded", start=start, timeout=5)
+        if len(reads) < 2:
+            raise AssertionError("the open spectator recovered without another live read")
+        mutations = [(path, body) for path, body in requests if path.startswith("/api/v1/msx/")]
+        if mutations:
+            raise AssertionError(f"live-read recovery mutated the machine: {mutations!r}")
+        os.write(fd, b"q")
+
+    terminal.run_terminal_scenario(executable,
+        description="Open MSX inventory spectator retries transient live read without reopening",
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        terminal_cols=120, terminal_rows=35)
+
+
 def check_fixtures():
     status, payload = inventory_response()
     assert status == 200 and payload["schema"] == "masc.lane-inventory/v1"
@@ -364,4 +406,5 @@ if __name__ == "__main__":
         for columns in (60, 80):
             run_inventory(executable, columns)
         run_destinations(executable)
+        run_msx_live_recovery(executable)
         print("Common Lane inventory focused PTY scenarios: PASS (synthetic HTTP)")

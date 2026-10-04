@@ -9,9 +9,10 @@ type t = private {
   grade : Candle_grade.t; total_milli : int; grade_trace : Candle_appraisal.trace;
   relations : Candle_appraisal.task_relation list; weights_trace : Candle_appraisal.trace;
   weight_max : int; deduction_rate : int; deduction_floor : int;
+  distribution : Candle_math.distribution; unallocated_milli : int;
   overdue_hours : int; coefficient : int; allocations : allocation list;
 }
-val make : identity:Candle_appraisal.identity -> grade:Candle_grade.t -> total_milli:int
+val make : distribution:Candle_math.distribution -> identity:Candle_appraisal.identity -> grade:Candle_grade.t -> total_milli:int
   -> grade_trace:Candle_appraisal.trace -> relations:Candle_appraisal.task_relation list
   -> weights_trace:Candle_appraisal.trace -> weight_max:int -> deduction_rate:int
   -> deduction_floor:int -> overdue_hours:int -> weights:(string * int) list -> (t, string) result
@@ -25,5 +26,5 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 (** Closed receipt decoder. Enforces integer ranges, unique recipients,
     admissible weights, nonnegative amounts no greater than their shares,
-    and shares summing exactly to the recorded total. It reads no current
+    and shares plus explicit unallocated milli summing to the recorded total. It reads no current
     policy and does not recalculate the coefficient or allocations. *)

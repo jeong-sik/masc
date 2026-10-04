@@ -220,6 +220,16 @@ let maybe_rotate_file path =
             |> List.sort (fun a b -> Int.compare b a)
           in
           List.iter (fun number ->
+            let backup = Printf.sprintf "%s.%d" path number in
+            match Fs_compat.exact_path_kind ~follow:false backup with
+            | Fs_compat.Exact_kind Unix.S_DIR ->
+              raise (Sys_error ("metrics backup is a directory: " ^ backup))
+            | Fs_compat.Exact_unknown ->
+              raise (Sys_error ("could not inspect metrics backup: " ^ backup))
+            | Fs_compat.Exact_kind
+                (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
+            | Fs_compat.Exact_missing -> ()) backups;
+          List.iter (fun number ->
             let src = Printf.sprintf "%s.%d" path number in
             if number >= max_rotated then
               ignore (Fs_compat.unlink_if_exists src)

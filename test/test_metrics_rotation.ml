@@ -143,8 +143,8 @@ let test_retention_unlinks_symlinks_without_following () =
   check (list string) "both live and dangling links removed" ["metrics.jsonl"; "unrelated"]
     (Fs_compat.read_dir dir)
 
-let test_retention_refuses_directory_collision () =
-  with_rotation ~max_bytes:17 ~retained:0 @@ fun () ->
+let test_retention_refuses_directory_collision retained () =
+  with_rotation ~max_bytes:17 ~retained @@ fun () ->
   let dir = tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup dir) @@ fun () ->
   let path = Filename.concat dir "metrics.jsonl" in
@@ -190,7 +190,8 @@ let () =
     ; "reduced retention prunes and shifts", test_reduced_retention_prunes_and_shifts
     ; "unrelated names survive cleanup", test_retention_preserves_unrelated_names
     ; "symlink targets survive cleanup", test_retention_unlinks_symlinks_without_following
-    ; "directories refuse cleanup", test_retention_refuses_directory_collision
+    ; "directories refuse cleanup", test_retention_refuses_directory_collision 0
+    ; "directories refuse shifting", test_retention_refuses_directory_collision 2
     ; "zero size disables cleanup", test_disabled_rotation_preserves_backups ] in
   run "Keeper metrics rotation"
     (List.map (fun (label, use_eio) -> label,

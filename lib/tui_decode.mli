@@ -361,6 +361,11 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_quota_scope_id : string option;
+      (** Opaque credential/quota scope ID joined from Usage in this response.
+          It identifies a credential location or client home, not the provider's
+          account identity; changing credentials in place need not change it.
+          [None] means no unambiguous scope ID was reported. *)
   ro_rate_limited : bool;
       (** This process observed a 429 that has neither reached its provider's
           Retry-After deadline nor been cleared by a successful answer.

@@ -239,10 +239,49 @@ let list_month_dirs base_dir =
     && d.[4] = '-'
     && Option.is_some (int_of_string_opt (String.sub d 0 4)))
 
-(** Day files matching [DD.jsonl] or [DD.NNN.jsonl], newest first. *)
+(* A completed file uses a canonical decimal sequence with at least three
+   digits. Parse once for validation, writer allocation and every read/prune
+   ordering; lexicographic order is wrong as soon as 999 becomes 1000. *)
+let rotation_sequence_digits = 3
+
+let day_file_parts name =
+  let length = String.length name in
+  if length < 8 || not (substring_is_ascii_digits name ~position:0 ~length:2)
+     || not (Filename.check_suffix name ".jsonl")
+  then None
+  else
+    let day = String.sub name 0 2 in
+    if length = 8 then Some (day, None)
+    else if length >= 9 + rotation_sequence_digits && Char.equal name.[2] '.' then
+      let digits = String.sub name 3 (length - 9) in
+      if not (substring_is_ascii_digits digits ~position:0 ~length:(String.length digits))
+      then None
+      else match int_of_string_opt digits with
+        | Some sequence when sequence > 0
+            && String.equal digits (Printf.sprintf "%0*d" rotation_sequence_digits sequence) ->
+            Some (day, Some sequence)
+        | Some _ | None -> None
+    else None
+
+let compare_day_files left right =
+  match day_file_parts left, day_file_parts right with
+  | Some (left_day, left_sequence), Some (right_day, right_sequence) ->
+      let day_order = String.compare left_day right_day in
+      if day_order <> 0 then day_order else
+      (match left_sequence, right_sequence with
+       | None, None -> 0
+       | None, Some _ -> 1
+       | Some _, None -> -1
+       | Some left, Some right -> Int.compare left right)
+  | None, None -> String.compare left right
+  | None, Some _ -> -1
+  | Some _, None -> 1
+
+(** Current and completed day files, newest first. *)
 let list_day_files month_path =
   list_subdirs month_path
   |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
+  |> List.sort (fun left right -> compare_day_files right left)
 
 (* The day number is always the leading two characters — for both the
    current [DD.jsonl] and rotated [DD.NNN.jsonl] segments.
@@ -322,15 +361,6 @@ let month_directory_name_is_valid name =
   Option.is_some (year_and_month_of_directory_name name)
 ;;
 
-(* [DD.jsonl] is the day's current append target; [DD.NNN.jsonl] is a
-   completed size-rotation segment of the same day (see
-   [append_rotating]). Lexicographic name order places a day's segments
-   after the previous day and before the day's current file, so the
-   newest-first listings, the oldest-first prune order, and range
-   selection all order them correctly with no special cases. *)
-let rotation_sequence_digits = 3
-let rotated_segment_name_length = 12 (* "DD." + NNN + ".jsonl" *)
-
 let day_number_is_valid ~year ~month day_text =
   match int_of_string_opt day_text, days_in_month ~year month with
   | Some day, Some maximum -> day >= 1 && day <= maximum
@@ -338,20 +368,9 @@ let day_number_is_valid ~year ~month day_text =
 ;;
 
 let day_file_name_is_valid ~year ~month name =
-  let is_current_shape =
-    String.length name = 8
-    && String.equal (String.sub name 2 6) ".jsonl"
-    && substring_is_ascii_digits name ~position:0 ~length:2
-  in
-  let is_rotated_segment_shape =
-    String.length name = rotated_segment_name_length
-    && Char.equal name.[2] '.'
-    && String.equal (String.sub name 6 6) ".jsonl"
-    && substring_is_ascii_digits name ~position:0 ~length:2
-    && substring_is_ascii_digits name ~position:3 ~length:rotation_sequence_digits
-  in
-  (is_current_shape || is_rotated_segment_shape)
-  && day_number_is_valid ~year ~month (String.sub name 0 2)
+  match day_file_parts name with
+  | Some (day, _) -> day_number_is_valid ~year ~month day
+  | None -> false
 ;;
 
 (* A name this layout can never produce is a foreign file, not a corrupted
@@ -410,6 +429,7 @@ let list_day_files_result month_path =
     ~expected:Day_file
     ~is_valid:(day_file_name_is_valid ~year ~month)
     entries
+  |> Result.map (List.sort (fun left right -> compare_day_files right left))
 ;;
 
 (* ── Lines from a single file ─────────────────────────── *)
@@ -962,34 +982,20 @@ let append_inner t json = append_unlocked t json
 let append t json =
   (Atomic.get append_guard) (fun () -> append_inner t json)
 
-let max_rotation_sequence = 999 (* the [NNN] name space of [DD.NNN.jsonl] *)
-
 let rotated_segment_name ~day_prefix ~sequence =
   Printf.sprintf "%s.%0*d.jsonl" day_prefix rotation_sequence_digits sequence
 
-(* Highest existing rotation sequence for [day_prefix] plus one. Scans
-   names structurally ([DD.NNN.jsonl] for this day) rather than keeping
-   a counter, so restarts and foreign writers cannot desynchronise it. *)
+(* Scan persisted identities so reopening a pruned store keeps progressing.
+   Never wrap an overflowing integer onto an existing segment. *)
 let next_rotation_sequence ~month_path ~day_prefix =
-  let day_dot = day_prefix ^ "." in
-  list_subdirs month_path
-  |> List.fold_left
-       (fun highest name ->
-          if
-            String.length name = rotated_segment_name_length
-            && String.starts_with ~prefix:day_dot name
-            && substring_is_ascii_digits name ~position:3
-                 ~length:rotation_sequence_digits
-            && String.equal (String.sub name 6 6) ".jsonl"
-          then
-            match
-              int_of_string_opt (String.sub name 3 rotation_sequence_digits)
-            with
-            | Some sequence -> Stdlib.Int.max highest sequence
-            | None -> highest
-          else highest)
-       0
-  |> ( + ) 1
+  let highest =
+    list_subdirs month_path
+    |> List.fold_left (fun highest name ->
+      match day_file_parts name with
+      | Some (day, Some sequence) when String.equal day day_prefix -> max highest sequence
+      | Some (_, Some _) | Some (_, None) | None -> highest) 0
+  in
+  if highest = max_int then None else Some (highest + 1)
 
 (* [append_rotating] lives after the file-count cache below: rotation
    must drop the current file's cache entry, and a fresh file that
@@ -1393,7 +1399,7 @@ let fold_range_file_paths_result t ~since ~until ~init ~f =
           days
           |> List.filter (day_file_name_is_valid ~year ~month:month_number)
           |> List.filter (day_in_range month)
-          |> List.rev
+          |> List.sort compare_day_files
         in
         let* acc = iter_days acc month month_path selected_days in
         iter_months acc rest
@@ -1677,10 +1683,9 @@ let append_rotating_unlocked t ~max_current_file_bytes json =
       else begin
         let month_path = Filename.dirname dated.path in
         let day_prefix = day_number_of_day_file_name dated.day_file in
-        let sequence = next_rotation_sequence ~month_path ~day_prefix in
-        if sequence > max_rotation_sequence
-        then None
-        else begin
+        match next_rotation_sequence ~month_path ~day_prefix with
+        | None -> None
+        | Some sequence -> begin
           let segment = rotated_segment_name ~day_prefix ~sequence in
           (* Same pre-rename steps as [prepare_for_directory_removal]:
              drop the cached writer for the old identity, and drop the
@@ -1697,7 +1702,7 @@ let append_rotating_unlocked t ~max_current_file_bytes json =
     in
     match placement with
     | None ->
-      Skipped_rotation_exhausted { sequence_limit = max_rotation_sequence }
+      Skipped_rotation_exhausted { sequence_limit = max_int }
     | Some outcome ->
       Jsonl_writer.append_jsonl ~path:dated.path json;
       run_post_append_pruning_unlocked t ~dated;

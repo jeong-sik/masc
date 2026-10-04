@@ -84,9 +84,11 @@ export class SettingsRuntimeSession {
       return source
     })
   }
-  async refreshOnObservation(): Promise<void> {
+  async refreshOnObservation(fileCommitted = false): Promise<void> {
     const attachment = this.attachment
     if (!this.attached(attachment)) return
+    // Shared verified commits also refresh the source used by lane edits.
+    if (fileCommitted) this.sourceDemanded = true
     // A new view reads even if it inherits a pending/uncertain write. Later
     // notifications cannot silently recover that outcome; explicit Read can.
     const initial = !attachment.observed

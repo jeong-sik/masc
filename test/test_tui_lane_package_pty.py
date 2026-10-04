@@ -140,9 +140,20 @@ def main(executable: str) -> None:
             key(b"s", b"Malformed candidate")
             # Leaving/reopening keeps the invalid draft, not just the old file.
             key(b"q", b"MASC Dashboard")
-            reopened = key(b":go lane add-ons\r", b"TOML draft terminal.toml")
-            if b"id = [" not in terminal.CSI_RE.sub(b"", reopened):
-                raise AssertionError("closing the pane discarded rejected TOML")
+            key(b":go lane add-ons\r", b"TOML draft terminal.toml")
+            # Activity validation adds rows above the retained draft. Scroll the
+            # real viewport to its body before asserting the rejected bytes.
+            reopened = b""
+            for _ in range(30):
+                terminal.read_available(master_fd, output)
+                start = len(output)
+                os.write(master_fd, b"J")
+                terminal.wait_for_output(process, master_fd, output, terminal.FRAME_END, start=start, timeout=3.0)
+                reopened = terminal.screen_text(bytes(output))
+                if b"id = [" in reopened:
+                    break
+            if b"id = [" not in reopened:
+                raise AssertionError(f"closing the pane discarded rejected TOML: {reopened!r}")
 
             # Save A can complete while the operator starts draft B. Its response
             # must update A without selecting A or losing B.

@@ -36,6 +36,7 @@ function syncUnloadGuard() {
  * A changed resolved path is not adopted over a retained draft by a comparison
  * read. Only an explicit reload/discard may select a different file. */
 export class RuntimeTomlSession {
+  readonly committed = signal<{ authority: ExecutionWorkspaceAuthority; generation: number } | null>(null)
   readonly state = signal<State>({ config: null, draft: '', modelContextDrafts: {}, currentSource: null,
     phase: 'idle', needsRead: false, uncertainWrite: false, section: 'routing', error: null, notice: null, projectionRevision: 0 })
   private basisAuthority: ExecutionWorkspaceAuthority | null = null
@@ -47,6 +48,9 @@ export class RuntimeTomlSession {
   }
   ready(authority: ExecutionWorkspaceAuthority) {
     return this.admits(authority) && this.basisAuthority === authority && !this.state.peek().needsRead
+  }
+  writable(authority: ExecutionWorkspaceAuthority) {
+    return this.ready(authority) && !this.state.peek().uncertainWrite
   }
   update(change: Partial<State>) {
     this.state.value = { ...this.state.peek(), ...change }
@@ -92,12 +96,14 @@ export class RuntimeTomlSession {
   async read(authority: ExecutionWorkspaceAuthority, mode: 'reload' | 'compare' | 'revalidate') {
     if (!this.admits(authority) || this.state.peek().phase !== 'idle') return
     const before = this.state.peek()
-    const sourceGeneration = runtimeTomlSourceGeneration.peek()
+    const generation = runtimeTomlSourceGeneration.peek()
+    let superseded = false
     this.update({ phase: mode === 'reload' ? 'loading' : 'reading', error: null, notice: null })
     try {
       const current = await fetchRuntimeTomlConfig(this.requestOptions(authority))
       if (!this.admits(authority)) { this.changedAuthority(); return }
-      if (sourceGeneration !== runtimeTomlSourceGeneration.peek()) {
+      if (generation !== runtimeTomlSourceGeneration.peek()) {
+        superseded = true
         this.update({ needsRead: true, currentSource: null,
           error: '읽는 동안 다른 설정 변경 요청이 발생했습니다. 초안은 유지했습니다. 현재 파일을 다시 읽으세요.' })
         return
@@ -120,7 +126,13 @@ export class RuntimeTomlSession {
     } catch (error) {
       if (!this.admits(authority)) this.changedAuthority()
       else this.update({ error: `${errorToString(error)} 초안과 저장 기준은 유지됩니다.` })
-    } finally { this.update({ phase: 'idle' }) }
+    } finally { this.update({ phase: 'idle' })
+      // Invalidation effects may have run while this request owned the phase.
+      // Revalidate the current authority, never the retired request's token.
+      const currentAuthority = executionWorkspaceAuthority.peek()
+      if (currentAuthority?.workspaceRoot === this.workspaceRoot
+        && (superseded || currentAuthority !== authority)) await this.ensure(currentAuthority)
+    }
   }
   useCurrent(authority: ExecutionWorkspaceAuthority, replaceDraft: boolean) {
     const state = this.state.peek(), current = state.currentSource
@@ -134,7 +146,7 @@ export class RuntimeTomlSession {
   async write(authority: ExecutionWorkspaceAuthority,
     send: (options: RuntimeTomlRequestOptions) => Promise<CommittedRuntimeTomlConfig | { unchanged: RuntimeTomlConfig }>, submittedText?: string): Promise<boolean> {
     const before = this.state.peek()
-    if (!this.ready(authority) || before.phase !== 'idle' || before.config === null || before.currentSource !== null
+    if (!this.writable(authority) || before.phase !== 'idle' || before.config === null || before.currentSource !== null
       || Object.keys(before.modelContextDrafts).length > 0 || submittedText === undefined && isDirty(before)) return false
     const submitted = submittedText ?? before.draft
     this.update({ phase: submittedText === undefined ? 'saving_patch' : 'saving_raw', error: null, notice: null })
@@ -163,6 +175,7 @@ export class RuntimeTomlSession {
       // Setup resume may publish the registry for the first time after the
       // file receipt. Editors that remounted during this write must reread it.
       this.update({ projectionRevision: this.state.peek().projectionRevision + 1 })
+      announceRuntimeTomlCommitted(authority)
       try { await refreshRuntimeConfigConsumers() }
       catch (error) { if (this.admits(authority)) this.update({ error: `대시보드 런타임 갱신 실패: ${errorToString(error)}` }) }
       return true
@@ -181,6 +194,12 @@ export function runtimeTomlSessionFor(authority: ExecutionWorkspaceAuthority): R
   let session = sessions.get(authority.workspaceRoot)
   if (!session) { session = new RuntimeTomlSession(authority.workspaceRoot); sessions.set(authority.workspaceRoot, session) }
   return session
+}
+/** Notify mounted settings of an owned file commit without adopting its raw draft. */
+export function announceRuntimeTomlCommitted(authority: ExecutionWorkspaceAuthority) {
+  const session = runtimeTomlSessionFor(authority)
+  if (!session.admits(authority)) return
+  session.committed.value = { authority, generation: runtimeTomlSourceGeneration.peek() }
 }
 // Keep dirty/uncertain documents guarded even while every editor is unmounted.
 effect(() => {

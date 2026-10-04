@@ -1899,9 +1899,8 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let live_turn =
         match Keeper_registry.get ~base_path:config.base_path name with
-        | Some { current_turn_observation = Some observation; _ } ->
-          Some observation
-        | Some _ | None -> None
+        | Some entry -> Keeper_composite_observer.live_turn_observation entry
+        | None -> None
       in
       let health, stale_reason =
         Keeper_status_runtime.keeper_turn_record_source_health

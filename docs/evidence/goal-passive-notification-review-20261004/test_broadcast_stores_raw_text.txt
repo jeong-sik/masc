@@ -1,0 +1,10 @@
+Testing `broadcast-stores-raw-text'.
+This run has ID `S1CBW7LX'.
+
+  [OK]          raw text          0   durable passive notifications preserve ...
+  [OK]          raw text          1   the delivery carries what was written.
+  [OK]          raw text          2   the durable row carries what was written.
+  [OK]          raw text          3   a quoted phrase keeps its quotes.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-notification-contract-m9puhcp3/_build/_tests/broadcast-stores-raw-text'.
+Test Successful in 0.055s. 4 tests run.

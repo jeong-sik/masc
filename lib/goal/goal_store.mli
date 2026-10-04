@@ -77,11 +77,29 @@ type pending_event = {
 val event_kind_to_string : event_kind -> string
 val pending_event_to_yojson : pending_event -> Yojson.Safe.t
 
+type notification_delivery = Awaiting_recipients | Pending_recipients of string list
+
+type pending_notification = {
+  notification_id : string;
+  goal_id : string;
+  sender : string;
+  content : string;
+  delivery : notification_delivery;
+}
+(** Immutable message identity and content. The first successful recipient
+    snapshot is persisted; acknowledgements remove only those exact recipients. *)
+
+type transition_effects = {
+  events : (event_kind * Yojson.Safe.t) list;
+  notifications : (string * string) list; (** sender, literal content *)
+}
+
 type state = {
   version : int;
   updated_at : string;
   goals : goal list;
   pending_events : pending_event list;
+  pending_notifications : pending_notification list;
 }
 (** On-disk shape persisted to {!goals_path}. [version] increments on every
     write so concurrent readers detect drift. *)
@@ -215,12 +233,16 @@ val update_state :
 (** {1 Single-goal operations} *)
 
 val transact_goal :
+  ?effects:(goal -> 'a -> transition_effects) ->
   Workspace_utils.config -> goal_id:string ->
   (goal -> (goal * 'a, string) result) -> (goal * 'a, write_error) result
 (** Holds the Goal file lock across an authoritative primary read, callback and
     conditional write. A callback may acquire the verification ledger lock;
     it must not acquire this Goal lock again. A callback [Error] is returned
-    as {!Rejected} and an unchanged goal writes nothing. *)
+    as {!Rejected} and an unchanged goal writes nothing. [effects] is a pure
+    projection of a changed committed goal/result. Its audit and notification
+    intents are written atomically with that goal; no delivery runs under the
+    lock. Unchanged/replayed transactions do not create new intents. *)
 
 type conditional_update =
   | Goal_updated of goal
@@ -349,3 +371,19 @@ val append_audit_event_after_pending :
 
 (** Requires the caller to hold the Goal lock. Flush older intents before this event. *)
 val append_audit_event_after_pending_locked : Workspace_utils.config -> Yojson.Safe.t -> (unit, string) result
+
+(** Read only authoritative pending notifications, independently of current Goal
+    phase or existence. An unavailable store is an error, never an empty queue. *)
+val pending_notifications : Workspace_utils.config -> (pending_notification list, write_error) result
+
+(** These operations re-read under the Goal lock and require the same immutable
+    id/goal/sender/content. An absent intent is already acknowledged. The first
+    snapshot wins; concurrent later snapshots cannot replace its audience. *)
+val snapshot_notification_recipients : Workspace_utils.config -> pending_notification ->
+  recipients:string list -> (pending_notification option, write_error) result
+val acknowledge_notification_recipient : Workspace_utils.config -> pending_notification ->
+  recipient:string -> (unit, write_error) result
+val acknowledge_notification : Workspace_utils.config -> pending_notification -> (unit, write_error) result
+(** Acknowledge only after the exact workspace row is committed and every
+    snapshotted recipient was durably accepted. Refuses uninitialised/nonempty
+    recipient obligations. External delivery always happens outside the Goal lock. *)

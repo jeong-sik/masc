@@ -12,6 +12,7 @@
   workspace_backlog
   workspace_bootstrap
   workspace_broadcast
+  workspace_request_id
   workspace_hooks
   workspace_skill_publish
   workspace_telemetry_drop_event
@@ -36,6 +37,7 @@
   workspace_task_create
   workspace_task_lifecycle
   workspace_task_receipts
+  workspace_task_approval_outbox
   workspace_task_rejection_outbox
   workspace_task_schedule
   workspace_task_transition_executor

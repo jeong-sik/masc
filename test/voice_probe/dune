@@ -4,8 +4,7 @@
 (test
  (name test_voice_probe)
  (modules test_voice_probe)
- (libraries alcotest astring ast_grep compiler-libs.common yojson masc masc.voice_config)
- (deps (source_tree ../../lib)))
+ (libraries alcotest astring yojson masc masc.voice_config))
 
 ; What the route tables read out of a request, shared by HTTP/1 and HTTP/2.
 (test

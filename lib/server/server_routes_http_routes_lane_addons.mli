@@ -7,6 +7,11 @@ val decode_slice_query : (string * string) list -> (Yojson.Safe.t, string) resul
 
 val decode_inspect_query : (string * string) list -> (Yojson.Safe.t, string) result
 
+val broadcast_principal_for_standing :
+  Server_auth.request_credential_standing -> string -> (string, string) result
+(** A Broadcast journal identity comes only from an authenticated credential's
+    canonical actor, never a caller-supplied header or a bearer fingerprint. *)
+
 (** A spectator's last mark: the change count it read and the incarnation it
     read it under. *)
 type since = { count : int; incarnation : string }

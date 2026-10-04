@@ -133,11 +133,23 @@ lengths, verifies the actual inputs and frozen effective prompt bodies, and
 checks the recorded slot dispatches. All 480 run IDs across both runs differ.
 
 The full provenance audit uses the private prepared runtime file, whose hash
-is recorded but whose configuration is not published. The before/after report
-can be reproduced with the two public bundles and no credentials:
+is recorded but whose configuration is not published. The public before/after comparison validates each executable record, frozen
+prompt, corpus, run registry and durable payload. It compares the declared
+runtime configuration hashes; it cannot independently verify unpublished
+configuration bytes. Reproduce it with public bundles and no credentials:
 
 ```sh
-python3 compare-evaluations.py /path/to/original/glm-baseline /path/to/this/bundle
+# Export the immutable original evidence into an empty local directory.
+git archive 7028cc511a06093660dca6349747973c778b0971 \
+  docs/evidence/2026-09-30-candle-appraiser | tar -x -C /path/to/original-export
+# Extract both payload archives before auditing their hash-addressed files.
+tar -xzf /path/to/original-export/docs/evidence/2026-09-30-candle-appraiser/glm-baseline/durable-payloads.tar.gz \
+  -C /path/to/original-export/docs/evidence/2026-09-30-candle-appraiser/glm-baseline
+tar -xzf /path/to/this/bundle/durable-payloads.tar.gz -C /path/to/this/bundle
+python3 compare-evaluations.py \
+  /path/to/original-export/docs/evidence/2026-09-30-candle-appraiser/glm-baseline \
+  /path/to/this/bundle \
+  --baseline-resources /path/to/original-export/docs/evidence/2026-09-30-candle-appraiser
 ```
 
 `SHA256SUMS` covers the bundle. Selected credential values were checked against

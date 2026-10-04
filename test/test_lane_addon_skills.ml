@@ -64,7 +64,7 @@ type fixture = {
 }
 
 let backend stops : Lane.For_testing.backend = {
-  start = (fun ~sw:_ ~instance_id ~package:_ ~on_created ->
+  start = (fun ~sw:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
     let stopped = ref false in
     let connection : Lane.For_testing.connection = {
       container_id = digest instance_id;

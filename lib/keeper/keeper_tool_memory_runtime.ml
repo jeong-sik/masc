@@ -114,13 +114,13 @@ let ranking_failure_logged = Atomic.make false
    store order, so what an exact phrase finds is never displaced by the
    broader tier. Then the ones holding any whitespace-separated term of it,
    as the trigram index ({!Keeper_memory_search_index}) finds them, together
-   with the ones holding every term as a substring, which is how a term too
-   short for the index still answers. That tier is ordered by the index's
+   with the ones holding every query term. Short ASCII terms require word
+   boundaries; longer and UTF-8 terms use substring matching. That tier is ordered by the index's
    BM25 score, best first; an item the index did not rank follows the ranked
    ones in store order. Choosing among many exact matches is the recall
    judgment's work (RFC-memory-search-beyond-substring section 3.2), not a
    lexical score's. When the index cannot be built, the second tier keeps
-   store order, the substring rule still answers, and the log says so once
+   store order, the same query matching still answers, and the log says so once
    per process: a host whose SQLite lacks the trigram tokenizer (older than
    3.34) fails every search the same way. *)
 let answering ~claim_of ~query items =
@@ -148,7 +148,7 @@ let answering ~claim_of ~query items =
     let ordered tier = List.stable_sort best_first tier |> List.map snd in
     let whole_query, rest =
       List.partition
-        (fun (_, item) -> String_util.contains_substring_ci (claim_of item) query)
+        (fun (_, item) -> String_util.contains_query_term_ci (claim_of item) query)
         (List.mapi (fun position item -> position, item) items)
     in
     ( List.map snd whole_query
@@ -156,7 +156,7 @@ let answering ~claim_of ~query items =
         (List.filter
            (fun ((_, item) as entry) ->
               Option.is_some (score entry)
-              || String_util.contains_all_tokens_ci (claim_of item) query)
+              || String_util.contains_all_query_terms_ci (claim_of item) query)
            rest) ))
 ;;
 
@@ -508,10 +508,10 @@ let history_read_error_fields history =
 let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
   if query = "" || limit <= 0 then empty_history_search
   else
-    let whole_query content = String_util.contains_substring_ci content query in
+    let whole_query content = String_util.contains_query_term_ci content query in
     let fragments content =
       (not (whole_query content))
-      && String_util.contains_all_tokens_ci content query
+      && String_util.contains_all_query_terms_ci content query
     in
     let exact_seen = ref StringSet.empty in
     let fragment_seen = ref StringSet.empty in
@@ -852,8 +852,8 @@ let keeper_memory_search_with_outcome
                (fun ids (m : fact_match) ->
                   match m.identity with
                   | Ordinary_memory_id { memory_id; _ }
-                    when String_util.contains_substring_ci m.claim query
-                         || String_util.contains_all_tokens_ci m.claim query ->
+                    when String_util.contains_query_term_ci m.claim query
+                         || String_util.contains_all_query_terms_ci m.claim query ->
                     StringSet.add memory_id ids
                   | Ordinary_memory_id _ | Source_sha256 _ -> ids)
                StringSet.empty

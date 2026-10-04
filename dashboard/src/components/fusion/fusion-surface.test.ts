@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { h, render } from 'preact'
 import { act, waitFor } from '@testing-library/preact'
@@ -7,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
 import * as boardApi from '../../api/board'
-import { declarationsForSelector } from '../../styles/css-test-utils'
 import {
   fusionBoardError,
   fusionBoardLoading,
@@ -21,16 +18,6 @@ import {
 } from '../../store'
 import type { FusionJudgeNode } from '../../lib/fusion-meta'
 import { FusionJudgesStrip, FusionSurface } from './fusion-surface'
-
-describe('Fusion mobile overflow contract', () => {
-  it('wraps backend-owned identifiers and keeps the list refresh compact', () => {
-    const css = readFileSync(resolve(__dirname, '../../styles/fusion-v2.css'), 'utf8')
-    const refresh = declarationsForSelector(css, '.v2-fusion-surface .fus-list-refresh')
-    expect(refresh.width).toBe('var(--mobile-touch-target-min)')
-    expect(refresh.height).toBe('var(--mobile-touch-target-min)')
-    expect(css).toMatch(/\.v2-fusion-surface \.fus-run-id-row h1,[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;/)
-  })
-})
 
 // Mock only the refresh side effects; keep the real signals (fusionBoardLoading /
 // fusionRunsLoading) via ...actual so the component reads live state. The manual

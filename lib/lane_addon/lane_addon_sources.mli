@@ -39,7 +39,11 @@ val activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity
 (** The activity a finished misc tool stands for. Exhaustive over the
     operation type, so a new MSX, DOS or browser tool cannot be read as a generic
     completion by omission. *)
-val snapshot_files_only : refresh_interest -> bool
+val refresh_fingerprint : refresh_interest -> Yojson.Safe.t -> (string option, string) result
+(** Identity of automatically refreshed file snapshots and completed Lane ports.
+    Only the host's Lane-port acquisition timestamp is excluded; producer
+    generation, selected output, status, coverage and all source bytes remain.
+    [None] for an empty binding or one containing live capture sources. *)
 (** Automatic Tool completions are capture hints for explicitly bound files.
     Native MSX, DOS and browser sources additionally follow their own typed
     activity.

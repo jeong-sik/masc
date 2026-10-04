@@ -278,8 +278,7 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
 ├─ tokens/
 │   ├─ source.ts                      ← SSOT: raw + semantic + themes
 │   ├─ build.ts                       ← codegen driver (`pnpm tokens:build`)
-│   ├─ build/tokens.json              ← generated DTCG 2025.10
-│   └─ scripts/check-equivalence.mjs  ← status canon + keeper ΔE check
+│   └─ build/tokens.json              ← generated DTCG 2025.10
 ├─ source_styles/                     ← preview surface stylesheets
 │   ├─ tokens.generated.css           ← @generated, do not edit
 │   ├─ primitives.css  layout.css

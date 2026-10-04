@@ -311,6 +311,31 @@ let option_of_label set label =
 
 let decode_choice set = function
   | Choice_answer { choice; probabilities; confidence } ->
+    let labels = List.map (fun option -> set.label option) set.options in
+    let probability_labels = List.map fst probabilities in
+    let* () =
+      if List.sort String.compare probability_labels = List.sort String.compare labels
+      then Ok ()
+      else Error "typesafeai: probabilities must cover each declared option exactly once"
+    in
+    let unit_probability value = Float.is_finite value && value >= 0.0 && value <= 1.0 in
+    let* () =
+      if unit_probability confidence && List.for_all (fun (_, p) -> unit_probability p) probabilities
+      then Ok ()
+      else Error "typesafeai: probabilities and confidence must be finite values from zero to one"
+    in
+    let total = List.fold_left (fun sum (_, p) -> sum +. p) 0.0 probabilities in
+    (* Summing bounded IEEE-754 values can accumulate one rounding error per option. *)
+    let rounding_error = Float.epsilon *. float_of_int (List.length probabilities) in
+    let* () =
+      if Float.abs (total -. 1.0) <= rounding_error then Ok ()
+      else Error "typesafeai: probabilities must sum to one"
+    in
+    let* () =
+      match List.assoc_opt choice probabilities with
+      | Some p when List.for_all (fun (_, other) -> p >= other) probabilities -> Ok ()
+      | _ -> Error "typesafeai: choice must have a highest probability"
+    in
     let* choice = option_of_label set choice in
     let rec decode_probabilities acc = function
       | [] -> Ok (List.rev acc)

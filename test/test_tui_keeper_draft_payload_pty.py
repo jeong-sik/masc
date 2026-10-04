@@ -7,7 +7,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_types.ml")
+
 
 
 def recipient_bound_draft(executable, *, with_text):

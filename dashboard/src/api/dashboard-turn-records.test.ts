@@ -635,8 +635,7 @@ describe('keeper turn record final input composition', () => {
 
   // A prompt component is parsed as `prompt.` plus an id from
   // TURN_PROMPT_BLOCK_IDS. Walk the constant through the full record path so
-  // every id it holds decodes as a component; prompt-block-id-parity.test.ts
-  // holds the constant equal to the OCaml producer.
+  // every id it holds decodes as a component.
   it.each([...TURN_PROMPT_BLOCK_IDS])('decodes the %s prompt component', async (block) => {
     getMock.mockResolvedValue(payload(entry({
       input_components: [{ component: `prompt.${block}`, bytes: 1 }],

@@ -26,8 +26,10 @@ val resolve_existing :
   declared_max:int ->
   'scheduler t ->
   ('scheduler t * 'scheduler resolution) option
-(** Resolve an existing scheduler and claim the one-shot conflict report when
-    [declared_max] differs from its authoritative declaration. *)
+(** Resolve an existing scheduler and report a conflict on every resolution
+    whose [declared_max] differs from its authoritative declaration. Consumers
+    reject the conflict before taking a permit; rejection must not make the
+    next conflicting request admissible. *)
 
 val install :
   key ->

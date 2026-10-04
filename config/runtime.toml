@@ -60,6 +60,8 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # binding for it.
 
 # TypeSafe AI (System One Jev) Opt-in Integration
+# librarian_preflight = true enables no-change judgment for Memory-only passes;
+# continuity and working-context generation still use the Librarian lane.
 # Calibrated probabilistic decisions for the board_attention_exact lane and
 # the librarian absorb gate (RFC-librarian-absorb-gate).
 # Keys stay in the environment; each destination names the variable holding
@@ -104,6 +106,7 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # absorb_gate = false
 # context_review = false       # source Context + proposed summary preservation review
 # skill_applicability = false  # current request + authorized Skill body advice
+# librarian_preflight = false # Memory-only no-change judgment; generates no text
 # excluded_keepers = []
 
 # max_output_tokens is the output budget a lane's requests send as max_tokens.
@@ -1886,7 +1889,6 @@ streaming = true
 reasoning-effort = "low"
 
 [models.ollama-cloud-deepseek-v4-1-flash.capabilities]
-supports-reasoning-budget = false
 thinking-control-format = "reasoning-effort"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
@@ -1915,7 +1917,6 @@ streaming = true
 reasoning-effort = "none"
 
 [models.ollama-cloud-deepseek-v4-1-flash-none.capabilities]
-supports-reasoning-budget = false
 thinking-control-format = "reasoning-effort"
 reasoning-streaming-format = "delta:reasoning"
 supports-image-input = true
@@ -2236,6 +2237,19 @@ max-concurrent = 1
 candidates = [
   "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
   "deepseek.deepseek-v4-pro",
+]
+
+# Opt-in reviewer route: separate providers let a review continue when one
+# subscription account is quota-blocked. Select this lane explicitly in the
+# live runtime assignments; the public seed never assigns deployment-local
+# keeper names and is not copied over an existing workspace's configuration.
+# A failed attempt with an unknown outward effect remains fenced by the
+# runtime; declaring another candidate does not authorize duplicate execution.
+[runtime.lanes.reviewer-failover]
+candidates = [
+  "codex_subscription.codex-gpt-6-1-sol-high",
+  "glm-coding.glm-5-3",
+  "antigravity_subscription.antigravity-gemini-3-8-flash-high",
 ]
 
 # The judge seat of the shipped Fusion presets. A seat names a route and walks

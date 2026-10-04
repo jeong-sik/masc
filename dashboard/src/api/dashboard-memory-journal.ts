@@ -13,6 +13,7 @@ import {
   decodeMemoryOsBasis,
   isMemoryOsMemoryId,
   parseMemoryOsFactCategory,
+  memoryOsFactCategoryToken,
   type MemoryOsFactBasis,
   type MemoryOsFactCategoryTag,
 } from './dashboard-turn-records'
@@ -117,9 +118,9 @@ function decodeFact(raw: unknown): MemoryJournalFact | null {
     'basis',
   ])) return null
   const claim = exactNonEmptyString(raw.claim)
-  const category = typeof raw.category === 'string'
-    ? parseMemoryOsFactCategory(raw.category)?.tag ?? null
-    : null
+  const parsedCategory = typeof raw.category === 'string'
+    ? parseMemoryOsFactCategory(raw.category) : null
+  const category = parsedCategory ? memoryOsFactCategoryToken(parsedCategory) : null
   const firstSeen = asNumber(raw.first_seen)
   const lastSeen = asNumber(raw.last_seen)
   const basis = decodeMemoryOsBasis(raw.basis)

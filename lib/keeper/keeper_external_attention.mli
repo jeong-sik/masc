@@ -150,6 +150,11 @@ type read_error =
       ; rows_end : int
       ; end_offset : int
       }
+  | Non_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+      }
   | Io_failed of
       { path : string
       ; cause : exn

@@ -32,3 +32,6 @@ routing·Lane 후보·Keeper 배정 변경을 적용하는 동안은 원문 편�
 Lane 후보 표는 파일 재조회·저장 결과·설정 재개 완료에 따라 다시 읽는다. 이전 요청의
 늦은 결과가 새 표를 덮지 않는다. 이 보장은 편집 세션과 편집기 안의 표를 대상으로 하며,
 Dashboard 전체의 공유 runtime 캐시 격리나 운영 서버 검증을 의미하지 않는다.
+
+공유 catalog와 resolved 목록의 별도 동작은
+[작업공간별 Runtime 조회](runtime-workspace-readings.md)를 따른다.

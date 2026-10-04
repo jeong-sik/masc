@@ -5,15 +5,16 @@ import { get, post } from '../../api/core'
 import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
-import { reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
+import { reloadRuntimeCatalog } from '../../lib/runtime-catalog-resource'
 vi.mock('../../api/core', () => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/dev-token', () => ({ ensureDevToken: vi.fn(async () => {}) }))
+const catalogMock = vi.hoisted(() => ({ value: { status: 'idle' } as (typeof import('../../lib/runtime-catalog-resource').runtimeCatalogState)['value'] }))
 vi.mock('../../lib/runtime-catalog-resource', () => ({
-  runtimeCatalogState: { value: { status: 'idle' } },
+  runtimeCatalogState: catalogMock,
   loadRuntimeCatalog: vi.fn(),
   reloadRuntimeCatalog: vi.fn(async () => {}),
 }))
-afterEach(() => { cleanup(); runtimeCatalogState.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); catalogMock.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
 beforeEach(() => { vi.mocked(reloadRuntimeCatalog).mockResolvedValue(undefined) })
 const response = { window_minutes: 60,
   cost_ledger_read: { state: 'available', malformed_rows: 0, schema_violation_rows: 2, identity_conflict_rows: 1 },
@@ -22,7 +23,7 @@ const response = { window_minutes: 60,
     usage_sample_count: 6, usage_missing_count: 2, telemetry_sample_count: 5, telemetry_missing_count: 3 }],
 }
 it('shows each official client account once with its provider-reported usage', async () => {
-  runtimeCatalogState.value = { status: 'loaded', data: [
+  catalogMock.value = { status: 'loaded', data: [
     { provider: 'claude_one.shared', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
     { provider: 'claude_one.other', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
     { provider: 'claude_alias.shared', provider_id: 'claude_alias', provider_display_name: 'Claude · alias', protocol: 'claude-code', available: true, models: [] },
@@ -73,7 +74,7 @@ it('shows each official client account once with its provider-reported usage', a
   expect(post).toHaveBeenCalledWith('/api/v1/runtime/official-client/probe', { runtime_id: 'claude_one.shared' })
 })
 it('shows a catalog failure instead of silently omitting account monitoring', async () => {
-  runtimeCatalogState.value = { status: 'error', message: 'HTTP 503' }
+  catalogMock.value = { status: 'error', message: 'HTTP 503' }
   vi.mocked(get).mockResolvedValue(response)
   const view = render(html`<${OverviewRuntimeStats} />`)
   await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())

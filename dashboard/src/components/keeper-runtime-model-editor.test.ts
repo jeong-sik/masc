@@ -1,3 +1,4 @@
+import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -499,3 +500,5 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
       .toContain('runtime resolved unavailable')
   })
 })
+
+beforeEach(() => { confirmRuntimeTestWorkspace() })

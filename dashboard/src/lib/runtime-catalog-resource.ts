@@ -2,27 +2,22 @@
 //
 // Several surfaces (keeper runtime editor, keeper workspace rail, runtime health
 // monitor) need provider/model capability snapshots. A single module-level
-// resource ensures the dashboard fetches `/api/v1/providers` at most once per
-// session and shares the result, rather than each component issuing its own
-// request.
+// resource shares one reading for the current workspace. Workspace changes
+// invalidate the old reading and refresh existing consumers automatically.
 
-import { createAsyncResource, type AsyncState } from './async-state'
+import { type AsyncState } from './async-state'
+import { createRuntimeWorkspaceResource } from './runtime-workspace-resource'
 import {
   fetchRuntimeProviders,
   type DashboardRuntimeProviderSnapshot,
 } from '../api/dashboard'
 
-const runtimeCatalogResource = createAsyncResource<DashboardRuntimeProviderSnapshot[]>()
+const runtimeCatalogResource = createRuntimeWorkspaceResource<DashboardRuntimeProviderSnapshot[]>(async signal =>
+  (await fetchRuntimeProviders({ signal })).providers)
 export const runtimeCatalogState = runtimeCatalogResource.state
 
-async function fetchRuntimeCatalog(): Promise<DashboardRuntimeProviderSnapshot[]> {
-  const response = await fetchRuntimeProviders()
-  return response.providers
-}
-
 export function loadRuntimeCatalog(): void {
-  if (runtimeCatalogState.value.status !== 'idle') return
-  void runtimeCatalogResource.load(fetchRuntimeCatalog)
+  void runtimeCatalogResource.load()
 }
 
 export function resetRuntimeCatalog(): void {
@@ -30,17 +25,7 @@ export function resetRuntimeCatalog(): void {
 }
 
 export async function reloadRuntimeCatalog(): Promise<void> {
-  runtimeCatalogResource.reset()
-  let loadError: unknown = null
-  await runtimeCatalogResource.load(async () => {
-    try {
-      return await fetchRuntimeCatalog()
-    } catch (err) {
-      loadError = err
-      throw err
-    }
-  })
-  if (loadError) throw loadError
+  await runtimeCatalogResource.reload()
 }
 
 export function findRuntimeCatalogEntry(

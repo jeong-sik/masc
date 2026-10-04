@@ -1717,7 +1717,7 @@ def runtime_parameter_workspace_withdrawal(binary: str) -> None:
         refresh=0.5, terminal_cols=300)
 
 
-def live_identity_before_chat_and_lifecycle(binary: str) -> None:
+def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None = None) -> None:
     # No refresh after readiness: the client retains A while the same endpoint
     # reports B only to the dispatch-time health probe.
     for operation in ("chat", "pause", "boot-recovery"):
@@ -1745,6 +1745,21 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
         for path in ("/api/v1/keepers/chat/stream", "/api/v1/keepers/chat",
                      "/api/v1/keepers/alpha/boot", "/api/v1/keepers/alpha/directive"):
             fixtures[path] = h.RequestHttpResponse(lambda body, path=path: post(path, body))
+        def capture(output, label):
+            if captures is None:
+                return
+            captures.mkdir(parents=True, exist_ok=True)
+            prefix = captures / f"live-identity-{operation}-{label}"
+            prefix.with_suffix(".pty").write_bytes(bytes(output))
+            prefix.with_suffix(".txt").write_bytes(screen(output))
+            with wire.lock:
+                events = list(wire.events)
+            prefix.with_suffix(".json").write_text(json.dumps({
+                "operation": operation,
+                "events": events,
+                "writes": [{"path": path, "body_hex": body.hex()}
+                           for path, body in writes],
+            }, indent=2) + "\n")
         def interact(process, fd, _slave, output, _base):
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
@@ -1759,16 +1774,35 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: b"Workspace identity changed or is unavailable" in screen(output), timeout=WAIT_SECONDS)
             h.drain_until_quiet(process, fd, output)
+            capture(output, "refused")
             expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
             assert [path for path, _ in writes] == expected, (operation, writes)
             if operation == "chat":
-                # A refused dispatch preserves the composer and its draft;
-                # q there is text, not the global exit key. Leave through Esc
-                # and verify the roster destination before requesting exit.
-                assert b"private-A-message" in screen(output), "refused chat lost its draft"
+                # A local YOU history row is not an editable draft. The
+                # pre-POST refusal must preserve the composer itself.
+                assert h.composer_showing(b"private-A-message").search(screen(output)), \
+                    "refused chat lost its composer draft"
                 h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                 assert "▸ chat".encode() not in screen(output), screen(output)
                 assert writes == [], "leaving the refused draft dispatched chat"
+                wire.publish("a-returned")
+                os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"a.returned" in screen(output)
+                        and b"workspace identity is unverified" not in screen(output),
+                    timeout=WAIT_SECONDS), "original workspace roster did not return"
+                with wire.lock:
+                    assert any(event["event"] == "roster" and event["phase"] == "a-returned"
+                               for event in wire.events), "returning to A did not read its roster"
+                h.select_keeper_row(process, fd, output, b"alpha")
+                h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: h.composer_showing(b"private-A-message").search(screen(output)) is not None,
+                    timeout=WAIT_SECONDS), "returning to A lost its refused composer draft"
+                capture(output, "a-restored")
+                assert writes == [], "returning to A automatically resent the refused draft"
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                assert writes == [], "leaving the restored draft dispatched chat"
             os.write(fd, b"q")
         h.run_terminal_scenario(binary,
             description="Live dispatch identity refuses cached workspace " + operation,
@@ -1793,7 +1827,7 @@ if __name__ == "__main__":
     resource_workspace_withdrawal(binary)
     runtime_parameter_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
-    live_identity_before_chat_and_lifecycle(binary)
+    live_identity_before_chat_and_lifecycle(binary, captures)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)
     schedule_editor_workspace_change(binary)

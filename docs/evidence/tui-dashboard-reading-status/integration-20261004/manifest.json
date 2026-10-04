@@ -1,0 +1,105 @@
+{
+  "recorded_at": "2026-10-04T21:17:57.360034+09:00",
+  "scope": "Existing local integrated-worktree fixture executions; no tests rerun for this evidence repair.",
+  "committed_source": "de6b2592a35c35a92cde74a5bf35f398dcb9df0d",
+  "committed_tree": "12745cb8052512cee019bd557f7f051ba3b772da",
+  "seven_scenario_source_tree": "581dd86d15b0798ab27e49d82d8c596d881dc07d",
+  "final_tree_delta": "One added Health: ok wait in each_failed_source_keeps_other_cards; no production change. Four variants reran after that wait.",
+  "source_sha256_read_back_now": {
+    "bin/masc_tui_home.ml": "4c1013634ba34de1eae5c3b9377b8ff348451a05f9e82a90f6c1edfd5a55c304",
+    "bin/masc_tui.ml": "31daf0fb025cbaa2be007859b60ab0c54279ea7e69bf599f3475e959893e3502",
+    "test/test_tui_home_decision_cards_pty.py": "a8d80432a6fbb55fb3a8ad386fe4a1b6a47dfb4845f79d163aa895b4b641612b",
+    "test/test_tui_home_decision_receipt_pty.py": "6e1450c3151a616bb090e2233d4155c4597c87237d4c98b58a7cf2956fb305e6",
+    "test/test_tui_keyboard_overview_pty.py": "b3cf8d072b0b188f5beb1ace5e1ee513bc7d0e69b86a85f274a57458eec4e85e",
+    "test/tui_keyboard_harness.py": "5022291719f33b140d363a785f0c5f0cda6a2306e93f1b34d9b424b9ab001840"
+  },
+  "execution_receipts": {
+    "focused_build": {
+      "handle": 50195,
+      "outcome": "PASS per contemporaneous owner handoff; build log alone has no exit-code stamp"
+    },
+    "seven_scenarios": {
+      "handle": 10907,
+      "outcome": "PASS per owner receipt and four logged group markers; each_failed_source contains four cases"
+    },
+    "first_use_frames": {
+      "handle": 96355,
+      "outcome": "PASS per owner receipt and log"
+    },
+    "four_variants_after_health_barrier": {
+      "handle": 80697,
+      "outcome": "PASS per owner receipt and log"
+    }
+  },
+  "binary_retrospective_observation": {
+    "observed_at": "2026-10-04T21:17:57.360034+09:00",
+    "sha256": "285698f16d84e19ce7ac1a57f9b8226bd18ee25af96d1d85b98bd1f018e0fe9e",
+    "embedded_build_commit": "f31288fbd874888fdadccd2332f7e08a8d3740ac",
+    "mtime": "2026-10-04T20:13:55.725444+09:00",
+    "limitation": "No binary hash was stamped at execution time. This is a retrospective observation, not cryptographic proof of which bytes ran. The embedded commit is the pre-commit checkout head, not the final committed integration SHA.",
+    "copied_build_sources_equal_committed_source": [
+      "bin/masc_tui_home.ml",
+      "bin/masc_tui.ml"
+    ]
+  },
+  "logs": {
+    "focused-results.txt": {
+      "source_log": "/tmp/pr40996-pty-fixed2.log",
+      "source_log_sha256": "7d5d4ce6e0b7453a05b49d8da278d52a2b5c02f2fe672af177baf1ae50bd8e3f",
+      "source_log_bytes": 24518,
+      "retained_source_lines": [
+        2,
+        3,
+        7,
+        11
+      ],
+      "excerpt_sha256": "9c633c88fbd47ba9d3f48234e0d748fd04140854ab0b90500456dbf3f396bedd",
+      "extraction": "Exact matching lines only; terminal frame payloads omitted."
+    },
+    "first-use-results.txt": {
+      "source_log": "/tmp/pr40996-first-use.log",
+      "source_log_sha256": "873923005b55a4f8694adda14d8796c94e096d692403599c6a76aea33de3d4da",
+      "source_log_bytes": 46937,
+      "retained_source_lines": [
+        176
+      ],
+      "excerpt_sha256": "aa0ad28b0a8f036e006e4dde7af93ee22f9dca08921e61827cc592bebc406075",
+      "extraction": "Exact matching lines only; terminal frame payloads omitted."
+    },
+    "health-barrier-results.txt": {
+      "source_log": "/tmp/pr40996-health-barrier-pty.log",
+      "source_log_sha256": "ad0ca593de5e022bdb9c38758fc99f2cfaf07bcb0d35e0dd22fc9118ec4eb279",
+      "source_log_bytes": 41,
+      "retained_source_lines": [
+        1
+      ],
+      "excerpt_sha256": "ad0ca593de5e022bdb9c38758fc99f2cfaf07bcb0d35e0dd22fc9118ec4eb279",
+      "extraction": "Exact matching lines only; terminal frame payloads omitted."
+    },
+    "focused-runner.py.txt": {
+      "source_log": "/tmp/pr40996-focused.py",
+      "sha256": "c1fcbdc7454ea4bb988f6217757fbe6f865e33c66e1ea8266f4d7177ae6103dc",
+      "bytes": 818,
+      "extraction": "Unmodified copy."
+    },
+    "focused-build.log": {
+      "source_log": "/tmp/pr40996-build.log",
+      "sha256": "ff1872f69bdeb2659b6c68c82a4a9d687827a9e81db798e195c4f0def6b9c4bb",
+      "bytes": 4523,
+      "extraction": "Unmodified copy."
+    }
+  },
+  "limits": [
+    "Pyright retains 63 pre-existing diagnostics; not type-clean.",
+    "No whole Overview suite, current browser replay, installed runtime, production, hosted CI or Full RC evidence.",
+    "The earlier 2026-10-03 checks and frames remain historical and unchanged."
+  ],
+  "typecheck_readback": {
+    "file": "typecheck-summary.json",
+    "sha256": "8d5189619c7303e476be91b61352d1b11390f9cde0b14d4c250ea99de2ead9fe",
+    "diagnostic_identity_multiset_equal": true,
+    "baseline_errors": 63,
+    "final_errors": 63,
+    "type_clean": false
+  }
+}

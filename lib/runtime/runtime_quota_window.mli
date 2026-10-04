@@ -76,6 +76,13 @@ val demote_order :
     labels instead. *)
 val scope_to_string : scope -> string
 
+val scope_id : scope -> string
+(** Opaque public ID shared by Setup groups, Runtime and Usage history. It
+    preserves the existing history digest. The scope names a credential
+    reference, client home or fallback provider row, not an authenticated
+    provider account; replacing credentials in place does not change this ID.
+    This is a correlation label, never an authentication or mutation token. *)
+
 val scope_equal : scope -> scope -> bool
 (** Whether two scopes name the same quota owner. *)
 

@@ -484,9 +484,9 @@ let all =
       ~exposure:(Toml_and_env "metrics.max_bytes")
       ~value_kind:Integer
       ~default:"10485760"
-      ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_metrics" ]
+      ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_types_support.append_jsonl_line" ]
       ~category:"metrics"
-      "Metrics file size before rotation"
+      "Auxiliary Keeper JSONL log size before rotation (bytes; 0 disables)"
   ; setting
       ~range:(int_range ~min:Env_config_keeper.KeeperMetrics.max_rotated_files_min ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.max_rotated_files ())))
@@ -494,9 +494,19 @@ let all =
       ~exposure:(Toml_and_env "metrics.max_rotated")
       ~value_kind:Integer
       ~default:"1"
-      ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_metrics" ]
+      ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_types_support.append_jsonl_line" ]
       ~category:"metrics"
-      "Number of rotated metrics files retained"
+      "Auxiliary Keeper JSONL log backups retained (0 discards old versions)"
+  ; setting
+      ~range:(int_range ~min:0 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.store_max_bytes ())))
+      ~env_name:"MASC_KEEPER_METRICS_STORE_MAX_BYTES"
+      ~exposure:(Toml_and_env "metrics.store_max_bytes")
+      ~value_kind:Integer
+      ~default:"0"
+      ~consumers:[ "Keeper_types_support.keeper_metrics_storage"; "Keeper_metrics_storage" ]
+      ~category:"metrics"
+      "Date-sharded Keeper metric byte target (0 keeps all; oldest completed files pruned)"
   ; setting
       ~reload_class:Next_turn
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperMemoryOs.recall_enabled ())))

@@ -8793,6 +8793,49 @@ let runtime_resolved_surface_json () =
           ] )
     ]
 
+let test_runtime_quota_scope_is_paired_with_its_response () =
+  let account scope id = `Assoc ["scope", `String scope; "scope_id", `String id;
+    "providers", `List []; "state", `String "not_reported_since_start"; "windows", `List []] in
+  let document scope accounts =
+    let first = resolved_runtime "runtime-a" "Resolved A" "model-a"
+      |> set_field "quota_scope" (`String scope) in
+    let base = runtime_resolved_surface_json () in
+    let runtimes = Yojson.Safe.Util.(base |> member "runtimes" |> to_list) in
+    base |> set_field "default_runtime" first
+      |> set_field "runtimes" (`List (first :: List.tl runtimes))
+      |> set_field "provider_usage_windows_since" (`Float 0.)
+      |> set_field "provider_usage_windows" (`List accounts) in
+  let decode json = match Tui_decode.decode_runtime_resolved_snapshot json with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let first snapshot = List.hd snapshot.Tui_decode.rrs_runtimes in
+  let initial = document "account:1"
+    [account "account:1" "stable-first"; account "account:2" "stable-second"] in
+  let captured = first (decode initial) in
+  Alcotest.(check (option string)) "snapshot retains quota scope" (Some "stable-first")
+    captured.ro_quota_scope_id;
+  let reordered = first (decode (document "account:2"
+    [account "account:1" "stable-second"; account "account:2" "stable-first"])) in
+  Alcotest.(check (option string)) "reordering ordinals retains quota scope" captured.ro_quota_scope_id
+    reordered.ro_quota_scope_id;
+  let relocated = document "account:1" [account "account:1" "different-location"] in
+  let new_row = first (decode relocated) in
+  Alcotest.(check (option string)) "different credential location at same ordinal changes scope"
+    (Some "different-location") new_row.ro_quota_scope_id;
+  Alcotest.(check (option string)) "old catalogue row retains its own paired scope"
+    (Some "stable-first") captured.ro_quota_scope_id;
+  (match Tui_decode.decode_runtime_resolved relocated with
+   | Ok (rows, _) -> Alcotest.(check (option string)) "catalogue projection retains quota scope"
+       new_row.ro_quota_scope_id (List.hd rows).ro_quota_scope_id
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun json ->
+    let row = first (decode json) in
+    Alcotest.(check (option string)) "unavailable or ambiguous quota scope ID stays unknown" None
+      row.ro_quota_scope_id;
+    Alcotest.(check (option string)) "response-local correlation survives failed Usage join"
+      (Some "account:1") row.ro_quota_scope)
+    [document "account:1" []; set_field "provider_usage_windows" `Null initial;
+     document "account:1" [account "account:1" "one"; account "account:1" "two"]]
+
 let test_decode_and_join_runtime_surface () =
   match
     Tui_decode.decode_runtime_surface_snapshot
@@ -12459,6 +12502,8 @@ let () =
     ( "decode_runtime_surface",
       [ Alcotest.test_case "joins projection and observation in lane order" `Quick
           test_decode_and_join_runtime_surface
+      ; Alcotest.test_case "Runtime quota scopes remain paired with response" `Quick
+          test_runtime_quota_scope_is_paired_with_its_response
       ; Alcotest.test_case "rejects an unknown provider status" `Quick
           test_runtime_probe_rejects_unknown_status
       ; Alcotest.test_case "probe status reads every word the server writes"

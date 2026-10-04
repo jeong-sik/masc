@@ -62,6 +62,49 @@ let fresh_read_keeps_draft () =
   shows "Activity draft: On" discarded;
   rejected (A.start_save ~generation:4 discarded)
 
+let clean_read_follows_changed_flag () =
+  let current=off ^ "concurrent = 7\n" in
+  let session=loaded (doc source) |> A.suspend |> read ~generation:2 (doc ~revision:"fresh" current) in
+  shows "Activity draft: Off" session;
+  Alcotest.(check bool) "clean draft has no conflict" false (has "File changed" (A.lines session));
+  let _,_,write=A.start_save ~generation:3 (A.toggle session) |> ok in
+  same "fresh" write.expected_source_revision;
+  same (source ^ "concurrent = 7\n") write.source_text
+
+let clean_read_follows_unrelated_edit () =
+  let current=source ^ "concurrent = 9\n" in
+  let session=loaded (doc source) |> read ~generation:2 (doc ~revision:"fresh" current) in
+  let _,_,write=A.start_save ~generation:3 (A.toggle session) |> ok in
+  same "fresh" write.expected_source_revision;
+  same (off ^ "concurrent = 9\n") write.source_text
+
+let durable_save_follows_next_file_without_losing_receipt () =
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let session=A.finish_save request (A.Saved (receipt ~registry:(R.Exact_output_registry_kept {reason="registry kept"}) ())) pending in
+  let session=read ~generation:3 (doc ~revision:"later-writer" source) session in
+  shows "Activity draft: On" session; shows "registry kept" session;
+  let _,_,write=A.start_save ~generation:4 (A.toggle session) |> ok in
+  same "later-writer" write.expected_source_revision; same off write.source_text
+
+let uncertain_drafts_require_explicit_reapply () =
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  List.iter (fun session ->
+    let reread=read ~generation:3 (doc ~revision:"observed" off) session in
+    shows "Activity draft: Off" reread; shows "Based on revision: original" reread;
+    shows "File changed" reread; rejected (A.start_save ~generation:4 reread);
+    rejected (A.start_save ~generation:5 (A.reapply reread)))
+    [A.finish_save request (A.Unconfirmed "connection lost") pending;
+     A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending;
+     A.suspend pending]
+
+let clean_draft_does_not_adopt_different_path () =
+  let session=loaded (doc source) |> read ~generation:2 (doc ~path:"/new/runtime.toml" ~revision:"fresh" off) in
+  shows "Activity draft: On" session; shows "Based on revision: original" session;
+  let attempted=A.toggle session in
+  shows "file path changed" attempted; rejected (A.start_save ~generation:3 attempted);
+  let _,_,write=A.start_save ~generation:4 (A.discard session |> A.toggle) |> ok in
+  same "fresh" write.expected_source_revision; same source write.source_text
+
 let required_and_empty () =
   let required="[runtime.exact_output_lanes.board_attention_exact]\nslots = [\"first\"]\n" in
   let session=loaded ~lane:Standalone_lane.Board_attention (doc required) |> A.toggle in
@@ -139,6 +182,11 @@ let () = Alcotest.run "Exact activity draft and save" ["operator flow",List.map 
   ["explicit save preserves candidates and other source",draft_and_save;
    "conflict reapplies activity only",conflict_reapply;
    "fresh read retains and discard resets",fresh_read_keeps_draft;
+   "clean draft follows external activity and workspace return",clean_read_follows_changed_flag;
+   "clean draft preserves latest unrelated edits",clean_read_follows_unrelated_edit;
+   "durable draft follows next file while receipt stays",durable_save_follows_next_file_without_losing_receipt;
+   "uncertain drafts need explicit reapply",uncertain_drafts_require_explicit_reapply;
+   "clean draft keeps changed-path boundary",clean_draft_does_not_adopt_different_path;
    "Required and empty candidate refusal",required_and_empty;
    "unavailable and malformed input",unavailable;
    "workspace roundtrip ignores old callbacks",workspace_roundtrip;

@@ -1867,7 +1867,7 @@ let workspace_activity_bindings ~context =
 let exact_activity_bindings =
   [ b Act "Space" "change activity draft" ~help:"preserve candidates; no write until s"
   ; b Act "s" "save" ~help:"preview and save against the original file revision"
-  ; b Act "r" "read current" ~help:"read the file without replacing the draft"
+  ; b Act "r" "read current" ~help:"keep edits; otherwise follow current file"
   ; b Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
   ; b Act "x" "discard draft" ~help:"use the displayed current file; no write"
   ; b Navigate "j/k" "scroll"

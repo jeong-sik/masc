@@ -20,6 +20,9 @@ val suspend : t -> t
     A fresh read is required even when returning to the same workspace. *)
 val start_read : generation:int -> t -> (t * request) option
 val finish_read : request -> (document, string) result -> t -> t
+(** Follow the current file when the retained activity has no unsaved change
+    and the resolved path is unchanged. Preserve a changed draft and its base,
+    including unconfirmed writes. Resolving that intent remains explicit. *)
 val toggle : t -> t
 val reapply : t -> t
 (** Explicitly apply only the desired activity to the displayed current file.

@@ -1,0 +1,36 @@
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c standalone_lane.mli
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c standalone_lane.ml
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c runtime_toml_namespace.mli
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c runtime_toml_namespace.ml
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c toml_line_editor.mli
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c toml_line_editor.ml
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c masc_tui_runtime_config_edit.mli
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c masc_tui_runtime_config_edit.ml
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c masc_tui_runtime_config_receipt.mli
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c masc_tui_runtime_config_receipt.ml
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c masc_tui_exact_activity.mli
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c masc_tui_exact_activity.ml
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -w +32+69 -warn-error +a -c test_tui_exact_activity.ml
++ ocamlfind ocamlc -package otoml,yojson,alcotest,ppx_enumerate -linkpkg standalone_lane.cmo runtime_toml_namespace.cmo toml_line_editor.cmo masc_tui_runtime_config_edit.cmo masc_tui_runtime_config_receipt.cmo masc_tui_exact_activity.cmo test_tui_exact_activity.cmo -o test.exe
++ ./test.exe
+Testing `Exact activity draft and save'.
+This run has ID `YCSQUMOZ'.
+
+  [OK]          operator flow          0   explicit save preserves candidates...
+  [OK]          operator flow          1   conflict reapplies activity only.
+  [OK]          operator flow          2   fresh read retains and discard res...
+  [OK]          operator flow          3   clean draft follows external activ...
+  [OK]          operator flow          4   clean draft preserves latest unrel...
+  [OK]          operator flow          5   durable draft follows next file wh...
+  [OK]          operator flow          6   uncertain drafts need explicit rea...
+  [OK]          operator flow          7   clean draft keeps changed-path bou...
+  [OK]          operator flow          8   Required and empty candidate refusal.
+  [OK]          operator flow          9   unavailable and malformed input.
+  [OK]          operator flow         10   workspace roundtrip ignores old ca...
+  [OK]          operator flow         11   unconfirmed write and preview refu...
+  [OK]          operator flow         12   changed file path needs discard.
+  [OK]          operator flow         13   quoted and multiline table shapes.
+  [OK]          operator flow         14   stored setting does not hide appli...
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-activity-current-file-a0_ub0ur/_build/_tests/Exact activity draft and save'.
+Test Successful in 0.031s. 15 tests run.

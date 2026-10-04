@@ -74,3 +74,25 @@ A package declaration's `enabled` is separate from its payload revision and
 worker presence. Off with a live or unresolved retained worker is an off request,
 not proof of cleanup. See [package activity](lane-package-activity.md) for the
 configuration-preserving control and incomplete-read behavior.
+
+## Dashboard
+
+Monitor → All Lanes reads this same operator inventory. Lane · Queue continues
+to show Keeper execution and queue activity; it is a separate view.
+
+The inventory offers identity/name/purpose search and a detail reading for every
+row. Selecting a row focuses its detail above the list. Cards fit narrow screens
+without requiring the package table's horizontal scrolling. A failed refresh
+retains the previous reading with an explicit stale notice. An unknown workspace
+does not read or retain visible rows; Verify workspace refreshes execution
+authority before reading its inventory. Late replies from another workspace are
+ignored.
+
+Exact detail links to the existing run diagnostics and runtime configuration
+screens. Package detail links to the existing declaration/observation manager.
+These are owner-screen links, not an automatic selection or mutation in those
+screens. Browser and machine detail report the actual observed owner state and
+point to their TUI/operator tools; this change adds no Web management controls
+for those families. Inventory row count is not a running-worker count. Executor
+registration is not proof of an active browser session; retained package state
+is not proof of a live process.

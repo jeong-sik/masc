@@ -2,8 +2,15 @@
 
 open Model_inference_metrics_entry
 
+type decision_read =
+  | Decisions_read
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+(** A missing store is an empty readable inventory. A directory or file that
+    cannot be read never confirms absence of runtime activity. *)
+
 val read_all_entries :
-  base_path:string -> since_unix:float -> raw_entry list * cost_read_result
+  base_path:string -> since_unix:float -> raw_entry list * cost_read_result * decision_read
 val usage_signal_present : raw_entry -> bool
 (** Input, output, cache-read, cache-creation, and reasoning token counters are
     usage evidence. A billing-only [cost_usd] value is not. *)

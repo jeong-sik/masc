@@ -8,7 +8,9 @@ type specification = {
   id : string; catalog : int option; output : int option;
   model : int option; provider : int option; binding : int option;
 }
-type history = Loading | Unavailable | Observed of {
+type history = Loading | Unavailable
+  | Decision_directory_unavailable | Decision_files_unreadable of int
+  | Observed of {
   window : int; generated_at : float; stale : bool; refresh_failed : bool; unattributed : int;
   store_note : string; runtimes : stats list;
 }
@@ -77,6 +79,16 @@ let history json =
     | Some _ -> Error "runtime evidence has an invalid refresh error" in
   match state with
   | "loading" -> Ok (if refresh_failed then Unavailable else Loading)
+  | "unavailable" ->
+    let* diagnostic = required "decision_read" json in
+    let* cause = member text "cause" diagnostic in
+    (match cause with
+     | "directory_unavailable" -> Ok Decision_directory_unavailable
+     | "files_unreadable" ->
+       let* count = member nat "unreadable_files" diagnostic in
+       if count > 0 then Ok (Decision_files_unreadable count)
+       else Error "runtime history has an invalid unreadable file count"
+     | _ -> Error "runtime history has an unrecognized decision read failure")
   | "ready" ->
     let* window = member nat "window_minutes" json in
     let* unattributed = member nat "unattributed_entries" json in
@@ -125,6 +137,11 @@ let lines t ~runtime_id =
   let history = match t.history with
     | Loading -> ["Runtime history", "loading; refresh to read the completed snapshot"]
     | Unavailable -> ["Runtime history", "snapshot refresh failed; no history available"]
+    | Decision_directory_unavailable ->
+        ["Runtime history", "unavailable; decision log directory could not be read"]
+    | Decision_files_unreadable count ->
+        ["Runtime history", Printf.sprintf
+          "incomplete; %d decision log files could not be read; runtime totals unavailable" count]
     | Observed observed ->
       ["History window", Printf.sprintf "last %d min, snapshot %s%s"
         observed.window (timestamp observed.generated_at)

@@ -1739,6 +1739,51 @@ let test_runtime_history_keeps_account_attribution () =
     check (float 0.001) "recent success belongs to selected account"
       (floor (now -. 10.)) (one |> member "recent_entries" |> to_list |> List.hd |> member "ts_unix" |> to_float))
 
+let test_runtime_history_unreadable_decision_file () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let good = make_keeper_dir base "readable-history" in
+    let broken = make_keeper_dir base "unreadable-history" in
+    let row = success_entry ~model:"model" ~ts:(now_unix ()) () in
+    let row = match row with
+      | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+          "executed_runtime_id", `String "account.model"]) :: fields)
+      | _ -> fail "fixture is not an object" in
+    write_decisions good [row];
+    (* A directory where a JSONL file was expected reliably fails the read,
+       including under root; chmod-based fixtures can silently remain readable. *)
+    Unix.mkdir broken 0o700;
+    let open Yojson.Safe.Util in
+    let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "one unreadable file prevents a complete history" "unavailable"
+      (failed |> member "state" |> to_string);
+    check string "file failure has a typed cause" "files_unreadable"
+      (failed |> member "decision_read" |> member "cause" |> to_string);
+    check int "unreadable file counted" 1
+      (failed |> member "decision_read" |> member "unreadable_files" |> to_int);
+    check bool "partial samples never look like complete runtime totals" true
+      (failed |> member "runtimes" = `Null);
+    Unix.rmdir broken;
+    let recovered = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "a subsequent successful read recovers" "ready"
+      (recovered |> member "state" |> to_string);
+    check int "readable account is counted after recovery" 1
+      (recovered |> member "runtimes" |> to_list |> List.hd |> member "success_count" |> to_int))
+
+let test_runtime_history_directory_read_failure () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let open Yojson.Safe.Util in
+    let empty = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "missing store is genuinely empty" "ready" (empty |> member "state" |> to_string);
+    let directory = Filename.dirname (make_keeper_dir base "unused") in
+    Unix.rmdir directory;
+    write_decisions directory [];
+    let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "unreadable directory is not empty history" "unavailable" (failed |> member "state" |> to_string);
+    check string "directory failure has a typed cause" "directory_unavailable"
+      (failed |> member "decision_read" |> member "cause" |> to_string))
+
 let () =
   run "Model_inference_metrics" [
     "basics", [
@@ -1796,6 +1841,8 @@ let () =
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;
       test_case "runtime history keeps account attribution" `Quick test_runtime_history_keeps_account_attribution;
+      test_case "runtime history refuses partial decision reads and recovers" `Quick test_runtime_history_unreadable_decision_file;
+      test_case "runtime history distinguishes missing and unreadable store" `Quick test_runtime_history_directory_read_failure;
     ];
     "thinking_fraction", [
       test_case "mixed reported yields fraction" `Quick test_thinking_fraction_mixed;

@@ -11,5 +11,7 @@ val compute_cost_latency_json :
 (** Operator-only runtime history. Groups by the exact executed runtime from
     decision records; unpaired cost observations and records without an answerer
     remain unattributed. The window and store diagnostics accompany the samples.
+    A failed decision-log read returns an unavailable history, never empty or
+    partial totals labelled as ready.
     Call this from an asynchronous cached producer, never on a request's I/O path. *)
 val compute_runtime_metrics_json : base_path:string -> window_minutes:int -> Yojson.Safe.t

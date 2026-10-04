@@ -49,7 +49,19 @@ let cold_failure () =
   check string "failed cold read does not masquerade as loading"
     "snapshot refresh failed; no history available"
     (value "Runtime history" (Evidence.lines snapshot ~runtime_id:"one"))
+let decision_store_failure () =
+  List.iter (fun (diagnostic, expected) ->
+    let snapshot = read (`Assoc ["specifications", `List [];
+      "history", `Assoc ["state", `String "unavailable";
+        "decision_read", `Assoc diagnostic; "cache", `Assoc ["state", `String "fresh"]]]) in
+    let lines = Evidence.lines snapshot ~runtime_id:"one" in
+    check bool "decision read failure remains visible" true (contains (value "Runtime history" lines) expected);
+    check bool "an unread file never claims no attributed samples" false (List.mem_assoc "Runtime samples" lines);
+    check bool "an unread file never claims no recent success" false (List.mem_assoc "Last success" lines))
+    [["cause", `String "directory_unavailable"], "directory could not be read";
+     ["cause", `String "files_unreadable"; "unreadable_files", `Int 2], "2 decision log files could not be read"]
 let () = run "TUI runtime evidence" ["operator reading", [
   test_case "attribution, missing evidence and specification" `Quick attributed_view;
   test_case "failed cold snapshot" `Quick cold_failure;
+  test_case "unavailable decision store is never empty activity" `Quick decision_store_failure;
   test_case "invalid sample coverage" `Quick reject_bad_coverage]]

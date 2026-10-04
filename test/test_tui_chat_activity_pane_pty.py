@@ -2,27 +2,23 @@
 import sys
 import base64
 import json
-import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_answering.ml",
-)
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_chat as _keyboard_chat
+
+
 
 def board_interaction(process, fd, _slave, output, _base):
-    h.palette_go(process, fd, output, b"go board", b"MASC Board")
-    h.send_and_wait(process, fd, output, b"w", b"first line: title")
+    _keyboard_harness.palette_go(process, fd, output, b"go board", b"MASC Board")
+    _keyboard_harness.send_and_wait(process, fd, output, b"w", b"first line: title")
     for draft in (b"", b"short draft"):
         if draft:
-            h.write_all(fd, output, draft)
-        h.drain_until_quiet(process, fd, output, cap=4.0)
-        screen = h.screen_rows(bytes(output))
+            _keyboard_harness.write_all(fd, output, draft)
+        _keyboard_harness.drain_until_quiet(process, fd, output, cap=4.0)
+        screen = _keyboard_harness.screen_rows(bytes(output))
         # A self-composed frame owns its footer, even when the draft is empty.
-        footer = h.screen_row_of(screen, b"Esc:")
+        footer = _keyboard_harness.screen_row_of(screen, b"Esc:")
         if footer != 30:
             raise AssertionError(f"Board footer is at {footer}, expected 30: {screen!r}")
         if b"\xe2\x94\x82" in screen[30]:
@@ -30,17 +26,17 @@ def board_interaction(process, fd, _slave, output, _base):
         # Empty Activity rows intentionally have no vertical rule. Check its
         # header to prove the pane is present, and the footer's final position
         # to prove short drafts were padded before it.
-        pane_cell = h.acting_pane_header_cell(output)
-        expected = h.KEEPER_CHAT_PANE_COLUMNS - h.ACTING_PANE_NARROW_COLUMNS + 1
+        pane_cell = _keyboard_keepers.acting_pane_header_cell(output)
+        expected = _keyboard_keepers.KEEPER_CHAT_PANE_COLUMNS - _keyboard_harness.ACTING_PANE_NARROW_COLUMNS + 1
         if pane_cell != expected:
             raise AssertionError(f"Board Activity header at {pane_cell}, expected {expected}")
-    h.send_and_wait(process, fd, output, b"\x1b", b"d:discard")
-    h.send_and_wait(process, fd, output, b"d", b"MASC Board")
-    h.write_all(fd, output, b"q")
+    _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"d:discard")
+    _keyboard_harness.send_and_wait(process, fd, output, b"d", b"MASC Board")
+    _keyboard_harness.write_all(fd, output, b"q")
 
 
 def output_handoff_scenario(executable):
-    fixture = h.AtomicChatFixture(no_control_token=True)
+    fixture = _keyboard_chat.AtomicChatFixture(no_control_token=True)
     phase = {"tail": "FIRST_PROGRESS_LINE\n한글 진행 내용", "failed": False}
 
     def turns():
@@ -58,22 +54,22 @@ def output_handoff_scenario(executable):
     fixture.fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
 
     def screen(process, fd, output):
-        h.drain_until_quiet(process, fd, output, cap=1.0)
-        return h.screen_rows(bytes(output))
+        _keyboard_harness.drain_until_quiet(process, fd, output, cap=1.0)
+        return _keyboard_harness.screen_rows(bytes(output))
 
     def interact(process, fd, _slave, output, _base):
         try:
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"c",
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"c",
                             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
-            h.wait_for_output(process, fd, output, b"FIRST_PROGRESS_LINE", start=0, timeout=12)
+            _keyboard_harness.wait_for_output(process, fd, output, b"FIRST_PROGRESS_LINE", start=0, timeout=12)
             rows = screen(process, fd, output)
-            excerpt_at = h.screen_row_of(rows, b"FIRST_PROGRESS_LINE")
-            continuation_at = h.screen_row_of(rows, "한글 진행 내용".encode())
+            excerpt_at = _keyboard_harness.screen_row_of(rows, b"FIRST_PROGRESS_LINE")
+            continuation_at = _keyboard_harness.screen_row_of(rows, "한글 진행 내용".encode())
             if continuation_at <= excerpt_at:
                 raise AssertionError(f"multiline output lost its separate row: {rows!r}")
-            activity_at = h.screen_row_of(rows, b"Esc stops it")
+            activity_at = _keyboard_harness.screen_row_of(rows, b"Esc stops it")
             if excerpt_at >= activity_at:
                 raise AssertionError(f"output is outside conversation: {rows!r}")
             text = b"\n".join(rows.values())
@@ -81,10 +77,10 @@ def output_handoff_scenario(executable):
                 raise AssertionError(f"output duplicated in footer: {rows!r}")
             if "최근 출력 발췌".encode() not in text:
                 raise AssertionError(f"incomplete preview not labelled: {rows!r}")
-            h.send_and_wait(process, fd, output, b"queued-question-preserved", b"queued-question-preserved")
-            h.send_and_wait(process, fd, output, b"\r", b"WAITING TO START")
+            _keyboard_harness.send_and_wait(process, fd, output, b"queued-question-preserved", b"queued-question-preserved")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"WAITING TO START")
             phase["tail"] = "SECOND_PROGRESS_LINE"
-            h.wait_for_output(process, fd, output, b"SECOND_PROGRESS_LINE", start=len(output), timeout=12)
+            _keyboard_harness.wait_for_output(process, fd, output, b"SECOND_PROGRESS_LINE", start=len(output), timeout=12)
             rows = screen(process, fd, output)
             text = b"\n".join(rows.values())
             for marker in (b"SECOND_PROGRESS_LINE", b"queued-question-preserved", b"WAITING TO START"):
@@ -95,10 +91,10 @@ def output_handoff_scenario(executable):
             print(json.dumps({"provenance": "fixture PTY", "scenario": "autonomous output behind queued chat",
                               "encoding": "base64", "pty": base64.b64encode(bytes(output)).decode()}), flush=True)
             phase["failed"] = True
-            h.wait_for_output(process, fd, output, "마지막 관측, 갱신 실패".encode(), start=len(output), timeout=12)
+            _keyboard_harness.wait_for_output(process, fd, output, "마지막 관측, 갱신 실패".encode(), start=len(output), timeout=12)
             phase["failed"] = False
             phase["tail"] = ""
-            h.wait_for_output(process, fd, output, b"EMPTY_PREVIEW_OBSERVED", start=len(output), timeout=12)
+            _keyboard_harness.wait_for_output(process, fd, output, b"EMPTY_PREVIEW_OBSERVED", start=len(output), timeout=12)
             rows = screen(process, fd, output)
             if b"SECOND_PROGRESS_LINE" in b"\n".join(rows.values()):
                 raise AssertionError(f"empty preview retained previous output: {rows!r}")
@@ -109,28 +105,28 @@ def output_handoff_scenario(executable):
             fixture.release_first_acceptance.set()
         # Esc interrupts an active request. Wait for the actual return action
         # before using it, rather than racing the terminal events after release.
-        h.wait_for_output(process, fd, output, b"Esc:list",
+        _keyboard_harness.wait_for_output(process, fd, output, b"Esc:list",
                           start=settlement_start, timeout=12)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        h.write_all(fd, output, b"q")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.write_all(fd, output, b"q")
 
-    h.run_terminal_scenario(executable, description="Autonomous output stays in the conversation beside queued input",
+    _keyboard_harness.run_terminal_scenario(executable, description="Autonomous output stays in the conversation beside queued input",
                             interact=interact, http_fixtures=fixture.fixtures, refresh=0.5,
                             terminal_cols=100)
 
 
 if __name__ == "__main__":
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         sys.argv[1],
         description="Keeper chat draws the Activity pane beside it",
-        interact=h.keeper_chat_draws_activity_pane_interaction,
-        terminal_cols=h.KEEPER_CHAT_PANE_COLUMNS,
+        interact=_keyboard_keepers.keeper_chat_draws_activity_pane_interaction,
+        terminal_cols=_keyboard_keepers.KEEPER_CHAT_PANE_COLUMNS,
     )
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         sys.argv[1],
         description="Board drafts keep the footer below the Activity pane",
         interact=board_interaction,
-        terminal_cols=h.KEEPER_CHAT_PANE_COLUMNS,
+        terminal_cols=_keyboard_keepers.KEEPER_CHAT_PANE_COLUMNS,
     )
     output_handoff_scenario(sys.argv[1])
     print("tui chat Activity pane: PASS")

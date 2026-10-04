@@ -1,0 +1,18 @@
+Testing `candle_config'.
+This run has ID `8TD3O0XU'.
+
+  [OK]          content          0   optional shop prices preserve payouts.
+  [OK]          content          1   arithmetic and required-field boundaries.
+  [OK]          content          2   half-life is explicit and strictly typed.
+  [OK]          content          3   explicit policy is required.
+  [OK]          content          4   a key this build does not know disables.
+  [OK]          content          5   text that is not TOML disables.
+  [OK]          file             0   no file is off.
+  [OK]          file             1   the file is read every time.
+  [OK]          file             2   a path that cannot be read disables.
+  [OK]          file             3   a path that cannot be examined disables.
+  [OK]          file             4   a link to a missing file disables.
+  [OK]          file             5   a file that is not a regular file disabl...
+
+Full test results in `<worktree>/_build/default/test/_build/_tests/candle_config'.
+Test Successful in 0.006s. 12 tests run.

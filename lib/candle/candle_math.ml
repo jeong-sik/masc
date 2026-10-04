@@ -1,3 +1,12 @@
+type share_rounding = Largest_remainder | Down
+type tie_break = Name_ascending | Name_descending
+type deduction_rounding = Floor | Ceil
+type distribution = {
+  share_rounding : share_rounding;
+  tie_break : tie_break;
+  deduction_rounding : deduction_rounding;
+}
+
 (* See candle_math.mli. *)
 
 let ( let* ) = Result.bind
@@ -83,14 +92,15 @@ let weight_sum weights =
 ;;
 
 (* The names that get one more milli-candle, in the order they get it: the
-   largest remainder first, and the name that sorts first among equals. *)
-let by_remainder (name_a, remainder_a) (name_b, remainder_b) =
+   largest remainder first, with the explicit name-order policy for equals. *)
+let by_remainder ~tie_break (name_a, remainder_a) (name_b, remainder_b) =
   match Z.compare remainder_b remainder_a with
-  | 0 -> String.compare name_a name_b
+  | 0 -> (match tie_break with Name_ascending -> String.compare name_a name_b
+    | Name_descending -> String.compare name_b name_a)
   | order -> order
 ;;
 
-let split ~total weights =
+let split ~rounding ~tie_break ~total weights =
   if total < 0
   then Error Negative_total
   else
@@ -116,8 +126,9 @@ let split ~total weights =
       let left = total - List.fold_left (fun acc (_, base, _) -> acc + base) 0 parts in
       let extra =
         List.map (fun (name, _, remainder) -> name, remainder) parts
-        |> List.sort by_remainder
-        |> List.filteri (fun index _ -> index < left)
+        |> List.sort (by_remainder ~tie_break)
+        |> List.filteri (fun index _ -> match rounding with
+      | Largest_remainder -> index < left | Down -> false)
         |> List.map fst
       in
       Ok
@@ -126,10 +137,12 @@ let split ~total weights =
            parts)
 ;;
 
-let deduct ~coefficient share =
+let deduct ~rounding ~coefficient share =
   let* () = check_thousandths coefficient in
   if share < 0 then Error (Negative_share share)
   else
-    let* deducted, (_ : Z.t) = scaled ~a:share ~b:coefficient ~c:(Z.of_int thousand) in
-    Ok deducted
+    let* deducted, remainder = scaled ~a:share ~b:coefficient ~c:(Z.of_int thousand) in
+    Ok (match rounding with
+      | Floor -> deducted
+      | Ceil -> if Z.equal remainder Z.zero then deducted else deducted + 1)
 ;;

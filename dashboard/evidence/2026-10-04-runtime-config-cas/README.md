@@ -20,3 +20,26 @@ Source hashes and exact commands are in `manifest.json`. The driver, HTML and so
 ## Limits
 
 No backend/native/Dune build, CI, deployment or real filesystem CAS was run. The browser fixture does not prove backend locking, successful durable commits or integration with the separately implemented server/TUI changes. A final independent review is still required. Lane Add-on draft navigation is a separate work unit.
+
+## Current parent integration (2026-10-04)
+
+Current local candidate: checkpoint `7dee734ac427811c6d98ce5a05dcd2e81c168153`
+with real merge parent `84e6966c289e3cc493a75740eda3b2e53f56a27e` and the
+model-form guarded-save consumer adjustment. Historical files above retain
+their original candidates and are not evidence of this integration.
+
+Focused wrapper build passed for runtime validity, dashboard HTTP, config edit
+state, and the TUI executable. Current executions passed: runtime validity
+144 tests, edit state 4 tests, raw HTTP CAS contract 1 test, actual config-draft
+PTY, dashboard typecheck, and 320 tests across the three affected Web test files.
+Local logs: `/tmp/pr41114-focused-build2.log`, `/tmp/pr41114-validity.log`,
+`/tmp/pr41114-edit.log`, `/tmp/pr41114-http-cas.log`,
+`/tmp/pr41114-draft-pty.log`, `/tmp/pr41114-tsc.log`, and
+`/tmp/pr41114-web-tests.log`. TUI SHA-256:
+`b3f32483db627d1dc5da4f0883eabab8ef3b8189d4afd6257ec319fb831aa219`.
+The first focused build exposed the new parent's model-form caller using the
+previous helper contract; the current caller sends the revision from its fresh
+read and maps the typed receipt/error. This protects read-to-write CAS, not the
+revision at which a model/account form was originally opened. No #41119 API
+was imported. No current browser, full-suite, release, or deployed-runtime
+verification is claimed.

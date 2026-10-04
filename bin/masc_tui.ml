@@ -19903,7 +19903,10 @@ and is loaded on demand through keeper_skill.
                   let* json = Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host ~port:state.port in
                   let* reading = Masc_tui_runtime_config_view.decode json in
                   let* draft = Masc_tui_model_form.apply form reading.source_text in
-                  save_runtime_config_text ~authority ~identity draft in
+                  save_runtime_config_text ~authority ~identity
+                    ~expected_source_revision:reading.metadata.source_revision draft
+                  |> Result.map Masc_tui_runtime_config_receipt.lane_summary
+                  |> Result.map_error Masc_tui_http.runtime_config_save_error_message in
                 (match result with
                  | Ok summary -> state.runtime_model_form <- None;
                    launch_runtime_catalog_load state ~mailbox:async_messages;

@@ -11664,6 +11664,21 @@ let keeper_observed_turn (state : state) keeper_name =
       | _ -> None) state.keeper_turns
 ;;
 
+let keeper_message_draft_empty (state : state) =
+  Buffer.length state.msg_input = 0
+  && state.msg_attachments = [] && state.msg_references = []
+
+let keeper_message_turn_active (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> false
+  | Some keeper_name ->
+    Option.is_some (working_chat_for_keeper state keeper_name)
+    || Option.is_some (keeper_observed_turn state keeper_name)
+    || (match state.msg_live with
+        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+          Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Working
+        | Some _ | None -> false)
+
 let keeper_observed_interrupt (state : state) keeper_name started_at =
   List.find_opt (fun item -> item.oi_keeper = keeper_name && item.oi_started_at = started_at)
     state.keeper_observed_interrupts

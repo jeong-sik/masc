@@ -2462,21 +2462,24 @@ let test_the_sheet_carries_the_fact_detail_keys () =
 
 let test_chat_quiet_leave_respects_the_draft () =
   let leaves = Masc_tui_keys.chat_quiet_leave in
-  Alcotest.(check bool) "empty Q leaves without an interrupt key" true
-    (leaves ~draft_empty:true "Q");
-  Alcotest.(check bool) "Q in a draft remains a letter" false
-    (leaves ~draft_empty:false "Q");
-  Alcotest.(check bool) "lowercase q remains a letter" false
-    (leaves ~draft_empty:true "q");
-  Alcotest.(check bool) "Ctrl-Q leaves with text" true
-    (leaves ~draft_empty:false "\017");
+  List.iter (fun (input_supported, turn_active, draft_empty, expected) ->
+    Alcotest.(check bool) "printable Q follows viewport, turn and complete draft" expected
+      (leaves ~input_supported ~turn_active ~draft_empty "Q");
+    Alcotest.(check bool) "Ctrl-Q always leaves" true
+      (leaves ~input_supported ~turn_active ~draft_empty "\017");
+    Alcotest.(check bool) "lowercase q remains text" false
+      (leaves ~input_supported ~turn_active ~draft_empty "q"))
+    [ true, true, true, true; true, true, false, false
+    ; true, false, true, false; true, false, false, false
+    ; false, true, true, true; false, true, false, true
+    ; false, false, true, true; false, false, false, true ];
   let chat = Masc_tui_keys.for_surface (Keepers Keeper_message) in
   Alcotest.(check bool) "chat help names both quiet exits" true
     (List.exists
        (fun (binding : Masc_tui_keys.binding) ->
          String.equal binding.key "Q / Ctrl-Q"
          && binding.help = Some
-              "Q with an empty draft, or Ctrl-Q: leave with a turn running without interrupting it")
+              "Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting")
        chat)
 
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =

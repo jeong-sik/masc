@@ -3570,15 +3570,18 @@ let render_keeper_message (state : state) =
            | Leave -> return_hint ())
         | None -> return_hint ()
     in
-    (* Q is a quiet exit only with an empty draft; Ctrl-Q remains available
-       while typing. The compact footer omits this hint for width, but the
+    (* Match the visible composer's key predicate, including staged media
+       and whether a turn is active. Ctrl-Q remains available while typing. The compact footer omits this hint for width, but the
        help sheet names both keys. *)
     let leave_hint =
       if state.keeper_message_focus = Right_pane
          && Option.is_none state.msg_recall_replaces
          && Option.is_none state.voice_capture
       then
-        if Buffer.length state.msg_input = 0 then "  Q / Ctrl-Q:leave"
+        if Masc_tui_keys.chat_quiet_leave ~input_supported:true
+             ~turn_active:(keeper_message_turn_active state)
+             ~draft_empty:(keeper_message_draft_empty state) "Q"
+        then "  Q / Ctrl-Q:leave"
         else "  Ctrl-Q:leave"
       else ""
     in

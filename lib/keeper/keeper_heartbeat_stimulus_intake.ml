@@ -76,11 +76,15 @@ type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
   | Stimulus_retry_later of
       Keeper_world_observation_board_signal.board_unavailable
+  | Stimulus_connector_retry_later of Keeper_external_attention.read_error
+  | Stimulus_connector_missing of string
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
+  | Connector_read_failed of Keeper_external_attention.read_error
+  | Connector_item_missing of string
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
@@ -88,16 +92,22 @@ let event_queue_intake_error_to_string = function
   | Transient_board_read unavailable ->
     "event queue stimulus intake retry: "
     ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
+  | Connector_read_failed error ->
+    "connector attention intake retry: " ^ Keeper_external_attention.read_error_to_string error
+  | Connector_item_missing event_id ->
+    "connector attention item missing: " ^ event_id
 ;;
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
   | Transient_board_read _ -> "event_queue_transient_board_read"
+  | Connector_read_failed _ -> "event_queue_connector_read_failed"
+  | Connector_item_missing _ -> "event_queue_connector_item_missing"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
-  | Transient_board_read _ -> false
+  | Transient_board_read _ | Connector_read_failed _ | Connector_item_missing _ -> false
 ;;
 
 let classify_pending_board_event_result = function
@@ -199,12 +209,9 @@ type heartbeat_event_intake = {
 }
 
 let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
-  Keeper_external_attention.load_events ~base_path ~keeper_name
-  |> List.find_map (function
-       | Keeper_external_attention.Recorded item
-         when String.equal item.Keeper_external_attention.event_id event_id ->
-         Some item
-       | Keeper_external_attention.Recorded _ -> None)
+  Keeper_external_attention.recorded_items_by_event_ids
+    ~base_path ~keeper_name ~event_ids:[ event_id ]
+  |> Result.map (List.assoc_opt event_id)
 ;;
 
 let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
@@ -361,32 +368,24 @@ let consume_single_heartbeat_stimulus
              attention item in one scan (see
              [connector_attention_items_of_batch] below) — reuse it instead
              of re-scanning the whole event log for this one id. *)
-          List.assoc_opt ca.event_id preloaded
+          Result.map (List.assoc_opt ca.event_id) preloaded
         | None ->
           recorded_attention_item_by_event_id
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name
             ~event_id:ca.event_id
       in
-      let pending_events =
-        match recorded_item with
-        | Some item ->
-          [ Keeper_world_observation.pending_board_event_of_external_attention
-              ~meta:meta_after_triage
-              item
-          ]
-        | None ->
-          Log.Keeper.warn
-            "connector attention stimulus missing recorded item event_id=%s (keeper=%s)"
-            ca.event_id
-            meta_after_triage.name;
-          []
-      in
-      Log.Keeper.info
-        "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
-        ca.event_id
-        meta_after_triage.name;
-      Stimulus_consumed pending_events
+      (match recorded_item with
+       | Error error -> Stimulus_connector_retry_later error
+       | Ok None -> Stimulus_connector_missing ca.event_id
+       | Ok (Some item) ->
+         Log.Keeper.info
+           "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
+           ca.event_id
+           meta_after_triage.name;
+         Stimulus_consumed
+           [ Keeper_world_observation.pending_board_event_of_external_attention
+               ~meta:meta_after_triage item ])
     | Keeper_event_queue.Hitl_resolved r ->
       (* The approval has left the queue, so this cycle no longer skips. There
          is no observation to fabricate: the typed resolution itself is
@@ -460,7 +459,8 @@ let consume_single_heartbeat_stimulus
       Stimulus_consumed []
   in
   match intake_result with
-  | Stimulus_retry_later _ -> intake_result
+  | Stimulus_retry_later _ | Stimulus_connector_retry_later _
+  | Stimulus_connector_missing _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StimulusConsumed)
@@ -822,7 +822,7 @@ let heartbeat_event_intake
      alive.
 
      Connector attention keeps RFC-0377's conversation boundary:
-     only the first ready connector conversation is eligible, while rows for
+     only the first readable ready connector conversation is eligible, while rows for
      other conversations remain pending for their own routed turn. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
@@ -845,85 +845,46 @@ let heartbeat_event_intake
       None
   in
   let ready_batch selections =
-    let first_connector_conversation =
-        List.find_map
-          (fun (selection : Keeper_event_queue_state.pending_selection) ->
-             if stimulus_ready_for_intake ~base_path selection.source
-             then
-               Keeper_event_queue.connector_attention_channel
-                 selection.source.payload
-             else None)
-          selections
-      in
-      let hitl_selected = ref false in
-      let admitted =
-        List.filter
-          (fun (selection : Keeper_event_queue_state.pending_selection) ->
-             stimulus_ready_for_intake ~base_path selection.source
-             &&
-             match selection.source.payload with
-             | Keeper_event_queue.Hitl_resolved _ ->
-               (* One tool bundle carries one exact cycle grant. Admitting two
-                  HITL resolutions would replay only the first while a completed
-                  turn ACKed both durable sources. Leave later resolutions queued
-                  for their own exact replay turn. *)
-               if !hitl_selected
-               then false
-               else (
-                 hitl_selected := true;
-                 true)
-             (* Every other kind shares a batch; a connector conversation
-                keeps it to one channel. A new kind is listed here on
-                purpose, so whether it may share a batch is decided, not
-                inherited. *)
-             | Keeper_event_queue.Board_signal _
-             | Keeper_event_queue.Board_attention _
-             | Keeper_event_queue.Bootstrap
-             | Keeper_event_queue.Fusion_completed _
-             | Keeper_event_queue.Schedule_due _
-             | Keeper_event_queue.Connector_attention _
-             | Keeper_event_queue.Ask_answered _
-             | Keeper_event_queue.Completion_authority_rejected _
-             | Keeper_event_queue.Task_cancelled _
-             | Keeper_event_queue.Workspace_message _
-             | Keeper_event_queue.Delegate_completed _
-             | Keeper_event_queue.Composition_completed _
-             | Keeper_event_queue.Task_outcome _ ->
-               (match
-                  Keeper_event_queue.connector_attention_channel
-                    selection.source.payload,
-                  first_connector_conversation
-                with
-                | None, _ -> true
-                | Some _, None -> false
-                | Some channel, Some first_channel ->
-                  Keeper_continuation_channel.same_conversation
-                    channel
-                    first_channel))
-          selections
-      in
-      admitted
+    let hitl_selected = ref false in
+    let admitted =
+      List.filter
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+           stimulus_ready_for_intake ~base_path selection.source
+           &&
+           match selection.source.payload with
+           | Keeper_event_queue.Hitl_resolved _ ->
+             (* One tool bundle carries one exact cycle grant. Admitting two
+                HITL resolutions would replay only the first while a completed
+                turn ACKed both durable sources. Leave later resolutions queued
+                for their own exact replay turn. *)
+             if !hitl_selected
+             then false
+             else (
+               hitl_selected := true;
+               true)
+           (* Every other kind is eligible here; the Connector snapshot
+              below selects one readable conversation. A new kind is listed here on
+              purpose, so whether it may share a batch is decided, not
+              inherited. *)
+           | Keeper_event_queue.Board_signal _
+           | Keeper_event_queue.Board_attention _
+           | Keeper_event_queue.Bootstrap
+           | Keeper_event_queue.Fusion_completed _
+           | Keeper_event_queue.Schedule_due _
+           | Keeper_event_queue.Connector_attention _
+           | Keeper_event_queue.Ask_answered _
+           | Keeper_event_queue.Completion_authority_rejected _
+           | Keeper_event_queue.Task_cancelled _
+           | Keeper_event_queue.Workspace_message _
+           | Keeper_event_queue.Delegate_completed _
+           | Keeper_event_queue.Composition_completed _
+           | Keeper_event_queue.Task_outcome _ ->
+             true)
+        selections
+    in
+    admitted
   in
   let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
-  let connector_attention_items_of_batch selections =
-    let event_ids =
-      selections
-      |> List.to_seq
-      |> Seq.filter_map
-        (fun (selection : Keeper_event_queue_state.pending_selection) ->
-           connector_attention_event_id selection.source)
-      |> Seq.take max_events
-      |> List.of_seq
-    in
-    match event_ids with
-    | [] | [ _ ] -> None
-    | _ :: _ :: _ ->
-      Some
-        (Keeper_external_attention.recorded_items_by_event_ids
-           ~base_path
-           ~keeper_name
-           ~event_ids)
-  in
   let is_board_source (selection : Keeper_event_queue_state.pending_selection) =
     match selection.source.payload with
     | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ -> true
@@ -941,12 +902,50 @@ let heartbeat_event_intake
     | Keeper_event_queue.Task_outcome _ -> false
   in
   let consume_batch selections =
-    (* Each Connector source spends one admission slot, so at most the first
-       [max_events] Connector ids can enter this turn. This private lazy is
-       forced only by this sequential intake loop, and avoids reading the
-       Connector store when earlier sources fill all slots. *)
-    let connector_attention_items =
-      lazy (connector_attention_items_of_batch selections)
+    (* Defer the one Connector snapshot until admission reaches a Connector.
+       Index once, then select the first readable conversation and withdraw
+       missing pointers in one linear pass without per-pointer reconciliation. *)
+    let connector_snapshot = ref None in
+    let prepare_connectors selections =
+      let event_ids = List.filter_map
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          connector_attention_event_id selection.source) selections in
+      let loaded = Keeper_external_attention.recorded_items_by_event_ids
+        ~base_path ~keeper_name ~event_ids
+        |> Result.map (fun pairs ->
+          let items = Hashtbl.create (List.length pairs) in
+          List.iter (fun (id, item) -> Hashtbl.replace items id item) pairs;
+          items) in
+      connector_snapshot := Some loaded;
+      match loaded with
+      | Error _ -> selections, None
+      | Ok items ->
+        let first_channel = ref None in
+        let first_missing = ref None in
+        let missing_count = ref 0 in
+        let selected = List.filter
+          (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            match connector_attention_event_id selection.source with
+            | None -> true
+            | Some event_id when not (Hashtbl.mem items event_id) ->
+              incr missing_count;
+              (match !first_missing with
+               | None -> first_missing := Some (selection, Connector_item_missing event_id)
+               | Some _ -> ());
+              false
+            | Some _ ->
+              match Keeper_event_queue.connector_attention_channel selection.source.payload with
+              | None -> false
+              | Some channel ->
+                match !first_channel with
+                | None -> first_channel := Some channel; true
+                | Some first -> Keeper_continuation_channel.same_conversation channel first)
+          selections in
+        if !missing_count > 0 then
+          Log.Keeper.warn
+            "turn entry: retaining missing connector attention keeper=%s count=%d"
+            keeper_name !missing_count;
+        selected, !first_missing
     in
     let rec loop
           remaining
@@ -961,6 +960,13 @@ let heartbeat_event_intake
         , List.rev selections_rev
         , first_withdrawn
         , None )
+      | _, (selection : Keeper_event_queue_state.pending_selection) :: _
+        when Option.is_none !connector_snapshot
+             && Option.is_some (connector_attention_event_id selection.source) ->
+        let selections, missing = prepare_connectors selections in
+        let first_withdrawn = match first_withdrawn with
+          | None -> missing | Some _ as kept -> kept in
+        loop remaining observations_rev selections_rev first_withdrawn selections
       | _, selection :: rest ->
         (match
            reconcile_spent_selection
@@ -991,7 +997,10 @@ let heartbeat_event_intake
            let connector_attention_items =
              match connector_attention_event_id selection.source with
              | None -> None
-             | Some _ -> Lazy.force connector_attention_items
+             | Some event_id ->
+               Option.map (Result.map (fun items ->
+                 match Hashtbl.find_opt items event_id with
+                 | None -> [] | Some item -> [event_id, item])) !connector_snapshot
            in
            (match
               consume_single_heartbeat_stimulus
@@ -1009,9 +1018,32 @@ let heartbeat_event_intake
                    unavailable);
               let first_withdrawn =
                 match first_withdrawn with
-                | None -> Some (selection, unavailable)
+                | None -> Some (selection, Transient_board_read unavailable)
                 | Some _ as kept -> kept
               in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_connector_missing event_id ->
+              Log.Keeper.warn
+                "turn entry: retaining missing connector attention keeper=%s event_id=%s"
+                keeper_name event_id;
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection, Connector_item_missing event_id)
+                | Some _ as kept -> kept
+              in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_connector_retry_later error ->
+              Log.Keeper.warn
+                "turn entry: retaining unread connector attention keeper=%s: %s"
+                keeper_name (Keeper_external_attention.read_error_to_string error);
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection, Connector_read_failed error)
+                | Some _ as kept -> kept
+              in
+              (* Every Connector row uses the same failed store snapshot. Leave
+                 the rest pending without repeating reconciliation and warnings;
+                 independent source kinds can still fill the admission batch. *)
+              let rest = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                Option.is_none (connector_attention_event_id selection.source)) rest in
               loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the
@@ -1087,7 +1119,7 @@ let heartbeat_event_intake
   let event_queue_intake_error =
     match hard_error, first_withdrawn with
     | Some (_, error), _ -> Some error
-    | None, Some (_, unavailable) -> Some (Transient_board_read unavailable)
+    | None, Some (_, error) -> Some error
     | None, None -> None
   in
   let event_queue_triggers =

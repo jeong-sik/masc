@@ -191,6 +191,7 @@ export interface DashboardRuntimeProviderSnapshot {
   model_id?: string | null
   model_api_name?: string | null
   protocol?: string | null
+  usage_read_configured?: boolean
   transport?: string | null
   kind?: string | null
   runtime_kind?: string | null
@@ -676,6 +677,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     model_id: asNullableString(raw.model_id),
     model_api_name: asNullableString(raw.model_api_name),
     protocol: asNullableString(raw.protocol),
+    usage_read_configured: asBoolean(raw.usage_read_configured),
     transport: asNullableString(raw.transport),
     kind: asNullableString(raw.kind),
     runtime_kind: asNullableString(raw.runtime_kind),

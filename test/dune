@@ -9272,6 +9272,13 @@
 (include stanzas/test_play_current_credential_authority.inc)
 
 (rule
+ (alias runtest-test_candle_evidence_audits)
+ (deps test_candle_evidence_audits.py
+       (source_tree ../docs/evidence/2026-09-30-candle-grade-explicit-outcome)
+       (source_tree ../docs/evidence/2026-09-30-candle-grade-scope-survey))
+ (action (run python3 %{dep:test_candle_evidence_audits.py})))
+
+(rule
  (alias runtest-test_tui_lane_initial_authority)
  (deps test_tui_lane_initial_authority.py
        tui_keyboard_harness.py

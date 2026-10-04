@@ -3459,13 +3459,13 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")));
-            let prefix = "      Account " in
+            let prefix = "      Quota scope " in
             let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
-            let account_width =
+            let scope_width =
               max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
-              (prefix ^ Masc_tui_message_layout.fit_middle account_width
-                 (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix));
+              (prefix ^ Masc_tui_message_layout.fit_middle scope_width
+                 (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
@@ -3554,13 +3554,13 @@ let render_exact_lane_provider_editor (state : state) editor =
             | None -> "") ^ "Selected " ^ row.sr_slot) in
         (match selected_runtime with
          | Some runtime ->
-           let prefix = "  Account " in
+           let prefix = "  Quota scope " in
            let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
-           let account_width =
+           let scope_width =
              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
-             (prefix ^ Masc_tui_message_layout.fit_middle account_width
-                (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix)
+             (prefix ^ Masc_tui_message_layout.fit_middle scope_width
+                (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
           ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6)) identity));
@@ -3856,7 +3856,7 @@ let render_lanes_overview (state : state) =
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset));
               box_line_styled buf cols ~style:(Theme.recede ())
-                ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
                   ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices);
@@ -10006,7 +10006,7 @@ let render_runtime (state : state) =
                 (Ansi.dim ^ note ^ Ansi.reset));
            (match picker.rlp_pick with
             | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
-                c.push ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                c.push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
                   ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id)
             | _ -> ())) picker.rlp_choices;

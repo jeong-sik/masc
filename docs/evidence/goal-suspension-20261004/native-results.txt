@@ -1,0 +1,72 @@
+Evidence directory: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz
+compile workspace_request_id
+compile workspace_broadcast
+compile goal_phase
+compile goal_store
+compile goal_verification
+compile goal_delivery
+compile goal_measurement
+compile goal_unavailable_envelope
+compile masc__Fusion_request_context
+compile masc__Workspace_goals
+consumer typecheck dashboard_goals_types_accessor
+consumer typecheck dashboard_goals_types_health
+consumer typecheck dashboard_goals_types_timeline
+consumer typecheck masc__Keeper_turn_task_context
+consumer typecheck masc__Tui_decode
+test_goal_suspension 218 cached/direct dependency objects
+Testing `Goal suspension'.
+This run has ID `T9Q4U7AH'.
+
+  [OK]          contract          0   restore every live state across both su...
+  [OK]          contract          1   terminal refusal and Drop/Reopen escape.
+  [OK]          contract          2   bound verdict preserves suspension and ...
+  [OK]          contract          3   criterion edit invalidates proof but pr...
+  [OK]          contract          4   confirmation restores the same proof bi...
+  [OK]          contract          5   Candle failure retains pending proof an...
+  [OK]          contract          6   strict codec, distinct counts and filters.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/Goal suspension'.
+Test Successful in 0.293s. 7 tests run.
+
+test_goal_phase_all 1 cached/direct dependency objects
+Testing `goal_phase_all'.
+This run has ID `HJ49CDQ4'.
+
+  [OK]          phase                      0   round-trip.
+  [OK]          phase                      1   set and order.
+  [OK]          action                     0   round-trip.
+  [OK]          action                     1   set and order.
+  [OK]          action                     2   public set excludes verifier c...
+  [OK]          transition matrix          0   legacy matrix every pair state...
+  [OK]          transition matrix          1   outcomes.
+  [OK]          transition matrix          2   already reports the current ph...
+  [OK]          transition matrix          3   agrees with the Task FSM on re...
+  [OK]          transition matrix          4   moves_goal lights only the key...
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/goal_phase_all'.
+Test Successful in 0.001s. 10 tests run.
+
+test_goal_drop_delivery 218 cached/direct dependency objects
+Testing `Goal cancellation delivery'.
+This run has ID `G4AZMJKO'.
+
+  [OK]          durability          0   repeat repairs committed audit exactl...
+  [OK]          durability          1   fresh process drains audit after Goal...
+  [OK]          durability          2   failed commit creates no effects.
+  [OK]          durability          3   unavailable primary remains unchanged.
+  [OK]          durability          4   missing Goal remains missing.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/Goal cancellation delivery'.
+Test Successful in 0.042s. 5 tests run.
+
+test_goal_suspension_projection 428 cached/direct dependency objects
+Testing `Goal suspension projection'.
+This run has ID `PK3GEVOL'.
+
+  [OK]          dashboard          0   public actions from FSM.
+  [OK]          dashboard          1   audit restoration state.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/Goal suspension projection'.
+Test Successful in 0.000s. 2 tests run.
+

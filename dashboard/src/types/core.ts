@@ -594,6 +594,7 @@ export type GoalProof =
   | { state: 'unreadable'; detail: string }
 
 export interface Goal {
+  resume_phase?: import("../api/goal-lifecycle").GoalResumePhase | null
   verification?: GoalProof
   id: string
   title: string

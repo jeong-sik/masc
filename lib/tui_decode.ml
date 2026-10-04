@@ -308,6 +308,8 @@ type planning_rollup = {
   pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
+  pr_paused : int;
+  pr_blocked : int;
 }
 
 type planning_backlog = {
@@ -1397,12 +1399,7 @@ let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_criterion_revision = optional_string_field json "criterion_revision" in
   let* pg_title = required_string_field json "title" in
-  let* raw_phase = required_string_field json "phase" in
-  let* pg_phase =
-    match Goal_phase.parse raw_phase with
-    | Some phase -> Ok phase
-    | None -> Error (Printf.sprintf "unknown planning goal phase %S" raw_phase)
-  in
+  let* pg_phase = Goal_phase.of_fields json in
   let* pg_priority = required_int_field json "priority" in
   let* pg_due_date = optional_string_field json "due_date" in
   let* pg_metric = optional_string_field json "metric" in
@@ -1442,12 +1439,16 @@ let decode_planning_rollup json =
   in
   let* pr_done = required_int_field json "done_count" in
   let* pr_dropped = required_int_field json "dropped_count" in
+  let* pr_paused = required_int_field json "paused_count" in
+  let* pr_blocked = required_int_field json "blocked_count" in
   Ok
     { pr_active
     ; pr_verifying
     ; pr_awaiting_confirmation
     ; pr_done
     ; pr_dropped
+    ; pr_paused
+    ; pr_blocked
     }
 
 let decode_planning_backlog json =
@@ -2855,12 +2856,12 @@ let rec decode_overview_goal_node json =
            | _ -> Ok None)
        | _ -> Ok None)
   in
-  let* og_phase =
-    match Goal_phase.parse raw_phase with
-    | Some phase -> Ok phase
-    | None ->
-        Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
-  in
+  let* og_phase = match Goal_phase.of_fields json with
+    | Ok phase -> Ok phase
+    | Error detail ->
+        (match Goal_phase.Kind.parse raw_phase with
+         | None -> Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
+         | Some _ -> Error (Overview_goals_malformed detail)) in
   let* og_priority = malformed (required_int_field json "priority") in
   let* og_criterion_revision = malformed (optional_string_field json "criterion_revision") in
   let* og_metric = malformed (optional_string_field json "metric") in

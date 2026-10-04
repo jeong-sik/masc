@@ -1589,7 +1589,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                     "verifying_count": 0,
                     "awaiting_confirmation_count": 0,
                     "done_count": 0,
-                    "dropped_count": 0,
+                    "dropped_count": 0, "paused_count": 0, "blocked_count": 0,
                 },
                 "task_backlog": {
                     "todo": 0,
@@ -1721,7 +1721,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
                 "verifying_count": 0,
                 "awaiting_confirmation_count": 0,
                 "done_count": 0,
-                "dropped_count": 0,
+                "dropped_count": 0, "paused_count": 0, "blocked_count": 0,
             },
             "task_backlog": {
                 "todo": 0,

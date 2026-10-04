@@ -1203,7 +1203,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   ; "verifying_count", `Int 0
                   ; "awaiting_confirmation_count", `Int 0
                   ; "done_count", `Int 0
-                  ; "dropped_count", `Int 0
+                  ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 0
                   ] )
             ; ( "task_backlog"
               , `Assoc
@@ -1355,7 +1355,7 @@ let test_planning_goal_without_the_verifier_field_is_refused () =
         , `Assoc
             [ "active_count", `Int 0; "verifying_count", `Int 1
             ; "awaiting_confirmation_count", `Int 0; "done_count", `Int 0
-            ; "dropped_count", `Int 0 ] )
+            ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 0 ] )
       ; ( "task_backlog"
         , `Assoc
             [ "todo", `Int 0; "claimed", `Int 0; "in_progress", `Int 0
@@ -1418,7 +1418,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           ; "verifying_count", `Int 3
           ; "awaiting_confirmation_count", `Int 0
           ; "done_count", `Int 4
-          ; "dropped_count", `Int 5
+          ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 5
           ] )
     ; ( "task_backlog"
       , `Assoc

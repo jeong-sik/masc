@@ -1,0 +1,52 @@
+Evidence directory: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+compile workspace_request_id
+compile workspace_broadcast
+compile goal_phase
+compile goal_store
+compile goal_verification
+compile goal_delivery
+compile goal_measurement
+compile goal_unavailable_envelope
+compile masc__Fusion_request_context
+compile masc__Workspace_goals
+consumer typecheck dashboard_goals_types_accessor
+consumer typecheck dashboard_goals_types_health
+consumer typecheck dashboard_goals_types_timeline
+consumer typecheck dashboard_goals_types_builder
+consumer typecheck dashboard_goals_types
+consumer typecheck dashboard_goals
+Traceback (most recent call last):
+  File "/tmp/masc-goal-suspend-20261004/check-goal-suspension.py", line 58, in <module>
+    print('consumer typecheck',unit,flush=True);compile_unit(path,unit)
+                                                ~~~~~~~~~~~~^^^^^^^^^^^
+  File "/tmp/masc-goal-suspend-20261004/check-goal-suspension.py", line 27, in compile_unit
+    run(cmd+opened+['-w','+8+11+32','-warn-error','+8+11+32','-c',unit+'.ml'])
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/masc-goal-suspend-20261004/check-goal-suspension.py", line 17, in run
+    if r.returncode:(out/'failure.txt').write_text(r.stdout);raise RuntimeError(r.stdout[-5000:])
+                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: dk441p
+findlib: [WARNING] Interface goal_unavailable_envelope.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/goal/.masc_goal.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface goal_store.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/goal/.masc_goal.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface checkseum.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/checkseum/c, /Users/dancer/.opam/5.5.1/lib/checkseum
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
+findlib: [WARNING] Interface masc__Keeper_execution_receipt.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/.masc.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface dashboard_goals.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/dashboard/.masc_dashboard.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface goal_verification.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/goal/.masc_goal.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface dashboard_goals_types.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/dashboard/.masc_dashboard.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface goal_delivery.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/goal/.masc_goal.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface masc__Keeper_world_observation.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/.masc.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface workspace_broadcast.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/workspace/.masc_workspace.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface masc__Workspace_goals.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/.masc.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface dashboard_goals_types_timeline.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/dashboard/.masc_dashboard.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface dashboard_goals_types_builder.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/dashboard/.masc_dashboard.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface masc__Keeper_unified_prompt.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/.masc.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+findlib: [WARNING] Interface goal_phase.cmi occurs in several directories: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004/_build/default/lib/goal/.masc_goal.objs/byte, /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-b6dk441p
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
+ocamlfind: [WARNING] Package `ptime.clock.os': Deprecated, use the ptime.clock library.
+ocamlfind: [WARNING] Package `uunf.string': Deprecated, use the uunf library.
+File "dashboard_goals.ml", line 1:
+Error: The files dashboard_goals_types.cmi
+       and masc__Keeper_execution_receipt.cmi make inconsistent assumptions
+       over interface Goal_store
+

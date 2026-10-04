@@ -730,6 +730,10 @@ let planning_stage_rail (phase : Goal_phase.t) =
   in
   let arrow = Ansi.dim ^ "\xe2\x94\x80\xe2\x96\xb6" ^ Ansi.reset in
   match phase with
+  | (Goal_phase.Paused _ | Goal_phase.Blocked _) as suspended ->
+    planning_phase_color suspended ^ "[" ^ planning_phase_label suspended ^ "]" ^ Ansi.reset
+    ^ (match Goal_phase.resume_phase suspended with
+       | None -> "" | Some target -> "  resumes " ^ planning_phase_label target)
   | Goal_phase.Dropped ->
     planning_phase_color Goal_phase.Dropped
     ^ Ansi.bold ^ "[dropped]" ^ Ansi.reset
@@ -771,6 +775,8 @@ let planning_next_step (goal : planning_goal) =
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
+  | Goal_phase.Paused _, _ -> (Theme.warn (), "paused - [r] restores the prior state; linked Tasks continue independently")
+  | Goal_phase.Blocked _, _ -> (Theme.bad (), "blocked - [u] restores the prior state; linked Tasks continue independently")
 ;;
 
 (* The line under the list, for the goal the cursor is on. A verdict without its
@@ -1541,6 +1547,8 @@ let render_planning_detail (state : state)
           | Goal_phase.Awaiting_confirmation -> "[human]"
           | Goal_phase.Completed -> "[done]"
           | Goal_phase.Dropped -> "[drop]"
+          | Goal_phase.Paused _ -> "[pause]"
+          | Goal_phase.Blocked _ -> "[block]"
         in
         Printf.sprintf "%s P%d %s" phase_badge row.pg_priority
           (Terminal_text.single_line row.pg_title)

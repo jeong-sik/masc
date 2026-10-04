@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/goal-suspension-20261004/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  113 passed (113)
+   Start at  18:01:55
+   Duration  2.55s (environment 27%, transform 25%, setup 20%, import 19%, tests 9%, worker 1%)
+
+    Isolate  4 workers spawned · ~242ms startup each (spawn + environment, per file)
+             at least ~725ms faster with isolate: false — reuses workers across files instead of one per file
+

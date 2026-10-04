@@ -1125,7 +1125,7 @@ let test_board_and_planning_explain_their_order () =
     (board_sort_explanation Board_hot);
   check str "trending formula" "net votes / √age-hours"
     (board_sort_explanation Board_trending);
-  check str "active phase set" "executing + verifying"
+  check str "active phase set" "all nonterminal goals (including suspended)"
     (planning_filter_explanation Planning_filter_active);
   check str "phase and priority order" "phase order, then P1→P5"
     (planning_sort_explanation Planning_sort_phase_priority);
@@ -2761,7 +2761,7 @@ let planning_state () =
           ; pr_verifying = 0
           ; pr_awaiting_confirmation = 0
           ; pr_done = 0
-          ; pr_dropped = 0
+          ; pr_paused = 0; pr_blocked = 0; pr_dropped = 0
           }
       ; pl_backlog =
           { pb_todo = 0; pb_claimed = 0; pb_running = 0

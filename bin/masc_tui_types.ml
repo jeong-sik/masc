@@ -2186,6 +2186,8 @@ type planning_rollup = Tui_decode.planning_rollup
   pr_awaiting_confirmation: int;
   pr_done: int;
   pr_dropped: int;
+  pr_paused: int;
+  pr_blocked: int;
 }
 
 type planning_backlog = Tui_decode.planning_backlog
@@ -2267,7 +2269,7 @@ let planning_filter_label = function
 
 let planning_filter_explanation = function
   | Planning_filter_all -> "all phases"
-  | Planning_filter_active -> "executing + verifying"
+  | Planning_filter_active -> "all nonterminal goals (including suspended)"
   | Planning_filter_completed -> "completed only"
   | Planning_filter_dropped -> "dropped only"
 ;;
@@ -2304,12 +2306,12 @@ let next_planning_sort = function
 let planning_passes_filter filter (goal : planning_goal) =
   match filter, goal.pg_phase with
   | Planning_filter_all, _ -> true
-  | Planning_filter_active, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation) -> true
+  | Planning_filter_active, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Paused _ | Goal_phase.Blocked _) -> true
   | Planning_filter_completed, Goal_phase.Completed -> true
   | Planning_filter_dropped, Goal_phase.Dropped -> true
   | Planning_filter_active, (Goal_phase.Completed | Goal_phase.Dropped)
-  | Planning_filter_completed, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Dropped)
-  | Planning_filter_dropped, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Completed) ->
+  | Planning_filter_completed, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _)
+  | Planning_filter_dropped, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Paused _ | Goal_phase.Blocked _) ->
       false
 
 (* RFC 3339 timestamps and ISO dates compare lexicographically, so the sort
@@ -2337,8 +2339,10 @@ let planning_visible_goals ~filter ~sort (goals : planning_goal list)
     | Goal_phase.Executing -> 0
     | Goal_phase.Verifying -> 1
     | Goal_phase.Awaiting_confirmation -> 2
-    | Goal_phase.Completed -> 3
-    | Goal_phase.Dropped -> 4
+    | Goal_phase.Completed -> 5
+    | Goal_phase.Dropped -> 6
+    | Goal_phase.Paused _ -> 3
+    | Goal_phase.Blocked _ -> 4
   in
   let compare =
     match sort with

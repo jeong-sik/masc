@@ -4182,7 +4182,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries alcotest masc.masc_goal masc_tui_types))
+ (libraries alcotest masc.masc_goal masc_tui_types masc_tui_render_prim))
 
 ; The named keyboard alias keeps the existing targeted-suite entry point.
 ; Each dependency has its own process, so Dune can run the six parts together.
@@ -9349,3 +9349,13 @@
 (include stanzas/test_goal_drop_delivery.inc)
 
 (include stanzas/test_goal_notification_contract.inc)
+
+(test
+ (name test_goal_suspension)
+ (modules test_goal_suspension)
+ (libraries masc masc_goal alcotest eio_main))
+
+(test
+ (name test_goal_suspension_projection)
+ (modules test_goal_suspension_projection)
+ (libraries masc_dashboard masc_goal alcotest))

@@ -1,0 +1,39 @@
+{
+  "base_head": "347e6749035636c25a8c4ce9d762b5d29a0a2f14",
+  "issue": 41207,
+  "red": {
+    "exit": 1,
+    "failed": 4,
+    "cause": "Machine activity configuration is unavailable for both machines and both enabled states"
+  },
+  "green": {
+    "build_exit": 0,
+    "alias_exit": 0,
+    "cases": 4,
+    "seconds": 2.117
+  },
+  "ruff_exit": 0,
+  "pyright_errors": 0,
+  "source_sha256": {
+    "lib/server/server_runtime_bootstrap.ml": "4c50bd59118b5f1054f5f5fee329f9f1478fea9f40bcc77c8ea3ec68d81607a5",
+    "lib/server/server_machine_configuration.ml": "4ea09808c6e5e1d7142670f352cab4fa250397fdb0bf2d61b7078bbe1b9fdad7",
+    "test/test_stdio_machine_activity.py": "5d6ae7cbe993f2a5313038314425fdfd2df4a7b059b749980e09919105d05f26",
+    "test/stanzas/test_browser_activity.inc": "bf65329ce7e287bd7fc1a6f7067cc3628e63deffdf730aa300a74c61c70c3a64"
+  },
+  "binary_sha256": {
+    "_build/default/bin/main_stdio_eio.exe": "2fef260cbb1b2b19e54dcbf3105c93f4b99be8f81c7d72042d111c9af4745ab1"
+  },
+  "raw_sha256": {
+    "pr41199-stdio-machine-green.log": "ea7c09a6df75d5e301506595d39b2763eda0b591b8466020c0e25de374f21635",
+    "pr41199-stdio-machine-ruff-final.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pr41199-stdio-machine-pyright.json": "54e09d6170f01f29251ebddade15ba33895d3776eec0f4f90673d50534959c53",
+    "pr41199-stdio-machine-ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pr41199-stdio-machine-red-build.log": "8a4f4332bcf3641bed4a4020240a5eb6e54a9db13d7e3bbb972c11f20af3116d",
+    "pr41199-stdio-machine-red.log": "2a085b0c5e0238963200572d9a9717868e4634b5c2a214e5ff622237d588fbe3",
+    "pr41199-stdio-machine-alias.log": "f1ee3b13349244d1515720b60c7d5847055b841a1dff752455c47b8a0f1c7573",
+    "pr41199-stdio-machine-green-build.log": "bf134f779100f481834ea75361bcef975c6374cfeef4e4409d7acb1ea7475987",
+    "pr41199-stdio-machine-pyright-final.json": "f52e312f07ff87a6c0598da26af3ecdd852899303975a813b226523c920c3e73",
+    "pr41199-stdio-machine-alias-final.log": "bd62ac917e74fa50374f0fc41411f433a7aebd5bb81e478a5879528b8ac77daa",
+    "pr41199-stdio-machine-red-binary.sha256": "3597b3d08790d21820ee4654bbaf065c057b4b291f5144e0881f39fb1570233c"
+  }
+}

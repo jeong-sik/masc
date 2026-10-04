@@ -9,7 +9,9 @@ import sys
 import threading
 import unicodedata
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_tools as _keyboard_tools
 
 
 LONG_NAME = 'long-skill-' + 'x' * 100 + '-tail'
@@ -22,7 +24,7 @@ def width(text):
 
 def run(binary, columns, mode):
     partial = mode == 'partial'
-    fixtures = h.skills_usage_clarity_http_fixtures(
+    fixtures = _keyboard_tools.skills_usage_clarity_http_fixtures(
         ledgers_loaded=1 if partial else 19,
         unavailable=('bravo: metadata unavailable',) if partial else ())
     good = fixtures['/api/v1/skills']
@@ -41,22 +43,22 @@ def run(binary, columns, mode):
         (503, {'error': 'fixture catalog unavailable'}) if failed.is_set() else good)
 
     def interact(process, fd, _slave, output, _base):
-        h.resize_and_wait(process, fd, output, rows=48, columns=columns, needle=b'MASC Dashboard')
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=48, columns=columns, needle=b'MASC Dashboard')
         # At 68 and 80 columns the System pane drops its "MASC System" title
         # so its sub-tabs fit (config_pane_title_head), so the walk reads the
         # strip's selected token instead.
-        h.tab_until(process, fd, output, b'\xe2\x96\xb8System')
-        h.send_and_wait(process, fd, output, b't', b'MASC System / Tools')
-        h.send_and_wait(process, fd, output, b'p' * 3,
+        _keyboard_harness.tab_until(process, fd, output, b'\xe2\x96\xb8System')
+        _keyboard_harness.send_and_wait(process, fd, output, b't', b'MASC System / Tools')
+        _keyboard_harness.send_and_wait(process, fd, output, b'p' * 3,
                         b'skills catalog load failed:' if mode == 'initial-error'
                         else b'2 of 2 catalog Skills observed')
         if mode == 'stale':
             failed.set()
-            h.send_and_wait(process, fd, output, b'r', b'Previous catalog reading retained')
-        h.drain_until_quiet(process, fd, output)
-        end = output.rfind(h.FRAME_END) + len(h.FRAME_END)
+            _keyboard_harness.send_and_wait(process, fd, output, b'r', b'Previous catalog reading retained')
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        end = output.rfind(_keyboard_harness.FRAME_END) + len(_keyboard_harness.FRAME_END)
         raw = bytes(output[:end])
-        rows = h.screen_rows(raw)
+        rows = _keyboard_harness.screen_rows(raw)
         screen = '\n'.join(row.decode('utf-8') for _, row in sorted(rows.items()))
         if mode == 'initial-error':
             assert 'unavailable (no catalog reading)' in screen, screen
@@ -95,7 +97,7 @@ def run(binary, columns, mode):
             assert bounds[0][1] < bounds[1][0], bounds
             if columns == 68:
                 card_text = '\n'.join(ordered[bounds[0][0]:bounds[1][1] + 1])
-                compact = h.unwrapped(card_text.encode()).decode()
+                compact = _keyboard_chat.unwrapped(card_text.encode()).decode()
                 for label in ('alpha TRIGGERED 12 · DELIVERED 12 · ACTIONS 9',
                               'alpha TRIGGERED 4 · DELIVERED 3 · ACTIONS 2',
                               'beta TRIGGERED 3 · DELIVERED 2 · ACTIONS 1'):
@@ -119,7 +121,7 @@ def run(binary, columns, mode):
         }), flush=True)
         os.write(fd, b'q')
 
-    h.run_terminal_scenario(binary, description=f'Skill summary {columns} columns {mode}',
+    _keyboard_harness.run_terminal_scenario(binary, description=f'Skill summary {columns} columns {mode}',
                             interact=interact, http_fixtures=fixtures)
 
 

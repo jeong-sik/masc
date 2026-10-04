@@ -75,14 +75,18 @@ let percent_of_full = 100
 
 (* Fraction and percent meet only here, to draw a meter. *)
 let share_of_full = function
-  | Masc.Tui_decode_usage.Utilization_fraction value -> value
+  | Masc.Tui_decode_usage.Utilization_fraction value -> Some value
   | Masc.Tui_decode_usage.Utilization_percent value ->
-      float_of_int value /. float_of_int percent_of_full
+      Some (float_of_int value /. float_of_int percent_of_full)
+  | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } -> Some (used /. limit)
+  | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> None
 
 (* The full value of the unit the provider reported in, not a threshold. *)
 let at_or_past_full = function
   | Masc.Tui_decode_usage.Utilization_fraction value -> value >= 1.0
   | Masc.Tui_decode_usage.Utilization_percent value -> value >= percent_of_full
+  | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } -> used >= limit
+  | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> false
 
 (* Twelve significant digits cut binary noise such as 0.29 *. 100. =
    28.999999999999996 before the floor, and still keep 0.9999 below 100. *)
@@ -104,6 +108,9 @@ let utilization_text = function
       (* Not a number to convert: shown as it came. *)
       Printf.sprintf "%g" value
   | Masc.Tui_decode_usage.Utilization_percent value -> Printf.sprintf "%d%%" value
+  | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
+      Printf.sprintf "$%.4f / $%.4f" used limit
+  | Masc.Tui_decode_usage.Utilization_usd { used; limit = None } -> Printf.sprintf "$%.4f" used
 
 let minutes_per_hour = 60
 let minutes_per_day = 24 * minutes_per_hour
@@ -285,10 +292,8 @@ type row =
       tag : string option;
       trend : string option;
     }
-  | Silent_row of { name : string; tag : string }
-      (** An account with no report since the server started, drawn only
-          because the runtime catalogue observed its quota exhausted: that
-          tag explains a stuck Keeper. *)
+  | Silent_row of { name : string; tag : string option; state_text : string }
+      (** No report is an explicit state, not an absent account or zero use. *)
   | Email_row of string
       (** Account identity metadata, separate from window measurements. *)
 
@@ -299,18 +304,20 @@ let account_rank observed (account : Masc.Tui_decode_usage.provider_usage_accoun
   match (observed, account.pua_state) with
   | Observed_exhausted _, _ -> 0
   | Not_observed_exhausted, Masc.Tui_decode_usage.Account_reported _ -> 1
+  | Not_observed_exhausted, Masc.Tui_decode_usage.Account_reported_no_windows _ -> 1
   | Not_observed_exhausted, Masc.Tui_decode_usage.Account_not_reported_since_start -> 2
 
-(* An account that has not reported since the server started and has no
-   observed exhaustion draws nothing. Its row said only "no usage data" beside
-   a generic setup name, which told the operator neither which account it was
-   nor anything about it. *)
+(* Keep accounts without measured windows visible and distinguish no report
+   since startup from a provider's explicit empty-window report. *)
 let account_rows ~now ~history (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
   let name = scope_name account in
   let tag = exhausted_tag ~now observed in
   match account.pua_state, tag with
-  | Masc.Tui_decode_usage.Account_not_reported_since_start, None -> []
-  | Masc.Tui_decode_usage.Account_not_reported_since_start, Some tag -> [ Silent_row { name; tag } ]
+  | Masc.Tui_decode_usage.Account_not_reported_since_start, tag ->
+      [ Silent_row { name; tag; state_text = "No usage report since server start" } ]
+  | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source }, tag ->
+      [ Silent_row { name; tag; state_text = "Provider reported no usage windows · Last report "
+          ^ clock_text ~now observed_at ^ " · " ^ Terminal_text.single_line source } ]
   | Masc.Tui_decode_usage.Account_reported (first, rest), (None | Some _) ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
@@ -389,26 +396,23 @@ let draw_rows ~now ~width rows =
   in
   let window_lines window heard =
     let label = window_label window in
-    let share = share_of_full window.Masc.Tui_decode_usage.puw_utilization in
-    let remaining =
-      if window.puw_role = Masc.Tui_decode_usage.Role_gates_model_calls
-         && Float.is_finite share && share >= 0.0 && share <= 1.0
-      then Some ("Remaining " ^ utilization_text (Masc.Tui_decode_usage.Utilization_fraction (1.0 -. share)))
-      else None in
-    let reported = "Reported " ^ utilization_text window.puw_utilization in
-    let full_value = reported ^ Option.fold ~none:"" ~some:(fun remaining -> " · " ^ remaining) remaining in
-    let inline_remaining = inner - Text.display_width full_value - 3 >= meter_min_cells in
-    let value = if inline_remaining then full_value else reported in
-    let remaining_rows = if inline_remaining then [] else
-      Option.fold ~none:[] ~some:wrap remaining in
     let label_cells = min 20 (max 6 (inner / 3)) in
+    let utilization = window.Masc.Tui_decode_usage.puw_utilization in
+    let share = share_of_full utilization in
+    let value = match share with
+      | Some share -> "Used " ^ Printf.sprintf "%4s" (utilization_text
+          (Masc.Tui_decode_usage.Utilization_fraction share))
+      | None -> "Used " ^ utilization_text utilization
+    in
     let value_cells = Text.display_width value in
     let room = inner - label_cells - value_cells - 4 in
     let inline = room >= meter_min_cells && Text.display_width label <= label_cells in
     let meter_room = if inline then room else inner - value_cells - 3 in
     let meter_cells = max 1 (min meter_max_cells meter_room) in
-    let gauge = meter_open ^ meter ~cells:meter_cells (share_of_full window.puw_utilization)
-                ^ meter_close ^ " " ^ value in
+    let gauge = match share with
+      | Some share -> meter_open ^ meter ~cells:meter_cells share ^ meter_close ^ " " ^ value
+      | None -> value ^ " · no key limit"
+    in
     let first =
       if inline then
         [ pad_right label label_cells ^ " " ^ style (window_tone window) gauge ]
@@ -418,16 +422,37 @@ let draw_rows ~now ~width rows =
     let report = "Last report " ^ clock_text ~now window.puw_observed_at
       ^ (match heard with None -> "" | Some heard -> " · " ^ heard) in
     let metadata = "Reset " ^ reset in
-    first @ remaining_rows @ wrap (report ^ " · " ^ role_text window.puw_role) @ wrap ?tone:reset_tone metadata
+    let amounts = match utilization with
+      | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
+          wrap (Printf.sprintf "USD used $%.4f / limit $%.4f · remaining $%.4f"
+                  used limit (limit -. used))
+      | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ }
+      | Masc.Tui_decode_usage.Utilization_fraction _
+      | Masc.Tui_decode_usage.Utilization_percent _ -> []
+    in
+    let role = match utilization with
+      | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> "Reported usage total"
+      | Masc.Tui_decode_usage.Utilization_usd { limit = Some _; _ }
+      | Masc.Tui_decode_usage.Utilization_fraction _
+      | Masc.Tui_decode_usage.Utilization_percent _ -> role_text window.puw_role
+    in
+    let remaining = match share with
+      | Some share when window.puw_role = Masc.Tui_decode_usage.Role_gates_model_calls
+          && Float.is_finite share && share >= 0.0 && share <= 1.0 ->
+          wrap ("Remaining " ^ utilization_text (Masc.Tui_decode_usage.Utilization_fraction (1.0 -. share)))
+      | Some _ | None -> [] in
+    first @ remaining @ amounts @ wrap (report ^ " · " ^ role) @ wrap ?tone:reset_tone metadata
   in
   let render (name, held) =
     let blocked = List.exists (function
-      | Window_row { tag = Some _; _ } | Silent_row _ -> true
-      | Window_row { tag = None; _ } | Email_row _ -> false) held in
+      | Window_row { tag = Some _; _ } | Silent_row { tag = Some _; _ } -> true
+      | Window_row { tag = None; _ } | Silent_row { tag = None; _ } | Email_row _ -> false) held in
     let color = if blocked then Theme.bad () else Theme.info () in
     let body = List.concat_map (function
       | Email_row email -> wrap ~tone:quiet email
-      | Silent_row { tag; _ } -> wrap "no usage data" @ wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag)
+      | Silent_row { tag; state_text; _ } -> wrap state_text
+          @ (match tag with None -> []
+             | Some tag -> wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag))
       | Window_row { window; heard; tag; trend; _ } ->
           window_lines window heard
           @ (match trend with None -> [] | Some trend -> wrap ~tone:quiet trend)
@@ -519,7 +544,7 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
       in
       let reporting = List.length (List.filter (fun (_, account) ->
         match account.Masc.Tui_decode_usage.pua_state with
-        | Masc.Tui_decode_usage.Account_reported _ -> true
+        | Masc.Tui_decode_usage.Account_reported _ | Masc.Tui_decode_usage.Account_reported_no_windows _ -> true
         | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) ordered) in
       let full_reports = List.length (List.filter (fun (_, account) ->
         match account.Masc.Tui_decode_usage.pua_state with
@@ -530,7 +555,8 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
              | Masc.Tui_decode_usage.Role_unclassified_limit -> true
              | Masc.Tui_decode_usage.Role_counts_other_use -> false)
             && at_or_past_full window.puw_utilization) (first :: rest)
-        | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) ordered) in
+        | Masc.Tui_decode_usage.Account_not_reported_since_start
+        | Masc.Tui_decode_usage.Account_reported_no_windows _ -> false) ordered) in
       let blocked = match runtimes with
         | Types.Quota_read _ -> string_of_int (List.length (List.filter (function
             | Observed_exhausted _, _ -> true | Not_observed_exhausted, _ -> false) ordered))

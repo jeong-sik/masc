@@ -5,8 +5,8 @@ from pathlib import Path
 import signal
 import sys
 import tomllib
+import tui_keyboard_harness as _keyboard_harness
 
-import test_tui_keyboard_input as h
 
 
 
@@ -36,7 +36,7 @@ def settings(base):
 
 
 def fixtures():
-    responses = h.keeper_runtime_http_fixtures()
+    responses = _keyboard_harness.keeper_runtime_http_fixtures()
     for name in ("alpha", "beta"):
         responses[f"/api/v1/keepers/{name}/chat/history"] = (200, [])
         responses[f"/api/v1/keepers/{name}/chat/history/page"] = (
@@ -46,37 +46,37 @@ def fixtures():
 
 
 def home(process, fd, output, needle):
-    h.read_available(fd, output)
-    current = h.screen_text(bytes(output))
+    _keyboard_harness.read_available(fd, output)
+    current = _keyboard_harness.screen_text(bytes(output))
     if b"MASC Dashboard" in current and needle in current:
         return bytes(output)
-    return h.palette_go(process, fd, output, b"go dashboard", needle)
+    return _keyboard_harness.palette_go(process, fd, output, b"go dashboard", needle)
 
 
 def visit_beta(process, fd, output):
-    h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
-    h.select_keeper_row(process, fd, output, b"beta")
-    h.send_and_wait(process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode())
-    h.send_and_wait(process, fd, output, b"\x1b", b":settings")
+    _keyboard_harness.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
+    _keyboard_harness.select_keeper_row(process, fd, output, b"beta")
+    _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode())
+    _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b":settings")
 
 
 def restart(process, fd, slave, output, check):
     """Resume the same terminal-owning shell for its second binary launch."""
     start = len(output)
     os.write(fd, b"qq")
-    h.wait_for_stop(process, fd, output, timeout=5,
+    _keyboard_harness.wait_for_stop(process, fd, output, timeout=5,
                     description="first receipt TUI exit before restart")
     if b"Goodbye!" not in output[start:]:
         raise AssertionError("first TUI did not finish before restart")
     # The shell keeps the controlling terminal, argv, stdin and environment.
-    restarted = h.PtyOutput()
+    restarted = _keyboard_harness.PtyOutput()
     restarted.pid = process.pid
     os.kill(process.pid, signal.SIGCONT)
     check(process, fd, restarted)
     home(process, fd, restarted, b"MASC Dashboard")
     end = len(restarted)
     os.write(fd, b"qq")
-    h.wait_for_output(process, fd, restarted, b"Goodbye!", start=end, timeout=5)
+    _keyboard_harness.wait_for_output(process, fd, restarted, b"Goodbye!", start=end, timeout=5)
     # Keep only launch two's bytes for the outer harness's final exit checks.
     output.clear()
     output.extend(restarted)
@@ -90,9 +90,9 @@ def persistence(executable, mode):
     def interact(process, fd, slave, output, base):
         before = config_path(base).read_bytes()
         if mode != "overview":
-            h.wait_for_output(process, fd, output,
+            _keyboard_harness.wait_for_output(process, fd, output,
                               "Keepers ▸ alpha ▸ chat".encode(), start=0, timeout=10)
-            h.send_and_wait(process, fd, output, b"\x1b", b":settings")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b":settings")
         home(process, fd, output, b"Choose a Keeper" if mode != "last"
              else b"Continue with alpha")
         if config_path(base).read_bytes() != before:
@@ -110,12 +110,12 @@ def persistence(executable, mode):
         def check(child, child_fd, child_output):
             target = "beta" if mode == "last" else "alpha"
             if mode != "overview":
-                h.wait_for_output(child, child_fd, child_output,
+                _keyboard_harness.wait_for_output(child, child_fd, child_output,
                                   f"Keepers ▸ {target} ▸ chat".encode(),
                                   start=0, timeout=10)
-                h.send_and_wait(child, child_fd, child_output, b"\x1b", b":settings")
+                _keyboard_harness.send_and_wait(child, child_fd, child_output, b"\x1b", b":settings")
             else:
-                h.wait_for_output(child, child_fd, child_output, b"MASC Dashboard",
+                _keyboard_harness.wait_for_output(child, child_fd, child_output, b"MASC Dashboard",
                                   start=0, timeout=30)
             home(child, child_fd, child_output, b"Continue with beta")
             if config_path(base).read_bytes() != committed:
@@ -123,7 +123,7 @@ def persistence(executable, mode):
 
         restart(process, fd, slave, output, check)
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable, description=f"Home receipt same workspace restart {mode}",
         interact=interact, prepare_workspace=prepare(initial),
         http_fixtures=fixtures(), confirm_exit=b"",
@@ -139,10 +139,10 @@ def unavailable_receipts(executable):
         ('"deleted"', b"Last conversation deleted unavailable"),
     ):
         def interact(process, fd, _slave, output, base):
-            h.wait_for_output(process, fd, output, needle, start=0, timeout=10)
-            frame = h.resize_and_wait(process, fd, output, rows=32, columns=140,
-                                      needle=needle, controls=(h.FULL_REDRAW,))
-            if b"Continue with" in h.screen_text(frame):
+            _keyboard_harness.wait_for_output(process, fd, output, needle, start=0, timeout=10)
+            frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=140,
+                                      needle=needle, controls=(_keyboard_harness.FULL_REDRAW,))
+            if b"Continue with" in _keyboard_harness.screen_text(frame):
                 raise AssertionError("unreadable/deleted receipt offered continuation")
             if settings(base)["last_chat_keeper"] != tomllib.loads(
                 f"value = {receipt}"
@@ -150,7 +150,7 @@ def unavailable_receipts(executable):
                 raise AssertionError("boot rewrote an unavailable receipt")
             os.write(fd, b"q")
 
-        h.run_terminal_scenario(
+        _keyboard_harness.run_terminal_scenario(
             executable, description=f"Home unavailable receipt {receipt}",
             interact=interact,
             prepare_workspace=prepare(f'opening = "overview"\nlast_chat_keeper = {receipt}\n'),
@@ -170,16 +170,16 @@ def session_only(executable):
         try:
             visit_beta(process, fd, output)
             home(process, fd, output, b"this session only")
-            frame = h.resize_and_wait(process, fd, output, rows=32, columns=140,
-                                      needle=b"this session only", controls=(h.FULL_REDRAW,))
-            if b"Continue with beta" not in h.screen_text(frame):
+            frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=140,
+                                      needle=b"this session only", controls=(_keyboard_harness.FULL_REDRAW,))
+            if b"Continue with beta" not in _keyboard_harness.screen_text(frame):
                 raise AssertionError("failed config load lost the session target")
         finally:
             path.rmdir()
             path.write_bytes(original)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable, description="Home receipt load-before-write failure stays session only",
         interact=interact, prepare_workspace=prepare('opening = "overview"\n'),
         http_fixtures=fixtures(),
@@ -194,9 +194,9 @@ def changed_disk_mode(executable):
 
         def interact(process, fd, _slave, output, base):
             if initial == "last":
-                h.wait_for_output(process, fd, output,
+                _keyboard_harness.wait_for_output(process, fd, output,
                                   "Keepers ▸ beta ▸ chat".encode(), start=0, timeout=10)
-                h.send_and_wait(process, fd, output, b"\x1b", b":settings")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b":settings")
             home(process, fd, output, b"Continue with beta")
             path = config_path(base)
             # Another config writer changes the preference after startup.
@@ -214,7 +214,7 @@ def changed_disk_mode(executable):
             home(process, fd, output, b"Continue with beta")
             os.write(fd, b"q")
 
-        h.run_terminal_scenario(
+        _keyboard_harness.run_terminal_scenario(
             executable, description=f"Home visit after disk mode {initial} to {changed}",
             interact=interact, prepare_workspace=prepare(text),
             http_fixtures=fixtures(),
@@ -234,19 +234,19 @@ def roster_failure_and_deletion(executable):
         try:
             start = len(output)
             os.write(fd, b"r")
-            h.wait_for_output(process, fd, output, b"roster unavailable; read history",
+            _keyboard_harness.wait_for_output(process, fd, output, b"roster unavailable; read history",
                               start=start, timeout=10)
             home(process, fd, output, b"Last conversation with beta")
             # Choose is last and named history is immediately before it;
             # saturate downward without assuming how many decisions exist.
             os.write(fd, b"jjjjjjk")
-            h.drain_until_quiet(process, fd, output)
-            h.send_and_wait(process, fd, output, b"\r",
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r",
                             "Keepers ▸ beta ▸ chat".encode())
             before = len(requests)
-            h.send_and_wait(process, fd, output, b"receipt-readonly-probe\r",
+            _keyboard_harness.send_and_wait(process, fd, output, b"receipt-readonly-probe\r",
                             b"Cannot send while the Keeper roster is unavailable")
-            h.drain_until_quiet(process, fd, output)
+            _keyboard_harness.drain_until_quiet(process, fd, output)
             # The harness records POST and DELETE, never GET. Ignore unrelated
             # background traffic, but reject even an empty chat mutation.
             if any(path.startswith("/api/v1/keepers/beta/chat")
@@ -257,31 +257,31 @@ def roster_failure_and_deletion(executable):
             # Return while metadata is still broken, retaining the named
             # read-only history. Delete only after that frame so r requests an
             # actual transition instead of asking an unchanged frame to redraw.
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-            h.read_available(fd, output)
-            before_deletion = h.screen_text(bytes(output))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            _keyboard_harness.read_available(fd, output)
+            before_deletion = _keyboard_harness.screen_text(bytes(output))
             assert b"roster unavailable; read history" in before_deletion, before_deletion
             metadata.unlink()
             # A refresh can emit only changed rows. Require its completed frame
             # and inspect the composed screen instead of a duplicate label.
             start = len(output)
             os.write(fd, b"r")
-            h.wait_for_terminal_input_consumed(_slave)
+            _keyboard_harness.wait_for_terminal_input_consumed(_slave)
 
             def refreshed_receipt_is_unavailable():
-                end = output.rfind(h.FRAME_END)
+                end = output.rfind(_keyboard_harness.FRAME_END)
                 if end < start:
                     return False
-                current = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                current = _keyboard_harness.screen_text(bytes(output[:end + len(_keyboard_harness.FRAME_END)]))
                 return (b"conversation beta unavailable" in current
                         and b"Continue with beta" not in current
                         and b"roster unavailable; read history" not in current)
 
-            if not h.wait_for_fixture_state(process, fd, output,
+            if not _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     refreshed_receipt_is_unavailable, timeout=3.0):
                 raise AssertionError(f"fresh completed Home receipt did not reflect deletion: {bytes(output)!r}")
-            end = output.rfind(h.FRAME_END)
-            current = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+            end = output.rfind(_keyboard_harness.FRAME_END)
+            current = _keyboard_harness.screen_text(bytes(output[:end + len(_keyboard_harness.FRAME_END)]))
             assert b"conversation beta unavailable" in current, current
             assert b"Continue with beta" not in current, current
             assert b"roster unavailable; read history" not in current, current
@@ -289,7 +289,7 @@ def roster_failure_and_deletion(executable):
             metadata.write_bytes(original)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable, description="Home named history survives failed roster until complete deletion",
         interact=interact,
         prepare_workspace=prepare('opening = "overview"\nlast_chat_keeper = "beta"\n'),

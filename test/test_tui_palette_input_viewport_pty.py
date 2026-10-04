@@ -1,7 +1,7 @@
 """Long palette filters retain the edited tail and caret across resize."""
 import os
 import sys
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 

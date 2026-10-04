@@ -2,4 +2,3 @@
 accepted=1000 failure=Keeper metric append refused: 999 rotation segments already exist under /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/metric-exhaustion-8e22fd
 retained_rows=2
 retry=refused
-

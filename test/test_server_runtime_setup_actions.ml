@@ -90,9 +90,9 @@ let test_private_key () = fixture (fun base runtime binary _net ->
   let paths=List.filter_map (fun (p:Runtime_schema.provider) -> match p.credentials with
     | Some (Runtime_schema.File path) -> Some path | _ -> None) config.providers in
   Alcotest.check Alcotest.int "one committed private key" 1 (List.length paths);
-  let path=List.hd paths in
-  Alcotest.check Alcotest.int "key remains private after request cleanup" 0o600 (Unix.stat path).st_perm;
-  Alcotest.check Alcotest.string "key material correct" "fixture-secret-key" (In_channel.with_open_bin path In_channel.input_all);
+  let key_path=List.hd paths in
+  Alcotest.check Alcotest.int "key remains private after request cleanup" 0o600 (Unix.stat key_path).st_perm;
+  Alcotest.check Alcotest.string "key material correct" "fixture-secret-key" (In_channel.with_open_bin key_path In_channel.input_all);
   let open Yojson.Safe.Util in
   Alcotest.check Alcotest.string "response/tool verified scope" "verified" (receipt |> member "readiness" |> to_string);
   let keys=receipt |> to_assoc |> List.map fst |> List.sort String.compare in
@@ -103,7 +103,7 @@ let test_private_key () = fixture (fun base runtime binary _net ->
     ["durability";"order";"source_revision";"warnings"]
     (commit |> to_assoc |> List.map fst |> List.sort String.compare);
   Alcotest.check Alcotest.bool "private credential reference stays out of receipt" false
-    (String_util.contains_substring (Yojson.Safe.to_string receipt) path))
+    (String_util.contains_substring (Yojson.Safe.to_string receipt) key_path))
 let test_forbidden_reference () = fixture (fun base runtime binary _net ->
   let before=In_channel.with_open_bin runtime In_channel.input_all in
   List.iter (fun fields ->

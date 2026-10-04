@@ -3273,9 +3273,11 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
   let host = server_peer_host and port = state.port in
+  let check_workspace = capture_workspace_check state ~mailbox in
+  let enqueue_async = workspace_enqueue state in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
    | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
@@ -3353,6 +3355,13 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.notice<-Printf.sprintf "모델 %d개 검증 중 · 응답과 도구 호출을 확인합니다." (List.length models);
     let body=Login.save_body view models in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
+  | Activate_saved saved ->
+    Login.activating view saved;
+    start_job (fun () ->
+      let result = match check_workspace () with
+        | Error _ as error -> error
+        | Ok () -> post_setup "/api/v1/runtime/setup/resume" (`Assoc []) in
+      enqueue result)
   | Preview_removal {provider; _} ->
     view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
     start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
@@ -10287,6 +10296,11 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_usage <- Keeper_usage_unread;
   state.github_identity_view <- None;
   state.github_identity_view_error <- None;
+  Option.iter (fun (view : Masc_tui_account_login.t) ->
+    view.generation <- view.generation + 1;
+    Option.iter (fun stop -> stop ()) view.cancel_stream;
+    view.cancel_stream <- None) state.account_login;
+  state.account_login <- None;
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
@@ -14318,6 +14332,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          let module Login = Masc_tui_account_login in
          let applied = match action, result with
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
+           | Login.Activate_saved saved, result ->
+             let active = Login.activated view saved result in
+             if active then (
+               launch_runtime_config_load state ~mailbox;
+               launch_runtime_catalog_load state ~mailbox;
+               launch_runtime_surface_load state ~mailbox ~force:true);
+             launch_account_login_action state ~mailbox view (Login.Refresh_saved saved);
+             Ok ()
            | Login.Refresh_saved saved, result -> Login.refresh_saved view saved result; Ok ()
            | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
            (* The request's own error is the reason: the server's sentence for a
@@ -14342,7 +14364,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
                | Ok false -> Ok () | Error _ as error -> error)
              | Save _ -> (match Login.saved view json with
-               | Ok saved -> launch_account_login_action state ~mailbox view (Login.Refresh_saved saved); Ok ()
+               | Ok saved -> launch_account_login_action state ~mailbox view (Login.Activate_saved saved); Ok ()
                | Error message -> Error message)
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
@@ -14354,7 +14376,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
              (* A removal answers through [Account_login_removal]. *)
              | Remove _ -> Ok ()
-             | Start _ | Cancel | Close | Nothing -> Ok ()) in
+             | Activate_saved _ | Start _ | Cancel | Close | Nothing -> Ok ()) in
          (match applied with
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";

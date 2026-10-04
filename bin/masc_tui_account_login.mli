@@ -36,8 +36,11 @@ type saved =
 type list_view = Clients | Accounts of client
 (** The list opens on [Clients]; choosing one shows [Accounts] of that client:
     a row that adds a new account, then its configured accounts. *)
+type activation = Activating | Activation_failed of string
+  | Active of { exact_output_available : bool }
+  (** Saving and owner activation are separate receipts. *)
 type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
-  | Finished of { saved : saved; refresh_failed : bool }
+  | Finished of { saved : saved; activation : activation; refresh_failed : bool }
       (** [refresh_failed]: the list read after the save did not arrive. *)
   | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
@@ -65,7 +68,7 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry
+type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry
   | Select_existing of provider
       (** Open a configured account's models, including labelled existing connections, without logging in again. *)
   | Start of { provider : provider; existing : bool }
@@ -117,8 +120,14 @@ val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
 (** Refresh configuration revision and selection after an unsuccessful save,
     retaining the account and selected models for an explicit retry. *)
 val saved : t -> Yojson.Safe.t -> (saved, string) result
-(** Read a save's verification and commit durability into [Finished]. Missing
-    or unknown durability and unreadable verification lists are errors. *)
+(** Read a save's verification, durability and lock warnings into [Finished].
+    Missing or unknown receipt metadata and unreadable verification lists are errors. *)
+val activating : t -> saved -> unit
+(** Preserve the saved receipt while owner activation is pending. *)
+val activated : t -> saved -> (Yojson.Safe.t, string) result -> bool
+(** Record the owner activation receipt; [true] only when runtime readiness and
+    setup availability are confirmed. Failure keeps an activation-only retry. *)
+
 val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
 (** Re-read the list after a save, keeping what the save published on screen. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit

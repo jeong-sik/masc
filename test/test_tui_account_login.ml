@@ -146,7 +146,7 @@ let unicode_and_late_input_response () =
   check bool "current failure allows correction" false t.input_pending
 let verified_save_refresh () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; refresh_failed} in
+  let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; activation=Login.Active {exact_output_available=true}; refresh_failed} in
   t.phase<-finished false;
   Login.refresh_saved t Login.Saved_verified (Error "network unavailable");
   check bool "transport failure cannot revoke verified save" true (t.phase=finished true);
@@ -155,6 +155,29 @@ let verified_save_refresh () =
   check bool "bad inventory cannot revoke verified save" true (t.phase=finished true);
   Login.refresh_saved t Login.Saved_verified (Ok inventory);
   check bool "successful refresh retains saved screen" true (t.phase=finished false)
+let saved_activation_retry () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  let saved = match Login.saved t (`Assoc ["configured", `Bool true; "readiness", `String "verified"]) with
+    | Ok saved -> saved | Error message -> fail message in
+  check bool "pending activation cannot dispatch another save" true (Login.key t "enter"=Login.Nothing);
+  check bool "pending activation cannot duplicate activation" true (Login.key t "r"=Login.Nothing);
+  List.iter (fun response ->
+    check bool "unconfirmed activation is not active" false (Login.activated t saved response);
+    check bool "retry activates without another save" true (Login.key t "r"=Login.Activate_saved saved);
+    Login.refresh_saved t saved (Ok inventory);
+    check bool "inventory cannot turn saved configuration into active runtime" true
+      (Login.key t "enter"=Login.Activate_saved saved))
+    [Error "private configuration detail";
+     Ok (`Assoc ["runtime_ready", `Bool true; "model_setup", `Assoc ["status", `String "available"]]);
+     Ok (`Assoc ["runtime_ready", `Bool true; "exact_output_authority_available", `Bool true;
+                "model_setup", `Assoc ["status", `String "waiting"]])];
+  check bool "chat runtime can activate before exact output becomes available" true
+    (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
+      "exact_output_authority_available", `Bool false; "model_setup", `Assoc ["status", `String "available"]])));
+  Login.refresh_saved t saved (Error "inventory unavailable");
+  check bool "active result survives a failed inventory refresh" true
+    (t.phase=Login.Finished {saved; activation=Login.Active {exact_output_available=false}; refresh_failed=true});
+  check bool "active refresh is read-only" true (Login.key t "r"=Login.Refresh_saved saved)
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -280,6 +303,8 @@ let usage_limited_save () =
   let row id code = `Assoc ["runtime_id",`String id;"code",`String code] in
   let saved = match Login.saved t (receipt [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"]) with
     | Ok saved -> saved | Error message -> fail message in
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
+    "exact_output_authority_available", `Bool true; "model_setup", `Assoc ["status", `String "available"]])));
   let rows () = List.map Login.row_text (Login.lines t) in
   check bool "the unmeasured runtime and its code have their own row" true
     (List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
@@ -290,7 +315,7 @@ let usage_limited_save () =
     (List.mem "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." (rows ()));
   Login.refresh_saved t saved (Ok inventory);
   check bool "a refreshed list keeps the unmeasured account" true
-    (t.phase=Login.Finished {saved; refresh_failed=false}
+    (t.phase=Login.Finished {saved; activation=Login.Active {exact_output_available=true}; refresh_failed=false}
      && List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
@@ -311,6 +336,8 @@ let partly_checked_save () =
       "runtime_ids",`List [`String added;`String kept];"unverified",unverified;"not_rechecked",rechecked] in
   let saved = match Login.saved t (receipt ()) with
     | Ok saved -> saved | Error message -> fail message in
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
+    "exact_output_authority_available", `Bool true; "model_setup", `Assoc ["status", `String "available"]])));
   let rows () = List.map Login.row_text (Login.lines t) in
   check bool "retained runtime is explicitly not rechecked" true
     (List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") (rows ()));
@@ -318,7 +345,10 @@ let partly_checked_save () =
   check bool "the notice says existing connections were retained" true (contains t.notice "기존 연결은 그대로 유지했습니다");
   check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
   let t2=Login.create "codex" in ok (Login.inventory t2 inventory);
-  ignore (Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()));
+  let saved2 = match Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()) with
+    | Ok saved -> saved | Error message -> fail message in
+  ignore (Login.activated t2 saved2 (Ok (`Assoc ["runtime_ready", `Bool true;
+    "exact_output_authority_available", `Bool true; "model_setup", `Assoc ["status", `String "available"]])));
   check bool "quota failure and not-rechecked runtime are separately listed" true
     (let r = List.map Login.row_text (Login.lines t2) in
      List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") r);
@@ -332,7 +362,8 @@ let partly_checked_save () =
         "  " ^ kept ^ " (이번 저장에서 재검증하지 않음)" ] in
   let seen = ref initial in
   List.iter (fun _ -> ignore (Login.key t2 "j"); seen := visible () @ !seen)
-    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+    (List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:32)
+       (List.map Login.row_text (Login.lines t2)));
   List.iter (fun row -> check bool "every result fragment is reachable by scrolling" true
       (List.mem row !seen)) expected;
   let bottom = visible () in
@@ -345,7 +376,8 @@ let partly_checked_save () =
   check bool "one up key moves after repeated down keys at the bottom" true
     (visible () <> bottom);
   List.iter (fun _ -> ignore (Login.key t2 "k"))
-    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+    (List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:32)
+       (List.map Login.row_text (Login.lines t2)));
   check (list string) "scroll can return to the initial result" initial (visible ());
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
@@ -760,6 +792,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
+  test_case "saved activation retry cannot repeat save or login" `Quick saved_activation_retry;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
   test_case "visible save preserves durability uncertainty without resubmitting" `Quick uncertain_durability_save;
   test_case "lock warning survives refresh without exposing diagnostics" `Quick uncertain_lock_release_save;

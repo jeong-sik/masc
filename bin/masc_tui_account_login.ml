@@ -24,11 +24,13 @@ type saved =
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }
+type activation = Activating | Activation_failed of string
+  | Active of { exact_output_available : bool }
 (* The list opens on the clients; choosing one lists its accounts under a row
    that adds a new one. *)
 type list_view = Clients | Accounts of client
 type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
-  | Finished of { saved : saved; refresh_failed : bool } | Failed
+  | Finished of { saved : saved; activation : activation; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
@@ -53,7 +55,7 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existing of provider
+type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry | Select_existing of provider
   | Start of { provider : provider; existing : bool }
   | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
@@ -309,12 +311,33 @@ let saved_of_json json =
   | _ -> None
 let saved t json =
   match saved_of_json json with
-  | Some saved -> t.cursor <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
+  | Some saved -> t.cursor <- 0; t.phase <- Finished {saved; activation = Activating; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
+let activation_of_result = function
+  | Ok json ->
+    (match field "runtime_ready" json, field "exact_output_authority_available" json,
+           field "status" (field "model_setup" json) with
+     | `Bool true, `Bool exact_output_available, `String "available" -> Active {exact_output_available}
+     | _ -> Activation_failed "서버가 런타임 활성화를 확인하지 않았습니다.")
+  (* Activation errors can contain configuration details. Keep the failed
+     boundary visible without printing those details into the terminal. *)
+  | Error _ -> Activation_failed "런타임 활성화 요청을 확인하지 못했습니다. 서버 상태와 접근 권한을 확인하세요."
+let activating t saved =
+  t.phase <- Finished {saved; activation = Activating; refresh_failed = false};
+  t.cursor <- 0; t.notice <- saved_notice saved
+let activated t saved result =
+  let activation = activation_of_result result in
+  t.phase <- Finished {saved; activation; refresh_failed = false};
+  t.cursor <- 0; t.notice <- saved_notice saved;
+  match activation with Active _ -> true | Activating | Activation_failed _ -> false
 let refresh_saved t saved result =
+  let activation = match t.phase with
+    | Finished {activation; _} -> activation
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ ->
+      Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
   t.cursor <- 0;
-  t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
+  t.phase <- Finished {saved; activation; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
 let input_response ~sequence t result =
   match result with
@@ -524,6 +547,9 @@ let key t key =
     t.cursor <- max 0 (t.cursor - 1); Nothing
   | Finished _ when key="down" || key="j" ->
     t.cursor <- min t.saved_scroll_max (t.cursor + 1); Nothing
+  | Finished {activation = Activating; _} -> Nothing
+  | Finished {saved; activation = Activation_failed _; _}
+    when List.mem key ["r"; "\r"; "\n"; "enter"] -> Activate_saved saved
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -598,7 +624,9 @@ let hints t = match t.phase with
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
-  | Finished _ -> "j/k:스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Finished {activation = Activating; _} -> "j/k:스크롤  런타임 활성화 중  Esc:닫기"
+  | Finished {activation = Activation_failed _; _} -> "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기"
+  | Finished {activation = Active _; _} -> "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기"
   | Loading | Saving | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
@@ -651,7 +679,16 @@ let body_rows t =
      | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
        @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
      | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
-  | Finished {saved; refresh_failed} -> List.map (fun row -> Text row) (saved_rows saved)
+  | Finished {saved; activation; refresh_failed} ->
+    (match activation with
+     | Activating -> [Text "저장 완료 · 런타임 활성화 중입니다."]
+     | Activation_failed detail ->
+       [Text "저장 완료 · 런타임 활성화 미확인"; Text detail;
+        Text "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다."]
+     | Active {exact_output_available} ->
+       Text "저장한 설정을 런타임에 활성화했습니다." ::
+       (if exact_output_available then [] else [Text "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."]))
+    @ List.map (fun row -> Text row) (saved_rows saved)
     @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
   | Loading | Saving | Failed -> []
 let lines t = Text t.notice :: body_rows t

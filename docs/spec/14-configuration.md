@@ -359,6 +359,12 @@ previews removing it, and Esc goes back to the clients. Login codes stay
 masked in the panel and terminal keys are sent to that login process. Ctrl-C
 cancels; `r` retrieves the recovery receipt. After authentication, choose a model
 and press Enter to verify and save.
+After saving, the panel requests runtime activation and refreshes the runtime
+catalog and configuration lists. Saving and activation have separate results:
+if activation is unconfirmed, `r` or Enter retries activation without repeating
+login or saving the connection again. The saved model verification results
+remain visible, including usage-limited models. A confirmed runtime activation
+also reports when the exact-output authority is still unavailable.
 The current default and its declared fallback order remain ahead of the added
 model. In dashboard runtime setup, the equivalent login panel retains the
 selected account through model discovery and save.

@@ -1,0 +1,56 @@
+{
+  "qualified_commit": "b39662fd879f603f3ed8f64ccba89beb3c03f7ec",
+  "parent": "6197d5f8a03738a8f7bb602de969f2ae1898966b",
+  "native_cases": 115,
+  "results": [
+    {
+      "target": "test/test_lane_addon_worker.exe",
+      "exit": 0,
+      "log": "/tmp/sampling-pending-composition-test_lane_addon_worker.log"
+    },
+    {
+      "target": "test/test_lane_addon.exe",
+      "exit": 0,
+      "log": "/tmp/sampling-pending-composition-test_lane_addon.log"
+    },
+    {
+      "target": "test/test_lane_sampling_receipt_recovery.exe",
+      "exit": 0,
+      "log": "/tmp/sampling-pending-composition-test_lane_sampling_receipt_recovery.log"
+    },
+    {
+      "target": "test/test_lane_addon_store_query.exe",
+      "exit": 0,
+      "log": "/tmp/sampling-pending-composition-test_lane_addon_store_query.log"
+    },
+    {
+      "target": "test/test_server_lane_addon_sampling.exe",
+      "exit": 0,
+      "log": "/tmp/sampling-pending-composition-test_server_lane_addon_sampling.log"
+    }
+  ],
+  "sources_sha256": {
+    "lib/lane_addon/lane_addon_runtime.ml": "48669f437271586e0aac45e4f5bbbbf22d8da3bb031d5ab16f52cfd67301d7af",
+    "lib/lane_addon/lane_addon_runtime.mli": "26d779f6a6a344979d5335393af8b947ebe3b0bd542dc1b70b4b29ac7bd4db72",
+    "lib/lane_addon/lane_addon_store.ml": "5f2b6486cf671ebdc7050419a4f7cb13227c8eda9d87bca3f0e28d4dab53e626",
+    "lib/lane_addon/lane_addon_store.mli": "06f89e1bf01e923171a4b8143359322c65c8ba5efac9b4e3d056cf1f66df1a8c",
+    "test/test_lane_addon.ml": "dc28145f961532d253ca769276807c0deb3d10564726f5e13b927e1b6e1b9189",
+    "test/test_lane_addon_worker.ml": "6a977d2fdf4aec6b6b2783d640d318512f55b0187ec9b95d5b7f0609fa09cd25",
+    "test/test_lane_sampling_receipt_recovery.ml": "ac970ad1b5a62056f28e56a98af3ecdac52a6ec78126b5c1a6d2f6f3c521f7a1"
+  },
+  "binaries_sha256": {
+    "test/test_lane_addon_worker.exe": "c15d2835dc5adc47d874530da3326742ecce87a774bc7e08f63a03a1a530f45f",
+    "test/test_lane_addon.exe": "2f587b7764ef9b1b0c1e520a7a73d66726c30b4196d6df55143760a9b17769f5",
+    "test/test_lane_sampling_receipt_recovery.exe": "4273f74ec01112f2822bf1fdb617f921dd094ef1c9a1fa4138c63d6a1a376641",
+    "test/test_lane_addon_store_query.exe": "d9a592eed98542655f06837543ef21750ce41f1e5a3f27cc91bf345de9ebdd4b",
+    "test/test_server_lane_addon_sampling.exe": "7f8a7e048be75ebd7ee48483cb74fed2b6184076693b9b3020d004fc33e17f53"
+  },
+  "raw_logs_sha256": {
+    "build.log": "aa4da0f67f88ea4ac73a27cb67fb5edf883e2ff33b7d5067ec4219db345867ee",
+    "sampling-pending-composition-test_lane_addon_worker.log": "da4cf7feccc9cb17fabf8f4fc34c05e6304e87e02a66ba28eda6a440ebc72995",
+    "sampling-pending-composition-test_lane_addon.log": "d202edf472a78a4fff1371b691306353392103db8b95eecc5e31e2e812e1867f",
+    "sampling-pending-composition-test_lane_sampling_receipt_recovery.log": "aa9d9ada66cff08bf80f5bae589aacf3957173a14683a700fdb7d5893ca3e993",
+    "sampling-pending-composition-test_lane_addon_store_query.log": "b971c35f88c1608d40b58fc5e849320494ca8b7e59e9d589c3390f033fb936b3",
+    "sampling-pending-composition-test_server_lane_addon_sampling.log": "0c3c8e25bde9bd6e82d662ba68f534471838a0cfad4f25836667d9502e4c6013"
+  }
+}

@@ -9309,3 +9309,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_memory_recall_state_pty)))
+
+(test
+ (name test_tui_model_form)
+ (modules test_tui_model_form)
+ (libraries alcotest masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))

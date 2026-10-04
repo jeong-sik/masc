@@ -81,7 +81,9 @@ val discover_sampling_requests : t -> instance_id:string -> max_reply_bytes:int 
   sampling_recovery_report
 (** Seed durable retry markers from both historical journal namespaces. Only
     complete enumeration and marker publication sets [discovery_complete]; an
-    unread or corrupt individual record instead remains a pending retry. *)
+    unread or corrupt individual record instead remains a pending retry.
+    An unfinished discovery cycle records durable completion per namespace,
+    so retry skips the namespace already enumerated even after reopening. *)
 val retry_sampling_requests : t -> instance_id:string -> max_reply_bytes:int ->
   (unit, string) result
 (** Visit durable pending markers only, retrying unfinished discovery when its

@@ -848,10 +848,11 @@ let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative na
                  (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
       | _ -> Error "invalid sampling recovery state"
 )
+let sampling_discovery_checkpoints = [".discovery-outcomes-complete"; ".discovery-requests-complete"]
 let retry_sampling_markers ~on_read t ~instance_id ~max_reply_bytes =
   let directory = sampling_retry_directory instance_id in
   scan_sampling_directory t directory ~f:(fun name ->
-    if name = ".discovery" then Ok ()
+    if name = ".discovery" || List.mem name sampling_discovery_checkpoints then Ok ()
     else if not (Filename.check_suffix name ".json") then
       Error "invalid sampling recovery marker filename"
     else with_sampling_lock t ~instance_id ~name (fun () ->
@@ -869,14 +870,30 @@ let discover_sampling_requests_with ~on_read t ~instance_id ~max_reply_bytes =
     {discovery_complete=false; outcome=Error "sampling recovery requires a positive reply envelope"}
   else
     let seeded = with_sampling_lock t ~instance_id ~name:".discovery" (fun () ->
-      let sentinel = Filename.concat (sampling_retry_directory instance_id) ".discovery" in
-      let* () = mark_sampling_retry t ~instance_id ~name:".discovery" in
-      let seed directory = scan_sampling_directory t directory ~f:(fun name ->
-        if not (Filename.check_suffix name ".json") then Ok ()
-        else with_sampling_lock t ~instance_id ~name (fun () ->
-          mark_sampling_retry t ~instance_id ~name)) in
-      let terminal = seed (sampling_outcome_directory instance_id) in
-      let primary = seed (sampling_directory instance_id) in
+      let relative name = Filename.concat (sampling_retry_directory instance_id) name in
+      let sentinel = relative ".discovery" in
+      let* pending = read_sampling_marker t sentinel in
+      let* () = if pending then Ok () else
+        (* A fresh startup begins a new discovery cycle. Clear the prior
+           completed-cycle checkpoints before publishing its pending marker. *)
+        let* () = List.fold_left (fun previous name ->
+          let* () = previous in
+          let* present = read_sampling_marker t (relative name) in
+          if present then remove_sampling_marker t (relative name) else Ok ())
+          (Ok ()) sampling_discovery_checkpoints in
+        mark_sampling_retry t ~instance_id ~name:".discovery" in
+      let seed directory checkpoint =
+        let* complete = read_sampling_marker t (relative checkpoint) in
+        if complete then Ok () else
+        let* () = scan_sampling_directory t directory ~f:(fun name ->
+          if not (Filename.check_suffix name ".json") then Ok ()
+          else with_sampling_lock t ~instance_id ~name (fun () ->
+            mark_sampling_retry t ~instance_id ~name)) in
+        (* All of this namespace's request markers are durable before its
+           completion can authorize skipping enumeration after a restart. *)
+        mark_sampling_retry t ~instance_id ~name:checkpoint in
+      let terminal = seed (sampling_outcome_directory instance_id) ".discovery-outcomes-complete" in
+      let primary = seed (sampling_directory instance_id) ".discovery-requests-complete" in
       let* () = keep_first_sampling_error terminal primary in
       remove_sampling_marker t sentinel) in
     let recovered = retry_sampling_markers ~on_read t ~instance_id ~max_reply_bytes in

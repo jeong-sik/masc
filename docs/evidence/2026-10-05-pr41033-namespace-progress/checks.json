@@ -1,0 +1,70 @@
+{
+  "head": "5c087c0d21e348b6981fcd96da40b4cd262f7735",
+  "base": "bee7a1045803579c4ec6fbb6a73b5c33700eed2d",
+  "native_stack": {
+    "number": 40961,
+    "position": 6,
+    "size": 7
+  },
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "164e27b53147764a6d0913e915bf33c331111ea20b621385597d60cba721e176",
+    "lib/lane_addon/lane_addon_store.mli": "938c271a2779ea233ad95bc989faff1a4779cfbeece6803deb5c4dde0f302d41",
+    "test/test_lane_addon_worker.ml": "9397e24f900c1b5ac4729991a89501d2513d5bd9fa240fd184c3a236c315fbc7"
+  },
+  "raw_log_sha256": {
+    "pr41033-namespace-red-build.log": "27c5ee6e1d62d05bafc1d75498f93b27a0f6d1c6fbe9d38fb36d8dfce57a3f8e",
+    "pr41033-namespace-red.log": "51b8e3f4180308b74c88baa0ec45eeb506f1e79651912520169bc48743f7ca16",
+    "pr41033-namespace-red-build2.log": "f6fe8f008d2202833e74dfade5cdef4964d2111097a85848b8393792bd12d8d1",
+    "pr41033-namespace-red-valid.log": "a919b7a9a0c33629b132d044e411c4cb3d2cc87659500691b6584a2fa18f8ebd",
+    "pr41033-namespace-green-build.log": "fc659d02593dce0a262226780a96b8292e4f9d85839a0fdc729dadaeb70f47c2",
+    "pr41033-namespace-final-build.log": "fc659d02593dce0a262226780a96b8292e4f9d85839a0fdc729dadaeb70f47c2",
+    "pr41033-namespace-worker-green.log": "aadb97647578500a4f84908a1d36f1f9d4ff9ea1006977871c684b3bcee0fdd0",
+    "pr41033-namespace-runtime-green.log": "84c4963c9c70a8895ac59a0cb68e4ab564ab012de1cf2db520d237f16c05e4ce"
+  },
+  "binary_sha256": {
+    "test_lane_addon_worker": "2eb2384f5b3bba16790385cb730225cb6dd679330e0b7c6c96bc65de4dc80c26",
+    "test_lane_addon": "a8d0f1ef309fac1d8535c00cd0472595afbbe0d23792b17d3c03d1af5c017509"
+  },
+  "meaningful_red": {
+    "tests": 2,
+    "failed": 2,
+    "symptom": "healthy namespace history reread on pending retry"
+  },
+  "current_tests": {
+    "worker": {
+      "passed": 50,
+      "failed": 1,
+      "total": 51,
+      "failure": "lifecycle26 inherited shared outcome projection aggregate envelope; repair owned by descendant #41126"
+    },
+    "runtime": {
+      "passed": 25,
+      "failed": 0,
+      "total": 25
+    }
+  },
+  "unchanged_lower_gap": {
+    "store_read_budget_and_bounded_region_sha256": "5699769412492e8479c91a493fa2e8859dee467ed2be3fd50f482d63eb8d0924",
+    "regression_function_sha256": "93f3b6d2697938ed7f30c628c32f00a8a575d7e86897c6b22ef4866e345ade53",
+    "equal_baseline": true
+  },
+  "full_repository_suite": false,
+  "TerminalBench": "unrun",
+  "pr_metadata": {
+    "base": "bee7a1045803579c4ec6fbb6a73b5c33700eed2d",
+    "head": "5c087c0d21e348b6981fcd96da40b4cd262f7735",
+    "stack": {
+      "base": {
+        "ref": "main",
+        "sha": "87123f7df94a27ded447b5b05d01c2f5178de029"
+      },
+      "id": 1713420,
+      "number": 40961,
+      "position": 6,
+      "size": 7
+    },
+    "stack_present": true,
+    "state": "open"
+  },
+  "metadata_checked_at": "2026-10-04T22:43:30.249328+00:00"
+}

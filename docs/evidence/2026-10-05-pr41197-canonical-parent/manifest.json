@@ -1,0 +1,9 @@
+{
+  "qualified_commit": "9802ec2880e4dbd869e86b8c05bade36738ee060",
+  "parent": "c5d6ec3e47499e87e2113ab07f5bb3e3f1e35013",
+  "binary_sha256": "2453e3068438efc1b0143c9c7c8e021d43d6098d67cb9c7f9b330a33b19bb7cc",
+  "logs": {
+    "build.log": "abfa9882165cd673917edb583e219cc2bc8218d8047acb77b5a56ef266db0374",
+    "worker.log": "3827283d20916b3f78a937834ec4cc79ef0851118a0a3bd932dd73efb9b2b0f7"
+  }
+}

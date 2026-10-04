@@ -30,6 +30,9 @@ val create_handler :
 (** Assemble the same worker-bound production handler installed by [register]. *)
 
 module For_testing : sig
+  val attempt_captured : sw:Eio.Switch.t -> net:Eio_context.eio_net ->
+    Runtime_instance.t -> Mcp_protocol.Sampling.create_message_params ->
+    (Mcp_protocol.Sampling.create_message_result, string) result
   val response_content : Llm_provider.Types.api_response ->
     (Mcp_protocol.Sampling.sampling_content, string) result
 end

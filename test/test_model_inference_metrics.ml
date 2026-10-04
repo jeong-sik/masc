@@ -1063,7 +1063,7 @@ let test_duplicate_exact_identity_is_excluded_and_diagnosed () =
       (List.length agg.models);
     match agg.cost_read with
     | Error error ->
-      failf "metrics read failed: %s" (M.read_error_to_string error)
+      failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
     | Ok diagnostics ->
       check int "all conflicting rows diagnosed" 3
         diagnostics.identity_conflict_rows)
@@ -1098,7 +1098,7 @@ let test_an_attempt_reading_beside_the_turn_is_not_a_conflict () =
     check int "the paired turn and the attempt reading" 2 agg.total_entries;
     match agg.cost_read with
     | Error error ->
-      failf "metrics read failed: %s" (M.read_error_to_string error)
+      failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
     | Ok diagnostics -> check int "no conflict" 0 diagnostics.identity_conflict_rows)
 ;;
 

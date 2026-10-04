@@ -206,6 +206,28 @@ let requested_matches t (p:provider) =
   t.requested = "" || String.equal t.requested p.id
   || (not (List.exists (fun (row:provider) -> String.equal row.id t.requested) t.providers)
       && requested_client t.requested = Some p.client)
+let activation_incomplete t = match t.phase with
+  | Finished {activation = Activating | Activation_failed _; _} -> true
+  | Finished {activation = Active _; _}
+  | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ -> false
+let reopen_saved ~requested t = match t.phase with
+  | Finished _ ->
+    let matches = match t.provider with
+      | Some provider ->
+        (* Catalog entries such as [codex] name a client, not a competing
+           configured account. Explicit configured IDs retain precedence. *)
+        let providers = List.filter (fun (row:provider) -> row.origin=Configured) t.providers in
+        requested_matches {t with requested; providers} provider
+      | None -> requested = "" || String.equal requested t.requested in
+    if matches then Some t else None
+  | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ -> None
+let retain_activation t retained =
+  if activation_incomplete t then t :: List.filter (fun held -> held != t) retained
+  else retained
+let take_saved ~requested retained =
+  match List.find_map (reopen_saved ~requested) retained with
+  | None -> None, retained
+  | Some view -> Some view, List.filter (fun held -> held != view) retained
 let inventory ?view t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
         field "default_runtime_selection" json with

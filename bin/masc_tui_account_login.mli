@@ -127,7 +127,18 @@ val activating : t -> saved -> unit
 val activated : t -> saved -> (Yojson.Safe.t, string) result -> bool
 (** Record the owner activation receipt; [true] only when runtime readiness and
     setup availability are confirmed. Failure keeps an activation-only retry. *)
-
+val activation_incomplete : t -> bool
+(** A saved receipt whose activation is pending or unconfirmed. Closing its
+    panel must retain the view and any request already in flight. *)
+val reopen_saved : requested:string -> t -> t option
+(** Reuse a detached saved view for a matching account/client request. The
+    same object retains its in-flight generation and full saved receipt;
+    [None] means it does not belong to this request or is no longer saved. *)
+val retain_activation : t -> t list -> t list
+(** Retain an incomplete saved view without replacing another account's
+    receipt. Repeated closure of the same view keeps one entry. *)
+val take_saved : requested:string -> t list -> t option * t list
+(** Take one matching saved view to reopen, preserving every other receipt. *)
 val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
 (** Re-read the list after a save, keeping what the save published on screen. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit

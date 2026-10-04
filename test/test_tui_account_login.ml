@@ -157,7 +157,8 @@ let verified_save_refresh () =
   check bool "successful refresh retains saved screen" true (t.phase=finished false)
 let saved_activation_retry () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  let saved = match Login.saved t (`Assoc ["configured", `Bool true; "readiness", `String "verified"]) with
+  let saved = match Login.saved t (`Assoc ["configured", `Bool true; "readiness", `String "verified";
+      "commit", `Assoc ["durability", `String "durable"; "warnings", `List []]]) with
     | Ok saved -> saved | Error message -> fail message in
   check bool "pending activation cannot dispatch another save" true (Login.key t "enter"=Login.Nothing);
   check bool "pending activation cannot duplicate activation" true (Login.key t "r"=Login.Nothing);
@@ -178,6 +179,62 @@ let saved_activation_retry () =
   check bool "active result survives a failed inventory refresh" true
     (t.phase=Login.Finished {saved; activation=Login.Active {exact_output_available=false}; refresh_failed=true});
   check bool "active refresh is read-only" true (Login.key t "r"=Login.Refresh_saved saved)
+let closed_activation_recovery () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  t.provider <- Some provider;
+  let saved = Login.Saved_partly {unverified=[]; not_rechecked=["saved-account.model"]} in
+  Login.activating t saved;
+  t.generation <- 7;
+  check bool "closing retains a pending activation" true (Login.activation_incomplete t);
+  let reopened = match Login.reopen_saved ~requested:"" t with
+    | Some view -> view | None -> fail "saved activation disappeared on reopen" in
+  check bool "the pending request keeps the same view identity" true (reopened == t);
+  check int "reopening does not supersede the pending reply" 7 reopened.generation;
+  check bool "reopening cannot start a duplicate activation" true (Login.key reopened "r"=Login.Nothing);
+  check bool "another client cannot claim the saved account" true
+    (Login.reopen_saved ~requested:"claude" t=None);
+  ignore (Login.activated t saved (Error "lost response"));
+  check bool "closing retains an unconfirmed activation" true (Login.activation_incomplete t);
+  let reopened = match Login.reopen_saved ~requested:"codex" t with
+    | Some view -> view | None -> fail "failed activation disappeared on reopen" in
+  Login.refresh_saved reopened saved (Error "inventory unavailable");
+  check bool "reopened failed activation retries only resume with the original receipt" true
+    (Login.key reopened "enter"=Login.Activate_saved saved);
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready",`Bool true;
+    "exact_output_authority_available",`Bool true;"model_setup",`Assoc ["status",`String "available"]])));
+  check bool "a detached request can finish before reopening" true
+    (Option.is_some (Login.reopen_saved ~requested:"codex" t));
+  check bool "completed activation does not need retaining on another close" false (Login.activation_incomplete t);
+  check bool "the completed receipt refreshes without repeating activation" true (Login.key t "r"=Login.Refresh_saved saved)
+let closed_activation_accounts () =
+  let first=Login.create "codex" and second=Login.create "codex" in
+  first.provider <- Some {provider with id="codex_first"};
+  second.provider <- Some {provider with id="codex_second"};
+  first.providers <- [{provider with id="codex";origin=Login.Catalog};
+    {provider with id="codex_first";origin=Login.Configured}];
+  second.providers <- first.providers @ [{provider with id="codex_second";origin=Login.Configured}];
+  let saved_first=Login.Saved_partly {unverified=[]; not_rechecked=["first.model"]} in
+  let saved_second=Login.Saved_unverified ({runtime_id="second.model";code="quota_exhausted"},[]) in
+  Login.activating first saved_first;
+  Login.activating second saved_second;
+  ignore (Login.activated first saved_first (Error "first unavailable"));
+  ignore (Login.activated second saved_second (Error "second unavailable"));
+  check bool "catalog codex entry does not shadow client recovery" true
+    (Option.is_some (Login.reopen_saved ~requested:"codex" first));
+  first.providers <- {provider with id="codex";origin=Login.Configured} :: first.providers;
+  check bool "an explicit configured codex ID still wins over the client alias" true
+    (Login.reopen_saved ~requested:"codex" first=None);
+  let retained = Login.retain_activation first [] |> Login.retain_activation second in
+  let retained = Login.retain_activation second retained in
+  check int "closing another account preserves both distinct receipts" 2 (List.length retained);
+  let taken, rest = Login.take_saved ~requested:"codex_first" retained in
+  let first = match taken with Some view -> view | None -> fail "first account receipt lost" in
+  check bool "first account retries its own saved receipt" true (Login.key first "r"=Login.Activate_saved saved_first);
+  check int "reopening one account leaves the other recoverable" 1 (List.length rest);
+  let taken, rest = Login.take_saved ~requested:"codex_second" rest in
+  let second = match taken with Some view -> view | None -> fail "second account receipt lost" in
+  check bool "second account keeps its usage-limited receipt" true (Login.key second "enter"=Login.Activate_saved saved_second);
+  check int "reopened views are removed once" 0 (List.length rest)
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -793,6 +850,8 @@ let () = run "TUI account login" ["workflow",[
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
   test_case "saved activation retry cannot repeat save or login" `Quick saved_activation_retry;
+  test_case "closed activation retains its request and recovery receipt" `Quick closed_activation_recovery;
+  test_case "closed activation recovery preserves multiple accounts" `Quick closed_activation_accounts;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
   test_case "visible save preserves durability uncertainty without resubmitting" `Quick uncertain_durability_save;
   test_case "lock warning survives refresh without exposing diagnostics" `Quick uncertain_lock_release_save;

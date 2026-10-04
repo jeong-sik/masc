@@ -42,6 +42,9 @@ def scenario(binary, outcome):
     activations = []
     ordering = []
     active = threading.Event()
+    pending = h.GatedHttpResponse((200, {"runtime_ready": True,
+        "exact_output_authority_available": True, "model_setup": {"status": "available"}}),
+        hold_seconds=30.0)
     refreshed = {name: threading.Event() for name in ("inventory", "config", "catalog", "surface")}
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
@@ -75,7 +78,8 @@ def scenario(binary, outcome):
     def save(body):
         saves.append(json.loads(body))
         ordering.append("save")
-        receipt = {"configured": True, "readiness": "verified", "runtime_ids": ["account-one.model"]}
+        receipt = {"configured": True, "readiness": "verified", "runtime_ids": ["account-one.model"],
+                   "commit": {"durability": "durable", "warnings": []}}
         if outcome == "usage_limited":
             receipt.update(readiness="usage_limited", unverified=[{
                 "runtime_id": "account-one.model", "code": "quota_exhausted"}])
@@ -90,7 +94,11 @@ def scenario(binary, outcome):
         assert len(saves) == 1, "activation must follow one committed save"
         ordering.append("activate")
         if len(activations) == 1:
-            if outcome == "refused":
+            if outcome == "close_pending":
+                result = pending()
+                active.set()
+                return result
+            if outcome in ("refused", "close_failed"):
                 return 503, {"error": "fixture-private-configuration-detail"}
             if outcome == "lost":
                 return h.DroppedHttpResponse()
@@ -129,7 +137,7 @@ def scenario(binary, outcome):
 
     fixtures[RUNTIME_PROBE_FORCE_PATH] = surface
 
-    def interact(process, fd, _slave, output, base_path):
+    def interact_steps(process, fd, _slave, output, base_path):
         # The health response is bound to the same runtime root as this TUI.
         # Record only after the screen has loaded its initial identity.
         h.tab_until(process, fd, output, b"MASC Keepers")
@@ -146,12 +154,23 @@ def scenario(binary, outcome):
         h.send_and_wait(process, fd, output, b"\r", b"Account one model")
         start = len(output)
         os.write(fd, b"\r")
-        if outcome in ("refused", "lost", "incomplete"):
+        if outcome == "close_pending":
+            assert h.wait_for_fixture_event(process, fd, output, pending.requested, timeout=5.0)
+            h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
+            h.send_and_wait(process, fd, output, b"/login codex\r", "런타임 활성화 중입니다".encode())
+            assert len(activations) == 1, "reopening restarted the pending activation"
+            pending.release.set()
+            h.wait_for_output(process, fd, output, ACTIVE, start=start)
+        elif outcome in ("refused", "lost", "incomplete", "close_failed"):
             h.wait_for_output(process, fd, output, FAILED, start=start)
             h.drain_until_quiet(process, fd, output)
             assert len(activations) == 1, "failure must wait for the operator's retry"
             assert ACTIVE not in output[start:], "unconfirmed activation was reported as active"
             assert b"fixture-private-configuration-detail" not in output, "activation error exposed config details"
+            if outcome == "close_failed":
+                h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
+                h.send_and_wait(process, fd, output, b"/login codex\r", FAILED)
+                assert len(activations) == 1, "reopening silently retried activation"
             # Enter has the same activation-only retry as r; cover both bindings.
             h.send_and_wait(process, fd, output, b"\r" if outcome == "incomplete" else b"r", ACTIVE)
         else:
@@ -159,7 +178,7 @@ def scenario(binary, outcome):
         for name, event in refreshed.items():
             assert h.wait_for_fixture_event(process, fd, output, event, timeout=5.0), f"{name} did not reload after activation"
         assert len(saves) == 1 and ordering.count("login") == 1, "activation retry duplicated save or login"
-        assert len(activations) == (2 if outcome in ("refused", "lost", "incomplete") else 1)
+        assert len(activations) == (2 if outcome in ("refused", "lost", "incomplete", "close_failed") else 1)
         if outcome == "usage_limited":
             h.wait_for_output(process, fd, output, b"account-one.model (quota_exhausted)", start=start)
             h.wait_for_output(process, fd, output, "아직 사용할 수 없습니다".encode(), start=start)
@@ -168,7 +187,7 @@ def scenario(binary, outcome):
         refreshed["inventory"].clear()
         h.send_and_wait(process, fd, output, b"r", ACTIVE)
         assert h.wait_for_fixture_event(process, fd, output, refreshed["inventory"], timeout=5.0)
-        assert len(saves) == 1 and len(activations) == (2 if outcome in ("refused", "lost", "incomplete") else 1)
+        assert len(saves) == 1 and len(activations) == (2 if outcome in ("refused", "lost", "incomplete", "close_failed") else 1)
         h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
@@ -177,12 +196,18 @@ def scenario(binary, outcome):
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC System")
         os.write(fd, b"q")
 
+    def interact(process, fd, slave, output, base_path):
+        try:
+            interact_steps(process, fd, slave, output, base_path)
+        finally:
+            pending.release.set()
+
     h.run_terminal_scenario(binary, description=f"account save activation: {outcome}",
         interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
-    for outcome in ("success", "refused", "lost", "incomplete", "usage_limited"):
+    for outcome in ("success", "refused", "lost", "incomplete", "usage_limited", "close_pending", "close_failed"):
         scenario(binary, outcome)
-    print("tui account activation: PASS (5 scenarios)")
+    print("tui account activation: PASS (7 scenarios)")

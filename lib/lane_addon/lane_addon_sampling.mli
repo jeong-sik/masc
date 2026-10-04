@@ -33,6 +33,8 @@ val create :
     Mcp_protocol.Sampling.create_message_params ->
     (Mcp_protocol.Sampling.create_message_result, string) result) ->
   unit -> (t, string) result
+(** Reject a reply envelope smaller than two bytes, the encoded size of the
+    smallest JSON error string. This also applies to directly supplied packages. *)
 
 val retained_receipts : store:Lane_addon_store.t -> instance_id:string -> max_bytes:int ->
   Lane_addon_types.output -> (Yojson.Safe.t list, string) result

@@ -1,0 +1,22 @@
+{
+  "parent": "41680bd6a2592ef7c490d3ec6302daef9633955f",
+  "red_exit": 1,
+  "red_cases": 2,
+  "green_exit": 0,
+  "green_cases": 30,
+  "binary_sha256": "17d7830fa276efa9ac4a7710df12747a09d7319c1f336fc15708b73ef44fa6c7",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_manifest.ml": "637fe88b5aa5bbbd8241d3191d077b853dd204e38ae4d399448124fe0d13a583",
+    "lib/lane_addon/lane_addon_sampling.ml": "c47c4a6d89f2d89712c3e37110110d8efa3bccf98e1fa752cad7c4b27b80e2e0",
+    "lib/lane_addon/lane_addon_sampling.mli": "01681ec1167f11da40dea4138983800dd7037499d704c95adb0dff12947ed464",
+    "test/test_lane_addon_worker.ml": "ebade1607f1861f26bde57951d8193800b746da18bda399ea06927fc65ed1952",
+    "docs/design/lane-addon-model-boundary.md": "128a806c790c9c5d768552b0ebee02148ebb34513aa3b093626a73f5b83eac24"
+  },
+  "evidence_sha256": {
+    "green-tests.log": "65cbe09cb3f64f7d192a6a364f90d9a08ec93f5153a01b1629750a1a48fc1ae8",
+    "green-build.log": "6171db0155622fbf031b2d4427d9ed654c77a665359c3dfdb382eca387e1afd8",
+    "README.md": "50455926720b0fb7d9b0a7b9b90b22de27031418adca1e1790d95061cb8e8be2",
+    "red-build.log": "6171db0155622fbf031b2d4427d9ed654c77a665359c3dfdb382eca387e1afd8",
+    "red-tests.log": "b70cbed7366a662b232cbd3e8658fc589992578c7139bbf5bee44e35a44b8757"
+  }
+}

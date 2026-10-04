@@ -1,0 +1,76 @@
+Testing `Lane Add-on worker'.
+This run has ID `D7VS2DBO'.
+
+> [FAIL]        lifecycle          0   sampling manifest reply minimum.
+  [FAIL]        lifecycle          1   sampling broker reply minimum.
+  [SKIP]        lifecycle          2   sampling retention error uses encoded ...
+  [SKIP]        lifecycle          3   sampling blob failure keeps request ev...
+  [SKIP]        lifecycle          4   sampling recovery reports unreadable t...
+  [SKIP]        lifecycle          5   sampling receipt requires durable jour...
+  [SKIP]        lifecycle          6   receipt projection reads shared outcom...
+  [SKIP]        lifecycle          7   sampling terminal recovery and host re...
+  [SKIP]        lifecycle          8   sampling reply bound and ancestor dura...
+  [SKIP]        lifecycle          9   sampling refuses nonfinite retained ev...
+  [SKIP]        lifecycle         10   sampling recovery reports unreadable p...
+  [SKIP]        lifecycle         11   pending sampling recovery syncs reopen...
+  [SKIP]        lifecycle         12   sampling recovery rejects replaced roo...
+  [SKIP]        lifecycle         13   sampling recovery streams bounded reco...
+  [SKIP]        lifecycle         14   known sampling outcomes survive cancel...
+  [SKIP]        lifecycle         15   declared sampling requires the exact h...
+  [SKIP]        lifecycle         16   image preview is read only and preserv...
+  [SKIP]        lifecycle         17   world action and binary artifact ingress.
+  [SKIP]        lifecycle         18   structured observation and exact removal.
+  [SKIP]        lifecycle         19   blocked observation preserves other ow...
+  [SKIP]        lifecycle         20   blocked initialization can detach.
+  [SKIP]        lifecycle         21   resource refusal and bounded response.
+  [SKIP]        lifecycle         22   cleanup failure remains retryable.
+  [SKIP]        lifecycle         23   restart cleanup verifies exact owner.
+  [SKIP]        lifecycle         24   restart recovers without a create rece...
+  [SKIP]        lifecycle         25   deterministic name cannot authorize fo...
+  [SKIP]        lifecycle         26   absence requires a successful Docker q...
+  [SKIP]        lifecycle         27   recovery bounds an unresponsive Docker...
+  [SKIP]        lifecycle         28   lost create response preserves unrelat...
+  [SKIP]        lifecycle         29   created identity precedes blocked insp...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        lifecycle          0   sampling manifest reply minimum.        │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT sampling manifest rejects an unrepresentable error string
+ASSERT sampling manifest rejects an unrepresentable error string
+File "list.ml", line 114, character 12:
+FAIL sampling manifest rejects an unrepresentable error string
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Dune__exe__Test_lane_addon_worker.test_sampling_manifest_reply_minimum.(fun) in file "test/test_lane_addon_worker.ml", lines 1583-1585, characters 2-60
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio__core__Fiber.any_gen.(fun).wrap in file "lib_eio/core/fiber.ml", line 113, characters 16-20
+Re-raised at Eio__core__Fiber.any_gen in file "lib_eio/core/fiber.ml", line 155, characters 25-60
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-lane-sampling-envelope-minimum-20261005/_build/_tests/Lane Add-on worker/lifecycle.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-lane-sampling-envelope-minimum-20261005/_build/_tests/Lane Add-on worker'.
+2 failures! in 0.006s. 2 tests run.

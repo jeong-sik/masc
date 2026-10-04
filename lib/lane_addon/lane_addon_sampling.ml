@@ -124,6 +124,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
   let* () = match package.model_access with
     | Types.Host_sampling -> Ok ()
     | Types.Model_disabled -> Error "package does not declare host sampling" in
+  let* () = if package.resources.max_reply_bytes >= 2 then Ok ()
+    else Error "host sampling requires at least two reply bytes to encode a JSON error string" in
   let* () = if String.trim instance_id<>"" && String.trim route<>"" then Ok ()
     else Error "sampling requires an exact instance and nonblank host route" in
   let retain fields = Eio_unix.run_in_systhread (fun () ->

@@ -42,6 +42,12 @@ The typed alternative is `"disabled"`; omission also disables model access.
 Unknown strings and booleans are rejected. Inspection serializes this mode,
 and it participates in the package's semantic configuration revision.
 
+Host sampling requires `resources.max_reply_bytes` of at least two bytes:
+even an empty refusal is encoded as the JSON string `""`. Both manifest
+admission and direct broker creation reject smaller envelopes. This minimum
+does not guarantee a model request or answer will fit; retention and response
+encoding still enforce the package's declared bound before delivery.
+
 `Lane_addon_worker.start` accepts the host callback only when the package
 declares host sampling. A declared requirement with no callback, or a callback
 supplied to a disabled package, is rejected before container creation. The

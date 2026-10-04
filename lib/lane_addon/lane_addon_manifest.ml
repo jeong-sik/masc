@@ -122,6 +122,8 @@ let load ~path =
     else if not (cpus > 0.) || classify_float cpus = FP_infinite
          || memory <= 0 || pids <= 0 || max_reply_bytes <= 0
     then Error "resources require finite positive CPU, memory, pids and reply bytes"
+    else if model_access = Host_sampling && max_reply_bytes < 2
+    then Error "host sampling requires at least two reply bytes to encode a JSON error string"
     else Ok { id; revision; title; contributions = List.rev contributions; image; command;
       directory = Filename.dirname path; skills_directory; action_tool; outputs; refresh_policy; model_access; binding_schema; presentation;
       resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }

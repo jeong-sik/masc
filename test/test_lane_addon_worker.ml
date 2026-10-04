@@ -787,7 +787,7 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check bool "out-of-observation callback creates no durable request" true
     (before_records = sampling_requests store ~instance_id:"sampling-worker");
   let tiny_package = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=1}} in
+    resources={(package dir "sampling").resources with max_reply_bytes=2}} in
   let bounded = match Masc.Lane_addon_sampling.create ~store ~package:tiny_package
       ~instance_id:"bounded-model" ~route:"fixture-route" ~invoke () with
     | Ok handler -> handler | Error detail -> fail detail in
@@ -1562,7 +1562,61 @@ let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fu
   check string "bounded refusal leaves the completed result durable" "finished"
     Yojson.Safe.Util.(terminal |> member "state" |> to_string))
 
+let test_sampling_manifest_reply_minimum () = with_fixture (fun _ _ dir _ ->
+  let path = Filename.concat dir "lane.toml" in
+  let load model_access max_reply_bytes =
+    write path (Printf.sprintf {|id="reply-bound"
+revision="1"
+title="Reply boundary"
+image="fixture/image"
+command=["observer"]
+contributions=["observe"]
+[interface]
+model_access=%S
+[resources]
+cpus=0.5
+memory_bytes=4096
+pids=1
+max_reply_bytes=%d
+|} model_access max_reply_bytes);
+    Masc.Lane_addon_manifest.load ~path in
+  List.iter (fun bytes ->
+    check bool "sampling manifest rejects an unrepresentable error string" true
+      (Result.is_error (load "host_sampling" bytes))) [0; 1];
+  check bool "smallest JSON error string is representable" true
+    (Result.is_ok (load "host_sampling" 2));
+  check bool "sampling minimum does not change model-disabled admission" true
+    (Result.is_ok (load "disabled" 1)))
+
+let test_sampling_broker_reply_minimum () = with_fixture (fun _ _ dir _ ->
+  let module Sampling = Masc.Lane_addon_sampling in
+  let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "reply-bound") in
+  let calls = ref 0 in
+  let invoke ~route:_ ~request:_ _ = incr calls; Error "unexpected invocation" in
+  let base = package dir "sampling" in
+  let bounded bytes = {base with model_access=Types.Host_sampling;
+    resources={base.resources with max_reply_bytes=bytes}} in
+  let create package = Sampling.create ~store ~package ~instance_id:"reply-bound"
+    ~route:"fixture-route" ~invoke () in
+  List.iter (fun bytes ->
+    check bool "direct broker rejects an unrepresentable error string" true
+      (Result.is_error (create (bounded bytes)))) [1; 0];
+  let package = bounded 2 in
+  let broker = match create package with Ok value -> value | Error detail -> fail detail in
+  let handler = match Sampling.for_worker broker ~package ~instance_id:"reply-bound" with
+    | Ok value -> value | Error detail -> fail detail in
+  let params = match Mcp_protocol.Sampling.create_message_params_of_yojson
+      (`Assoc ["messages", `List []; "maxTokens", `Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  (match handler params with
+   | Ok _ -> fail "out-of-observation call must be refused"
+   | Error detail -> check int "smallest refusal fits its encoded envelope" 2
+       (String.length (Yojson.Safe.to_string (`String detail))));
+  check int "admission and refusal never invoke a provider" 0 !calls)
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "sampling manifest reply minimum" `Quick test_sampling_manifest_reply_minimum;
+  test_case "sampling broker reply minimum" `Quick test_sampling_broker_reply_minimum;
   test_case "sampling retention error uses encoded wire bound" `Quick test_sampling_retention_error_uses_encoded_reply_bound;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
   test_case "sampling recovery reports unreadable terminal journal" `Quick test_sampling_recovery_reports_unreadable_terminal_journal;

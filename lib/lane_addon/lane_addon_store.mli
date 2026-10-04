@@ -137,6 +137,10 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val create : root:string ->
+    compact_sampling_record:(path:string -> bytes:string -> (unit, string) result) -> t
+  (** Scoped replacement of optional cold journal compaction only, after
+      normal journal/blob verification. No global hooks or public API change. *)
   val iter_sampling_requests :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     t -> instance_id:string -> max_bytes:int ->

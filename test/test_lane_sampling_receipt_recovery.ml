@@ -56,23 +56,34 @@ let seed store ~outcome_first ~placement =
 let test_large_receipt outcome_first placement block_compaction () = with_store @@ fun store ->
   let _, selected, bytes, answer, journal, existing = seed store ~outcome_first ~placement in
   let before = Option.map Unix.stat existing in
-  let parent = Filename.dirname journal in
-  if block_compaction then Unix.chmod parent 0o500;
-  Fun.protect ~finally:(fun () -> if block_compaction then Unix.chmod parent 0o700) (fun () ->
-    let query () = require (Sampling.retained_receipts
-      ~store:(Store.create ~root:(Store.root store)) ~instance_id ~max_bytes selected) in
+  let compact = match Fs_compat.load_file journal |> Yojson.Safe.from_string with
+    | `Assoc fields -> `Assoc (List.remove_assoc "outcome_bytes" fields)
+    | _ -> fail "fixture journal is not an object" in
+  let compactions = ref 0 in
+  let compact_sampling_record ~path ~bytes =
+    incr compactions;
+    check string "only this journal is compacted" journal path;
+    check bool "compaction drops only the inline duplicate" true
+      (Yojson.Safe.from_string bytes = compact);
+    Error "fixture compaction failure" in
+  let query () =
+    let cold = if block_compaction then Store.For_testing.create
+      ~root:(Store.root store) ~compact_sampling_record
+      else Store.create ~root:(Store.root store) in
+    require (Sampling.retained_receipts ~store:cold ~instance_id ~max_bytes selected) in
     let rows = query () in
     check int "one recovered receipt" 1 (List.length rows);
     check string "complete answer within the 4 MiB query allowance" answer
       Yojson.Safe.Util.(List.hd rows |> member "terminal" |> member "response" |> member "content" |> member "text" |> to_string);
     check bool "repeated read after reopening agrees" true (query () = rows);
-    if block_compaction then
+    if block_compaction then (
+      check int "both cold queries reached the failing compaction boundary" 2 !compactions;
       check bool "journal compaction really failed" true
-        Yojson.Safe.Util.(Fs_compat.load_file journal |> Yojson.Safe.from_string |> member "outcome_bytes" = `String bytes);
+        Yojson.Safe.Util.(Fs_compat.load_file journal |> Yojson.Safe.from_string |> member "outcome_bytes" = `String bytes));
     match existing, before with
     | Some path, Some stat -> check int "intact outcome inode is preserved" stat.Unix.st_ino (Unix.stat path).Unix.st_ino
     | None, None -> ()
-    | Some _, None | None, Some _ -> fail "inconsistent fixture")
+    | Some _, None | None, Some _ -> fail "inconsistent fixture"
 
 let test_aggregate_limit_is_not_replenished () = with_store @@ fun store ->
   let _, first, _, _, _, _ = seed store ~outcome_first:false ~placement:`Canonical in

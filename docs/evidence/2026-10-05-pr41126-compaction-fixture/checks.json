@@ -1,0 +1,38 @@
+{
+  "original_head": "4fc810b43a2654107e35aa3d3d107234434e4ae9",
+  "tested_source_tree": "49a6f144b19207d415c2eccb43ccf4021503fc16",
+  "verified_at_utc": "2026-10-04T21:01:53.441419+00:00",
+  "executed_uid": 502,
+  "root_container_executed": false,
+  "meaningful_red": {
+    "passed": 9,
+    "failed": 2,
+    "expected_callback_attempts": 2,
+    "actual_callback_attempts": 0
+  },
+  "green": {
+    "build_exit": 0,
+    "tests": 11,
+    "failed": 0
+  },
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "4ea36a4f75129511a8deb64e2a11113b2b64c8b35b2583cc763e7bade9aa31eb",
+    "lib/lane_addon/lane_addon_store.mli": "591e765c85027a2ca0dde5b8552fe4a1027d8cbe82b795efb2185aee851fef1a",
+    "lib/lane_addon/lane_addon_sampling.ml": "3ed19cc3411602828a368d42cf16deb12e09594edf5fe45652735a4233dd0880",
+    "test/test_lane_sampling_receipt_recovery.ml": "ac970ad1b5a62056f28e56a98af3ecdac52a6ec78126b5c1a6d2f6f3c521f7a1",
+    "test/dune": "34ad210b604d3db107a698d9a758b0dc78f55e9c4f2c8f61d7e3d730782e0be3"
+  },
+  "binary_sha256": {
+    "_build/default/test/test_lane_sampling_receipt_recovery.exe": "d878488052be79fca408fc6403f41f67558f78a5a9a41e4122888dcaece3ac03"
+  },
+  "raw_logs_sha256": {
+    "pr41126-compaction-red-valid.log": "c323c9c7ed760b191f2516435b607081c07478e3e4c735e131e0d22a5e764b71",
+    "pr41126-compaction-green.log": "b2e7b31f89419fde7e7ace4aa06bd5fa6b8ce5c72b0fc3f7574436cf5a3aa238",
+    "pr41126-compaction-red-build-corrected.log": "39100aee02c11df6f3d9db3f9004fe63b66bdb7e426ae990e7e2ab9eb23995bc",
+    "pr41126-compaction-red-build-connected-boundary.log": "94c4f8a53b316dd51106dec62328ecc8f3dff979cd3a7811af10c65c82460069",
+    "pr41126-compaction-parser-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41126-compaction-parser.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41126-compaction-red-build.log": "b7561620f858eb795153d522adb50182744313e93eb0485a1dc6c18607702815",
+    "pr41126-compaction-green-build.log": "94c4f8a53b316dd51106dec62328ecc8f3dff979cd3a7811af10c65c82460069"
+  }
+}

@@ -2,14 +2,15 @@ open Lane_addon_types
 let ( let* ) = Result.bind
 type jsonl_snapshot = { entry_count : int; reference : evidence }
 type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
-           sequences : (string, jsonl_snapshot) Hashtbl.t }
+           sequences : (string, jsonl_snapshot) Hashtbl.t;
+           compact_sampling_record : (path:string -> bytes:string -> (unit, string) result) option }
 let create ~root =
   let root = if Filename.is_relative root then Filename.concat (Sys.getcwd ()) root else root in
   let rec trim_separator root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
       trim_separator (String.sub root 0 (length - 1)) else root in
-  { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+  { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4; compact_sampling_record = None }
 let root t = t.root
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let protect f =
@@ -693,8 +694,11 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
                queries can read a large outcome once. Compaction is optional:
                failure cannot discard the already durable outcome blob. *)
             (match json with
-             | `Assoc fields -> ignore (write t relative
-                 (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
+             | `Assoc fields ->
+                 let bytes = Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields)) in
+                 ignore (match t.compact_sampling_record with
+                   | None -> write t relative bytes
+                   | Some compact -> compact ~path:(Filename.concat t.root relative) ~bytes)
              | _ -> ());
             Ok () in
       let projected, query_bytes = match inline, json with
@@ -1097,6 +1101,9 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let create ~root ~compact_sampling_record =
+    let store = create ~root in
+    { store with compact_sampling_record = Some compact_sampling_record }
   let iter_sampling_requests = iter_sampling_requests_with
   let write = write_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with

@@ -1104,13 +1104,15 @@ class AtomicChatFixture:
         def chunks() -> Iterator[bytes]:
             prefix = f"data: {json.dumps(acceptance)}\n\n".encode()
             if working:
-                prefix += blocks[1] + b"\n\n"
+                # Render this request's real text after RUN_STARTED, before
+                # holding its terminal. It is a client-applied Working barrier.
+                prefix += b"\n\n".join(blocks[1:4]) + b"\n\n"
             yield prefix
             if not self.release.wait(timeout=30):
                 raise AssertionError("interaction never released the held server turn")
             # The original request id is retained even when queued text is edited.
             terminal = keeper_chat_succeeded_response(json.dumps({**request, "message": operation["input"]["message"]}).encode())
-            yield b"\n\n".join(terminal.body.split(b"\n\n")[2 if working else 1:])
+            yield b"\n\n".join(terminal.body.split(b"\n\n")[4 if working else 1:])
 
         return StreamingHttpResponse(chunks)
 
@@ -1274,7 +1276,9 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
+            # The generic busy status also describes the autonomous fixture.
+            # This text follows this request's RUN_STARTED while its terminal is held.
+            send_and_wait(process, master_fd, output, b"\r", b"reply-working-question")
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
             send_and_wait(process, master_fd, output, b"follow-up", composer_showing(b"follow-up"))
             os.write(master_fd, b"\r")
@@ -1314,7 +1318,9 @@ def chat_pending_stop_leave_interaction(fixture: AtomicChatFixture) -> Interacti
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
+            # The generic busy status also describes the autonomous fixture.
+            # This text follows this request's RUN_STARTED while its terminal is held.
+            send_and_wait(process, master_fd, output, b"\r", b"reply-working-question")
             os.write(master_fd, b"\x1b")
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("stop acknowledgement was not held")

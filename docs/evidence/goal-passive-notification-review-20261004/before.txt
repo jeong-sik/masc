@@ -1,0 +1,51 @@
+Testing `Goal notification contract'.
+This run has ID `CL5HKN9Z'.
+
+> [FAIL]        transcript          0   external notification is passive.
+  [FAIL]        transcript          1   Keeper fleet context is passive.
+  [OK]          transcript          2   active mention survives passive proje...
+  [OK]          identity            0   canonical.
+  [FAIL]        identity            1   untyped.
+  [FAIL]        identity            2   short.
+  [FAIL]        identity            3   uppercase.
+  [FAIL]        identity            4   nonhex.
+  [FAIL]        identity            5   path.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        transcript          0   external notification is passive.      │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-04 17:18:13] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/goal-notification-contract-9f009a (no git root found)
+[2026-10-04 17:18:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/Users/dancer/me for requested path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/goal-notification-contract-9f009a
+[2026-10-04 17:18:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/goal-notification-contract-9f009a for test executable test_goal_notification_contract.exe
+ASSERT one transcript row across retry
+ASSERT literal evidence is preserved
+ASSERT passive projection cannot create mention metadata
+File "test_goal_notification_contract.ml", line 43, character 2:
+FAIL passive projection cannot create mention metadata
+
+   Expected: `0'
+   Received: `1'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Test_goal_notification_contract.test_passive.(fun) in file "test_goal_notification_contract.ml", line 43, characters 2-92
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-notification-contract-ifmcssdk/_build/_tests/Goal notification contract/transcript.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-notification-contract-ifmcssdk/_build/_tests/Goal notification contract'.
+7 failures! in 0.026s. 9 tests run.

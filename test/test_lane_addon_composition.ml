@@ -764,6 +764,92 @@ let test_native_fusion_report_is_readable_after_detach () =
         List.iter (fun (sha, expected) ->
           check string "Keeper artifact bytes survive Detach and Lane-store removal" expected (read sha)) retained)))
 
+(* This callback is registered by the test, not by the production Keeper hook
+   registry. It runs only after a tool result exists. *)
+let wkbl_observer ~binding ~sources =
+  let tests = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> Filename.concat root "addons/tests"
+    | None -> Filename.concat (Filename.dirname Sys.executable_name) "../addons/tests" in
+  let script = {|import json, sys
+sys.path.insert(0, sys.argv[1])
+from test_packages import ProtocolCase
+print(json.dumps(ProtocolCase().call("wkbl-score-runs", json.loads(sys.argv[2]), json.loads(sys.argv[3]))))
+|} in
+  Eio_unix.run_in_systhread (fun () ->
+    let channel = Unix.open_process_args_in "python3"
+      [|"python3"; "-c"; script; tests; Yojson.Safe.to_string binding; Yojson.Safe.to_string sources|] in
+    let bytes = match In_channel.input_all channel with
+      | bytes -> bytes
+      | exception exn -> ignore (Unix.close_process_in channel); raise exn in
+    match Unix.close_process_in channel with
+    | Unix.WEXITED 0 -> unwrap (Types.output_of_json (Yojson.Safe.from_string bytes))
+    | _ -> fail "WKBL observer stdio process failed")
+
+let test_wkbl_snapshot_and_post_tool_use_agree () =
+  with_fixture ~produce:wkbl_observer (fun clock config root _directory _received _stopped ->
+    let repo = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> root
+      | None -> Filename.concat (Filename.dirname Sys.executable_name) ".." in
+    let fixture = Filename.concat repo "addons/wkbl-score-runs/fixtures/046-01-48-X2.json" in
+    let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+    let snapshot = Filename.concat root "wkbl-snapshot.json" in
+    write snapshot bytes;
+    let source = Yojson.Safe.from_string bytes in
+    let hook_output = ref None in
+    let hook = function
+      | Agent_core.Hooks.PostToolUse { output = Ok { content; _ }; _ } ->
+          hook_output := Some (wkbl_observer ~binding:(`Assoc [])
+            ~sources:(`List [Yojson.Safe.from_string content]));
+          Agent_core.Hooks.Continue
+      | _ -> Agent_core.Hooks.Continue in
+    let schedule : Agent_core.Tool_contract.schedule = {
+      planned_index=0; batch_index=0; batch_size=1;
+      execution_mode=Agent_core.Tool_contract.Serial } in
+    let invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"wkbl-snapshot" ~turn:0 ~schedule
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+    ignore (Agent_core.Hooks.invoke_validated (Some hook)
+      (Agent_core.Hooks.PostToolUse {
+        invocation; tool_name="read_wkbl_snapshot"; input=`Null;
+        output=Ok { Agent_core.Types.content=bytes; content_blocks=None; _meta=None };
+        result_bytes=String.length bytes; duration_ms=0. }));
+    let hook_row = match !hook_output with
+      | Some { Types.rows=[row]; _ } -> row
+      | _ -> fail "PostToolUse did not derive exactly one run" in
+    let sources = `List [`Assoc [
+      "source_id",`String "wkbl-pbp";
+      "kind",`String "snapshot_file";
+      "path",`String snapshot]] in
+    let id = dispatch config Runtime.Attach [
+      "manifest_path",`String (manifest root);
+      "run_id",`String "wkbl-comparison";
+      "binding",`Assoc ["sources",sources]] |> text "instance_id" in
+    await clock (fun () ->
+      let current = instance config id in
+      member "observation_seq" current = `Int 1
+      || text "kind" (member "phase" current) = "failed");
+    let current = instance config id in
+    if member "observation_seq" current <> `Int 1 then
+      failf "WKBL observation did not commit: %s" (Yojson.Safe.to_string current);
+    let lane_row = inspect config |> list "rows" |> List.find (fun row ->
+      text "lane_id" row = id ^ "/wkbl/score-runs") in
+    check string "same run answer after both trigger paths"
+      (Yojson.Safe.to_string (`Assoc hook_row.fields))
+      (Yojson.Safe.to_string (member "fields" lane_row));
+    let reference = member "evidence" lane_row |> Yojson.Safe.Util.to_list |> List.hd in
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    check string "source bytes are retained by the Lane source adapter"
+      (Store.digest bytes) (text "sha256" reference);
+    check string "frozen source contains the original 46-row period" bytes
+      (unwrap (Store.read_blob store {Types.uri=text "uri" reference;
+        sha256=Some (text "sha256" reference)}));
+    check string "both paths identify the same source cursor"
+      (text "cursor" source)
+      (member "fields" lane_row |> text "source_cursor");
+    ignore (dispatch config Runtime.Detach ["instance_id",`String id]);
+    await clock (fun () ->
+      text "kind" (member "phase" (instance config id)) = "detached"))
+
 let fusion_source run_id = Printf.sprintf
   {|[{source_id="fusion",kind="fusion_run",run_id=%S}]|} run_id
 let register_private_run root owner =
@@ -1063,6 +1149,8 @@ let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clo
     (member "visibility" (instance config consumer) = `Assoc ["kind",`String "shared"]))
 
 let () = run "TOML cross-Lane composition" ["world inputs",[
+  test_case "WKBL snapshot and PostToolUse agree on one supplied period" `Quick
+    test_wkbl_snapshot_and_post_tool_use_agree;
   test_case "pending notifications preserve one call per completed input" `Quick
     test_pending_notification_does_not_repeat_same_completed_input;
   test_case "native Fusion report crosses packages and remains Keeper-readable" `Quick

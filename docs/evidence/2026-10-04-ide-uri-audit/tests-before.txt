@@ -1,0 +1,76 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-audit-ide-document-uri-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/ide/ide-lsp-client.test.ts -t 'preserves literal path characters'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-audit-ide-document-uri-20261004/dashboard
+
+ ❯ src/components/ide/ide-lsp-client.test.ts (36 tests | 4 failed | 32 skipped) 8ms
+   ❯ LspConnection (21)
+     × preserves literal path characters in document traffic (/workspace/masc, src/hash#part.ml) 5ms
+     × preserves literal path characters in document traffic (/workspace/masc, src/percent%20name.ml) 1ms
+     × preserves literal path characters in document traffic (/workspace/space #?%/한글, src/한글 ?name.ml) 0ms
+     × preserves literal path characters in document traffic (/workspace/unused, /workspace/masc/src/hash#part.ml) 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/masc, src/hash#part.ml)
+ FAIL  src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/unused, /workspace/masc/src/hash#part.ml)
+AssertionError: expected '#part.ml' to be '' // Object.is equality
+
+- Expected
++ Received
+
++ #part.ml
+
+ ❯ src/components/ide/ide-lsp-client.test.ts:534:24
+    532|       expect(uri.protocol).toBe('file:')
+    533|       expect(uri.host).toBe('')
+    534|       expect(uri.hash).toBe('')
+       |                        ^
+    535|       expect(uri.search).toBe('')
+    536|       expect(decodeURIComponent(uri.pathname)).toBe(absolutePath)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/masc, src/percent%20name.ml)
+AssertionError: expected '/workspace/masc/src/percent name.ml' to be '/workspace/masc/src/percent%20name.ml' // Object.is equality
+
+Expected: "/workspace/masc/src/percent%20name.ml"
+Received: "/workspace/masc/src/percent name.ml"
+
+ ❯ src/components/ide/ide-lsp-client.test.ts:536:48
+    534|       expect(uri.hash).toBe('')
+    535|       expect(uri.search).toBe('')
+    536|       expect(decodeURIComponent(uri.pathname)).toBe(absolutePath)
+       |                                                ^
+    537|     }
+    538|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/space #?%/한글, src/한글 ?name.ml)
+AssertionError: expected '#?%/%ED%95%9C%EA%B8%80/src/%ED%95%9C%…' to be '' // Object.is equality
+
+- Expected
++ Received
+
++ #?%/%ED%95%9C%EA%B8%80/src/%ED%95%9C%EA%B8%80%20?name.ml
+
+ ❯ src/components/ide/ide-lsp-client.test.ts:534:24
+    532|       expect(uri.protocol).toBe('file:')
+    533|       expect(uri.host).toBe('')
+    534|       expect(uri.hash).toBe('')
+       |                        ^
+    535|       expect(uri.search).toBe('')
+    536|       expect(decodeURIComponent(uri.pathname)).toBe(absolutePath)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 32 skipped (36)
+   Start at  01:50:18
+   Duration  746ms (transform 39%, environment 27%, setup 21%, import 10%, tests 1%, worker 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.

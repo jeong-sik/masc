@@ -4,7 +4,7 @@ import { isRecord } from './common/normalize'
 
 type ReadingValue =
   | { kind: 'value'; text: string }
-  | { kind: 'unavailable'; reason: 'missing' | 'not_object' | 'wrong_type' }
+  | { kind: 'unavailable'; reason: 'missing' | 'not_object' | 'wrong_type' | 'unsafe_integer' }
 
 function readingValue(reading: LaneAddonReading, fields: LaneAddonRow['fields']): ReadingValue {
   let value: unknown = fields
@@ -18,7 +18,12 @@ function readingValue(reading: LaneAddonReading, fields: LaneAddonRow['fields'])
       if (typeof value === 'string') return { kind: 'value', text: value }
       break
     case 'number':
-      if (typeof value === 'number' && Number.isFinite(value)) return { kind: 'value', text: String(value) }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+          return { kind: 'unavailable', reason: 'unsafe_integer' }
+        }
+        return { kind: 'value', text: String(value) }
+      }
       break
     case 'boolean':
       if (typeof value === 'boolean') return { kind: 'value', text: String(value) }
@@ -36,6 +41,7 @@ const unavailableReason = {
   missing: 'field unavailable',
   not_object: 'field path does not address an object',
   wrong_type: 'field does not match declared display format',
+  unsafe_integer: 'integer exceeds JavaScript’s exact range',
 } as const
 
 /** Package-local Lane IDs are resolved only within the declaring instance.

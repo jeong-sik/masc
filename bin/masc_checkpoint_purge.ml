@@ -185,8 +185,8 @@ let () =
     let path =
       Filename.concat
         runtime_keepers_dir
-        (Masc.Keeper_runtime_root_entry.keeper_basename
-           ~keeper_name Masc.Keeper_runtime_root_entry.Metadata)
+        (Keeper_runtime_root_entry.keeper_basename
+           ~keeper_name Keeper_runtime_root_entry.Metadata)
     in
     match
       Masc.Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:runtime_root path

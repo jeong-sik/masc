@@ -24,5 +24,11 @@
     "Prior test incorrectly expected enabled=true to be rejected as an unknown field; now uses unexpected=true."
   ],
   "source_checkpoint": "9d2026d60a637b4154b1bae1fd40b664a1ae62bf",
-  "authored_direct_runtime_scenarios": 5
+  "authored_direct_runtime_scenarios": 5,
+  "parent_refresh": {
+    "previous_base": "24ddb0d7d315299246a9dabfe6d2b9025ab2ecb2",
+    "current_base": "4187f3f1f41a57b9bb507b60cfdd85a78973d699",
+    "merge_checkpoint": "aeed858b4f28292b8e8bc2ec8914ffa1bd051364",
+    "delta": "Onboarding setup retry callback and Web tests/evidence; read source before merging. lib/test/bin and Dune/opam inputs are unchanged. Reuse only the unchanged pure-module/syntax evidence; no new Web or runtime execution claim."
+  }
 }

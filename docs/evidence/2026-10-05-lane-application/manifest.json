@@ -7,8 +7,8 @@
     },
     {
       "path": "checks.json",
-      "bytes": 1833,
-      "sha256": "dab89a2a5d7f25abd41ace126bfb3de31ee10f7633b70e361414abe3004ed8ec"
+      "bytes": 2298,
+      "sha256": "1abd9d70008b36de0ca07e4cd824c247e7e587237f44b7603d5fcadce9fa4d30"
     },
     {
       "path": "pure-compile.txt",

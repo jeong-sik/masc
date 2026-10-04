@@ -757,7 +757,25 @@ let test_missing_image_creates_nothing_until_it_is_built () =
       (In_channel.with_open_bin path In_channel.input_all);
     detach clock config id)
 
+let test_inventory_reads_live_manual_without_effects () =
+  with_fixture (fun env _sw config _directory packages state ->
+    let manifest = package packages "ready" in
+    let attached = dispatch config Runtime.Attach ["manifest_path",`String manifest;
+      "run_id",`String "manual-world";"binding",`Assoc ["sources",`List []]] in
+    let id = text "instance_id" attached in
+    await_ready (Eio.Stdenv.clock env) config id;
+    let events = !(state.events) and observations = !(state.observations) in
+    let inventory = Runtime.inventory ~config in
+    check bool "existing manager observed" true inventory.owner_present;
+    let current = List.find (fun (i : Runtime.inventory_instance) -> i.instance_id=id) inventory.instances in
+    check bool "manual identity and live presence retained" true
+      (current.incarnation=id && current.configuration=None && current.presence=Runtime.Live);
+    check bool "metadata never starts or stops a worker" true (events = !(state.events));
+    check bool "metadata never requests an observation" true (observations = !(state.observations));
+    detach (Eio.Stdenv.clock env) config id)
+
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
+  test_case "live manual inventory reads no worker effects" `Quick test_inventory_reads_live_manual_without_effects;
   test_case "duplicate TOML keys preserve applied owners and report issues" `Quick
     test_duplicate_toml_keys_preserve_applied_workers;
   test_case "historical cleanup failures wait for virtual maintenance beats" `Quick

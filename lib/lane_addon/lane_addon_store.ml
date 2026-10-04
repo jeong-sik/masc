@@ -229,6 +229,35 @@ let read_directory t relative = protect (fun () ->
              | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
+type binding_inventory = {
+  records : (string * Yojson.Safe.t) list;
+  issues : (string * string) list;
+  complete : bool;
+}
+let binding_inventory ~root =
+  let directory = Filename.concat root "bindings" in
+  let listed = protect (fun () ->
+    match Fs_compat.exact_path_kind directory with
+    | Fs_compat.Exact_missing -> Ok []
+    | _ -> Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
+  match listed with
+  | Error detail -> { records=[]; issues=[directory,detail]; complete=false }
+  | Ok names ->
+      let records,issues = List.fold_left (fun (records,issues) name ->
+        if not (Filename.check_suffix name ".json") then records,issues
+        else
+          let path = Filename.concat directory name in
+          let read = protect (fun () ->
+            let* contents = Fs_compat.load_owned_regular_file_range
+              ~ownership_root:root ~offset:0 ~max_bytes:max_int path
+              |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+            match contents with
+            | None -> Error "binding disappeared during inventory read"
+            | Some contents -> Ok (Yojson.Safe.from_string contents.content)) in
+          match read with
+          | Ok value -> (path,value)::records,issues
+          | Error detail -> records,(path,detail)::issues) ([],[]) names in
+      { records=List.rev records; issues=List.rev issues; complete=issues=[] }
 let bounded_file_for_sampling ~max_bytes path = protect (fun () ->
   let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
   let channel = Unix.in_channel_of_descr fd in

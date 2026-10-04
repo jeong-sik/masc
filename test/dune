@@ -1,4 +1,8 @@
 (include stanzas/test_tui_usage_studio_pty.inc)
+(test
+ (name test_server_lane_inventory)
+ (modules test_server_lane_inventory)
+ (libraries masc_test_deps masc.server alcotest eio_main unix yojson bigstringaf))
 (include stanzas/test_librarian_working_state_evaluation.inc)
 
 (test

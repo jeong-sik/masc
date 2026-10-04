@@ -425,6 +425,13 @@ let issue_automation ~verb ~timeout_sec =
       ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
+type inventory_observation = Live_clients of int | Executor_registered of bool
+(* Reading inventory must not prune clients or resolve their waiting requests. *)
+let inventory_observation = function
+  | Lane_name.Live -> Live_clients (Eio.Mutex.use_ro clients_mutex (fun () ->
+      Hashtbl.fold (fun _ client count -> if connected client then count+1 else count) clients 0))
+  | Lane_name.Automation -> Executor_registered (Option.is_some (Atomic.get automation_executor))
+  | Lane_name.Stagehand -> Executor_registered (Option.is_some (Atomic.get stagehand_executor))
 let issue_stagehand ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
     Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb)

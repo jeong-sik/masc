@@ -1836,6 +1836,13 @@ let add_routes ~sw ~clock router =
               reqd)
          request
          reqd)
+  |> Http.Router.get "/api/v1/lanes" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun state _agent_name req reqd ->
+            Server_lane_inventory.snapshot ~config:(Mcp_server.workspace_config state)
+            |> Server_lane_inventory.to_json
+            |> fun json -> Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   (* Paged, and without detail payloads. [lane=] and [run_kind=] filter BEFORE pagination so
      the Verifier's task/Goal review registries cannot be hidden behind a busy
      Librarian window. Serving every exact-output payload made this response

@@ -511,7 +511,7 @@ let test_daemon_delivery ~start_before_commit () =
     Eio.Switch.on_release sw (fun () ->
       Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer);
     Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_
+      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_
           ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
           ~on_runtime_attempt_error:_ () ->
         incr reviewer_calls;

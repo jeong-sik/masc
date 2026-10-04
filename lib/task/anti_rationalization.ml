@@ -71,6 +71,7 @@ let run_llm_reviewer_fn
   : (base_path:string ->
      ?sw:Eio.Switch.t ->
      evaluator_runtime:string ->
+     candidate_kind:Types_core.verifier_slot_kind ->
      prompt:string ->
      ?goal_blocks:Agent_core.Types.content_block list ->
      report_tool_schema:Types_core.tool_schema ->
@@ -83,7 +84,7 @@ let run_llm_reviewer_fn
         -> Agent_core.Error.t
         -> unit) ->
      unit -> (reviewer_reply, Agent_core.Error.t) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: the verdict vocabulary is owned by this variant. Witness
@@ -489,11 +490,11 @@ let step_verdict_call call args =
     model — no wire response format is requested
     ([Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config]). *)
 let resolve_evaluator_slots = function
-  | Some runtime when String.trim runtime <> "" -> Ok [ runtime ]
+  | Some runtime when String.trim runtime <> "" -> Ok [ runtime, Types_core.Explicit_runtime ]
   | Some _ -> Error "task completion evaluator runtime is empty"
   | None ->
     (try
-       match (Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn) () with
+       match (Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn) () with
        | Ok [] ->
          Error "verifier_exact exact-output lane resolved to no admitted slots"
        | Ok slots -> Ok slots
@@ -568,7 +569,7 @@ let run
       ; fallback_reason = Some reason
       ; evaluator_error_retryable = None
       }
-  | Ok (first_slot :: rest_slots) ->
+  | Ok (((first_slot, _) as first_candidate) :: rest_slots) ->
     (match render_prompt () with
      | Error detail ->
        (Atomic.get outcome_observer_fn)
@@ -598,7 +599,7 @@ let run
            goal_blocks
        in
        (match generator_runtime with
-        | Some generator when List.exists (String.equal generator) (first_slot :: rest_slots) ->
+        | Some generator when List.exists (fun (slot, _) -> String.equal generator slot) (first_candidate :: rest_slots) ->
           task_warn
             "generator runtime %s is one of the verifier_exact lane slots"
             generator
@@ -614,7 +615,7 @@ let run
           runtime candidates inside each slot, while the slot's terminal error
           remains the operator-facing reason. A single-slot lane still reports
           exactly what the pre-lane path reported. *)
-       let run_attempt slot =
+       let run_attempt (slot, candidate_kind) =
          let nested_retryable_error_seen = ref false in
          try
            let result =
@@ -622,6 +623,7 @@ let run
                ~base_path
                ?sw
                ~evaluator_runtime:slot
+               ~candidate_kind
                ~prompt
                ?goal_blocks
                ~report_tool_schema:report_review_verdict_schema
@@ -644,8 +646,8 @@ let run
                      (Printexc.to_string exn)))
            , !nested_retryable_error_seen )
        in
-       let rec attempt ~retryable_error_seen slot remaining =
-         match run_attempt slot with
+       let rec attempt ~retryable_error_seen ((slot, _) as candidate) remaining =
+         match run_attempt candidate with
          | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_error_seen ->
            (match verdict with
             | Approve reason ->
@@ -679,7 +681,7 @@ let run
                 "%s runtime=%s; failing over to next verifier_exact slot %s"
                 detail
                 slot
-                next;
+                (fst next);
               attempt ~retryable_error_seen next rest
             | [] ->
               task_warn "%s" detail;
@@ -709,7 +711,7 @@ let run
                 "evaluator unavailable runtime=%s retryable=%b; failing over to next verifier_exact slot %s: %s"
                 slot
                 retryable
-                next
+                (fst next)
                 detail;
               attempt
                 ~retryable_error_seen:(retryable_error_seen || retryable)
@@ -732,7 +734,7 @@ let run
                     Some exhausted_retryable
                 })
        in
-       attempt ~retryable_error_seen:false first_slot rest_slots)
+       attempt ~retryable_error_seen:false first_candidate rest_slots)
 ;;
 
 (* The Task lane: its own prompt variables, its own log subject. Everything

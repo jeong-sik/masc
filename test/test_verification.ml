@@ -1757,7 +1757,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
     let previous_lane_slots =
-      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
     in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
@@ -1773,7 +1773,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
           previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
@@ -1788,8 +1788,8 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            verifier_exact lane; the default runtime hook above no longer
            reaches it. *)
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
-          (fun () -> Ok [ "test-system-evaluator" ]);
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
+          (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-system-evaluator" ]));
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
@@ -1817,7 +1817,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  Eio.Promise.resolve resolve_run_completed ()
                | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
                on_tool_result
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
@@ -2024,7 +2024,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
     let previous_lane_slots =
-      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
     in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
@@ -2037,7 +2037,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
           previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
@@ -2046,14 +2046,14 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
-          (fun () -> Ok [ "test-system-evaluator" ]);
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
+          (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-system-evaluator" ]));
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});

@@ -28,3 +28,19 @@ returns the test exit status; no pre-existing report directory is required.
 
 This proves bounded local storage-to-receipt behavior, not a full server, actual
 provider/Docker run, startup race, independent approval, merge or deployment.
+
+## Current parent integration
+
+The manifests and extracted-consumer runner results above are historical. This
+integration uses parent #41033 at
+`0c984e316874d6af6ffe22430bd6b11b3e61ba2c`. Conflict resolution retains its root
+durability obligation and strict owned-file verification, including startup-only
+oversized corruption repair. The child keeps its separate journal per-file bound,
+compact-receipt accounting, and unchanged aggregate outcome allowance.
+
+The repo-local focused native build passed for the four relevant executables.
+Using the declared test environment, receipt recovery passed 11/11 (1.917s),
+worker recovery 28/28 (7.922s), runtime 22/22 (7.656s), and source provenance
+15/15 (0.196s): 76 tests total. These execute the integrated store and consumer,
+including the parent's strict recovery regressions. No full suite, complete
+server bootstrap, provider/Docker execution, deployment or release is claimed.

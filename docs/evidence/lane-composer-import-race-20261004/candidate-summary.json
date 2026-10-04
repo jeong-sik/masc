@@ -1,0 +1,35 @@
+{
+  "scope": "real Chromium local HTML and Python package MCP stdio fixtures; no MASC server or live provider execution",
+  "source_sha256": {
+    "docs/design/lane-addons-composer.html": "864a8c06b3cefbd3e9f1379ea2aec85b7807fd82e599d7f217b1ce2fc0da7836",
+    "docs/design/lane-composition-export.js": "d7b2d05c1b97544f40fbec2532d3830e85ca2844bebfc3664048782b12fe1937",
+    "addons/fusion-report/server.py": "61a526172db1ae1e029a34c36afb131c8162825bf8f2853cb5903e83299ce5d9",
+    "test/test_lane_composition_browser.py": "2cecc985ae4174eb88f19e5825e40d2b9c15b9f5b028197687c50e345748d3ba"
+  },
+  "masc_server_execution": false,
+  "package_stdio_fixture": true,
+  "live_provider": false,
+  "broadcast": false,
+  "checks": [
+    "deferred A/B imports: B finishes first; late A cannot replace graph/settings/TOMLs or add Undo history",
+    "deferred A/B imports: A finishes first after B selection; only B is applied",
+    "typing in an installation setting cancels pending import before blur commits the edit",
+    "deferred import cannot overwrite subsequent edit or change its Undo history",
+    "deferred import cannot overwrite subsequent template or change its Undo history",
+    "deferred import cannot overwrite subsequent undo or change its Undo history",
+    "stale validation/read errors stay silent; failed newest import preserves graph and cancels older read",
+    "inspecting a node without editing still allows the current import to finish",
+    "incomplete declarations rejected visibly",
+    "four named-port TOMLs rendered and real download matched",
+    "settings edit invalidates preview; actual Undo restores identical TOML",
+    "actual saved JSON import replaces stale settings and preserves all TOMLs",
+    "report/context row order independent; missing context rejected without replacing report; ambiguous retained reply leaves full body visible",
+    "answer first with explicit full-record expansion; inconsistent retained response falls back to unchanged visible report",
+    "actual MCP fixture report imported; text/gaps preserved safely; declared run match invalidates on edit and restores on Undo; invalid import preserves previous file; close clears report",
+    "synthetic native ownership and sharing receipts: exact row/lane selection matching, Broadcast and Keeper states, other selection rejection, invalid import retention and clear; no native delivery executed",
+    "390px document has no horizontal overflow"
+  ],
+  "status": "passed",
+  "browser": "147.0.7727.15",
+  "page_errors": []
+}

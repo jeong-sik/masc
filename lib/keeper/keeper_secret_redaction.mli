@@ -8,6 +8,10 @@ type t
 
 val empty : t
 
+val copy_for_current_domain : t -> t
+(** Recompile the captured exact values on the calling domain. No secret files
+    are reread and no mutable compiled pattern is shared with the source. *)
+
 val ssh_remote_token_file : base_path:string -> keeper_name:string -> string
 (** Host-side 0600 registration file for a remote keeper's GitHub token.
     The SSH bootstrap owns writes; snapshots read it only for exact-value

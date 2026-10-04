@@ -574,7 +574,7 @@ let memory_fact_line sign (json : Yojson.Safe.t) =
              | Some Blocker -> Tone_blocker
              (* A category a newer producer added reads as a fact until this
                 build is taught it; its word is still drawn as sent. *)
-             | Some Fact | None -> Tone_fact
+             | Some (Fact | Custom _) | None -> Tone_fact
            in
            Some (Masc_tui_message_layout.Journal_fact { sign; category; tone; claim })
        | Some _, None | None, Some _ | None, None -> None)

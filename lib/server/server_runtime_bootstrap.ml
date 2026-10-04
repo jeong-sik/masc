@@ -1388,8 +1388,8 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
    same post-readiness lane as the task completion authority — the stage-2
    gate is illegal to merge without it (a gate no one calls wedges every goal
    that enters [Verifying]). *)
-let start_goal_verifier ~sw (state : Mcp_server.server_state) =
-  Goal_verification_agent.start ~sw ~config:(Mcp_server.workspace_config state)
+let start_goal_verifier ~sw ~clock (state : Mcp_server.server_state) =
+  Goal_verification_agent.start ~sw ~clock ~config:(Mcp_server.workspace_config state)
 
 let resume_model_configuration () =
   match Runtime.config_path () with
@@ -1474,7 +1474,7 @@ let start_post_ready_owner_lanes
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
-    start_goal_verifier ~sw state;
+    start_goal_verifier ~sw ~clock state;
     Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
       ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ())
       ~appraise:(Server_candle_appraiser.run ~base_path:(Mcp_server.workspace_config state).base_path) ();
@@ -1733,6 +1733,12 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
         initialized_owner
       in
       let state = activated_owner.state in
+      (* Historical sampling reads cannot be admitted until the initial
+         durable journal recovery attempt has finished. Maintenance retries
+         incomplete records after readiness. *)
+      (match Lane_addon_runtime.recover_sampling ~config:(Mcp_server.workspace_config state) with
+       | Ok () -> ()
+       | Error detail -> Log.Server.warn "Lane sampling startup recovery incomplete: %s" detail);
       (* Authentication wrappers treat [server_state = Some _] as the mutation
          capability boundary. Publish only after transport-neutral activation
          has restored Gate state and started the owner persistence lanes. *)

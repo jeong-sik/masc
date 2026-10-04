@@ -97,6 +97,20 @@ let response_with_references (answer : S.create_message_result) references =
   let answer = package_response answer in
   {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])}
 
+let encode_sampling_reply ~request_id ~max_bytes reply =
+  match request_id with
+  | None ->
+      let json = match reply with
+        | Ok answer -> S.create_message_result_to_yojson answer
+        | Error message -> `String message in
+      encode_bounded ~max_bytes json
+  | Some id ->
+      let module J = Mcp_protocol.Jsonrpc in
+      let frame = match reply with
+        | Ok answer -> J.make_response ~id ~result:(S.create_message_result_to_yojson answer)
+        | Error message -> J.make_error ~id ~code:Mcp_protocol.Error_codes.internal_error ~message () in
+      encode_bounded ~max_bytes:(max_bytes - 1) (J.message_to_yojson frame)
+
 let bound_refusal ~max_bytes message =
   let json_len s = String.length (Yojson.Safe.to_string (`String s)) in
   if String.length message <= max_bytes
@@ -130,7 +144,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     Store.write_blob store bytes)
     |> Result.map_error (fun _ -> "sampling request could not be retained") in
   let observation = ref Outside_observation in
-  let handler (params : S.create_message_params) =
+  let handler ?request_id:wire_id (params : S.create_message_params) =
     let run () =
     let* observation_inputs = match !observation with
       | Outside_observation -> Error "host sampling requires an active observation"
@@ -146,6 +160,16 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       "observation_inputs_sha256",observation_inputs;
       "package",`Assoc ["id",`String package.id;"revision",`String package.revision];
       "params",S.create_message_params_to_yojson params] in
+    let* () = match wire_id with
+      | None -> Ok ()
+      | Some _ ->
+          let references = `Assoc ["request",Types.evidence_to_json request;
+            "outcome",Types.evidence_to_json request] in
+          let reply = Yojson.Safe.to_string (`Assoc ["status",`String "invalid_response";
+            "evidence",references]) in
+          encode_sampling_reply ~request_id:wire_id
+            ~max_bytes:package.resources.max_reply_bytes (Error reply)
+          |> Result.map (fun _ -> ()) in
     let record state =
       let state, outcome = match state with
         | Pending -> "pending", None | Finished evidence -> "finished", Some evidence in
@@ -203,12 +227,19 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Answer answer ->
               let references = `Assoc ["request",Types.evidence_to_json request;
                 "outcome",Types.evidence_to_json (Store.blob_reference bytes)] in
-              (match encode_bounded ~max_bytes:package.resources.max_reply_bytes
-                  (S.create_message_result_to_yojson (response_with_references answer references)) with
+              (match encode_sampling_reply ~request_id:wire_id ~max_bytes:package.resources.max_reply_bytes
+                  (Ok (response_with_references answer references)) with
                | Ok _ -> Ok (outcome, bytes)
                | Error detail ->
-                   let* bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes
-                     (`Assoc (identity @ ["status",`String "invalid_response";"error",`String detail])) in
+                   let invalid_fields = identity @
+                     ["status",`String "invalid_response";"error",`String detail] in
+                   let bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                     (`Assoc (invalid_fields @
+                       ["response",S.create_message_result_to_yojson answer])) in
+                   let* bytes = match bytes with
+                     | Ok bytes -> Ok bytes
+                     | Error _ -> encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                         (`Assoc invalid_fields) in
                    Ok (Invalid_response (answer, detail), bytes))
           | Host_error _ | Invalid_response _ | Invocation_exception _ -> Ok (outcome, bytes) in
         let evidence = Store.blob_reference bytes in
@@ -247,9 +278,22 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         (match Eio_unix.run_in_systhread (fun () ->
            encode_bounded ~max_bytes:package.resources.max_reply_bytes reply) with
          | Ok bytes -> Error bytes
-         | Error _ -> Error (bound_refusal ~max_bytes:package.resources.max_reply_bytes
-                               "sampling failed; outcome retained")) in
-    run () |> Result.map_error (bound_refusal ~max_bytes:package.resources.max_reply_bytes) in
+         | Error _ -> Error "sampling failed; outcome retained") in
+    run () |> Result.map_error (fun message ->
+      match wire_id with
+      | None -> bound_refusal ~max_bytes:package.resources.max_reply_bytes message
+      | Some _ ->
+          match encode_sampling_reply ~request_id:wire_id
+              ~max_bytes:package.resources.max_reply_bytes (Error message) with
+          | Ok _ -> message
+          | Error _ ->
+              let empty_size = match encode_sampling_reply ~request_id:wire_id
+                  ~max_bytes:max_int (Error "") with
+                | Ok bytes -> String.length bytes + 1
+                | Error _ -> package.resources.max_reply_bytes in
+              let available = max 0 (package.resources.max_reply_bytes - empty_size) in
+              let refusal = "sampling failed; outcome retained" in
+              String.sub refusal 0 (min available (String.length refusal))) in
   Ok {package; instance_id; store; observation; handler}
 
 let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =

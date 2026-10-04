@@ -6,7 +6,7 @@ import unicodedata
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_types.ml", "bin/masc_tui.ml")
+
 IDS = ["provider." + "shared-runtime-prefix-" * 4 + f"R{index:02d}" for index in range(32)]
 
 

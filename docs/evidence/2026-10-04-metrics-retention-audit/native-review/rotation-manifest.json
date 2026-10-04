@@ -1,0 +1,13 @@
+{
+  "baseline": "2b230357cb72586fe0c20d5a07490a43cb93ecab",
+  "scope": "complete actual Fs_compat/Env_config_keeper under isolated module names, exact JSONL rotation/append source and UTF-8 repair source; unmodified complete 24-case metrics suite; real Stdlib/Eio filesystem I/O in temporary dirs; cached dependencies; no full product build or TOML-loader test",
+  "sha256": {
+    "lib/fs_compat/fs_compat.ml": "4ad0e9a682cb6f17e944778956db4a8ada86cabc547288ebdcf179eaa2f143ae",
+    "lib/fs_compat/fs_compat.mli": "0a213bcc42b40b98a6023625e0d401859d7bb07b6d7a316acdac25c7a2590566",
+    "lib/config/env_config_keeper.ml": "93410943839c8605bdcce3c3acda99df7ad0445562ff8f421268c41fcdf04ec3",
+    "lib/config/env_config_keeper.mli": "6da6a5522a9f0e2e198a5581bf8aa731ef6cc64374703b410327f83d307d319b",
+    "lib/keeper/keeper_types_support.ml": "e0b3641f9a75b38e966a36c1471d3afb2c7e2fd003428b034d122943b1bbb383",
+    "lib/keeper/keeper_config_text.ml": "f00536515caee67e95379a5071ea5d0433ab4c5cc8932174a33225364a939e27",
+    "test/test_metrics_rotation.ml": "c0391b9b65df67b65229d7017d65aadef267aa355a495c8be1506d8986f7502e"
+  }
+}

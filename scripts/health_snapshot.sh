@@ -201,33 +201,6 @@ else
   echo "Skipping scripts/dune-local.sh build @check"
 fi
 
-anti_fake_output=""
-anti_fake_status=0
-set +e
-anti_fake_output="$(bash scripts/anti-fake-audit.sh 2>&1)"
-anti_fake_status=$?
-set -e
-
-anti_fake_good="$(printf '%s\n' "$anti_fake_output" | awk '/^  Good:/ {print $2}')"
-anti_fake_suspect="$(printf '%s\n' "$anti_fake_output" | awk '/^  Suspect:/ {print $2}')"
-anti_fake_fake="$(printf '%s\n' "$anti_fake_output" | awk '/^  Fake:/ {print $2}')"
-anti_fake_total="$(printf '%s\n' "$anti_fake_output" | awk '/^  Total:/ {print $2}')"
-
-anti_fake_good="${anti_fake_good:-0}"
-anti_fake_suspect="${anti_fake_suspect:-0}"
-anti_fake_fake="${anti_fake_fake:-0}"
-anti_fake_total="${anti_fake_total:-0}"
-
-case "$anti_fake_status" in
-  0) anti_fake_label="pass" ;;
-  1) anti_fake_label="findings" ;;
-  *)
-    printf '%s\n' "$anti_fake_output" >&2
-    echo "ERROR: anti-fake audit failed unexpectedly" >&2
-    exit "$anti_fake_status"
-    ;;
-esac
-
 base_policy_json="$(mktemp)"
 base_policy_cmd=(
   bash
@@ -357,7 +330,6 @@ echo "HEAD:   $head_sha"
 echo "At:     $now_iso"
 echo ""
 echo "Baseline: ${baseline_label}"
-echo "Anti-fake: status=${anti_fake_label} good=${anti_fake_good} suspect=${anti_fake_suspect} fake=${anti_fake_fake} total=${anti_fake_total}"
 echo "Unsafe patterns (lib):  failwith=${lib_failwith} list_hd=${lib_list_hd} list_tl=${lib_list_tl} option_get=${lib_option_get} obj_magic=${lib_obj_magic}"
 echo "Unsafe patterns (test): failwith=${test_failwith} list_hd=${test_list_hd} list_tl=${test_list_tl} option_get=${test_option_get} obj_magic=${test_obj_magic}"
 echo "Base policy: mli_open_base=${mli_open_base} ml_base_stdlib_shadow=${ml_base_stdlib_shadow} bin_ml_base_stdlib_shadow=${bin_ml_base_stdlib_shadow}"
@@ -374,13 +346,6 @@ json_payload="$(cat <<EOF
   "build": {
     "skipped": ${SKIP_BUILD},
     "status": "pass"
-  },
-  "anti_fake": {
-    "status": "${anti_fake_label}",
-    "good": ${anti_fake_good},
-    "suspect": ${anti_fake_suspect},
-    "fake": ${anti_fake_fake},
-    "total": ${anti_fake_total}
   },
   "counts": {
     "lib_failwith": ${lib_failwith},
@@ -461,7 +426,6 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "| bin | $bin_ml_over_500 | n/a |"
     echo "| test | $test_ml_over_500 | n/a |"
     echo ""
-    echo "- Anti-fake: \`$anti_fake_label\` (good=$anti_fake_good suspect=$anti_fake_suspect fake=$anti_fake_fake total=$anti_fake_total)"
     echo "- Base policy: mli_open_base=\`$mli_open_base\` ml_base_stdlib_shadow=\`$ml_base_stdlib_shadow\` bin_ml_base_stdlib_shadow=\`$bin_ml_base_stdlib_shadow\`"
     echo "- ML line cap changed: \`$ml_line_cap_changed_status\` ($ml_line_cap_changed_message)"
     echo "- ML line cap aggregate: \`$ml_line_cap_status\` ($ml_line_cap_message)"

@@ -140,9 +140,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     | Types.Model_disabled -> Error "package does not declare host sampling" in
   let* () = if String.trim instance_id<>"" && String.trim route<>"" then Ok ()
     else Error "sampling requires an exact instance and nonblank host route" in
-  let retain fields = Eio_unix.run_in_systhread (fun () ->
-    let* bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) in
-    Store.write_blob store bytes)
+  let encode_request fields = Eio_unix.run_in_systhread (fun () ->
+    encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields))
     |> Result.map_error (fun _ -> "sampling request could not be retained") in
   let observation = ref Outside_observation in
   let handler ?request_id:wire_id (params : S.create_message_params) =
@@ -155,12 +154,13 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       | Some S.ThisServer | Some S.AllServers -> Error "Lane sampling supplies its own context" in
     let* () = if params.max_tokens>0 then Ok () else Error "sampling requires a positive provider output limit" in
     let request_id = Random_id.prefixed ~prefix:"lane-model-" ~bytes:16 in
-    let* request = retain ["kind",`String "model_request";
+    let* request_bytes = encode_request ["kind",`String "model_request";
       "request_id",`String request_id;
       "instance_id",`String instance_id;"route",`String route;
       "observation_inputs_sha256",observation_inputs;
       "package",`Assoc ["id",`String package.id;"revision",`String package.revision];
       "params",S.create_message_params_to_yojson params] in
+    let request = Store.blob_reference request_bytes in
     let* () = match wire_id with
       | None -> Ok ()
       | Some _ ->
@@ -171,6 +171,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           encode_sampling_reply ~request_id:wire_id
             ~max_bytes:package.resources.max_reply_bytes (Error reply)
           |> Result.map (fun _ -> ()) in
+    let* request = Eio_unix.run_in_systhread (fun () -> Store.write_blob store request_bytes)
+      |> Result.map_error (fun _ -> "sampling request could not be retained") in
     let record state =
       let state, outcome = match state with
         | Pending -> "pending", None | Finished evidence -> "finished", Some evidence in

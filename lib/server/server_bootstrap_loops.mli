@@ -7,6 +7,11 @@
     caller's [Switch].  Public surface is intentionally tiny — most of
     the work lives in private helpers in the [.ml]. *)
 
+val register_lane_fleet_backend : unit -> unit
+(** Register the production Lane Broadcast recipient snapshot and transcript
+    projector without starting Keeper loops. Used by normal server startup and
+    isolated host qualification, both with the same delivery implementation. *)
+
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; fusion_delivery :
@@ -187,6 +192,10 @@ module For_testing : sig
     Workspace_broadcast.broadcast_delivery ->
     Workspace_broadcast.mention_delivery
 
+  val goal_notification_backend : Goal_delivery.backend
+  val append_workspace_message_to_recipient : base_path:string ->
+    sender_authority:Lane_addon_broadcast_delivery.sender_authority -> Workspace_broadcast.broadcast_delivery ->
+    keeper_name:string -> (unit,string) result
   val project_workspace_message_to_fleet :
     base_path:string ->
     registered_keepers:(unit -> (string * string) list) ->

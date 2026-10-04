@@ -7,6 +7,7 @@
  (name test_goal_verification_agent)
  (modules test_goal_verification_agent)
  (libraries
+  eio.mock
   masc_test_deps
   digestif
   masc_candle

@@ -371,6 +371,55 @@ let mention_transcript_settled = function
   | Workspace_broadcast.Deferred _
   | Workspace_broadcast.Rejected _ -> false
 
+let append_workspace_message_to_recipient ~base_path ~sender_authority
+    (delivery : Workspace_broadcast.broadcast_delivery) ~keeper_name =
+  let open Result.Syntax in
+  let* recipient = Keeper_id.Keeper_name.of_string keeper_name in
+  let keeper_name = Keeper_id.Keeper_name.to_string recipient in
+  let* request_id=Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id in
+  let delivery_key=Keeper_chat_delivery_identity.Workspace_message request_id in
+  let* speaker = match sender_authority with
+    | Lane_addon_broadcast_delivery.Keeper_sender ->
+        (match Keeper_identity.Keeper_id.of_string delivery.from_agent with
+         | Some keeper_id -> Ok (Keeper_chat_store.keeper_speaker keeper_id)
+         | None -> Error "admitted Keeper sender identity is invalid")
+    | External_sender ->
+        Ok {Keeper_chat_store.speaker_id=Some delivery.from_agent;
+          speaker_name=Some delivery.from_agent; speaker_authority=Keeper_chat_store.External} in
+  let appended=Eio_unix.run_in_systhread (fun () ->
+    Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
+      ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
+      ~speaker ~mention_policy:Keeper_chat_store.Passive_context ()) in
+  (* Notify only after returning to the owner domain from transcript I/O. *)
+  match appended with
+  | Error detail -> Error detail
+  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
+  | Ok (Keeper_chat_store.Appended _) ->
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:workspace_message_chat_source
+        ~content:delivery.content (); Ok ()
+
+let goal_notification_backend : Goal_delivery.backend = {
+  snapshot=(fun ~config ->
+    (* Persisted Keepers are the audience even before autoboot fills the live
+       registry. A directory read failure must not become an empty snapshot. *)
+    Eio_unix.run_in_systhread (fun () ->
+      Keeper_meta_store.persisted_keeper_names_read_only_result config));
+  project=(fun ~config ~delivery ~recipient ->
+    append_workspace_message_to_recipient ~base_path:config.Workspace_utils.base_path
+      ~sender_authority:Lane_addon_broadcast_delivery.External_sender delivery ~keeper_name:recipient);
+}
+
+let register_lane_fleet_backend () =
+  Lane_addon_runtime.register_fleet_backend {
+    snapshot=(fun ~config ~caller ~access ->
+      let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
+      Lane_addon_broadcast_delivery.sender_snapshot ~caller ~access
+        ~registered:(List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) registered));
+    project=(fun ~config ~sender_authority ~delivery ~recipient ->
+      append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
+        ~sender_authority delivery ~keeper_name:recipient);
+  }
+
 let project_workspace_message_to_fleet
       ~base_path
       ~registered_keepers
@@ -470,6 +519,8 @@ module Projection_for_testing = struct
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
   let deliver_broadcast_mention = deliver_broadcast_mention
   let project_workspace_message_to_fleet = project_workspace_message_to_fleet
+  let goal_notification_backend = goal_notification_backend
+  let append_workspace_message_to_recipient = append_workspace_message_to_recipient
   let mention_transcript_settled = mention_transcript_settled
 end
 
@@ -1861,6 +1912,8 @@ let start_keeper_loops_owned
             (Printexc.to_string exn)));
     mention_outcome
   in
+  Goal_delivery.register_backend goal_notification_backend;
+  register_lane_fleet_backend ();
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   install_workspace_message_mutation_invalidation
     ~invalidate_full_health_snapshot

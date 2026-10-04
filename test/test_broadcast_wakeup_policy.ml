@@ -34,6 +34,7 @@ let delivery ~target ~request_id ~seq ~content : Workspace_broadcast.broadcast_d
   ; mention = Some target
   ; msg_type = "broadcast"
   ; mention_delivery = Workspace_broadcast.Pending
+  ; fanout_state = Workspace_broadcast.Fanout_active
   ; audience = Workspace_broadcast.Fleet_conversation
   }
 ;;
@@ -338,6 +339,7 @@ let fleet_delivery ~request_id ~from_agent ~content
   ; mention = None
   ; msg_type = "broadcast"
   ; mention_delivery = Workspace_broadcast.Passive
+  ; fanout_state = Workspace_broadcast.Fanout_active
   ; audience = Workspace_broadcast.Fleet_conversation
   }
 ;;
@@ -389,6 +391,169 @@ let test_fleet_projection_adds_no_queue_entry () =
     (List.length
        (queued_workspace_messages ~base_path:config.base_path ~keeper_name:"alpha"))
 ;;
+
+let test_broadcast_retry_recovers_interrupted_fleet_projection () =
+  with_workspace @@ fun config ->
+  List.iter (persist_meta config) ["alpha"; "beta"];
+  let request_id = "wmsg-" ^ String.make 32 'c' in
+  let attempts = ref 0 and committed_seq = ref None in
+  let previous = Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun delivery ->
+    incr attempts;
+    if !attempts=1 then committed_seq := Some delivery.Workspace_broadcast.seq;
+    Broadcast_wakeup.project_workspace_message_to_fleet ~base_path:config.base_path
+      ~registered_keepers:(fun () -> if !attempts=1 then ["alpha","alpha"]
+        else ["alpha","alpha";"beta","beta"]) delivery;
+    if !attempts=1 then raise (Eio.Cancel.Cancelled Exit);
+    Workspace_broadcast.Passive) in
+  Fun.protect ~finally:(fun () ->
+    let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in ()) (fun () ->
+    let send config = Workspace_broadcast.broadcast_once ~request_id config
+      ~from_agent:"external-agent" ~content:"retained evidence" in
+    (match send config with
+     | exception Eio.Cancel.Cancelled Exit -> ()
+     | Ok _ | Error _ -> fail "the first fleet projection must be interrupted");
+    let rows keeper_name = count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id in
+    check int "first recipient was committed before cancellation" 1 (rows "alpha");
+    check int "second recipient was not reached" 0 (rows "beta");
+    let reopened = Workspace.default_config config.base_path in
+    for _ = 1 to 2 do
+      let receipt = match send reopened with
+        | Ok receipt -> receipt
+        | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+      check (option int) "retry preserves the original message sequence" !committed_seq (Some receipt.seq);
+      check int "previous recipient is not duplicated" 1 (rows "alpha");
+      check int "missed recipient is recovered exactly once" 1 (rows "beta")
+    done;
+    check int "each idle retry safely reconciles the retained projection" 3 !attempts)
+;;
+
+let test_active_retry_survives_cancelled_partial_fanout () =
+  with_workspace @@ fun config ->
+  Eio.Switch.run @@ fun sw ->
+  List.iter (persist_meta config) ["alpha";"beta"];
+  let request_id="wmsg-" ^ String.make 32 'e' in
+  let entered, mark_entered=Eio.Promise.create () in
+  let release, mark_release=Eio.Promise.create () in
+  let owner_context, mark_owner_context=Eio.Promise.create () in
+  let attempts=ref 0 in
+  let previous=Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun delivery ->
+    incr attempts;
+    Broadcast_wakeup.project_workspace_message_to_fleet ~base_path:config.base_path
+      ~registered_keepers:(fun () -> if !attempts=1 then ["alpha","alpha"]
+        else ["alpha","alpha";"beta","beta"]) delivery;
+    if !attempts=1 then (
+      Eio.Promise.resolve mark_entered ();
+      Eio.Promise.await release);
+    Workspace_broadcast.Passive) in
+  Fun.protect ~finally:(fun () ->
+    let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+    if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_release ()) (fun () ->
+    let send () = Workspace_broadcast.broadcast_once ~request_id config
+      ~from_agent:"external-agent" ~content:"retained evidence" in
+    let owner=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.sub (fun context ->
+      Eio.Promise.resolve mark_owner_context context; send ())) in
+    Eio.Promise.await entered;
+    let active=match send () with Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check bool "active retry returns row without waiting for fanout" true
+      (active.fanout_state=Workspace_broadcast.Fanout_active);
+    check bool "original fanout is still active" false (Eio.Promise.is_resolved owner);
+    check int "active retry launches no second fanout" 1 !attempts;
+    let rows name=count_delivery_rows ~base_path:config.base_path ~keeper_name:name ~request_id in
+    check int "first recipient already has exact transcript row" 1 (rows "alpha");
+    check int "later recipient remains missing before cancellation" 0 (rows "beta");
+    Eio.Cancel.cancel (Eio.Promise.await owner_context) Exit;
+    (match Eio.Promise.await owner with
+     | Error (Eio.Cancel.Cancelled _) -> ()
+     | Error error -> raise error
+     | Ok _ -> fail "partial fanout owner cancellation must propagate");
+    let recovered=match send () with Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check bool "idle retry finishes its projection invocation" true
+      (recovered.fanout_state=Workspace_broadcast.Fanout_finished);
+    check string "recovery uses retained request identity" active.request_id recovered.request_id;
+    check int "recovery uses original committed sequence" active.seq recovered.seq;
+    check int "accepted recipient is never duplicated" 1 (rows "alpha");
+    check int "cancelled remaining recipient is recovered exactly once" 1 (rows "beta"))
+;;
+
+type first_write_end = Reject_first_write | Cancel_first_write
+
+let retry_after_uncommitted_attempt ?(fleet_delivery=Workspace_broadcast.Immediate_fleet) first_write_end =
+  with_workspace @@ fun config ->
+  Eio.Switch.run @@ fun sw ->
+  let request_id = "wmsg-" ^ String.make 32 'd' in
+  let before_commit, mark_before_commit = Eio.Promise.create () in
+  let allow_first, mark_allow_first = Eio.Promise.create () in
+  let retry_waiting, mark_retry_waiting = Eio.Promise.create () in
+  let first_context, mark_first_context = Eio.Promise.create () in
+  let writes = ref 0 and fanouts = ref 0 in
+  let previous_write = Workspace_broadcast.For_testing.replace_write_json_commit
+    (fun config path json ->
+      incr writes;
+      if !writes=1 then (
+        Eio.Promise.resolve mark_before_commit ();
+        Eio.Promise.await allow_first;
+        Error "fixture primary row refused")
+      else Workspace_utils.write_json_commit_result config path json) in
+  let previous_wait = Workspace_broadcast.For_testing.replace_on_exact_request_wait
+    (fun _request_id ->
+      if not (Eio.Promise.is_resolved retry_waiting) then
+        Eio.Promise.resolve mark_retry_waiting ()) in
+  let previous_fanout = Workspace_broadcast.For_testing.replace_on_broadcast_mention
+    (fun _ -> incr fanouts; Workspace_broadcast.Passive) in
+  Fun.protect ~finally:(fun () ->
+    let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+      Workspace_broadcast.For_testing.replace_write_json_commit previous_write in
+    let (_ : string -> unit) =
+      Workspace_broadcast.For_testing.replace_on_exact_request_wait previous_wait in
+    let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention previous_fanout in
+    if not (Eio.Promise.is_resolved allow_first) then Eio.Promise.resolve mark_allow_first ()) (fun () ->
+    let send () = Workspace_broadcast.broadcast_once ~fleet_delivery ~request_id config
+      ~from_agent:"external-agent" ~content:"retained evidence" in
+    let first = Eio.Fiber.fork_promise ~sw (fun () ->
+      Eio.Cancel.sub (fun context -> Eio.Promise.resolve mark_first_context context; send ())) in
+    Eio.Promise.await before_commit;
+    let retry = Eio.Fiber.fork_promise ~sw send in
+    Eio.Promise.await retry_waiting;
+    check bool "retry reached the precommit wait" false (Eio.Promise.is_resolved retry);
+    (match first_write_end with
+     | Reject_first_write -> Eio.Promise.resolve mark_allow_first ()
+     | Cancel_first_write -> Eio.Cancel.cancel (Eio.Promise.await first_context) Exit);
+    (match first_write_end, Eio.Promise.await first with
+     | Reject_first_write, Ok (Error (Workspace_broadcast.Broadcast_not_persisted _)) -> ()
+     | Cancel_first_write, Error (Eio.Cancel.Cancelled _) -> ()
+     | _, Error error -> raise error
+     | _ -> fail "uncommitted attempt must retain its failure or cancellation");
+    let receipt = match Eio.Promise.await_exn retry with
+      | Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check string "waiting retry keeps the exact request identity" request_id receipt.request_id;
+    check int "failed primary attempt was followed by one real commit" 2 !writes;
+    let expected_fanouts=match fleet_delivery with
+      | Workspace_broadcast.Immediate_fleet -> 1
+      | Workspace_broadcast.Deferred_fleet | Workspace_broadcast.Deferred_passive_fleet -> 0 in
+    check int "only immediate committed attempts reach inline fleet projection" expected_fanouts !fanouts;
+    let replay = match send () with
+      | Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check int "idle replay keeps the authoritative sequence" receipt.seq replay.seq;
+    check int "idle replay never creates another message" 2 !writes)
+;;
+
+let test_primary_refusal_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt Reject_first_write
+let test_cancelled_primary_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt Cancel_first_write
+
+let test_deferred_primary_refusal_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt ~fleet_delivery:Workspace_broadcast.Deferred_fleet Reject_first_write
+let test_deferred_cancelled_primary_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt ~fleet_delivery:Workspace_broadcast.Deferred_fleet Cancel_first_write
 
 (* The named target's row is written by the mention path with its mention ids.
    The fanout runs afterwards over the same delivery key, so it must find that
@@ -642,6 +807,75 @@ let test_workspace_message_mutation_invalidates_workspace_and_health () =
       check int "full health invalidated once" 1 !full_health_invalidations)
 ;;
 
+let test_durable_fleet_recipient_projection_is_idempotent () =
+  with_workspace @@ fun config ->
+  persist_meta config "beta";
+  let request_id="wmsg-" ^ String.make 32 'c' in
+  let message=fleet_delivery ~request_id ~from_agent:"external-operator"
+    ~content:"Retained artifact marker; reading remains separately observed" in
+  let append ()=Broadcast_wakeup.append_workspace_message_to_recipient
+    ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender message ~keeper_name:"beta" in
+  check bool "actual durable recipient append succeeds" true (Result.is_ok (append ()));
+  check bool "same workspace message retry is accepted idempotently" true (Result.is_ok (append ()));
+  check int "repeated recipient attempt stores one transcript row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"beta" ~request_id);
+  List.iter (fun keeper_name ->
+    check bool "invalid recipient does not become accepted" true
+      (Result.is_error (Broadcast_wakeup.append_workspace_message_to_recipient
+        ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender
+        message ~keeper_name));
+    check int "invalid recipient gets no transcript row" 0
+      (count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id))
+    ["../outside"; ""; "bad/name"];
+  persist_meta config "edgar.a.poe";
+  check bool "dotted Keeper recipient remains valid" true
+    (Result.is_ok (Broadcast_wakeup.append_workspace_message_to_recipient
+      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender
+      message ~keeper_name:"edgar.a.poe"))
+;;
+
+let test_deferred_keeper_identity_matches_ordinary_projection () =
+  with_workspace @@ fun config ->
+  List.iter (persist_meta config) ["alpha";"beta"];
+  let sender="BeTa" in
+  let ordinary_id="wmsg-" ^ String.make 32 'd' in
+  let deferred_id="wmsg-" ^ String.make 32 'e' in
+  let make request_id=fleet_delivery ~request_id ~from_agent:sender ~content:"same Keeper identity" in
+  Broadcast_wakeup.project_workspace_message_to_fleet ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [sender,sender;"alpha","alpha"]) (make ordinary_id);
+  let append ()=Broadcast_wakeup.append_workspace_message_to_recipient
+    ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.Keeper_sender
+    (make deferred_id) ~keeper_name:"alpha" in
+  check bool "mixed-case deferred Keeper append succeeds" true (Result.is_ok (append ()));
+  check bool "same deferred Keeper projection remains idempotent" true (Result.is_ok (append ()));
+  let speaker request_id=speaker_of_row ~base_path:config.base_path ~keeper_name:"alpha" ~request_id in
+  let ordinary=speaker ordinary_id and deferred=speaker deferred_id in
+  check (option string) "ordinary canonical Keeper id" (Some "beta") ordinary.speaker_id;
+  check (option string) "deferred shares ordinary canonical Keeper id" ordinary.speaker_id deferred.speaker_id;
+  check (option string) "deferred shares ordinary canonical Keeper name" ordinary.speaker_name deferred.speaker_name;
+  check bool "retained authority remains Keeper" true
+    (deferred.speaker_authority=Keeper_chat_store.Keeper);
+  check int "canonical retry stores one recipient row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"alpha" ~request_id:deferred_id);
+  let external_id="wmsg-" ^ String.make 32 'f' in
+  check bool "retained external authority is accepted" true
+    (Result.is_ok (Broadcast_wakeup.append_workspace_message_to_recipient
+      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender
+      (make external_id) ~keeper_name:"alpha"));
+  let external_speaker=speaker external_id in
+  check (option string) "external id remains its opaque original spelling" (Some sender) external_speaker.speaker_id;
+  check bool "external is not promoted by Keeper-shaped identity" true
+    (external_speaker.speaker_authority=Keeper_chat_store.External);
+  let invalid_id="wmsg-" ^ String.make 32 'a' in
+  check bool "invalid admitted Keeper identity refuses projection" true
+    (Result.is_error (Broadcast_wakeup.append_workspace_message_to_recipient
+      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.Keeper_sender
+      (fleet_delivery ~request_id:invalid_id ~from_agent:"   " ~content:"invalid sender")
+      ~keeper_name:"alpha"));
+  check int "invalid Keeper identity writes no transcript row" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"alpha" ~request_id:invalid_id)
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -666,12 +900,28 @@ let () =
         ] )
     ; ( "fleet_projection"
       , [
-          test_case "broadcast reaches other Keepers' windows" `Quick
+          test_case "durable single-recipient retry retains one transcript row" `Quick
+            test_durable_fleet_recipient_projection_is_idempotent
+        ; test_case "broadcast reaches other Keepers' windows" `Quick
             test_fleet_projection_reaches_other_keepers
         ; test_case "fleet projection adds no queue entry" `Quick
             test_fleet_projection_adds_no_queue_entry
+        ; test_case "Broadcast retry recovers interrupted fleet projection" `Quick
+            test_broadcast_retry_recovers_interrupted_fleet_projection
+        ; test_case "active retry survives cancelled partial fanout" `Quick
+            test_active_retry_survives_cancelled_partial_fanout
+        ; test_case "primary refusal wakes a precommit Broadcast retry" `Quick
+            test_primary_refusal_wakes_precommit_retry
+        ; test_case "cancelled primary wakes a precommit Broadcast retry" `Quick
+            test_cancelled_primary_wakes_precommit_retry
+        ; test_case "deferred primary refusal wakes a precommit Broadcast retry" `Quick
+            test_deferred_primary_refusal_wakes_precommit_retry
+        ; test_case "deferred cancelled primary wakes a precommit Broadcast retry" `Quick
+            test_deferred_cancelled_primary_wakes_precommit_retry
         ; test_case "fleet projection preserves the mention row" `Quick
             test_fleet_projection_preserves_the_mention_row
+        ; test_case "deferred Keeper identity matches ordinary projection" `Quick
+            test_deferred_keeper_identity_matches_ordinary_projection
         ; test_case "a Keeper's broadcast is Keeper speech" `Quick
             test_fleet_projection_from_a_keeper_is_keeper_speech
         ; test_case "an unregistered author stays external" `Quick

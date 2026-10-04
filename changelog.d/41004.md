@@ -1,0 +1,3 @@
+### Fixed
+
+- Commit approval delivery obligations with Task completion, retry durable Keeper queue delivery after failures or restarts, and render each approved outcome once in Keeper turn input.

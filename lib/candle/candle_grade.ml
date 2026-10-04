@@ -1,8 +1,8 @@
-type t = Trivial | Small | Medium | Large | Epic
-let all = [Trivial; Small; Medium; Large; Epic]
-let to_string = function
- | Trivial -> "trivial" | Small -> "small" | Medium -> "medium"
- | Large -> "large" | Epic -> "epic"
-let of_string = function
- | "trivial" -> Some Trivial | "small" -> Some Small | "medium" -> Some Medium
- | "large" -> Some Large | "epic" -> Some Epic | _ -> None
+type t = string
+let to_string value = value
+let of_string value =
+  if String.length value = 0 then None
+  else if String.for_all (function
+    | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true
+    | _ -> false) value then Some value
+  else None

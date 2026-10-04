@@ -60,6 +60,7 @@ let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   ; ro_is_default = false
   ; ro_quota_exhausted = exhausted
   ; ro_quota_resets_at = resets
+  ; ro_quota_scope_id = None
   ; ro_quota_scope = Some scope
   ; ro_rate_limited = false
   ; ro_rate_limit_resets_at = None
@@ -125,20 +126,19 @@ let test_section_draws_three_line_shapes () =
   check string "plain usage title" " Plan usage" (plain section.title);
   let text = String.concat "\n" lines in
   List.iter (fun fact -> check bool ("retains " ^ fact) true (contains ~affix:fact text))
-    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Used 67%"; "Used 44%"; "Used 100%"
-    ; "Model call limit"; " in 4h12m"; "heard 3m00s ago"; "reset time passed"
+    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Used  67%"; "Used  44%"; "Used 100%"
+    ; "Model call limit"; " in 4h12m"; "reported 3m00s ago"; "reset time passed"
     ; "no newer report"; "Last report"; "exhausted (observed)"; "catalogue reopens"; " in 2h00m" ];
   check bool "exhausted account is first" true
     (match lines with first :: _ -> contains ~affix:"Kimi Coding" first | [] -> false);
-  check bool "unreported, unblocked accounts draw no invented meters" false
+  check bool "unreported accounts remain visible" true
     (contains ~affix:"Codex Pro" text || contains ~affix:"Ollama Cloud" text);
   let five_hour = List.find (fun line -> contains ~affix:"67%" line) lines in
   let meter, cells = meter_of five_hour in
   check string "the window still draws the reported share" meter (Providers.meter ~cells 0.67);
   check bool "cards have visible boundaries" true (contains ~affix:"┌" text)
 
-(* The one silent account kept: its quota is observed exhausted, and that tag
-   is the reason a Keeper on it is stuck. It draws no meter. *)
+(* A silent account keeps its identity and, when observed, its exhaustion. *)
 let test_silent_account_draws_only_its_exhaustion () =
   let windows =
     match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
@@ -156,9 +156,9 @@ let test_silent_account_draws_only_its_exhaustion () =
       let lines = List.map plain section.lines in
       let text = String.concat "\n" lines in
       List.iter (fun fact -> check bool ("silent account retains " ^ fact) true
-        (contains ~affix:fact text)) [ "Codex Pro"; "no usage data"; "exhausted (observed)" ];
-      check bool "the silent account that is not exhausted draws nothing" true
-        (not (List.exists (contains ~affix:"Ollama Cloud") lines))
+        (contains ~affix:fact text)) [ "Codex Pro"; "No usage report since server start"; "exhausted (observed)" ];
+      check bool "the unblocked silent account is visible too" true
+        (List.exists (contains ~affix:"Ollama Cloud") lines)
 
 let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
     ?(kimi_resets_at = 1790179580.0) ~width () =
@@ -193,7 +193,7 @@ let test_meter_width_is_bounded () =
   let _, wide_cells = meter_of wide in
   check int "a wide terminal draws a 24-cell meter" 24 wide_cells;
   check bool "a wide terminal keeps the hearing age" true
-    (List.exists (contains ~affix:"heard 3m00s ago") (reported_section ~width:120 ()));
+    (List.exists (contains ~affix:"reported 3m00s ago") (reported_section ~width:120 ()));
   let narrow = claude_five_hour (reported_section ~width:44 ()) in
   let _, narrow_cells = meter_of narrow in
   check bool "a narrow card keeps a readable, bounded meter" true
@@ -203,7 +203,7 @@ let test_meter_width_is_bounded () =
   let separate = reported_section ~width:70 () in
   let text = String.concat "\n" separate in
   check bool "one passed reset keeps the other account's report age" true
-    (contains ~affix:"Claude Max" text && contains ~affix:"heard 3m00s ago" text);
+    (contains ~affix:"Claude Max" text && contains ~affix:"reported 3m00s ago" text);
   check bool "the past-reset card keeps the reset state" true
     (contains ~affix:"reset time passed" text);
   List.iter (fun line -> check bool "separate cards fit the supplied width" true
@@ -284,7 +284,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   List.iter (fun fact -> check bool ("window role retains " ^ fact) true
     (contains ~affix:fact text))
     [ "Used 100%"; "Model call limit"; "Other use · does not block model calls"
-    ; "Unclassified limit"; "Used 80%" ];
+    ; "Unclassified limit"; "Used  80%" ];
   check bool "the source label is retained" true
     (List.exists (fun line -> contains ~affix:"1 x unit 5" (plain line)) section.lines);
   check bool "missing reset stays distinct from zero" true
@@ -368,8 +368,7 @@ let test_empty_read_names_missing_usage_data () =
         (List.map plain section.lines)
   | None -> fail "an empty account list disappeared"
 
-(* Account email metadata never changes meter geometry. Unreported accounts
-   without an observed block remain absent. *)
+(* Account identity remains visible before the first usage report. *)
 let test_account_emails_name_their_accounts () =
   let windows =
     match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
@@ -392,7 +391,7 @@ let test_account_emails_name_their_accounts () =
   let text = String.concat "\n" (List.map plain fitting.lines) in
   List.iter (fun fact -> check bool ("email identity retains " ^ fact) true
     (contains ~affix:fact text)) [ "Claude Max"; "id-claud"; "c@x.io"; "kimi@example.com" ];
-  check bool "an account with no drawn report has no email row" false
+  check bool "an account with no usage report keeps its email" true
     (contains ~affix:"codex@example.com" text);
   let wide = read [ ("claude_code", "claude.with.long.address@example.com") ] in
   let meters (section : Providers.section) = List.filter (contains ~affix:meter_open) (List.map plain section.lines) in
@@ -414,7 +413,7 @@ let test_unknown_state_is_rejected () =
 
 let test_history_preserves_reported_days_and_units () =
   let json = Yojson.Safe.from_string
-    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","unreadable_reports":0,"points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
+    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","unreadable_reports":0,"reported_no_windows":[],"points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
   in
   match Masc.Tui_decode_usage.decode_provider_usage_history json with
   | Error detail -> fail detail
@@ -426,7 +425,8 @@ let test_history_preserves_reported_days_and_units () =
            (match point.puhp_unit with
             | Masc.Tui_decode_usage.Utilization_fraction value ->
                 check (float 0.0001) "reported fraction" 0.4 value
-            | Masc.Tui_decode_usage.Utilization_percent _ -> fail "unit changed")
+            | Masc.Tui_decode_usage.Utilization_percent _
+            | Masc.Tui_decode_usage.Utilization_usd _ -> fail "unit changed")
        | _ -> fail "expected one reported point")
 
 (* The trend is built once from the answer. A day without a report is the
@@ -441,6 +441,7 @@ let test_trend_is_built_from_the_answer () =
   let day = 86400.0 in
   let history : Masc.Tui_decode_usage.provider_usage_history =
     { puh_days = 3; puh_generated_at = generated_at; puh_unreadable_reports = 1;
+      puh_reported_no_windows = [];
       puh_points =
         [ point ~scope_id:"s1" ~observed_at:(generated_at -. (2.0 *. day))
             (Masc.Tui_decode_usage.Utilization_fraction 0.0)
@@ -464,6 +465,33 @@ let test_trend_is_built_from_the_answer () =
          (row.scope_id, row.marks, row.reported_days))
        trend.rows)
 
+let test_empty_history_report_reaches_trend () =
+  let module Decode = Masc.Tui_decode_usage in
+  let now = 1780000000. in
+  let payload = `Assoc ["days", `Int 7; "generated_at", `Float now;
+    "sampling", `String "latest_provider_report_per_utc_day"; "unreadable_reports", `Int 0;
+    "points", `List [`Assoc ["scope_id", `String "prior"; "kind", `String "five_hour";
+      "limit_id", `Null; "unit", `String "fraction"; "value", `Float 0.;
+      "observed_at", `Float (now -. 86400.)]];
+    "reported_no_windows", `List (List.map (fun scope -> `Assoc ["scope_id", `String scope;
+      "observed_at", `Float now]) ["prior"; "empty-only"])] in
+  let history = match Decode.decode_provider_usage_history payload with
+    | Ok history -> history | Error detail -> fail detail in
+  let trend = Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history in
+  let find scope = List.find (fun (row : Masc_tui_usage_trend.row) -> row.scope_id=scope) trend.rows in
+  let none = Masc_tui_usage_trend.no_report_mark and empty = Masc_tui_usage_trend.empty_report_mark in
+  check string "no-window day differs from measured zero and missing report"
+    (String.concat "" (List.init 5 (fun _ -> none)) ^ "\xe2\x96\x81" ^ empty) (find "prior").marks;
+  check int "empty day counts as reported alongside measured day" 2 (find "prior").reported_days;
+  check string "empty-only scope has a visible row"
+    (String.concat "" (List.init 6 (fun _ -> none)) ^ empty) (find "empty-only").marks;
+  check int "empty-only successful report counted" 1 (find "empty-only").reported_days;
+  let fields = match payload with `Assoc fields -> fields | _ -> assert false in
+  List.iter (fun fields -> check bool "missing or malformed daily empty state is a failed read" true
+    (Result.is_error (Decode.decode_provider_usage_history (`Assoc fields))))
+    [List.remove_assoc "reported_no_windows" fields;
+     ("reported_no_windows", `List [`Assoc ["scope_id", `String "bad"]]) :: List.remove_assoc "reported_no_windows" fields]
+
 (* The id the section names a scope by is the server's, carried on the row,
    so the trend's points and the current windows cannot disagree. *)
 let test_scope_id_is_the_servers () =
@@ -473,6 +501,34 @@ let test_scope_id_is_the_servers () =
       check (list string) "ids as the server sent them"
         [ "id-codex"; "id-kimi"; "id-claude_code"; "id-ollama_cloud" ]
         (List.map Providers.scope_id windows.puws_accounts)
+
+let test_usd_cards_do_not_invent_a_percentage () =
+  let json = Yojson.Safe.from_string
+    {|{"provider_usage_windows_since":1,"provider_usage_windows":[
+      {"scope":"usd","scope_id":"usd","providers":[{"id":"openrouter","display_name":"OpenRouter"}],
+       "state":"reported","windows":[
+        {"limit_id":null,"window":{"kind":"provider_label","label":"credit limit"},"role":"gates_model_calls",
+         "utilization":{"unit":"usd","value":5.125,"limit":20},"resets_at":null,"observed_at":2},
+        {"limit_id":null,"window":{"kind":"provider_label","label":"credit usage (all time)"},"role":"counts_other_use",
+         "utilization":{"unit":"usd","value":12.3456,"limit":null},"resets_at":null,"observed_at":2}]}]}|}
+  in
+  let reading = match Masc.Tui_decode_usage.decode_provider_usage_windows json with
+    | Ok reading -> reading | Error detail -> fail detail in
+  List.iter (fun width ->
+    let section = match Providers.section ~providers:(Types.Providers_read reading)
+        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width with
+      | Some section -> section | None -> fail "USD accounts disappeared" in
+    let lines = List.map plain section.lines in
+    let text = String.concat " " lines in
+    List.iter (fun value -> check bool ("retains " ^ value) true (contains ~affix:value text))
+      [ "Used  25%"; "$5.1250"; "$20.0000"; "$14.8750"; "$12.3456"; "no key limit" ];
+    check int "only the capped amount has a meter" 1
+      (List.length (List.filter (contains ~affix:meter_open) lines));
+    List.iter (fun line -> check bool "USD rows fit the terminal" true
+      (Masc_tui_message_layout.display_width line <= width)) lines)
+    [44; 80; 132];
+  check (option (float 0.0001)) "an uncapped amount has no fabricated percentage" None
+    (Providers.share_of_full (Masc.Tui_decode_usage.Utilization_usd { used = 12.3456; limit = None }))
 
 let () =
   run "tui_overview_providers"
@@ -486,9 +542,11 @@ let () =
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ; test_case "history uses reported points" `Quick
             test_history_preserves_reported_days_and_units
+        ; test_case "empty reports remain observed in the trend" `Quick test_empty_history_report_reaches_trend
         ; test_case "trend is built from the answer" `Quick
             test_trend_is_built_from_the_answer
         ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
+        ; test_case "USD cards preserve amounts without a fabricated meter" `Quick test_usd_cards_do_not_invent_a_percentage
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
         ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded

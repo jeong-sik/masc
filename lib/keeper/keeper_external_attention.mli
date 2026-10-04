@@ -150,6 +150,11 @@ type read_error =
       ; rows_end : int
       ; end_offset : int
       }
+  | Non_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+      }
   | Io_failed of
       { path : string
       ; cause : exn
@@ -170,10 +175,11 @@ val load_events_result :
 
 val recorded_items_by_event_ids :
   base_path:string -> keeper_name:string -> event_ids:string list ->
-  (string * item) list
-(** One-scan batch counterpart to [load_events] +
+  ((string * item) list, read_error) result
+(** One-scan batch counterpart to [load_events_result] +
     per-id [Recorded] lookup: loads the event log exactly once, then
-    resolves every id in [event_ids] against that one in-memory load
+    preserves whole-log read failures and resolves every id in [event_ids]
+    against that one in-memory load
     (first [Recorded] match per id, same semantics as looking each id up
     individually). An id with no [Recorded] entry is simply absent from
     the result; the returned pairs preserve [event_ids]' order. Calling

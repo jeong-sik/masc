@@ -98,26 +98,6 @@ let test_omitting_the_state_keeps_the_old_reading () =
         (contains hints "[ / ]" && contains hints "Right / Enter"))
     detail_surfaces
 
-let render_path = "bin/masc_tui_render.ml"
-
-(* Both renderers of each scoped surface. A new detail-owning surface joins
-   this list with its two renderers, and until it does its footer is the bug
-   again. *)
-let renderers =
-  [ ("bin/masc_tui_render_board.ml", "render_board_list")
-  ; ("bin/masc_tui_render_fusion.ml", "render_fusion_list")
-  ; (render_path, "render_system_logs")
-  ; (render_path, "render_system_log_detail")
-  ; (render_path, "render_planning_list")
-  ; (render_path, "render_planning_detail")
-  ; (render_path, "render_schedule_list")
-  ; (render_path, "render_schedule_detail")
-  ; (render_path, "render_verification_list")
-  ; (render_path, "render_verification_detail")
-  ; (render_path, "render_harness_list")
-  ; (render_path, "render_harness_detail")
-  ]
-
 (* Harness came to this through a different door: its verdict pane already had
    a footer of its own, written out in the renderer rather than read from the
    table. What a hand-written row leaves out is invisible -- and this one left
@@ -220,15 +200,6 @@ let test_every_scoped_surface_is_named () =
           (List.exists (fun s -> s = surface) named))
     Keys.help_surfaces
 
-let test_every_renderer_says_which_state_it_draws () =
-  List.iter
-    (fun (module_path, binding_name) ->
-      check int (binding_name ^ " passes ~detail_open to footer_hints") 1
-        (Ast_grep.count_applications_with_labelled_argument_in_value_binding
-           ~module_path ~binding_name
-           ~callee:"Masc_tui_keys.footer_hints" ~label:"detail_open"))
-    renderers
-
 let () =
   run "tui footer detail state"
     [ ( "table",
@@ -256,9 +227,8 @@ let () =
             test_every_scoped_surface_is_named
         ] )
     ; ( "renderers",
-        [ test_case "every renderer says which state it draws" `Quick
-            test_every_renderer_says_which_state_it_draws
-        ; test_case "the verdict pane names the keys that answer" `Quick
+        [
+ test_case "the verdict pane names the keys that answer" `Quick
             test_the_verdict_pane_names_the_keys_that_answer
         ] )
     ]

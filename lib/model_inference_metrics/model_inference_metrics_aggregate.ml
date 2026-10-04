@@ -15,6 +15,17 @@ open Model_inference_metrics_reader
 
 (* ── Aggregate by model ─────────────────────────────────── *)
 
+let cached_input_of_entries (entries : raw_entry list) : cached_input option =
+  List.fold_left (fun total e ->
+    match e.is_error, e.input_tokens, e.cache_read_tokens with
+    | false, Some input, Some cached when input > 0 && cached >= 0 && cached <= input ->
+      let previous = Option.value total
+          ~default:{ ci_input_tokens = 0; ci_cache_read_tokens = 0; ci_sample_count = 0 } in
+      Some { ci_input_tokens = previous.ci_input_tokens + input;
+             ci_cache_read_tokens = previous.ci_cache_read_tokens + cached;
+             ci_sample_count = previous.ci_sample_count + 1 }
+    | _ -> total) None entries
+
 let aggregate_by_model (entries : raw_entry list) : model_stats list =
   let tbl : raw_entry list StringMap.t =
     List.fold_left
@@ -127,6 +138,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
              sum_int_opt (List.filter_map (fun e -> e.output_tokens) success_entries)
          ; total_cache_read_tokens =
              sum_int_opt (List.filter_map (fun e -> e.cache_read_tokens) success_entries)
+         ; cached_input = cached_input_of_entries success_entries
          ; total_cache_creation_tokens =
              sum_int_opt (List.filter_map (fun e -> e.cache_creation_tokens) success_entries)
          ; total_reasoning_tokens =
@@ -234,18 +246,10 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
        Array.sort Float.compare lat_vals;
        let success_count = count_if (fun e -> not e.is_error) bucket_entries in
        let error_count = count_if (fun e -> e.is_error) bucket_entries in
-       let cache_reads = List.filter_map (fun e -> e.cache_read_tokens) bucket_entries in
-       let inputs = List.filter_map (fun e -> e.input_tokens) bucket_entries in
        let cache_hit_ratio =
-         match sum_int_opt cache_reads, sum_int_opt inputs with
-         | None, None -> None
-         | total_cache_read, total_input ->
-           let total_cache_read = Option.value ~default:0 total_cache_read in
-           let total_input = Option.value ~default:0 total_input in
-           let denom = total_cache_read + total_input in
-           if denom = 0
-           then Some 0.0
-           else Some (Float.of_int total_cache_read /. Float.of_int denom)
+         cached_input_of_entries bucket_entries
+         |> Option.map (fun paired ->
+           Float.of_int paired.ci_cache_read_tokens /. Float.of_int paired.ci_input_tokens)
        in
        let error_rate =
          if n = 0 then 0.0 else Float.of_int error_count /. Float.of_int n
@@ -312,12 +316,14 @@ let latency_histogram (entries : raw_entry list) : latency_bucket list =
 
 (* ── Public compute functions ───────────────────────────── *)
 
-let compute ~base_path ~window_minutes : aggregate =
+let ( let* ) = Result.bind
+
+let compute ~base_path ~window_minutes =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries, cost_read = read_all_entries ~base_path ~since_unix in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let total_error_entries = count_if (fun e -> e.is_error) entries in
-  { window_minutes
+  Ok { window_minutes
   ; bucket_minutes = 0
   ; models
   ; total_entries = List.length entries
@@ -327,10 +333,10 @@ let compute ~base_path ~window_minutes : aggregate =
   }
 ;;
 
-let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate =
+let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes =
   let bucket_minutes = max 1 bucket_minutes in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries, cost_read = read_all_entries ~base_path ~since_unix in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let bucket_sec = bucket_minutes * 60 in
   let by_model_map : raw_entry list StringMap.t =
@@ -351,7 +357,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
       models
   in
   let total_error_entries = count_if (fun e -> e.is_error) entries in
-  { window_minutes
+  Ok { window_minutes
   ; bucket_minutes
   ; models = models_with_buckets
   ; total_entries = List.length entries
@@ -363,7 +369,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
 
 let aggregate_buckets ~base_path ~window_min ~bucket_min =
   let since_unix = Time_compat.now () -. (Float.of_int window_min *. 60.0) in
-  let entries, cost_read = read_all_entries ~base_path ~since_unix in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let bucket_sec = if bucket_min <= 0 then 60 else bucket_min * 60 in
   let by_model = group_entries_by_model entries in
   Result.map
@@ -376,7 +382,7 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min =
            by_model
          |> List.sort (fun a b -> compare a.mb_model_id b.mb_model_id)
        , diagnostics ))
-    cost_read
+    (Result.map_error (fun error -> Costs_unavailable error) cost_read)
 ;;
 
 (* ── Runtime-lane rollup ────────────────────────────────────
@@ -389,4 +395,3 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min =
    for dashboard sparklines and avoids dragging the raw entry list
    through another aggregation layer. Call sites that need exact
    percentiles should compute them from [recent_entries]. *)
-

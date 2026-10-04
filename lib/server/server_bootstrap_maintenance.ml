@@ -407,7 +407,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Server_provider_usage_history.install config;
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;
+  Server_lane_addon_sampling.register ~config ~net:env#net;
   Lane_addon_runtime.start_configuration_service ~config ~sw ~clock;
+  Lane_addon_runtime.start_fleet_service ~config ~sw ~clock;
   (* Exclusive startup ownership: before any new server request can submit a
      worker, settle disk-only nonterminal rows left by the prior process.  Poll
      and cancel deliberately cannot infer process death, so this bootstrap
@@ -499,23 +501,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* Provider usage windows are otherwise heard only during a turn, so an
      account that is spent, and therefore not picked, stays "no report since
      server start" and never says when it resets. One read per account, at
-     start, without a model turn; an HTTP account whose provider declares
-     usage-read.refresh-s is read again on that period. *)
+     start and after catalogue publication, without a model turn; an HTTP
+     account whose provider declares usage-read.refresh-s repeats on that period. *)
   fork_logged_fiber
     ~sw
     ~on_error:(log_server_fiber_crash "provider_usage_read")
     (fun () ->
-      (* While setup is still required the runtime catalogue is empty, and a
-         read now would ask no account. Read when it becomes available, as
-         the completion authority starts. *)
-      if Runtime_startup_state.requires_setup () then Runtime_startup_state.await_available ();
-      Runtime_provider_usage_read.read_all
+      Runtime_provider_usage_read.watch_declared
         ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
           ~grace_seconds:Process_eio.child_exit_grace_seconds)
         ~net:env#net
         ~clock
-        ~cwd:Eio.Path.(Eio.Stdenv.fs env / config.base_path);
-      Runtime_provider_usage_read.refresh_declared ~net:env#net ~clock);
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / config.base_path));
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
   fork_logged_fiber
@@ -776,9 +773,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             report.corrupt_rows
     in
     let reconcile_goal_events () =
-      match Goal_store.flush_pending_events (Mcp_server.workspace_config state) with
+      match Goal_delivery.flush (Mcp_server.workspace_config state) with
       | Ok () -> ()
-      | Error detail -> Log.Server.warn "goal audit outbox delivery deferred: %s" detail
+      | Error detail -> Log.Server.warn "goal effect outbox delivery deferred: %s" detail
     in
     reconcile_goal_events ();
     project_transition_outboxes Startup_projection;

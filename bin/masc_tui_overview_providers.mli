@@ -1,7 +1,6 @@
 (** The Usage surface's Plan usage section: one card per provider account.
     Each card labels the reported used percentage and the window's role,
-    says when it resets, and shows the last observation time after a reset
-    has passed.
+    says when it resets, and shows the last report time beside every window.
 
     Every value is the provider's own report, as
     [GET /api/v1/runtime/resolved] carries it. Nothing here guesses a
@@ -36,8 +35,8 @@ val section :
   now:float ->
   width:int ->
   section option
-(** [None] before the first read. Reported accounts and accounts whose
-    runtime catalogue observed exhaustion draw bordered cards. Empty and failed
+(** [None] before the first read. Every known account draws a bordered card,
+    including an explicit state when no usage has been reported. Empty and failed
     reads keep their explicit source states. A wide viewport places two cards
     beside each other; a narrow viewport stacks them. Every row fits [width]
     terminal cells. Emails, reset times, hearing age and catalogue observations
@@ -45,11 +44,12 @@ val section :
     Window roles still decide which full values are alarms. *)
 
 val utilization_text : Masc.Tui_decode_usage.provider_usage_utilization -> string
-(** The value as a whole percent, so accounts read in one unit. A percent is
+(** The value as a whole percent or a USD credit amount. A percent is
     shown as reported; a fraction is multiplied by 100 and floored, so
     [0.9999] reads [99%] and never [100%]. *)
 
-val share_of_full : Masc.Tui_decode_usage.provider_usage_utilization -> float
+val share_of_full : Masc.Tui_decode_usage.provider_usage_utilization -> float option
+(** [None] for uncapped USD use: an amount with no denominator has no meter. *)
 
 val meter : cells:int -> float -> string
 (** A meter [cells] cells wide filled to the given share of full, drawn with

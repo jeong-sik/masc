@@ -1976,10 +1976,11 @@ describe('SettingsSurface', () => {
     expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })
 
-  it('refreshes mounted Settings after its editor unmounts during a save', async () => {
+  it.each([false, true])('refreshes mounted Settings after its editor unmounts during a save, provider failure=%s', async providerFailure => {
+    const epoch = `settings-late-save-${providerFailure}`
     resetRuntimeTomlSessionsForTesting()
-    invalidateExecutionSnapshotGeneration('settings-late-save', 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: 'settings-late-save',
+    invalidateExecutionSnapshotGeneration(epoch, 0)
+    hydrateExecutionSnapshot({ execution_publication_epoch: epoch,
       execution_publication_generation: 1, status: { project: 'test', workspace_root: '/settings-late-save' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
@@ -2011,8 +2012,12 @@ describe('SettingsSurface', () => {
         ...resolved.default_runtime!, model: 'late-save-visible-model',
       } }))
       apiMock.fetchRuntimeTomlConfig.mockResolvedValue({ ...config, source_text: draft, source_revision: 'b'.repeat(64) })
+      if (providerFailure) apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider snapshot unavailable'))
       finish(committedRuntimeTomlConfigFixture({ ...config, source_text: draft }))
       await waitFor(() => expect(container.textContent).toContain('late-save-visible-model'))
+      if (providerFailure) {
+        expect(container.querySelector('[data-testid="runtime-catalog-error"]')).not.toBeNull()
+      }
       expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreaterThan(counts[0]!)
       expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGreaterThan(counts[1]!)
       expect(apiMock.fetchRuntimeTomlConfig.mock.calls.length).toBeGreaterThan(counts[2]!)

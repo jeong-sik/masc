@@ -363,6 +363,25 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')).not.toBeNull())
   })
 
+  it.each([false, true])('revalidates same-workspace authority after a held read, dirty=%s', async dirty => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = dirty ? baseConfig.source_text + '# retained intent\n' : baseConfig.source_text
+    if (dirty) fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    let finish!: (value: typeof baseConfig) => void
+    apiMocks.fetchRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-read-current"]')!)
+    await waitFor(() => expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(2))
+    await act(() => workspace(null))
+    await act(() => workspace('/test/A'))
+    await act(async () => { finish(baseConfig); await Promise.resolve() })
+    await waitFor(() => expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(container.textContent).toContain('보관된 초안을 복구했습니다'))
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(!dirty)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
   it('automatically rereads a clean load superseded by an external write', async () => {
     let finish!: (value: typeof baseConfig) => void
     apiMocks.fetchRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))

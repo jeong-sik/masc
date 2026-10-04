@@ -126,9 +126,11 @@ export class RuntimeTomlSession {
       if (!this.admits(authority)) this.changedAuthority()
       else this.update({ error: `${errorToString(error)} 초안과 저장 기준은 유지됩니다.` })
     } finally { this.update({ phase: 'idle' })
-      // The generation effect already ran while this request owned the phase.
-      // Resume clean reloads now; ensure leaves retained dirty drafts alone.
-      if (superseded) await this.ensure(authority)
+      // Invalidation effects may have run while this request owned the phase.
+      // Revalidate the current authority, never the retired request's token.
+      const currentAuthority = executionWorkspaceAuthority.peek()
+      if (currentAuthority?.workspaceRoot === this.workspaceRoot
+        && (superseded || currentAuthority !== authority)) await this.ensure(currentAuthority)
     }
   }
   useCurrent(authority: ExecutionWorkspaceAuthority, replaceDraft: boolean) {

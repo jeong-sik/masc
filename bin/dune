@@ -2408,4 +2408,4 @@
  (name masc_tui_model_form)
  (wrapped false)
  (modules masc_tui_model_form)
- (libraries masc_tui_model_runtime_table masc_tui_message_layout masc.runtime masc.toml_line_editor masc.agent_core.llm_provider otoml))
+ (libraries masc_tui_model_runtime_table masc_tui_message_layout masc.runtime masc.runtime_toml_namespace masc.toml_line_editor masc.agent_core.llm_provider otoml))

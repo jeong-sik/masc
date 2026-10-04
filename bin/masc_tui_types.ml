@@ -11248,7 +11248,7 @@ let runtime_selection_summary_lines ~cols state =
     | Some snapshot, Runtime_all ->
         List.nth_opt snapshot.Tui_decode.rss_resolved.rrs_runtimes state.runtime_cursor
         |> Option.map (fun runtime -> runtime,
-            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.ro_id, None) in
+            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.Tui_decode.ro_id, None) in
   match selected with
   | None -> []
   | Some (runtime, probe, lane) ->

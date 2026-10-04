@@ -4,19 +4,10 @@ import re
 import sys
 import unicodedata
 from urllib.parse import parse_qs, urlsplit
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_workspace as _keyboard_workspace
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render_code.ml",
-    "bin/masc_tui_render_code.mli",
-    "bin/masc_tui_code_results.ml",
-    "bin/masc_tui_code_results.mli",
-    "bin/masc_tui_code_requests.ml",
-    "bin/masc_tui_code_requests.mli",
-)
+
 FILE = "notes/[draft](final).lua"
 AUTHOR = "AUTHORHEAD-`literal`-" + "a" * 110 + "-AUTHORTAIL"
 SUBJECT = "SUBJECTHEAD fix glob **/*.ml preserve `literal` " + "한글 history evidence " * 45 + " SUBJECTTAIL (#7654)"
@@ -43,13 +34,13 @@ def from_cell(text, boundary):
 
 
 def completed(output):
-    end = output.rfind(h.FRAME_END)
+    end = output.rfind(_keyboard_harness.FRAME_END)
     assert end >= 0, "No completed redraw"
-    return bytes(output[:end + len(h.FRAME_END)])
+    return bytes(output[:end + len(_keyboard_harness.FRAME_END)])
 
 
 def window(output, columns):
-    rows = h.screen_rows(completed(output))
+    rows = _keyboard_harness.screen_rows(completed(output))
     position, match = next((row, WINDOW.search(text.decode("utf-8")))
         for row, text in sorted(rows.items()) if WINDOW.search(text.decode("utf-8")))
     first, last, total = map(int, match.groups())
@@ -78,8 +69,8 @@ def window(output, columns):
 
 
 def fixtures(short, requests):
-    result = h.code_memo_fixtures()
-    result[h.WORKSPACE_TREE_ROOT_PATH] = (200, [{
+    result = _keyboard_workspace.code_memo_fixtures()
+    result[_keyboard_workspace.WORKSPACE_TREE_ROOT_PATH] = (200, [{
         "path": FILE, "label": FILE, "depth": 0, "parent": "",
         "hasChildren": False, "diff": None, "keeperId": None, "hueIndex": None}])
     result["/api/v1/workspace/file"] = (200, {"ok": True, "content":
@@ -112,32 +103,32 @@ def fixtures(short, requests):
         def capture(path, response=response):
             requests.append((path, b""))
             return response
-        result[endpoint] = h.PathHttpResponse(capture)
+        result[endpoint] = _keyboard_harness.PathHttpResponse(capture)
     return result
 
 
 def run(executable, columns, no_color, short=False):
     requests = []
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go code", b"[draft]")
-        h.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
-        h.read_available(fd, output)
+        _keyboard_harness.palette_go(process, fd, output, b"go code", b"[draft]")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
+        _keyboard_harness.read_available(fd, output)
         start = len(output)
-        h.resize_and_wait(process, fd, output, rows=40 if short else 18, columns=columns,
-                          needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
-        h.wait_for_output(process, fd, output, h.FRAME_END,
-                          start=h.end_of_needle(output, b"local lock = 1", start), timeout=3)
-        h.send_and_wait(process, fd, output, b"H", b"Commit: abc1234")
-        screen = h.screen_text(completed(output)).decode("utf-8")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=40 if short else 18, columns=columns,
+                          needle=b"local lock = 1", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END,
+                          start=_keyboard_harness.end_of_needle(output, b"local lock = 1", start), timeout=3)
+        _keyboard_harness.send_and_wait(process, fd, output, b"H", b"Commit: abc1234")
+        screen = _keyboard_harness.screen_text(completed(output)).decode("utf-8")
         assert "Esc:back" in screen, (columns, no_color, screen)
         if short:
             first, last, total, _ = window(output, columns)
             assert first == 1 and last == total, (first, last, total)
-            h.send_and_wait(process, fd, output, b"jjjj", b"rows 5-")
+            _keyboard_harness.send_and_wait(process, fd, output, b"jjjj", b"rows 5-")
             assert window(output, columns)[3][0].strip() == "Commit: xyz7890"
-            h.send_and_wait(process, fd, output, b"\r", b"#8765 --")
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
-            h.send_and_wait(process, fd, output, b"\r", b"#7654 --")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"#8765 --")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"#7654 --")
         else:
             captured = {}
             while True:
@@ -147,21 +138,21 @@ def run(executable, columns, no_color, short=False):
                     break
                 height = last - first + 1
                 expected_first = min(total, first + max(1, height - 1))
-                h.send_and_wait(process, fd, output, b"\x1b[6~", f"rows {expected_first}-".encode())
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[6~", f"rows {expected_first}-".encode())
             compact = "".join("".join(captured[index].split()) for index in sorted(captured))
             for field in (AUTHOR, SUBJECT, TASK, EXECUTION, "KEEPERTAIL", "Turn:37", "Result:applied", "File:" + FILE, "Scope:Project", "Coverage:"):
                 assert "".join(field.split()) in compact, (columns, field, compact)
-            h.send_and_wait(process, fd, output, b"\x1b[F", f"rows {total}-".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", f"rows {total}-".encode())
             assert window(output, columns)[:2] == (total, total)
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
             # A continuation of a long author still belongs to the commit.
             author_first = next(index for index, line in captured.items() if line.startswith("Author:"))
             target = author_first + 1
-            h.send_and_wait(process, fd, output, b"j" * (target-1), f"rows {target}-".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"j" * (target-1), f"rows {target}-".encode())
             # Enter adds a wrapped file note. Its total changes the counter
             # even when the title cannot fit the PR number at30 columns.
-            h.send_and_wait(process, fd, output, b"\r", b"rows ")
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"rows ")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
             answered = {}
             while True:
                 first, last, total, body = window(output, columns)
@@ -169,16 +160,16 @@ def run(executable, columns, no_color, short=False):
                 if last == total:
                     break
                 step = max(1, last - first)
-                h.send_and_wait(process, fd, output, b"\x1b[6~", f"rows {min(total, first+step)}-".encode())
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[6~", f"rows {min(total, first+step)}-".encode())
             answer_text = "".join("".join(answered[index].split()) for index in sorted(answered))
             assert "Filenote:#7654--thisscopehasno" in answer_text, (columns, answer_text)
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
             keeper_first = next(index for index, line in captured.items() if line.startswith("Keeper:"))
-            h.send_and_wait(process, fd, output, b"j" * keeper_first,
+            _keyboard_harness.send_and_wait(process, fd, output, b"j" * keeper_first,
                             f"rows {keeper_first+1}-".encode())
-            jumped = h.send_and_wait(process, fd, output, b"\r", b"local target = 2")
+            jumped = _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"local target = 2")
             assert re.search(rb"\x1b\[7m\s+2\x1b\[0m", jumped), jumped
-            h.send_and_wait(process, fd, output, b"H", b"rows 1-")
+            _keyboard_harness.send_and_wait(process, fd, output, b"H", b"rows 1-")
             assert window(output, columns)[0] == 1
         # Query escaping belongs to the client; compare the decoded identity.
         for endpoint, field in (("/api/v1/workspace/file", "path"),
@@ -189,7 +180,7 @@ def run(executable, columns, no_color, short=False):
             assert queries and all(query.get(field) == [FILE] for query in queries), (endpoint, queries)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
         description=f"Code history full metadata/owner {columns} NO_COLOR={no_color} short={short}",
         interact=interact, http_fixtures=fixtures(short, requests),
         extra_env={"NO_COLOR": "1"} if no_color else {})

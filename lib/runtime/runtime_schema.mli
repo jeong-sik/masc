@@ -404,6 +404,8 @@ type typesafeai =
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
+  ; librarian_preflight : bool
+      (** Opt-in JEV no-change judgment for Memory-only passes. *)
   ; excluded_keepers : string list
   }
 [@@deriving show, eq]

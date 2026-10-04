@@ -12,6 +12,7 @@ on:
           - linux-x64
           - macos-arm64
           - stagehand-model-macos-arm64
+          - lane-fusion-container
 
       capture_item_http:
         description: Exercise Item TUI and isolated HTTP routes with the compiled binaries and production dashboard
@@ -283,7 +284,6 @@ jobs:
       - name: Build probe
         id: build
         run: |
-          python3 scripts/test_stagehand_probe_controls.py
           opam exec -- dune build --profile release bin/stagehand_model_probe.exe
       - name: Exercise offline setup and validator controls
         id: controls
@@ -314,5 +314,123 @@ jobs:
         with:
           name: stagehand-model-probe-macos-arm64-${{ github.sha }}
           path: ${{ runner.temp }}/stagehand-model-probe/
+          if-no-files-found: error
+          retention-days: 7
+
+  lane-fusion-ref:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'lane-fusion-container'
+    name: Validate Fusion qualification ref
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require a release branch or tag
+        shell: bash
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/release/v*|refs/tags/v*) ;;
+            *) echo "Native Fusion qualification belongs to a Release/Tag candidate" >&2; exit 1 ;;
+          esac
+
+  lane-fusion-container-probe:
+    needs: lane-fusion-ref
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'lane-fusion-container'
+    name: Qualify isolated Fusion containers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Initialize attempt evidence
+        run: |
+          set -euo pipefail
+          PROBE_OUT="$RUNNER_TEMP/lane-fusion-container"
+          echo "PROBE_OUT=$PROBE_OUT" >> "$GITHUB_ENV"
+          mkdir -p "$PROBE_OUT/evidence"
+          printf '%s\n' "$GITHUB_SHA" > "$PROBE_OUT/requested-head.txt"
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Install Linux native dependencies
+        run: |
+          set -euo pipefail
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgmp-dev libssl-dev libzstd-dev \
+            libsqlite3-dev libpq-dev libev-dev libffi-dev zlib1g-dev libncurses-dev \
+            m4 libprotobuf-dev protobuf-compiler
+      - name: Pin and install OCaml dependencies
+        run: |
+          set -euo pipefail
+          scripts/opam-pin-external-deps.sh --with-compact-protocol --with-bisect
+          opam install ./masc.opam --deps-only --with-test --yes
+      - name: Build exact-head native qualification executable
+        id: build
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code HEAD --
+          scripts/check-version-truth.sh
+          opam exec -- dune build --profile release bin/lane_fusion_container_probe.exe \
+            2>&1 | tee "$PROBE_OUT/native-build.log"
+          cp _build/default/bin/lane_fusion_container_probe.exe "$PROBE_OUT/"
+          (cd "$PROBE_OUT" && sha256sum lane_fusion_container_probe.exe > SHA256SUMS)
+      - name: Build the two manifest-declared worker images
+        id: images
+        run: |
+          set -euo pipefail
+          docker version > "$PROBE_OUT/docker-version.txt" 2>&1
+          docker info > "$PROBE_OUT/docker-info.txt" 2>&1
+          for package in fusion-compute fusion-report; do
+            image=$(python3 - "$package" <<'PYIMAGE'
+          import sys, tomllib
+          from pathlib import Path
+          manifest = Path("addons") / sys.argv[1] / "lane.toml"
+          image = tomllib.loads(manifest.read_text())["image"]
+          if not isinstance(image, str) or not image or image.startswith("-"):
+              raise SystemExit("Invalid declared image")
+          print(image)
+          PYIMAGE
+            )
+            docker build --file "addons/$package/Dockerfile" --tag "$image" \
+              --iidfile "$PROBE_OUT/$package.image-id" addons \
+              2>&1 | tee "$PROBE_OUT/$package.build.log"
+            docker image inspect "$image" > "$PROBE_OUT/$package.image.json"
+            cp "addons/$package/lane.toml" "$PROBE_OUT/$package.lane.toml"
+          done
+      - name: Run actual Docker qualification with synthetic HTTP replies
+        id: qualify
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code HEAD --
+          (cd "$PROBE_OUT" && sha256sum --check SHA256SUMS)
+          opam exec -- "$PROBE_OUT/lane_fusion_container_probe.exe" \
+            --repo-root "$GITHUB_WORKSPACE" --head-sha "$GITHUB_SHA" \
+            --output-dir "$PROBE_OUT/evidence" \
+            2>&1 | tee "$PROBE_OUT/qualification.log"
+      - name: Record attempt outcome even on failure
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          IMAGE_OUTCOME: ${{ steps.images.outcome }}
+          QUALIFICATION_OUTCOME: ${{ steps.qualify.outcome }}
+        run: |
+          python3 - <<'PYRECEIPT'
+          import json, os
+          from pathlib import Path
+          output = Path(os.environ["PROBE_OUT"])
+          output.mkdir(parents=True, exist_ok=True)
+          receipt = {key: os.environ[key] for key in (
+              "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+              "BUILD_OUTCOME", "IMAGE_OUTCOME", "QUALIFICATION_OUTCOME")}
+          receipt.update(live_provider=False, production=False)
+          (output / "attempt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          PYRECEIPT
+      - name: Upload exact-head attempt evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lane-fusion-container-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lane-fusion-container/
           if-no-files-found: error
           retention-days: 7

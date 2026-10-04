@@ -1,0 +1,31 @@
+{
+  "provenance": "local candidate binary, isolated fixture PTY; PNG renders captured text without ANSI colors",
+  "captured_at": "2026-10-03T03:21:08.962266+00:00",
+  "binary_sha256": "7e4143ca65f325b01b17533ac190ed1e9ffa54282382bc326747610482e8b119",
+  "frames": [
+    {
+      "name": "connected-models",
+      "rows": 30,
+      "columns": 100,
+      "ansi_sha256": "46ec9dedc1159074713a4fa4444d4e33b17ae0f7e65843067021cc337775ff72"
+    },
+    {
+      "name": "plan-wide",
+      "rows": 48,
+      "columns": 220,
+      "ansi_sha256": "caa36a693d08e7e408edd8a719abcb7e77b020851d185dc4cbe5b84627e49d95"
+    },
+    {
+      "name": "plan-compact",
+      "rows": 30,
+      "columns": 80,
+      "ansi_sha256": "3591632561f15b0079a9c0806718ed256a6d9748363b81b827c70c8054641a4f"
+    }
+  ],
+  "source_sha256": {
+    "bin/masc_tui_account_login.ml": "6382d29eb5a0a254a0c7b546b401d1d0e0ce5f6348c7aea85a3df71fa1500c2f",
+    "bin/masc_tui_account_login.mli": "6de2ffef04c9ad4a31f78d90a2f23bafd10720897e23c238dc4cec4918c2ac27",
+    "bin/masc_tui_overview_providers.ml": "4ef36a8414c60966efd9c535c749a92594d8ced5ca67d7c8aa196f8afe5ec498",
+    "bin/masc_tui_overview_providers.mli": "8e206f680d942ffd416c9966254c9e1faef353658589091158904f76144bfcc4"
+  }
+}

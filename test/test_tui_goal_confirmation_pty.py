@@ -11,26 +11,15 @@ import subprocess
 import sys
 import threading
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_planning as _keyboard_planning
 
-SOURCE_MODULES = (
-    "bin/masc_tui_async_protocol.ml",
-    "bin/masc_tui_async_protocol.mli",
-    "bin/masc_tui_home.ml",
-    "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_planning_detail.ml",
-    "bin/masc_tui_planning_detail.mli",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_types.ml",
-)
+
 
 
 def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> None:
     goal_id = "goal-confirmation"
-    goal = h.planning_goal(goal_id, "plan-alpha-29424")
+    goal = _keyboard_harness.planning_goal(goal_id, "plan-alpha-29424")
     goal.update(phase="awaiting_confirmation", criterion_revision="revision-1")
     verdict = {
         "outcome": "proven",
@@ -64,9 +53,9 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
         "goal_id": goal_id, "criterion_revision": goal["criterion_revision"],
         "request_id": verdict["request_id"], "verification_run_id": verdict["verification_run_id"],
     }
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
-    fixtures[h.DASHBOARD_GOALS_PATH] = (200, {
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.PLANNING_PATH] = _keyboard_harness.planning_snapshot([goal])
+    fixtures[_keyboard_harness.DASHBOARD_GOALS_PATH] = (200, {
         "generated_at": "2026-09-19T08:00:00Z",
         "tree": [{
             "id": goal_id, "title": goal["title"], "phase": "awaiting_confirmation",
@@ -88,7 +77,7 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
     submit_entered = threading.Event()
     release_submit = threading.Event()
 
-    def read() -> h.HttpResponse:
+    def read() -> _keyboard_harness.HttpResponse:
         nonlocal read_count
         read_count += 1
         read_entered.set()
@@ -96,7 +85,7 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
             return 500, {"error": "test did not release confirmation read"}
         return 200, response
 
-    def submit(body: bytes) -> h.HttpResponse:
+    def submit(body: bytes) -> _keyboard_harness.HttpResponse:
         posted.append(json.loads(body))
         submit_entered.set()
         if not release_submit.wait(timeout=15.0):
@@ -118,11 +107,11 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
                 confirmed_at="2026-09-19T08:01:00Z",
             ),
         }
-        fixtures[h.PLANNING_PATH] = h.planning_snapshot([confirmed_goal])
+        fixtures[_keyboard_harness.PLANNING_PATH] = _keyboard_harness.planning_snapshot([confirmed_goal])
         return 200, confirmed
 
     fixtures[f"/api/v1/goals/confirmation?goal_id={goal_id}"] = read
-    fixtures["/api/v1/goals/confirmation"] = h.RequestHttpResponse(submit)
+    fixtures["/api/v1/goals/confirmation"] = _keyboard_harness.RequestHttpResponse(submit)
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -131,7 +120,7 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
         output: bytearray,
         _base_path: str,
     ) -> None:
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process,
             master_fd,
             output,
@@ -140,42 +129,42 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
             needle=b"MASC Dashboard",
             final_cursor=b"\x1b[?25l",
         )
-        h.open_loaded_planning(process, master_fd, output)
+        _keyboard_planning.open_loaded_planning(process, master_fd, output)
         # Keep the Goal visible when its phase changes to completed.
         for phase_filter in (b"completed", b"dropped", b"all"):
-            h.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
-        h.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
         if not long_binding:
-            h.wait_for_output(process, master_fd, output, b"Actual: 5 (reported)", start=0, timeout=5.0)
-        h.write_all(master_fd, output, b"a")
-        if not h.wait_for_fixture_event(process, master_fd, output, read_entered, timeout=3.0):
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"Actual: 5 (reported)", start=0, timeout=5.0)
+        _keyboard_harness.write_all(master_fd, output, b"a")
+        if not _keyboard_harness.wait_for_fixture_event(process, master_fd, output, read_entered, timeout=3.0):
             raise AssertionError("confirmation read never reached the server")
         try:
             # Scroll the long measurement while the proof request is held.
             # Its completion must bring the newly actionable binding into view.
-            h.press_and_settle(process, master_fd, output, b"jjjjjjjjjj")
+            _keyboard_harness.press_and_settle(process, master_fd, output, b"jjjjjjjjjj")
             proof_start = len(output)
         finally:
             release_read.set()
-        h.wait_for_output(process, master_fd, output, b"CONFIRM THIS PROOF",
+        _keyboard_harness.wait_for_output(process, master_fd, output, b"CONFIRM THIS PROOF",
                           start=proof_start, timeout=5.0)
-        h.wait_for_output(process, master_fd, output, h.FRAME_END,
-                          start=h.end_of_needle(output, b"CONFIRM THIS PROOF", proof_start), timeout=3.0)
+        _keyboard_harness.wait_for_output(process, master_fd, output, _keyboard_harness.FRAME_END,
+                          start=_keyboard_harness.end_of_needle(output, b"CONFIRM THIS PROOF", proof_start), timeout=3.0)
         proof_frame = bytes(output[proof_start:])
         # send_and_wait ends at FRAME_END after this interaction's confirmation.
         # Replay only that returned frame, never historical terminal output.
-        proof_screen = h.screen_text(proof_frame)
+        proof_screen = _keyboard_harness.screen_text(proof_frame)
         if long_binding:
             if b"EVIDENCE_BINDING_END" in proof_screen:
                 raise AssertionError("long binding unexpectedly fits in the initial viewport")
-            h.send_and_wait(process, master_fd, output, b"a",
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"a",
                             b"Read through the proof binding before confirming")
             if posted:
                 raise AssertionError("unseen binding allowed completion")
             # A taller real frame shows the whole binding, including its end.
-            h.resize_and_wait(process, master_fd, output, rows=400, columns=160,
-                              needle=b"EVIDENCE_BINDING_END", controls=(h.FULL_REDRAW,))
-            binding_screen = h.screen_text(bytes(output))
+            _keyboard_harness.resize_and_wait(process, master_fd, output, rows=400, columns=160,
+                              needle=b"EVIDENCE_BINDING_END", controls=(_keyboard_harness.FULL_REDRAW,))
+            binding_screen = _keyboard_harness.screen_text(bytes(output))
             for tail in (b"TITLE_BINDING_END", b"REVISION_BINDING_END", b"REQUEST_BINDING_END",
                          b"VERIFIER_BINDING_END", b"EVIDENCE_BINDING_END"):
                 if tail not in binding_screen:
@@ -187,30 +176,30 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
         if read_count != 1 or posted:
             raise AssertionError("first key must read the proof without posting")
         # Make the proof reader overflow, so its edges change real rows.
-        h.resize_and_wait(process, master_fd, output, rows=18, columns=80,
+        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=18, columns=80,
                           needle=b"CONFIRM THIS PROOF", final_cursor=b"\x1b[?25l")
         def reader_window():
-            end = output.rfind(h.FRAME_END)
-            complete = bytes(output[:end + len(h.FRAME_END)])
-            match = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", h.screen_text(complete))
+            end = output.rfind(_keyboard_harness.FRAME_END)
+            complete = bytes(output[:end + len(_keyboard_harness.FRAME_END)])
+            match = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", _keyboard_harness.screen_text(complete))
             if match is None:
                 raise AssertionError("confirmation reader did not overflow")
             return tuple(int(value) for value in match.groups())
         first, last, total = reader_window()
         if first != 1 or last >= total:
             raise AssertionError("confirmation reader must start in an overflowing first window")
-        h.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
         end_first, end_last, end_total = reader_window()
         if end_first <= first or end_last != total or end_total != total:
             raise AssertionError("End did not reach the same proof document's last row")
-        h.send_and_wait(process, master_fd, output, b"\x1b[H", b"CONFIRM THIS PROOF")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b[H", b"CONFIRM THIS PROOF")
         if reader_window() != (first, last, total):
             raise AssertionError("Home did not return to the same inspected proof")
         if read_count != 1 or posted:
             raise AssertionError("reader edges must not reread or post the proof")
         # Submit from the overflowed last window, where metadata remains
         # scrollable even after the proof is replaced by a Sending row.
-        h.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
         if reader_window()[0] <= 1 or reader_window()[1] != total:
             raise AssertionError("submission must start from the proof document's end")
         if replace_proof:
@@ -219,43 +208,43 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
             b"confirmation proof changed" if replace_proof else b"reached its target"
         )
         try:
-            submitting_frame = h.send_and_wait(
+            submitting_frame = _keyboard_harness.send_and_wait(
                 process, master_fd, output, b"a", b"Sending proof confirmation..."
             )
             if reader_window()[0] != 1:
                 raise AssertionError("Sending state must reset the document to its first row")
-            complete_end = output.rfind(h.FRAME_END)
-            header = next(row for row in h.screen_text(bytes(output[:complete_end + len(h.FRAME_END)])).splitlines()
+            complete_end = output.rfind(_keyboard_harness.FRAME_END)
+            header = next(row for row in _keyboard_harness.screen_text(bytes(output[:complete_end + len(_keyboard_harness.FRAME_END)])).splitlines()
                           if b"MASC Work" in row)
             if goal_id.encode() not in header or b"confirming" not in header:
                 raise AssertionError(f"Sending header lost Goal identity or phase: {header!r}")
-            if not h.wait_for_fixture_event(
+            if not _keyboard_harness.wait_for_fixture_event(
                 process, master_fd, output, submit_entered, timeout=3.0
             ):
                 raise AssertionError("confirmation POST never reached the server")
             # Repeated input and leaving/reopening the detail cannot unsend
             # the pending POST or permit a second request while it is held.
-            h.write_all(master_fd, output, b"aa")
-            h.send_and_wait(process, master_fd, output, b"\x1b", h.PLANNING_LIST_HEADER)
-            h.send_and_wait(
+            _keyboard_harness.write_all(master_fd, output, b"aa")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", _keyboard_harness.PLANNING_LIST_HEADER)
+            _keyboard_harness.send_and_wait(
                 process, master_fd, output, b"\r", b"Sending proof confirmation..."
             )
             # Keep the existing result evidence at its original geometry;
             # the held in-flight assertions above exercised the short reader.
-            h.resize_and_wait(process, master_fd, output, rows=50, columns=160,
+            _keyboard_harness.resize_and_wait(process, master_fd, output, rows=50, columns=160,
                               needle=b"Sending proof confirmation...", final_cursor=b"\x1b[?25l")
             result_start = len(output)
         finally:
             release_submit.set()
-        h.wait_for_output(
+        _keyboard_harness.wait_for_output(
             process, master_fd, output, needle, start=result_start, timeout=5.0
         )
-        h.wait_for_output(
+        _keyboard_harness.wait_for_output(
             process,
             master_fd,
             output,
-            h.FRAME_END,
-            start=h.end_of_needle(output, needle, result_start),
+            _keyboard_harness.FRAME_END,
+            start=_keyboard_harness.end_of_needle(output, needle, result_start),
             timeout=3.0,
         )
         result_frame = bytes(output[result_start:])
@@ -285,7 +274,7 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
         )
         os.write(master_fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Goal confirmation preserves the inspected proof"
         + (" when the server proof changes" if replace_proof else "")

@@ -64,13 +64,7 @@ must agree. It reports each text/encoding/phase separately; no cross-axis or
 historical pooling. P95 uses nearest rank. Whole-response target checks remain
 0.1 ms and are separate from scenario correctness.
 
-## Scope and tests
-
-`test/test_server_artifact_comparison.py` exercises invalid provenance,
-unfinished/wrong workflows, ZIP/checksum/architecture/symlink errors, incomplete
-receipts, HTTP-200 tool failure, endpoint/identity drift, cleanup failure and
-unexpected model calls. These synthetic validator tests do not run MASC or
-prove the benchmark itself completed.
+## Scope
 
 Successful fixture results do not establish production identity, deployment,
 all-surface responsiveness, physical display latency or multi-turn Keeper

@@ -1,0 +1,53 @@
+id = "fusion-compute"
+revision = "0.1.0"
+title = "Fusion panel and judge computation"
+contributions = ["derive"]
+image = "masc-lane-fusion-compute:0.1.0"
+command = ["python3", "server.py"]
+
+[world.outputs.result]
+lanes = ["fusion/computation"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+model_access = "host_sampling"
+refresh_policy = "source_changes"
+presentation = '''{
+ "description": "같은 입력을 패널별로 분석하고, Judge가 보존된 답변을 모아 판단합니다",
+ "readings": [
+  {"lane_id":"fusion/computation","path":["computation","role"],"label":"역할","format":"text"},
+  {"lane_id":"fusion/computation","path":["call_status_label"],"label":"모델 응답","format":"text"},
+  {"lane_id":"fusion/computation","path":["computation","model"],"label":"응답 모델","format":"text"},
+  {"lane_id":"fusion/computation","path":["computation","text"],"label":"분석 결과","format":"text"},
+  {"lane_id":"fusion/computation","path":["input_complete"],"label":"입력 근거 모두 있음","format":"boolean"}
+ ]
+}'''
+binding_schema = '''{
+ "type":"object", "additionalProperties":false,
+ "required":["analysis_id","role","prompt","instructions","max_tokens","model_route","sources"],
+ "properties":{
+  "analysis_id":{"type":"string","minLength":1},
+  "role":{"enum":["panel","judge"]},
+  "prompt":{"type":"string","minLength":1},
+  "instructions":{"type":"string","minLength":1},
+  "max_tokens":{"type":"integer","minimum":1},
+  "temperature":{"type":"number"},
+  "model_route":{"type":"string","minLength":1},
+  "sources":{"type":"array","minItems":1,"items":{
+   "type":"object","additionalProperties":false,"required":["source_id","kind"],
+   "properties":{
+    "source_id":{"type":"string","minLength":1},
+    "kind":{"enum":["snapshot_file","lane_output"]},
+    "path":{"type":"string","minLength":1},
+    "installation_id":{"type":"string","minLength":1},
+    "output_id":{"type":"string","minLength":1},
+    "selection":{"const":"latest_completed"}
+   }
+  }}
+ }
+}'''

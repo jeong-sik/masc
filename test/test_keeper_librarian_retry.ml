@@ -73,10 +73,10 @@ let rec rm_rf path =
     else Unix.unlink path
 ;;
 
-let new_claim ?(claim = "add C") () =
+let new_claim ?(claim = "add C") ?(category = "fact") () =
   `Assoc
     [ Librarian.wire_field_claim, `String claim
-    ; Librarian.wire_field_category, `String "fact"
+    ; Librarian.wire_field_category, `String category
     ]
 ;;
 
@@ -121,6 +121,17 @@ let selection_json
 
 let parse json =
   Librarian.selection_of_json_result ~now:2_000_000. (input ()) json
+;;
+
+let test_new_category_is_materialized () =
+  match parse (selection_json ~dropped:[]
+    ~new_claims:[new_claim ~category:"architecture_decision" ()] ()) with
+  | Error error -> fail (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    (match selection.new_claims with
+     | [claim] -> check string "new category retained" "architecture_decision"
+         (Memory.category_to_string claim.category)
+     | _ -> fail "expected one new claim")
 ;;
 
 let test_a_stated_drop_removes_and_an_unnamed_fact_survives_exactly () =
@@ -2141,7 +2152,8 @@ let () =
   run
     "keeper_librarian_current_selection"
     [ ( "selection"
-      , [ test_case
+      , [ test_case "new category materialized" `Quick test_new_category_is_materialized
+        ; test_case
             "a stated drop removes and an unnamed fact survives"
             `Quick
             test_a_stated_drop_removes_and_an_unnamed_fact_survives_exactly

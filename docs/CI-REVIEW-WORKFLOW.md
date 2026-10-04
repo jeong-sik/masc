@@ -31,10 +31,30 @@ when that coverage is needed; it is separate from leader-selected candidate
 verification and does not grant merge permission.
 
 `ci.yml` and `test.yml` are reusable components. Full type checking, release
-profile, dashboard, model checks, behavioral suites and distribution/installation
+profile, dashboard, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
-requires an explicit `publish=true` dispatch on an existing version tag and full
-successful verification. Specialized host and packaging proofs remain manual.
+uses `release.yml` with an existing version tag, `rc_run_id`, and explicit
+`publish=true`. The tagged commit must match the latest successful full RC.
+The publication job verifies its receipt and artifact checksums and uploads the
+existing distribution; it does not rebuild or rerun tests. A publication run is
+not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
+one toolchain job; node behavior runs under the behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
+there is no known-failure exemption list or second standalone compilation pass.
+The behavior lane runs product suites. CI/review/PTY-helper, build-checker and evidence-validator self-tests are not part of the test suite. The optional credential check runs the scanner directly against the tracked tree.
+Presentation tools are installed only for the behavior lane. The dashboard is
+built once with the production configuration and shared by all native targets;
+type checks and dashboard payload-consumer tests stay in their own job. That
+job exercises Goal, schedule, turn-record, verification, portrait, lifecycle and
+memory behavior directly; test selection does not scan backend source strings.
+Installer script tests run once on Linux in the distribution
+job and once on macOS with stock Bash and BSD utilities;
+each of the four native targets still builds and verifies its shipped binaries
+and installation. Native files are uploaded after installation validation;
+early unverified duplicates and the separate fixture-preview bundle are omitted.
+The behavior lane builds its own sandbox image where it is used.
+TLA model checks run explicitly through `model-check.yml` when state-machine
+specifications change; they are not a prerequisite for shipping a binary.
+Specialized host and packaging proofs remain manual.
 
 Prefer short, focused checks: the constitution's "about two minutes"
 describes their intended scale, not a timeout or a pass/fail threshold.
@@ -50,3 +70,16 @@ failures. Bulk source-style lints, prose rules, byte inventories, historical cou
 and recursive checks about other checks are not release gates. Feature work
 continues while verification runs; agents do not watch, wait or repeatedly poll.
 The disabled hosted workflows are not enabled by editing these source definitions.
+
+To publish a verified candidate after creating its version tag, use the same
+commit's completed full RC run:
+
+```bash
+gh workflow run release.yml --ref vX.Y.Z -f rc_run_id=RUN_ID -f publish=true
+```
+
+The current-attempt receipt and the run's assembled distribution must remain
+available. A failed-job rerun can reuse installation artifacts from an earlier
+successful job in the same run. The exact RC-checked release body travels with
+the receipt and is not regenerated at publication. Missing or expired artifacts require another RC; rebuilding inside the
+publication job would no longer publish the bytes that were verified.

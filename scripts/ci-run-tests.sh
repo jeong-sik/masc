@@ -27,14 +27,8 @@ HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-0}"
 TEST_TIMEOUT_GRACE_SEC="${CI_TEST_TIMEOUT_GRACE_SEC:-5}"
 
-# Injectable clock: CI_TEST_NOW_CMD overrides the epoch source so tests can
-# drive the deadline with a fake clock instead of the wall clock.
 now_epoch() {
-  if [[ -n "${CI_TEST_NOW_CMD:-}" ]]; then
-    eval "${CI_TEST_NOW_CMD}"
-  else
-    date +%s
-  fi
+  date +%s
 }
 
 START_EPOCH="$(now_epoch)"
@@ -161,6 +155,11 @@ diag_dump() {
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
   ps -eo pid,ppid,etime,%cpu,%mem,comm,args \
     | grep -Ei 'dune|ocaml|alcotest|test_' \
+    | grep -v grep \
+    || true
+
+  echo "[ci-diag] global process snapshot:"
+  ps -eo pid,ppid,pgid,etime,comm,args \
     | grep -v grep \
     || true
 

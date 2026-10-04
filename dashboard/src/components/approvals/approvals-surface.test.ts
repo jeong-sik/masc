@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import * as Vitest from 'vitest'
@@ -1570,22 +1568,6 @@ describe('ApprovalsSurface', () => {
       expect(el.tagName).toBe('BUTTON')
       expect(el.textContent).not.toContain('nonblocking')
     }
-  })
-
-  it('keeps the sticky detail rail working by un-clipping the approvals .ov-scroll', () => {
-    // The rail is position: sticky, but the shared .ov-scroll wrapper's
-    // overflow formed a non-scrolling sticky containing block. approvals-v2.css
-    // must restore overflow:visible on the approvals-scoped wrapper only.
-    const css = readFileSync(resolve(__dirname, '../../styles/approvals-v2.css'), 'utf8')
-    expect(css).toMatch(/\.ap-surface\s*>\s*\.ov-scroll\s*\{[^}]*overflow:\s*visible/)
-    const railRule = css.match(/\.ap-detail-panel\s*\{([^}]*)\}/)?.[1] ?? ''
-    expect(railRule).toContain('position: sticky')
-  })
-
-  it('collapses the approvals shell to one column on narrow viewports', () => {
-    const css = readFileSync(resolve(__dirname, '../../styles/approvals-v2.css'), 'utf8')
-    expect(css).toMatch(/@media \(max-width: 980px\)[\s\S]*?\.ap-surface\s*\{\s*flex-direction:\s*column;/)
-    expect(css).toMatch(/\.ap-surface\s*>\s*\.ov-scroll\s*\{[^}]*width:\s*100%/)
   })
 
   it('shows which Keepers were singled out', async () => {

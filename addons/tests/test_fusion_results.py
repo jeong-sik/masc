@@ -6,10 +6,11 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
-import sys
 import tempfile
+from pathlib import Path
+from stdio_fixture import run_stdio
+import sys
 import tomllib
 import unittest
 
@@ -29,11 +30,19 @@ def detail(status="completed", evidence_state="recorded"):
         run.update(decision="bounded preview", summary="summary")
     if status == "failed":
         run.update(error="provider unavailable", failure_code="provider_error")
-    post = {"id": "p-" + "a" * 32, "body": "Untrusted retained evidence text",
+    judge = {"status": "synthesized", "resolved_answer": "Untrusted retained evidence text",
+             "decision": "Answer", "synthesis": "Retained structured synthesis",
+             "consensus": [], "contradictions": [], "partial_coverage": [],
+             "unique_insights": [], "blind_spots": []}
+    if status == "failed":
+        judge = {"status": "failed", "failure_code": "provider_error", "error": "provider unavailable"}
+    post = {"id": "p-" + "a" * 32, "body": "Fusion deliberation headline",
+            "meta": {"judge": judge},
             "origin": {"source": "fusion", "fusion_run_id": RUN, "fusion_producer": "example"}}
     return {"generated_at": "2026-09-30T00:00:00Z", "run": run,
             "evidence": {"status": evidence_state,
                          "post": post if evidence_state == "recorded" else None}}
+
 
 
 def source(value, complete=True):
@@ -61,14 +70,9 @@ def call(package, sources, sizes=None):
 
 
 def exchange(package, requests, sizes=None):
-    # Requests are prepared as a batch. A file-backed stdin avoids duplex
-    # pipe backpressure while retaining the actual worker and wire bytes.
-    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as wire:
-        serialized = "".join(json.dumps(item) + "\n" for item in requests)
-        wire.write(serialized)
-        wire.seek(0)
-        proc = subprocess.run([sys.executable, str(ADDONS / package / "server.py")],
-                              stdin=wire, capture_output=True, text=True, check=True)
+    serialized = "".join(json.dumps(item) + "\n" for item in requests)
+    proc = run_stdio([sys.executable, str(ADDONS / package / "server.py")],
+                     input=serialized, capture_output=True, text=True, check=True)
     assert not proc.stderr, proc.stderr
     lines = proc.stdout.splitlines(keepends=True)
     if sizes is not None:
@@ -76,8 +80,54 @@ def exchange(package, requests, sizes=None):
                      output_bytes=len(lines[-1].encode("utf-8")))
     return [json.loads(line) for line in lines]
 
-
 class FusionResults(unittest.TestCase):
+    def test_protocol_rejections_keep_stdio_alive(self):
+        cases = [
+            ("id", "\ud800", False),
+            ("id", True, False),
+            ("id", {}, False),
+            ("id", float("inf"), False),
+            ("output", "nan", False),
+            ("output", "nan", True),
+            ("output", "surrogate", False),
+            ("error", "surrogate", False),
+        ]
+        for kind, value, summary in cases:
+            with self.subTest(kind=kind, value=value, summary=summary):
+                code = ("import sys; sys.path.insert(0, " + repr(str(ADDONS)) + "); "
+                        "import protocol\n"
+                        "def observe(binding, sources):\n")
+                if kind == "error":
+                    code += "    raise protocol.InvalidInput('bad ' + chr(0xd800))\n"
+                elif value == "nan":
+                    code += "    return {'value': float('nan')}\n"
+                elif value == "surrogate":
+                    code += "    return {'value': chr(0xd800)}\n"
+                else:
+                    code += "    return {}\n"
+                code += "protocol.serve('fixture', observe"
+                if summary:
+                    code += ", text_summary=lambda output: 'summary'"
+                code += ")\n"
+                first = {"jsonrpc": "2.0", "id": value if kind == "id" else 1,
+                         "method": "ping" if kind == "id" else "tools/call",
+                         "params": {"name": "lane_observe", "arguments": {
+                             "binding": {}, "sources": []}}}
+                ping = {"jsonrpc": "2.0", "id": "next", "method": "ping"}
+                proc = run_stdio([sys.executable, "-c", code],
+                                 input=json.dumps(first) + "\n" + json.dumps(ping) + "\n",
+                                 capture_output=True, text=True, timeout=10)
+                self.assertEqual(proc.stderr, "")
+                responses = [json.loads(line) for line in proc.stdout.splitlines()]
+                self.assertEqual(len(responses), 2)
+                if kind == "id":
+                    self.assertEqual(responses[0]["error"]["code"], -32602)
+                    self.assertIsNone(responses[0]["id"])
+                else:
+                    self.assertTrue(responses[0]["result"]["isError"])
+                    self.assertEqual(responses[0]["id"], 1)
+                self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": "next", "result": {}})
+
     def test_oversized_integer_timestamps_do_not_terminate_worker(self):
         requests = []
         for index, field in enumerate(("started_at", "finished_at"), 1):
@@ -412,6 +462,29 @@ class FusionResults(unittest.TestCase):
                     self.assertEqual(responses[0]["error"], {
                         "code": -32602, "message": "JSON nesting exceeds the decoder limit"})
                 self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
+    def test_oversized_integer_decode_refuses_without_losing_next_ping(self):
+        limit = sys.int_info.default_max_str_digits
+        for location in ("binding", "id"):
+            with self.subTest(location=location):
+                request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                    "name": "lane_observe", "arguments": {"binding": {}, "sources": []}}}
+                if location == "binding":
+                    request["params"]["arguments"]["binding"]["integer"] = "__integer__"
+                else:
+                    request["id"] = "__integer__"
+                wire = json.dumps(request).replace('"__integer__"', "9" * (limit + 1))
+                wire += "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
+                worker = subprocess.run([sys.executable, "-X", f"int_max_str_digits={limit}",
+                                         str(ADDONS / "fusion-results/server.py")],
+                                        input=wire, capture_output=True, text=True)
+                self.assertEqual(worker.returncode, 0, worker.stderr)
+                self.assertEqual(worker.stderr, "")
+                self.assertEqual([json.loads(line) for line in worker.stdout.splitlines()], [
+                    {"jsonrpc": "2.0", "id": None, "error": {
+                        "code": -32602, "message": "JSON value exceeds the decoder limits"}},
+                    {"jsonrpc": "2.0", "id": 2, "result": {}},
+                ])
 
     def test_decoder_recursion_refuses_before_id_and_keeps_next_request(self):
         # Exercise the decoder failure even on interpreters whose JSON parser

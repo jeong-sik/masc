@@ -65,12 +65,5 @@ Actions already supplied a suitable isolated runner. This workflow makes that
 execution path concrete; it does not weaken the task's original evidence
 contract.
 
-Validation without an OCaml build:
-
-```sh
-python3 test/test_checkpoint_history_comparison.py
-actionlint .github/workflows/bench-tests.yml
-```
-
-Runtime compatibility and measurement acceptance require the CI experiment;
-synthetic validator tests are not runtime performance evidence.
+Runtime compatibility and measurement acceptance require the manual experiment
+and its retained observations.

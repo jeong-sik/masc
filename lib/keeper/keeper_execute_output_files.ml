@@ -68,7 +68,15 @@ let unlink_if_present path =
 let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_capture.files) =
   let* stdout_path, stdout_bytes = complete_path "stdout" files.stdout in
   let* stderr_path, stderr_bytes = complete_path "stderr" files.stderr in
-  Eio_guard.run_in_systhread ~label:"keeper-execute-publish-output" (fun () ->
+  (* Redaction and blob hashing share this file job; bound its CPU work when
+     the worker pool exists, and keep blocking I/O off the main fiber otherwise. *)
+  let run f =
+    match Domain_pool_ref.get () with
+    | Some _ -> Domain_pool_ref.submit_cpu_or_inline f
+    | None -> Eio_guard.run_in_systhread ~label:"keeper-execute-publish-output" f
+  in
+  run (fun () ->
+    let redaction = Keeper_secret_redaction.copy_for_current_domain redaction in
     let temporary_files = ref [] in
     let temporary_file () =
       let path = Filename.temp_file ~temp_dir:(Filename.dirname stdout_path)
@@ -120,7 +128,7 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
           | None ->
             let store = Tool_blob_store.create ~base_path in
             let store_file path =
-              Tool_blob_store.put_file_durable store ~path ~mime:"text/plain"
+              Tool_blob_store.put_file_durable_blocking store ~path ~mime:"text/plain"
               |> Tool_output.normalized_artifact_ref_to_json
             in
             [ "output_artifact", store_file combined

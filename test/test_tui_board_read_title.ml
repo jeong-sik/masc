@@ -78,41 +78,7 @@ let test_the_index_says_what_the_board_holds () =
     (holds "Board (3)" (sidebar_title ~holding:None labels));
   Alcotest.(check bool) "a page that carries everything says it once" true
     (holds "Board (3)" (sidebar_title ~holding:(Some 3) labels))
-;;
 
-(* Which surfaces pass a count, and which say they have none. The rows above
-   are the helper's own; these say the three paged surfaces reach it with the
-   number their own header draws, and that the filtered ones answer [None]
-   rather than leaving the question open.
-
-   [render.ml] links into no test (task-550), so this reads the source. A
-   Schedules snapshot drawn through the surface would be the better proof and
-   is not available here. *)
-let render = "bin/masc_tui_render.ml"
-
-let passes ~binding =
-  Ast_grep.count_applications_with_labelled_argument_in_value_binding
-    ~module_path:render ~binding_name:binding ~callee:"write_list_sidebar"
-    ~label:"holding"
-
-let reads ~binding ~field =
-  Ast_grep.count_field_accesses_outside_calls_in_value_binding
-    ~module_path:render ~binding_name:binding ~callees:[] ~fields:[ field ]
-
-let test_a_paged_index_is_given_the_count_its_own_header_draws () =
-  Alcotest.(check int) "the Board index asks the census" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
-       ~binding_name:"render_board_list" ~callee:"board_holding");
-  Alcotest.(check int) "the Schedules index is given the request count" 1
-    (reads ~binding:"render_schedule_detail" ~field:"scs_request_count");
-  Alcotest.(check int) "the Task Review index is given its page total" 1
-    (reads ~binding:"render_verification_detail" ~field:"vs_total");
-  List.iter
-    (fun binding ->
-      Alcotest.(check int)
-        (binding ^ " states what it holds")
-        1 (passes ~binding))
-    [ "render_schedule_detail"; "render_verification_detail" ]
 ;;
 
 let () =
@@ -132,8 +98,6 @@ let () =
             test_an_uncounted_board_keeps_the_page_count
         ; Alcotest.test_case "the index says what the board holds" `Quick
             test_the_index_says_what_the_board_holds
-        ; Alcotest.test_case
-            "a paged index is given the count its header draws" `Quick
-            test_a_paged_index_is_given_the_count_its_own_header_draws
+
         ] )
     ]

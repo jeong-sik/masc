@@ -4,15 +4,16 @@ import os
 import sys
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_voice as _keyboard_voice
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml")
+
 CARET = "▏".encode()
 
 
 def settle(process, fd, output, keys):
-    h.press_and_settle(process, fd, output, keys, cap=15.0)
-    return h.screen_rows(bytes(output))
+    _keyboard_harness.press_and_settle(process, fd, output, keys, cap=15.0)
+    return _keyboard_harness.screen_rows(bytes(output))
 
 
 def selected(rows, needle):
@@ -32,7 +33,7 @@ def wizard(executable):
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.open_the_voice_pane(process, fd, output)
+        _keyboard_voice.open_the_voice_pane(process, fd, output)
         settle(process, fd, output, b"e")
         settle(process, fd, output, b"\r\r")
         # Name is a free text field; neither length nor wide terminal cells
@@ -45,16 +46,16 @@ def wizard(executable):
             rows = settle(process, fd, output, b"\x15" + text.encode())
             suffix = text[-8:].encode()
             for height, width in ((24, 64), (40, 110), (24, 80)):
-                h.resize_and_wait(process, fd, output, rows=height,
+                _keyboard_harness.resize_and_wait(process, fd, output, rows=height,
                                   columns=width, needle=CARET,
-                                  controls=(h.FULL_REDRAW,))
-                rows = h.screen_rows(bytes(output))
+                                  controls=(_keyboard_harness.FULL_REDRAW,))
+                rows = _keyboard_harness.screen_rows(bytes(output))
                 fields = [row for row in rows.values() if CARET in row]
                 if len(fields) != 1 or suffix + CARET not in fields[0]:
                     raise AssertionError(f"typed tail/caret missing at {width}: {rows!r}")
             # Backspace removes a whole UTF-8 scalar, not its last byte.
             settle(process, fd, output, b"\x7f")
-            rows = h.screen_rows(bytes(output))
+            rows = _keyboard_harness.screen_rows(bytes(output))
             if not any(text[-8:-1].encode() + CARET in row for row in rows.values()):
                 raise AssertionError(f"backspace did not keep the caret at the tail: {rows!r}")
         settle(process, fd, output, b"\x1b")
@@ -62,20 +63,20 @@ def wizard(executable):
             raise AssertionError("cancelled typing changed a voice configuration")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable, description="Voice long text keeps its tail and caret",
-                           interact=interact, http_fixtures=h.voice_wizard_http_fixtures(),
+    _keyboard_harness.run_terminal_scenario(executable, description="Voice long text keeps its tail and caret",
+                           interact=interact, http_fixtures=_keyboard_voice.voice_wizard_http_fixtures(),
                            http_requests=requests)
 
 
 def assignment(executable):
     requests = []
-    fixtures = h.voice_wizard_http_fixtures()
+    fixtures = _keyboard_voice.voice_wizard_http_fixtures()
     agents = [f"keeper-{index:02d}" for index in range(32)]
-    roster = h.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"][1]
+    roster = _keyboard_harness.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"][1]
     prototype = roster["keepers"][0]
     fixtures["/api/v1/gate/keepers?detailed=true"] = (200, {
         "count": len(agents), "total": len(agents), "truncated": False,
-        "keepers": [{**prototype, "name": agent, "meta": h.keeper_roster_meta(agent)}
+        "keepers": [{**prototype, "name": agent, "meta": _keyboard_harness.keeper_roster_meta(agent)}
                     for agent in agents],
     })
     fixtures["/api/v1/voice/voices"] = (200, {
@@ -91,22 +92,22 @@ def assignment(executable):
             (keepers / f"{name}.json").unlink()
         for agent in agents:
             (keepers / f"{agent}.json").write_text(
-                json.dumps(h.keeper_metadata(agent)), encoding="utf-8")
+                json.dumps(_keyboard_harness.keeper_metadata(agent)), encoding="utf-8")
 
     def interact(process, fd, _slave, output, _base):
-        h.open_the_voice_pane(process, fd, output)
+        _keyboard_voice.open_the_voice_pane(process, fd, output)
         # Roster data is independently loaded by refresh, so wait for its
         # ready signal in the roster before opening the assignment screen.
         roster_start = len(output)
-        h.tab_until(process, fd, output, b"MASC Keepers")
-        h.wait_for_output(process, fd, output, b"keeper-00",
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.wait_for_output(process, fd, output, b"keeper-00",
                           start=roster_start, timeout=15)
         # The selected Config pane survives the roster visit.
-        h.tab_until(process, fd, output, b"MASC Voice")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Voice")
         settle(process, fd, output, b"a")
-        h.wait_for_output(process, fd, output, b"voice-00", start=0, timeout=15)
-        h.drain_until_quiet(process, fd, output)
-        rows = h.screen_rows(bytes(output))
+        _keyboard_harness.wait_for_output(process, fd, output, b"voice-00", start=0, timeout=15)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        rows = _keyboard_harness.screen_rows(bytes(output))
         selected(rows, b"keeper-00")
         selected(rows, b"voice-00")
         # Each list overflows even a tall frame. Walking one must leave the
@@ -116,32 +117,32 @@ def assignment(executable):
             selected(rows, f"keeper-{index:02d}".encode())
             selected(rows, f"voice-{index:02d}".encode())
         for height, width in ((24, 64), (40, 110), (24, 80)):
-            h.resize_and_wait(process, fd, output, rows=height, columns=width,
-                              needle=b"voice-31", controls=(h.FULL_REDRAW,))
-            rows = h.screen_rows(bytes(output))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=height, columns=width,
+                              needle=b"voice-31", controls=(_keyboard_harness.FULL_REDRAW,))
+            rows = _keyboard_harness.screen_rows(bytes(output))
             selected(rows, b"keeper-31")
             selected(rows, b"voice-31")
             if not any(b"Enter:assign" in row for row in rows.values()):
                 raise AssertionError(f"assignment footer hidden: {rows!r}")
         requests.clear()
-        h.resize_and_wait(process, fd, output, rows=10, columns=80,
-                          needle=b"terminal too small", controls=(h.FULL_REDRAW,))
-        h.write_all(fd, output, b"j\x1b[C\r")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=10, columns=80,
+                          needle=b"terminal too small", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.write_all(fd, output, b"j\x1b[C\r")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         if any(path == "/api/v1/voice/setup" and body for path, body in requests):
             raise AssertionError("hidden assignment accepted Enter in a compact frame")
-        h.resize_and_wait(process, fd, output, rows=24, columns=80,
-                          needle=b"voice-31", controls=(h.FULL_REDRAW,))
-        rows = h.screen_rows(bytes(output))
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=80,
+                          needle=b"voice-31", controls=(_keyboard_harness.FULL_REDRAW,))
+        rows = _keyboard_harness.screen_rows(bytes(output))
         selected(rows, b"keeper-31")
         selected(rows, b"voice-31")
         os.write(fd, b"\r")
-        body = json.loads(h.wait_for_http_request(process, fd, output, requests,
+        body = json.loads(_keyboard_harness.wait_for_http_request(process, fd, output, requests,
                                                  path="/api/v1/voice/setup"))
         if body.get("changes") != [{"change": "set_agent_voice",
                                     "agent": "keeper-31", "voice": "voice-31"}]:
             raise AssertionError(f"Enter saved a different pair: {body!r}")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         rows = settle(process, fd, output, b"j\x1b[C")
         selected(rows, b"keeper-00")
         selected(rows, b"voice-00")
@@ -151,7 +152,7 @@ def assignment(executable):
         settle(process, fd, output, b"\x1b")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable, description="Voice assignment follows both selections",
+    _keyboard_harness.run_terminal_scenario(executable, description="Voice assignment follows both selections",
                            interact=interact, http_fixtures=fixtures,
                            http_requests=requests, prepare_workspace=prepare_workspace)
 

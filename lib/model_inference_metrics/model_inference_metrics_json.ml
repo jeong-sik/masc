@@ -77,6 +77,12 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
     ; "total_input_tokens", Json_util.int_opt_to_json s.total_input_tokens
     ; "total_output_tokens", Json_util.int_opt_to_json s.total_output_tokens
     ; "total_cache_read_tokens", Json_util.int_opt_to_json s.total_cache_read_tokens
+    ; "cached_input", (match s.cached_input with
+        | None -> `Null
+        | Some paired -> `Assoc [
+            "input_tokens", `Int paired.ci_input_tokens;
+            "cache_read_tokens", `Int paired.ci_cache_read_tokens;
+            "sample_count", `Int paired.ci_sample_count])
     ; "total_cache_creation_tokens", Json_util.int_opt_to_json s.total_cache_creation_tokens
     ; "total_reasoning_tokens", Json_util.int_opt_to_json s.total_reasoning_tokens
     ; "usage_sample_count", `Int s.usage_sample_count

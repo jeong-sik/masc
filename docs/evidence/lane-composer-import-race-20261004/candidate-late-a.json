@@ -1,0 +1,121 @@
+{
+  "version": 2,
+  "title": "Import fixture b",
+  "nodes": [
+    {
+      "id": "block-1",
+      "kind": "source",
+      "name": "Source b",
+      "available": true,
+      "snapshot_path": "/fixture/b.json",
+      "snapshot_source_id": "source-b"
+    },
+    {
+      "id": "block-2",
+      "kind": "panel",
+      "name": "패널 A · 제안 검토",
+      "available": true,
+      "installation": {
+        "id": "block-2",
+        "model_route": "fixture.b",
+        "instructions": "Review b",
+        "max_tokens": 512
+      }
+    },
+    {
+      "id": "block-3",
+      "kind": "panel",
+      "name": "패널 B · 반론 검토",
+      "available": true,
+      "installation": {
+        "id": "block-3",
+        "model_route": "fixture.b",
+        "instructions": "Review b",
+        "max_tokens": 512
+      }
+    },
+    {
+      "id": "block-4",
+      "kind": "judge",
+      "name": "Judge · 종합 판단",
+      "available": true,
+      "installation": {
+        "id": "block-4",
+        "model_route": "fixture.b",
+        "instructions": "Review b",
+        "max_tokens": 512
+      }
+    },
+    {
+      "id": "block-5",
+      "kind": "report",
+      "name": "근거가 이어진 보고서",
+      "available": true,
+      "installation": {
+        "id": "block-5",
+        "model_route": "fixture.b",
+        "instructions": "Review b",
+        "max_tokens": 512
+      }
+    },
+    {
+      "id": "block-6",
+      "kind": "broadcast",
+      "name": "명시적으로 보고서 공유",
+      "available": true
+    },
+    {
+      "id": "block-7",
+      "kind": "agent",
+      "name": "작업 에이전트",
+      "available": true
+    },
+    {
+      "id": "block-8",
+      "kind": "agent",
+      "name": "검증 에이전트",
+      "available": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "block-1",
+      "to": "block-2"
+    },
+    {
+      "from": "block-1",
+      "to": "block-3"
+    },
+    {
+      "from": "block-2",
+      "to": "block-4"
+    },
+    {
+      "from": "block-3",
+      "to": "block-4"
+    },
+    {
+      "from": "block-4",
+      "to": "block-5"
+    },
+    {
+      "from": "block-5",
+      "to": "block-6"
+    },
+    {
+      "from": "block-6",
+      "to": "block-7"
+    },
+    {
+      "from": "block-6",
+      "to": "block-8"
+    }
+  ],
+  "installation_settings": {
+    "run_id": "run-b",
+    "analysis_id": "analysis-b",
+    "compute_manifest": "/fixture/fusion-compute/lane.toml",
+    "report_manifest": "/fixture/fusion-report/lane.toml",
+    "prompt": "Question b"
+  }
+}

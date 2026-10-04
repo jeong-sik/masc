@@ -9,9 +9,7 @@ import unicodedata
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_observation_layout.ml", "bin/masc_tui_types.ml",
-                  "bin/masc_tui_render.ml", "bin/masc_tui_render_prim.ml",
-                  "bin/masc_tui.ml", "bin/masc_tui_loader.ml")
+
 TOOLS = ["/tool/" + "long-path/" * 20 + "TOOL-ASCII-END",
          "한글 도구 경로 " * 20 + "TOOL-CJK-END", "third-tool-END"]
 

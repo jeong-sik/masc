@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /addon
 COPY protocol.py /protocol.py
+COPY fusion_judge.py /fusion_judge.py
 COPY fusion-results/server.py /addon/server.py
 COPY fusion-results/lane.toml /addon/lane.toml
 USER 65534:65534

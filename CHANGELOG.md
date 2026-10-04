@@ -33,6 +33,7 @@
 
 ### Final corrections (#40760, #40764)
 
+- Preserve chat text, attachments, references and queue order when a workspace check refuses the request before its first POST. Keep newer composer input intact, and resume retained local requests explicitly without a server pause/resume transaction. (#41097)
 - Librarian absorption evaluations now report malformed or missing judgment answers as failures and record measured monotonic duration for completed, failed and cancelled evaluations.
 - Restore the pre-expansion Keeper prompt draft when fullscreen editing is cancelled, closed, or dismissed through its backdrop; confirmed edits and live save protection remain available. (#40764)
 - Preserve a cleaner stop request issued before its spawned worker acquires the service lease; only a new start clears an earlier stop request. (#40764)

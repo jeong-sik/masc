@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LaneDeclarationError, type LaneDeclarationDocument } from '../api/lane-declarations'
 
-const lane = vi.hoisted(() => ({ fetchLaneAddons: vi.fn(), attachLaneAddon: vi.fn(), observeLaneAddon: vi.fn() }))
+const lane = vi.hoisted(() => ({ fetchLaneAddons: vi.fn(), attachLaneAddon: vi.fn(), observeLaneAddon: vi.fn(), fetchLaneAddonSlice: vi.fn(), preserveLaneAddonEvidence: vi.fn() }))
 const workspace = vi.hoisted(() => ({ refreshExecution: vi.fn() }))
 vi.mock('../store', async original => ({ ...await original<typeof import('../store')>(), ...workspace }))
 const files = vi.hoisted(() => ({ fetchLaneDeclaration: vi.fn(), saveLaneDeclaration: vi.fn() }))
@@ -60,6 +60,64 @@ beforeEach(() => {
 afterEach(() => { cleanup(); resetLaneDeclarationSessionsForTesting(); vi.resetAllMocks() })
 
 describe('Lane declaration editing through the status surface', () => {
+  it.each(['cached', 'blank'])('does not guard unload for an unchanged %s draft after authority return', async kind => {
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    if (kind === 'cached') await open(screen)
+    else await openNew(screen)
+    act(() => observeWorkspace('/workspace-b'))
+    await waitFor(() => expect(screen.queryByLabelText('TOML source')).toBeNull())
+    act(() => observeWorkspace('/workspace'))
+    await screen.findByLabelText('TOML source')
+    expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(true)
+    const leave = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(leave)
+    expect(leave.defaultPrevented).toBe(false)
+  })
+  it.each(['nested/file.toml', 'nested\\file.toml', 'bad\0file.toml'])('explains invalid filename %s without losing the draft', async name => {
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await openNew(screen)
+    const text = '# invalid-name draft\n' + original
+    fireEvent.input(screen.getByLabelText('File name'), { target: { value: name } })
+    fireEvent.input(source(screen), { target: { value: text } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
+    await screen.findByText('Enter a file name without path separators or NUL characters.')
+    expect(source(screen).value).toBe(text)
+    expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+  })
+  it('withdraws frozen slice and selection before accepting another workspace with reused row IDs', async () => {
+    const row = { id: 'shared-row', lane_id: 'shared-worker/value', kind: 'value', title: 'Only A evidence',
+      observed_at: 1, subject_id: 'fixture', actor: null, clock: null, fields: {}, evidence: [], related_ids: [] }
+    const worker = { instance_id: 'shared-worker', run_id: 'run', addon_id: 'fixture', title: 'Shared worker',
+      revision: 'r1', phase: { kind: 'attached' }, configuration: null, incarnation: 'one', action_schema: null,
+      package: { binding_schema: null, presentation: { description: null, readings: [] }, outputs: {} },
+      observation_seq: 1, rows_count: 1, binding: {} }
+    lane.fetchLaneAddons.mockResolvedValue({ ...snapshot, instances: [worker] })
+    lane.fetchLaneAddonSlice.mockResolvedValue({ rows: [row], coverage: [], complete: true })
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByRole('table', { name: 'TOML declarations' })
+    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    await screen.findByText('Only A evidence')
+    fireEvent.click(screen.getByRole('radio'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Only A evidence · shared-row' }))
+    expect(screen.getByRole('region', { name: 'Selected Lane event' })).toBeTruthy()
+    let lateSlice!: (value: { rows: typeof row[]; coverage: never[]; complete: boolean }) => void
+    lane.fetchLaneAddonSlice.mockReturnValueOnce(new Promise(resolve => { lateSlice = resolve }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    let finish!: (value: typeof snapshot) => void
+    lane.fetchLaneAddons.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    act(() => observeWorkspace('/workspace-b'))
+    expect(screen.queryByText('Only A evidence')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Selected Lane event' })).toBeNull()
+    await act(async () => { finish({ ...snapshot, instances: [worker], rows: [{ ...row, title: 'Only B evidence' }] } as unknown as typeof snapshot) })
+    await screen.findByText('Only B evidence')
+    await act(async () => { lateSlice({ rows: [row], coverage: [], complete: true }) })
+    expect(screen.queryByText('Only A evidence')).toBeNull()
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByRole('radio') as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByRole('button', { name: 'Preserve selected evidence' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(lane.preserveLaneAddonEvidence).not.toHaveBeenCalled()
+  })
   it('explains unavailable editing and verifies authority before admitting a fresh configuration', async () => {
     observeWorkspace(null)
     let finish!: () => void
@@ -486,9 +544,10 @@ describe('Lane declaration editing through the status surface', () => {
       })) } })
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByText('Configuration read: incomplete')
-    for (const sourcePath of paths.slice(0, -1)) {
+    for (const sourcePath of paths.slice(0, -2)) {
       expect(screen.queryByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeNull()
     }
+    expect(screen.getByRole('button', { name: `Edit TOML ${directory}/.toml`, exact: true })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: `Edit TOML ${path}`, exact: true }))
     await waitFor(() => expect(source(screen).value).toBe(original))
     expect(files.fetchLaneDeclaration).toHaveBeenCalledTimes(1)

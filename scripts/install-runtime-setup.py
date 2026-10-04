@@ -882,10 +882,16 @@ def prepare_antigravity_account(source, credentials):
             raise ValueError('invalid account receipt')
         credential = receipt['credential_file']
         models = antigravity_catalog_rows(receipt['catalog'])
+        replaced = selected != 'saved' or credential != source.get('credential_file')
         credentials.register_account_reference(credential)
+        if not replaced and not source.get('credential_replaced'):
+            # An existing workspace reference is not ours to delete on cancel.
+            credentials.retain([dict(credential_file=credential)])
     except (KeyError, TypeError, ValueError):
         raise SetupError('Antigravity account selection did not return a readable result')
-    source.update(credential_file=credential, credential_kind='file', credential_replaced=True,
+    if replaced:
+        source['credential_replaced'] = True
+    source.update(credential_file=credential, credential_kind='file',
                   account_catalog=models, provider_timeout_s=receipt['provider_timeout_s'])
     if receipt.get('catalog_error'):
         print(terminal_text(receipt['catalog_error']) + ' Choose Refresh model list to try again.', file=sys.stderr)

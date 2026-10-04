@@ -453,6 +453,54 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertEqual(self.requests[-1][1]['runtime_ids'], ['operator_account.new-model'])
         self.assertEqual(result['runtime_id'], identity)
 
+    def test_antigravity_saved_reference_retains_exact_provider_and_file(self):
+        for action, changed_file, previously_replaced in [
+                ('saved', False, False), ('saved', True, False),
+                ('current', True, False), ('signin', True, False),
+                ('saved', False, True)]:
+            with self.subTest(action=action, changed_file=changed_file, previously_replaced=previously_replaced):
+                original = self.base / 'saved-oauth'
+                replacement = self.base / 'new-oauth'
+                for path in [original, replacement]:
+                    path.write_text('private fixture')
+                    path.chmod(0o600)
+                returned = str(replacement if changed_file else original)
+                source = dict(choice='antigravity', command='agy', credential_file=str(original),
+                              credential_kind='file', origin='runtime_config', provider_id='operator_account',
+                              rows=[dict(id='operator_account.existing', model='existing', max_context=16384, tools=True)])
+                if previously_replaced:
+                    source['credential_replaced'] = True
+                receipt = dict(schema='masc.antigravity_account.v1', credential_file=returned,
+                               provider_timeout_s=180, invocation_verified=False,
+                               catalog=dict(source='antigravity_cli_models', account_availability_verified=False,
+                                            models=[dict(id='existing', label='Existing'), dict(id='new-model', label='New')]))
+                account_calls = []
+                def native(argv, **kwargs):
+                    if argv[1] == 'runtime-antigravity-account':
+                        account_calls.append(argv)
+                        return subprocess.CompletedProcess(argv, 0, json.dumps(receipt), '')
+                    return self.native(argv, **kwargs)
+                replaced = changed_file or action != 'saved' or previously_replaced
+                with SETUP.PendingCredentials('/fixture/masc', self.base) as credentials, \
+                     patch.object(SETUP, 'pick', return_value=[{'saved': 0, 'current': 1, 'signin': 2}[action]]), \
+                     patch.object(SETUP, 'antigravity_context', return_value=8192), \
+                     patch.object(SETUP.subprocess, 'run', side_effect=native):
+                    prepared = SETUP.prepare_antigravity_account(source, credentials)
+                    self.assertEqual(bool(prepared.get('credential_replaced')), replaced)
+                    models, _ = SETUP.source_models('/fixture/masc', prepared, 10)
+                    existing = next(row for row in models if row['id'] == 'existing')
+                    self.assertEqual(existing['existing'] is None, replaced)
+                    _, selected = SETUP.resolve_model_spec(prepared, next(row for row in models if row['id'] == 'new-model'),
+                        10, binary='/fixture/masc', base_path=self.base)
+                    self.assertEqual(selected.get('existing_provider_id'), None if replaced else 'operator_account')
+                    self.assertEqual(self.requests[-1][1].get('existing_provider_id'), selected.get('existing_provider_id'))
+                    self.assertEqual(selected['credential_file'], returned)
+                    self.assertEqual(returned in credentials.pending, replaced)
+                self.assertEqual(Path(returned).exists(), not replaced,
+                                 'cancellation preserves pre-existing references and removes only newly selected ones')
+                self.assertEqual('--credential-file' in account_calls[0], action == 'saved')
+                self.assertEqual('--sign-in' in account_calls[0], action == 'signin')
+
     def test_prepared_implicit_native_home_retains_selected_provider(self):
         source = dict(choice='codex', command='codex', account_home=None, credential_kind='none',
                       origin='runtime_config', provider_id='operator_account', label='Codex')

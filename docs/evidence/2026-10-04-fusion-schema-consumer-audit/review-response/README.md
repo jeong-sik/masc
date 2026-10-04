@@ -16,7 +16,7 @@ manifest.json identifies the source. The runner accepts candidate-checkout and
 shared-checkout-cache paths as its two arguments.
 
 The full consumer-file type check could not complete because cached Masc and
-Operator_tool interfaces have inconsistent assumptions over Masc (typecheck.log).
+Operator_tool interfaces have inconsistent assumptions over Masc (typecheck-failure.txt).
 The focused native slice passes, but it is not the full Keeper schema suite,
 provider fallback or full product build. No CI or production execution ran.
 

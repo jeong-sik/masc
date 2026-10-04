@@ -1,0 +1,12 @@
+{
+  "baseline": "e6f576349f9d54242148d7d3b95e20202256c86c",
+  "native_tests": 5,
+  "red": "admin expected200 received404",
+  "files": {
+    "red.log": "1ef0ad33cfc5d6dd19400f308083f033c26a1f07c91b656f1d6cb3115e80cc0a",
+    "green.log": "06c41a12d28dceb61e467faca99bb5438e5d90a6ae415d322e7bb87c6694108b",
+    "green-build.log": "0e20ea4ec4f6e0d29ed88e9286eaae60a93d7c93df028d7a2bc6c20e58d48ec1",
+    "README.md": "c8253f5df8a6724505d88fc75dc1e60f55ba2aed11bd5fd4af7fe4a4750e8431",
+    "red-build.log": "0e20ea4ec4f6e0d29ed88e9286eaae60a93d7c93df028d7a2bc6c20e58d48ec1"
+  }
+}

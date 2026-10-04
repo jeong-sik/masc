@@ -14,10 +14,13 @@ import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generatio
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { LaneInventoryPanel } from './lane-inventory-panel'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { OnboardingSettings } from './onboarding-settings'
 
 const api = vi.hoisted(() => ({ fetchRuntimeTomlConfig: vi.fn(), previewRuntimeTomlConfig: vi.fn(), saveRuntimeTomlConfig: vi.fn(), fetchRuntimeResolved: vi.fn() }))
 const projectionApi = vi.hoisted(() => ({ fetchStandaloneLanes: vi.fn() }))
 const followup = vi.hoisted(() => ({ resumeSavedModelSetup: vi.fn(), refreshRuntimeConfigConsumers: vi.fn() }))
+const onboardingApi = vi.hoisted(() => ({ fetchSetupStatus: vi.fn(), fetchSetupInventory: vi.fn() }))
+vi.mock('../api/onboarding', async original => ({ ...await original<typeof import('../api/onboarding')>(), ...onboardingApi }))
 const inventoryApi = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
 vi.mock('../api/lane-inventory', async original => ({ ...await original<typeof import('../api/lane-inventory')>(), ...inventoryApi }))
 vi.mock('../api/dashboard-runtime', async original => ({ ...await original<typeof import('../api/dashboard-runtime')>(), ...api }))
@@ -64,6 +67,8 @@ beforeEach(() => {
   })
   followup.resumeSavedModelSetup.mockResolvedValue({ kind: 'active', exactOutputAvailable: true })
   followup.refreshRuntimeConfigConsumers.mockResolvedValue(undefined)
+  onboardingApi.fetchSetupStatus.mockResolvedValue({ schema: 'masc.onboarding_status.v1', base_path: '/fixture/A', selected_model: null, selected_runtime: null, checks: [] })
+  onboardingApi.fetchSetupInventory.mockResolvedValue({ source_revision: 'fixture', runtimes: [] })
   inventoryApi.fetchLaneInventory.mockResolvedValue(parseLaneInventory(inventory))
 })
 afterEach(() => { cleanup(); resetExactLaneActivitySessionsForTesting(); resetRuntimeTomlSessionsForTesting() })
@@ -73,13 +78,14 @@ async function draft() {
 }
 
 describe('Exact activity operator flow', () => {
-  it.each(['success', 'failed', 'authority', 'refresh'])('settles only the resolved setup error after manual retry: %s', async kind => {
+  it.each(['runtime', 'onboarding'].flatMap(surface => ['success', 'failed', 'authority', 'refresh'].map(kind => ({ surface, kind }))))('settles only the resolved setup error after $surface manual retry: $kind', async ({ surface, kind }) => {
     followup.resumeSavedModelSetup.mockResolvedValueOnce({ kind: 'failed', reason: 'activation_failed' })
     if (kind === 'refresh') followup.refreshRuntimeConfigConsumers.mockRejectedValueOnce(new Error('fixture refresh failed'))
     const { authority, session } = await draft()
     await session.save(authority)
     session.expanded.value = true
-    let view = render(html`<div><${RuntimeTomlEditor} /><${ExactLaneActivityPanel} lane=${lane} /></div>`)
+    const RetrySurface = surface === 'runtime' ? RuntimeTomlEditor : OnboardingSettings
+    let view = render(html`<div><${RetrySurface} /><${ExactLaneActivityPanel} lane=${lane} /></div>`)
     await view.findByText(/재개를 확인하지 못했습니다/)
     const retry = deferred<{ kind: 'active'; exactOutputAvailable: boolean } | { kind: 'failed'; reason: 'activation_failed' }>()
     followup.resumeSavedModelSetup.mockReturnValueOnce(retry.promise)

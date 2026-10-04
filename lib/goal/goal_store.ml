@@ -307,8 +307,12 @@ let pending_notification_of_yojson = function
         (match Json_util.get_string json "notification_id", Json_util.get_string json "goal_id",
                Json_util.get_string json "sender", Json_util.get_string json "content" with
          | Some notification_id, Some goal_id, Some sender, Some content
-           when notification_id <> "" && goal_id <> "" && String.trim sender <> "" && content <> "" ->
-             Ok {notification_id; goal_id; sender; content; delivery}
+           when goal_id <> "" && String.trim sender <> "" && content <> "" ->
+             (match Workspace_request_id.of_string notification_id with
+              | Error detail -> rejected ~field:"pending_notifications" detail
+              | Ok request_id ->
+                  let notification_id = Workspace_request_id.to_string request_id in
+                  Ok {notification_id; goal_id; sender; content; delivery})
          | _ -> rejected ~field:"pending_notifications" "invalid notification identity or content")
   | _ -> rejected ~field:"pending_notifications" "notification must be an object"
 
@@ -688,7 +692,7 @@ let transact_goal ?effects config ~goal_id f =
             {event_id=Random_id.hex ~bytes:16; goal_id; store_revision=revision;
              recorded_at=now; kind; payload}) effects.events in
           let notices = List.map (fun (sender, content) ->
-            {notification_id=Random_id.prefixed ~prefix:"wmsg-" ~bytes:16;
+            {notification_id=Workspace_request_id.(create () |> to_string);
              goal_id; sender; content; delivery=Awaiting_recipients}) effects.notifications in
           let next =
             { version = revision

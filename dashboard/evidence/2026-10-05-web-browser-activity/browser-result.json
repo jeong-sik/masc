@@ -1,0 +1,91 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-04T15:39:39.905Z",
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status, Browser panel/session, raw editor, router and API with synthetic HTTP. No backend validation/publication, real Browser sessions, native TUI, CI or deployment.",
+  "checks": [
+    "opening and toggling make no writes",
+    "navigation retains Browser draft",
+    "CAS conflict keeps file and draft",
+    "explicit reapply/save migrates flat paths, preserves other backends and concurrent edit, refreshes activity separately from executor",
+    "independent raw draft retained, old write basis withdrawn",
+    "unconfigured Stagehand can be enabled without changing Automation or claiming an installed executor",
+    "mobile controls without horizontal overflow",
+    "only three explicit previews and saves, one conflict; no model resume, page errors or unexpected routes"
+  ],
+  "reads": 5,
+  "applied": 2,
+  "mutations": [
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "b3d4cec87ba947b671980cfae59b406d780f773bc80b6f0fb9f118b5e5e6ad02"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "5d7989eca814ca66cddf7e1e6aa5e8e8ed026c11fc194fae72a2b6ab3cd36df0"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=true\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=true\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "e118bff336333bd489ade208cb713653d6b82ad11f13c71351c29a22008bc984"
+      }
+    }
+  ],
+  "mobileControls": [
+    {
+      "text": "활동 설정 닫기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "활동 설정 저장",
+      "opacity": "0.38",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "현재 설정 읽기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "초안 버리기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 94,
+      "height": 33.25
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

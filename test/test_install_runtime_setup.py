@@ -400,7 +400,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
             value = dict(runtimes=[dict(id='original.model')], setup_revision=self.revision)
         elif command == 'runtime-setup-batch':
             value = dict(runtime_id=payload['default_runtime_id'], runtime_ids=payload['runtime_ids'],
-                         configured=True, validation='passed', readiness='verified' if payload['verify'] else 'not_probed')
+                         configured=True, commit=dict(durability='durable', warnings=[]), validation='passed', readiness='verified' if payload['verify'] else 'not_probed')
         else:
             self.fail('Unexpected native command: ' + command)
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), '')
@@ -430,6 +430,117 @@ class RuntimeSetupAdapter(unittest.TestCase):
         with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
             SETUP.configure('/fixture/masc', self.base, spec())
         self.assertEqual(self.transports, ['runtime-setup-inventory', 'runtime-setup-render', 'runtime-setup-batch'])
+
+    def test_existing_account_is_resolved_before_terminal_selection_and_batch(self):
+        original = self.native
+        def native(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[1] == 'runtime-setup-render' and '--base-path' in argv:
+                self.assertEqual(argv[argv.index('--base-path') + 1], str(self.base))
+                payload = json.loads(Path(argv[-1]).read_text())
+                result.stdout = json.dumps(dict(runtime_id='operator_account.' + payload['model'], runtime_toml='prepared'))
+            return result
+        source = dict(choice='codex', command='codex', account_home='/fixture/account', credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account')
+        with patch.object(SETUP.subprocess, 'run', side_effect=native), \
+             patch.object(SETUP, 'catalog_models', return_value=[]):
+            identity, selected = SETUP.resolve_model_spec(source, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+            self.assertEqual(identity, 'operator_account.new-model')
+            self.assertEqual(selected['existing_provider_id'], 'operator_account')
+            result = SETUP.configure_many('/fixture/masc', self.base, [selected], [identity],
+                expected_revision=self.revision)
+        self.assertEqual(self.requests[-1][1]['runtime_ids'], ['operator_account.new-model'])
+        self.assertEqual(result['runtime_id'], identity)
+
+    def test_antigravity_saved_reference_retains_exact_provider_and_file(self):
+        for action, changed_file, previously_replaced, save_selected in [
+                ('saved', False, False, False), ('saved', True, False, False),
+                ('saved', True, False, True), ('current', True, False, False),
+                ('signin', True, False, False), ('saved', True, True, False),
+                ('saved', True, True, True)]:
+            with self.subTest(action=action, changed_file=changed_file, previously_replaced=previously_replaced,
+                              save_selected=save_selected):
+                original = self.base / 'saved-oauth'
+                replacement = self.base / 'new-oauth'
+                for path in [original, replacement]:
+                    path.write_text('private fixture')
+                    path.chmod(0o600)
+                returned = str(replacement if changed_file else original)
+                source = dict(choice='antigravity', command='agy', credential_file=str(original),
+                              credential_kind='file', origin='runtime_config', provider_id='operator_account',
+                              provider_timeout_s=824.5,
+                              rows=[dict(id='operator_account.existing', model='existing', max_context=16384, tools=True)])
+                if previously_replaced:
+                    source['credential_replaced'] = True
+                receipt = dict(schema='masc.antigravity_account.v1', credential_file=returned,
+                               provider_timeout_s=180, invocation_verified=False,
+                               catalog=dict(source='antigravity_cli_models', account_availability_verified=False,
+                                            models=[dict(id='existing', label='Existing'), dict(id='new-model', label='New')]))
+                account_calls = []
+                def native(argv, **kwargs):
+                    if argv[1] == 'runtime-antigravity-account':
+                        account_calls.append(argv)
+                        return subprocess.CompletedProcess(argv, 0, json.dumps(receipt), '')
+                    return self.native(argv, **kwargs)
+                replaced = action != 'saved' or previously_replaced
+                selected_file = str(original) if action == 'saved' else returned
+                with SETUP.PendingCredentials('/fixture/masc', self.base) as credentials, \
+                     patch.object(SETUP, 'pick', return_value=[{'saved': 0, 'current': 1, 'signin': 2}[action]]), \
+                     patch.object(SETUP, 'antigravity_context', return_value=8192), \
+                     patch.object(SETUP.subprocess, 'run', side_effect=native):
+                    prepared = SETUP.prepare_antigravity_account(source, credentials)
+                    self.assertEqual(bool(prepared.get('credential_replaced')), replaced)
+                    models, _ = SETUP.source_models('/fixture/masc', prepared, 10)
+                    existing = next(row for row in models if row['id'] == 'existing')
+                    self.assertEqual(existing['existing'] is None, replaced)
+                    _, selected = SETUP.resolve_model_spec(prepared, next(row for row in models if row['id'] == 'new-model'),
+                        10, binary='/fixture/masc', base_path=self.base)
+                    self.assertEqual(selected.get('existing_provider_id'), None if replaced else 'operator_account')
+                    self.assertEqual(self.requests[-1][1].get('existing_provider_id'), selected.get('existing_provider_id'))
+                    self.assertEqual(selected['credential_file'], selected_file)
+                    self.assertEqual(selected['timeout_s'], 824.5 if action == 'saved' else 180)
+                    self.assertEqual(selected_file in credentials.pending, replaced)
+                    if action == 'saved' and changed_file:
+                        self.assertIn(returned, credentials.pending, 'native discovery clone remains cleanup-owned')
+                    # Success retains the selected source, never its discovery clone.
+                    if save_selected:
+                        credentials.retain([selected])
+                self.assertEqual(Path(selected_file).exists(), save_selected or not replaced)
+                if returned != selected_file:
+                    self.assertFalse(Path(returned).exists(), 'cancel or save cleans the native discovery clone')
+                self.assertEqual('--credential-file' in account_calls[0], action == 'saved')
+                self.assertEqual('--sign-in' in account_calls[0], action == 'signin')
+
+    def test_antigravity_inventory_carries_timeout_for_bound_and_unbound_providers(self):
+        row = dict(id='bound.existing', provider_id='bound', display_name='Bound',
+                   protocol='antigravity-cli', command='agy', credential_kind='file',
+                   credential_file='/fixture/oauth', model='existing', provider_timeout_s=824.5)
+        integration = lambda name: dict(id=name, display_name=name, protocol='antigravity-cli',
+            command='agy', credential_kind='file', credential_file='/fixture/oauth',
+            provider_timeout_s=824.5, origin='runtime_config', setup_support='new_connection')
+        inventory = dict(runtimes=[row], integrations=[integration('bound'), integration('unbound')])
+        with patch.object(SETUP, 'official_client_path', return_value=None):
+            sources = SETUP.connection_sources('/fixture/masc', inventory)
+        for provider_id in ['bound', 'unbound']:
+            source = next(row for row in sources if row['provider_id'] == provider_id)
+            self.assertEqual(source['provider_timeout_s'], 824.5)
+
+    def test_prepared_implicit_native_home_retains_selected_provider(self):
+        source = dict(choice='codex', command='codex', account_home=None, credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account', label='Codex')
+        selected_home = str(self.base / 'codex-home')
+        with patch.dict(os.environ, {'CODEX_HOME': selected_home}), \
+             patch.object(SETUP, 'official_client_path', return_value='/located/codex'), \
+             patch.object(SETUP, 'pick', return_value=[0]), \
+             patch.object(SETUP, 'catalog_models', return_value=[]), \
+             patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            prepared = SETUP.prepare_connection('/fixture/masc', source, None)
+            _, selected = SETUP.resolve_model_spec(prepared, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+        self.assertEqual(selected['existing_provider_id'], 'operator_account')
+        self.assertEqual(selected['command'], 'codex')
+        self.assertEqual(selected['account_home'], selected_home)
 
     def test_native_verification_failure_identifies_connection_without_raw_diagnostics(self):
         response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error',
@@ -580,14 +691,51 @@ class RuntimeSetupAdapter(unittest.TestCase):
     def test_unjoined_success_receipt_is_refused(self):
         with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
                 patch.object(SETUP, 'native_setup_command', return_value=dict(runtime_id='wrong.model', runtime_ids=['wrong.model'],
-                    configured=True, validation='passed', readiness='verified')), self.assertRaises(SETUP.SetupError):
+                    configured=True, commit=dict(durability='durable', warnings=[]), validation='passed', readiness='verified')), self.assertRaises(SETUP.SetupError):
             SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True, expected_revision=self.revision)
+
+    def test_visible_save_reports_durability_uncertainty_without_retry(self):
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True,
+                       validation='passed', readiness='verified', commit=dict(durability='unconfirmed', warnings=[]))
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=receipt) as native, \
+                patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                             expected_revision=self.revision), receipt)
+        native.assert_called_once()
+        self.assertIn('disk durability is unconfirmed', stderr.getvalue())
+        self.assertIn('Do not repeat setup', stderr.getvalue())
+        for commit in (None, {}, dict(durability='unknown')):
+            with self.subTest(commit=commit), patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=dict(receipt, commit=commit)), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                                     expected_revision=self.revision)
+
+    def test_lock_release_warning_is_safe_and_does_not_repeat_save(self):
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True,
+                       validation='passed', readiness='verified', commit=dict(durability='durable',
+                       warnings=[dict(code='runtime_config_lock_release_unconfirmed', detail='private-server-path')]))
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=receipt) as native, \
+                patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                             expected_revision=self.revision), receipt)
+        native.assert_called_once()
+        self.assertIn('lock release is unconfirmed', stderr.getvalue())
+        self.assertNotIn('private-server-path', stderr.getvalue())
+        for warnings in (None, [dict(code='unknown')]):
+            with self.subTest(warnings=warnings), patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=dict(receipt,
+                        commit=dict(durability='durable', warnings=warnings))), self.assertRaises(SETUP.SetupError):
+                SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                                     expected_revision=self.revision)
 
     def test_usage_limited_receipt_is_accepted_and_names_the_unmeasured_runtime(self):
         # A spent quota or a rate limit publishes the runtime and the receipt
         # names it, so a published configuration is not reported as
         # unconfirmed.
-        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, validation='passed',
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, commit=dict(durability='durable', warnings=[]), validation='passed',
                        readiness='usage_limited',
                        unverified=[dict(runtime_id='native.model', code='quota_exhausted')])
         def configure(answer, verify=True):
@@ -611,7 +759,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
         # A save that left a bound runtime uncalled is neither verified nor
         # usage-limited. The receipt says which, and a verified receipt that
         # carries the same list is refused instead of read as a full check.
-        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, validation='passed',
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, commit=dict(durability='durable', warnings=[]), validation='passed',
                        readiness='partly_checked', unverified=[], not_rechecked=['native.model'])
         def configure(answer, verify=True):
             with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
@@ -1492,7 +1640,7 @@ class MultipleSelection(unittest.TestCase):
                                                             binary='/fixture/masc')
         native.assert_called_once_with('/fixture/masc', source, 'owned-qwen', 10, load=True)
         self.assertEqual(configured['max_context'], 16384)
-        self.renderer.assert_called_once_with(configured, '/fixture/masc')
+        self.renderer.assert_called_once_with(configured, '/fixture/masc', base_path=None)
         self.assertEqual(identity, 'fixture.native-model')
 
     def test_wizard_ollama_context_uses_native_private_reference(self):
@@ -1730,6 +1878,61 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 with self.assertRaisesRegex(SETUP.SetupError, 'Configuration changed'):
                     SETUP.configure_many(BINARY, base, [spec()], expected_revision=original_selection['setup_revision'])
                 self.assertEqual(before, runtime.read_bytes())
+
+    def test_saved_antigravity_native_clone_reuses_selected_sibling_and_custom_timeout(self):
+        import base64
+        with tempfile.TemporaryDirectory(prefix='saved-antigravity-boundary-') as tmp:
+            base = Path(tmp).resolve()
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            original = base / 'saved-oauth'
+            encode = lambda value: base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip('=')
+            original.write_text(json.dumps(dict(auth_method='synthetic-oauth',
+                token=dict(access_token='fixture', token_type='Bearer', refresh_token='fixture', expiry='2000-01-01T00:00:00Z'),
+                id_token=encode(dict(alg='RS256')) + '.' + encode(dict(iss='https://accounts.google.com',
+                    sub='saved-antigravity-fixture', aud='synthetic-client')) + '.synthetic-signature')))
+            original.chmod(0o600)
+            client = base / 'agy-fixture'
+            catalog = dict(status='SUCCESS', num_turns=0, usage=dict(total_tokens=0),
+                           command=dict(name='models', data=dict(models=[dict(id='existing', label='Existing'),
+                                                                      dict(id='new-model', label='New model')])))
+            client.write_text('#!' + sys.executable + '\nimport json,sys\nassert sys.argv[-1] == "models"\nprint(' + repr(json.dumps(catalog)) + ')\n')
+            client.chmod(0o700)
+            provider_text = lambda name: ('[providers.' + name + ']\nprotocol = "antigravity-cli"\n'
+                'command = ' + json.dumps(str(client)) + '\nis-non-interactive = true\ntimeout-s = 824.5\n'
+                '[providers.' + name + '.credentials]\ntype = "file"\npath = ' + json.dumps(str(original)) + '\n')
+            (config / 'runtime.toml').write_text('[runtime]\ndefault = "selected.existing"\n'
+                + provider_text('selected') + provider_text('sibling')
+                + '[models.existing]\napi-name = "existing"\nmax-context = 8192\ntools-support = true\n'
+                  '[selected.existing]\nwizard-default = true\n[sibling.existing]\nwizard-default = true\n')
+            real_run = subprocess.run
+            clones = []
+            def record_native(argv, **kwargs):
+                response = real_run(argv, **kwargs)
+                if argv[1] == 'runtime-antigravity-account' and response.returncode == 0:
+                    clones.append(json.loads(response.stdout)['credential_file'])
+                return response
+            env = {key: value for key, value in os.environ.items() if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            with patch.dict(os.environ, env, clear=True), SETUP.PendingCredentials(BINARY, base) as credentials, \
+                 patch.object(SETUP.subprocess, 'run', side_effect=record_native), \
+                 patch.object(SETUP, 'pick', return_value=[0]), \
+                 patch.object(SETUP, 'antigravity_context', return_value=8192):
+                inventory = SETUP.configured_inventory(BINARY, base)
+                source = next(row for row in SETUP.connection_sources(BINARY, inventory) if row['provider_id'] == 'selected')
+                prepared = SETUP.prepare_connection(BINARY, source, credentials)
+                self.assertEqual(len(clones), 1)
+                self.assertNotEqual(clones[0], str(original), 'exercise the real native producer clone')
+                models, _ = SETUP.source_models(BINARY, prepared, 10)
+                self.assertIsNotNone(next(row for row in models if row['id'] == 'existing')['existing'])
+                runtime_id, selected = SETUP.resolve_model_spec(prepared, next(row for row in models if row['id'] == 'new-model'),
+                    10, binary=BINARY, base_path=base)
+                self.assertTrue(runtime_id.startswith('selected.'), 'exact sibling choice survives native resolution')
+                self.assertEqual(selected['credential_file'], str(original))
+                self.assertEqual(selected['timeout_s'], 824.5)
+                self.assertEqual(selected['existing_provider_id'], 'selected')
+                credentials.retain([selected])
+            self.assertTrue(original.exists())
+            self.assertFalse(Path(clones[0]).exists())
 
     def test_multiple_models_bind_imp_and_reselection_preserves_both_connections(self):
         import tomllib

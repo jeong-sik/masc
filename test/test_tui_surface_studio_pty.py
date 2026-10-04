@@ -5,19 +5,21 @@ import json
 import os
 import re
 import sys
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_repositories as _keyboard_repositories
 
 
 
 def run(executable, no_color=False):
-    fixtures = h.planning_selection_http_fixtures()
-    planning_response = fixtures[h.PLANNING_PATH]
+    fixtures = _keyboard_harness.planning_selection_http_fixtures()
+    planning_response = fixtures[_keyboard_harness.PLANNING_PATH]
     assert isinstance(planning_response, tuple)
     planning = planning_response[1]
     assert isinstance(planning, dict)
     planning["task_backlog"] = {"todo": 11, "claimed": 12, "in_progress": 13,
         "awaiting_verification": 14, "done": 15, "cancelled": 16}
-    _, repositories = h.repositories_fixture()
+    _, repositories = _keyboard_repositories.repositories_fixture()
     repository_rows = repositories["repositories"]
     assert isinstance(repository_rows, list)
     repository_rows[0]["status"] = "wire\n\x1b[9D"
@@ -42,7 +44,7 @@ def run(executable, no_color=False):
         "Recover using surface-refresh-recovery-token")
     def read_repositories():
         return (503, {"error": refresh_error}) if refresh_failed else (200, repositories)
-    fixtures[h.REPOSITORIES_PATH] = read_repositories
+    fixtures[_keyboard_repositories.REPOSITORIES_PATH] = read_repositories
     fixtures["/api/v1/runtime/params"] = (200, {"parameters": [
         {"key": "studio.enabled", "current": True, "default": False,
          "has_override": True, "meta": {"description": "Enable the observed feature",
@@ -54,22 +56,22 @@ def run(executable, no_color=False):
     def interact(process, fd, _slave, output, _base):
         nonlocal refresh_failed
         def key(value, needle):
-            return h.send_and_wait(process, fd, output, value, needle)
+            return _keyboard_harness.send_and_wait(process, fd, output, value, needle)
         def capture(name, rows, columns, needle, selected_name=None, *, raw=False):
-            h.resize_and_wait(process, fd, output, rows=rows, columns=columns+1,
-                needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
-                needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=rows, columns=columns+1,
+                needle=needle, controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=rows, columns=columns,
+                needle=needle, controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             if b"wire\n" in frame or b"\x1b[9D" in frame:
                 raise AssertionError("repository status injected a newline or terminal cursor control")
-            if selected_name is not None and not h.keeper_row_selected(selected_name).search(frame):
+            if selected_name is not None and not _keyboard_harness.keeper_row_selected(selected_name).search(frame):
                 raise AssertionError(f"selected repository {selected_name!r} vanished from its table")
             print("STUDIO_CAPTURE="+json.dumps({"suite":"test_tui_surface_studio_pty", "name":name+("-no-color" if no_color else ""),
                 "rows":rows,"columns":columns,"provenance":"CI fixture PTY",
                 "frame_b64":base64.b64encode(frame).decode(),
-                "screen":b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
-            return frame if raw else h.screen_text(frame)
-        h.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
+                "screen":b"\n".join(_keyboard_harness.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
+            return frame if raw else _keyboard_harness.screen_text(frame)
+        _keyboard_harness.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
         key(b":go Work\r",b"plan-alpha-29424")
         wide=capture("work-wide",36,160,b"Goals")
         for needle in ("Goals · measured outcomes".encode(),"Tasks · Backlog:".encode(),
@@ -84,23 +86,40 @@ def run(executable, no_color=False):
         for needle in (b"Goals:", b"Backlog:", b"done=15", b"cancelled=16"):
             if needle not in narrow:
                 raise AssertionError(f"Narrow Work omitted {needle!r}")
-        joined = h.unwrapped(narrow)
+        joined = _keyboard_chat.unwrapped(narrow)
         for needle in (b"Goals done +0", b"Tasks done +0", b"Goal reviews pending +0"):
             if needle not in joined:
                 raise AssertionError(f"Narrow Work omitted baseline change {needle!r}")
         key(b"j", b"plan-beta-29424")
-        selected = h.screen_text(bytes(output))
+        selected = _keyboard_harness.screen_text(bytes(output))
         if b"goal-b-29424" not in selected:
             raise AssertionError("wrapped summaries obscured selected goal details")
         key(b"k", b"plan-alpha-29424")
         narrower = capture("work-narrow-60", 24, 60, b"goal-a-29424")
         for needle in (b"todo=11", b"claimed=12", b"in_progress=13",
                        b"awaiting_verification=14", b"done=15", b"cancelled=16"):
-            if needle not in h.unwrapped(narrower):
+            if needle not in _keyboard_chat.unwrapped(narrower):
                 raise AssertionError(f"60-column Work omitted {needle!r}")
         capture("work-short", 16, 80, b"goal-a-29424")
         key(b"j", b"goal-b-29424")
         key(b"k", b"goal-a-29424")
+        # Wrapped summaries must leave the cursor's row, its identity and
+        # the action footer visible even at the minimum supported viewport.
+        for index, (move, title, identity) in enumerate((
+                (None, b"plan-alpha", b"goal-a-29424"),
+                (b"j", b"plan-beta", b"goal-b-29424"),
+                (b"k", b"plan-alpha", b"goal-a-29424"))):
+            if move is not None:
+                key(move, identity)
+            frame = capture(f"work-minimum-{index}", 16, 40, b"sort:", raw=True)
+            visible_rows = _keyboard_harness.screen_rows(frame)
+            visible = b"\n".join(visible_rows.get(row, b"") for row in range(1, 17))
+            if not any(b"> " in row and title in row
+                       for number, row in visible_rows.items() if 1 <= number <= 16):
+                raise AssertionError(f"40x16 Work hid selected goal {title!r}")
+            for needle in (identity, b"Right / Enter:detail"):
+                if needle not in visible:
+                    raise AssertionError(f"40x16 Work hid {needle!r}")
         for heading in ("Goals · measured outcomes".encode(), "Tasks · Backlog:".encode()):
             if heading in narrow:
                 raise AssertionError("Narrow Work retained wide summary cards")
@@ -157,7 +176,7 @@ def run(executable, no_color=False):
             # Check reachability through its advertised extent, then restore it.
             seen = set()
             while True:
-                screen = h.screen_text(bytes(output))
+                screen = _keyboard_harness.screen_text(bytes(output))
                 joined = re.sub(rb"\s+", b"", screen.replace("│".encode(), b""))
                 seen.update(value for value in expected if value in joined)
                 position = re.search(rb"\b(\d+)-(\d+)/(\d+)\b", screen)
@@ -166,15 +185,15 @@ def run(executable, no_color=False):
                 first, last, total = map(int, position.groups())
                 if last >= total:
                     break
-                h.press_and_settle(process, fd, output, b"\x1b[6~")
+                _keyboard_harness.press_and_settle(process, fd, output, b"\x1b[6~")
                 next_position = re.search(rb"\b(\d+)-(\d+)/(\d+)\b",
-                    h.screen_text(bytes(output)))
+                    _keyboard_harness.screen_text(bytes(output)))
                 if next_position is None or int(next_position.group(1)) <= first:
                     raise AssertionError("System selected document stopped before its end")
             if seen != set(expected):
                 raise AssertionError(f"System omitted selected content {set(expected) - seen!r}")
-            h.write_all(fd, output, b"\x1b[H")
-            h.drain_until_quiet(process, fd, output)
+            _keyboard_harness.write_all(fd, output, b"\x1b[H")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
 
         read_selected((b"Currenttrue", b"Defaultfalse", b"Enabletheobservedfeature", b"override"))
         capture("system-short",16,80,b"studio.enabled")
@@ -194,7 +213,7 @@ def run(executable, no_color=False):
                        b'Default"mention_or_thread"', b"override"))
         key(b":go Dashboard\r",b"MASC Dashboard")
         os.write(fd,b"q")
-    h.run_terminal_scenario(executable,description="surface studio"+(" no color" if no_color else ""),
+    _keyboard_harness.run_terminal_scenario(executable,description="surface studio"+(" no color" if no_color else ""),
         interact=interact,http_fixtures=fixtures,workspace="Surface fixture",
         extra_env={"NO_COLOR":"1"} if no_color else None)
 

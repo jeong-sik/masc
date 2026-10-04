@@ -139,6 +139,7 @@ val task_assignee_of_status : task_status -> string option
 val task_performer_of_status : task_status -> string option
 val task_status_is_terminal : task_status -> bool
 val task_status_is_done : task_status -> bool
+(** Wire names from the same closed vocabulary used by the status parser. *)
 val valid_task_status_strings : string list
 val task_status_to_yojson : task_status -> Yojson.Safe.t
 val task_status_of_yojson : Yojson.Safe.t -> (task_status, string) result
@@ -383,6 +384,16 @@ type pending_completion_rejection =
   }
 [@@deriving show]
 
+(** Approval delivery is committed with the completed Task. *)
+type pending_completion_approval =
+  { task_id : string
+  ; verification_id : string
+  ; producer : string
+  ; authority : completion_authority
+  ; committed_at : string
+  }
+[@@deriving show]
+
 type task_deletion_phase = Cleanup_required of string list | Cleanup_verified
 [@@deriving show]
 
@@ -408,6 +419,9 @@ val task_deletion_receipt_to_yojson : task_deletion_receipt -> Yojson.Safe.t
 type backlog =
   { tasks : task list
   ; pending_completion_rejections : pending_completion_rejection list
+  ; pending_completion_approvals : pending_completion_approval list
+    (** Optional empty delivery set on the wire; an explicitly malformed or
+        duplicate field/identity is rejected, never interpreted as empty. *)
   ; task_deletion_receipts : task_deletion_receipt list
   ; last_updated : string
   ; version : int

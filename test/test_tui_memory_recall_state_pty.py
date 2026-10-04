@@ -9,7 +9,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_memory as _keyboard_memory
 
 
 
@@ -17,7 +18,7 @@ import test_tui_keyboard_input as h
 def run(executable, baseline=False):
     print("STUDIO_BINARY_SHA256=" + hashlib.sha256(Path(executable).read_bytes()).hexdigest())
     for failed_now in (False, True):
-        fixtures = h.memory_facts_http_fixtures()
+        fixtures = _keyboard_memory.memory_facts_http_fixtures()
         health = fixtures["/api/v1/dashboard/keeper-memory-health"][1]
         row = health["keepers"][0]
         row["snapshot_bytes"] = 262144
@@ -29,13 +30,13 @@ def run(executable, baseline=False):
                                 librarian_failures=row["librarian_failures"])
 
         def interact(process, fd, _slave, output, _base):
-            h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
-            h.wait_for_output(process, fd, output, b"Memory saved", start=0, timeout=10)
+            _keyboard_harness.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
+            _keyboard_harness.wait_for_output(process, fd, output, b"Memory saved", start=0, timeout=10)
             for columns in (140, 80):
-                frame = h.resize_and_wait(process, fd, output, rows=40, columns=columns,
-                                         needle=b"Memory saved", controls=(h.FULL_REDRAW,),
+                frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=columns,
+                                         needle=b"Memory saved", controls=(_keyboard_harness.FULL_REDRAW,),
                                          final_cursor=b"\x1b[?25l")
-                plain = h.screen_text(frame)
+                plain = _keyboard_harness.screen_text(frame)
                 expected = (b"ok" if failed_now else b"degraded") if baseline else (
                     b"memory degraded" if failed_now else b"memory ok")
                 status_rows = [line for line in plain.splitlines() if b"alpha" in line and b"Memory saved" in line]
@@ -51,11 +52,11 @@ def run(executable, baseline=False):
                     "rows": 40, "columns": columns,
                     "provenance": "installed binary fixture PTY baseline" if baseline else "candidate binary fixture PTY",
                     "frame_b64": base64.b64encode(frame).decode(),
-                    "screen": b"\n".join(h.screen_rows(frame).get(r, b"") for r in range(1, 41)).decode(errors="replace"),
+                    "screen": b"\n".join(_keyboard_harness.screen_rows(frame).get(r, b"") for r in range(1, 41)).decode(errors="replace"),
                 }), flush=True)
             os.write(fd, b"q")
 
-        h.run_terminal_scenario(executable, description="Memory state: " + ("failed now" if failed_now else "recovered"),
+        _keyboard_harness.run_terminal_scenario(executable, description="Memory state: " + ("failed now" if failed_now else "recovered"),
                                 interact=interact, http_fixtures=fixtures)
     print("Memory recall state PTY baseline recorded" if baseline else "Memory recall state PTY: PASS")
 

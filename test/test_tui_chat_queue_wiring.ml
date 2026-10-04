@@ -865,7 +865,7 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   }
 ;;
 
-let preflight_input () =
+let preflight_input ?(submission_seq = 0) () =
   let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
   let request = {entry.sent_request with
     Keeper_chat.message = "unsent input";
@@ -873,7 +873,7 @@ let preflight_input () =
       mime_type="image/png"; size=3; data="YWJj"}];
     references = [Keeper_chat.Ref_file_id "file-1"]} in
   let item : Masc_tui_keeper_chat_queue.item =
-    {request; submitted_at=1.; submission_seq=0;
+    {request; submitted_at=1.; submission_seq;
      intent=Masc_tui_keeper_chat_queue.Next; causal_parent_request_id=None} in
   {entry with sent_request=request; phase=Tui_types.Turn_preflight item}, item
 ;;
@@ -910,6 +910,9 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
   Buffer.add_string state.msg_input "newer composer";
   state.msg_references <- [Keeper_chat.Ref_url "https://example.invalid/new.png"];
   let entry, item = preflight_input () in
+  let staged = Q.restore_unsent Q.empty item in
+  state.msg_queued <- (match Q.take staged ~request_id:item.request.request_id with
+    | Some (_, rest) -> rest | None -> fail "preflight did not own its staged request");
   for i = 1 to Q.cap do
     let request = Keeper_chat.create_request ~keeper_name:"alpha"
       ~message:(Printf.sprintf "newer-%d" i) () in
@@ -950,7 +953,7 @@ let test_preflight_recovery_preserves_order_and_steer_intent () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_target_keeper_name <- Some "alpha";
   let older, older_item = preflight_input () in
-  let newer, newer_item = preflight_input () in
+  let newer, newer_item = preflight_input ~submission_seq:1 () in
   let steer_item = {newer_item with Q.intent=Q.Steer_after_interrupt;
     causal_parent_request_id=Some older_item.request.request_id; submission_seq=1} in
   let steer = {newer with Tui_types.phase=Tui_types.Turn_preflight steer_item} in
@@ -1090,6 +1093,33 @@ let test_empty_composer_cannot_reverse_already_queued_input () =
       = [item.request.request_id; later.request_id]);
   check bool "neither input can auto-dispatch after recovery" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
+let test_preflight_restoration_preserves_submission_chronology () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let push queue message =
+    let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message () in
+    match Q.push queue ~submitted_at:1. request with
+    | Ok (queue, _) -> queue, request
+    | Error detail -> fail detail in
+  let take queue request = match Q.take queue ~request_id:request.Keeper_chat.request_id with
+    | Some pair -> pair | None -> fail "staged input disappeared" in
+  let queue, _older = push Q.empty "older stopped input" in
+  let queue, newer = push queue "newer preflight" in
+  let preflight, held = take queue newer in
+  let restored = Q.restore_unsent held preflight in
+  (match Q.take_newest_for_keeper restored ~keeper_name:"alpha" with
+   | Some (latest, _) -> check string "Ctrl-P/Ctrl-K select the newer refused input"
+       newer.request_id latest.request.request_id
+   | None -> fail "restored input disappeared");
+  let queue, first = push Q.empty "first preflight" in
+  let preflight, empty_after_take = take queue first in
+  let queue, later = push empty_after_take "later input" in
+  let restored = Q.restore_unsent queue preflight in
+  (match Q.take_newest_for_keeper restored ~keeper_name:"alpha" with
+   | Some (latest, _) -> check string "extracting the last item does not restart chronology"
+       later.request_id latest.request.request_id
+   | None -> fail "later input disappeared")
 ;;
 
 let test_offscreen_preflight_recovery_retains_its_owner () =
@@ -4333,6 +4363,7 @@ let () =
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
         ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
         ; test_case "empty composer preserves already queued input order" `Quick test_empty_composer_cannot_reverse_already_queued_input
+        ; test_case "preflight restoration preserves submission chronology" `Quick test_preflight_restoration_preserves_submission_chronology
         ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal

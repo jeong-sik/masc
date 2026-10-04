@@ -783,6 +783,17 @@ let await_initialize_under_deadline ~clock ~timeout_sec ~lang_id promise =
     (fun () -> Ok (Eio.Promise.await promise))
 ;;
 
+let language_server_initialize_params ~workspace_root =
+  `Assoc
+    [ "rootUri", `String (Lsp_uri.file_uri_of_path workspace_root)
+    ; "rootPath", `String workspace_root
+    ; "processId", `Int (Unix.getpid ())
+    ; "capabilities", `Assoc
+        [ "textDocument", `Assoc
+            [ "publishDiagnostics", `Assoc [ "versionSupport", `Bool true ] ] ]
+    ]
+;;
+
 (** Ensure LSP process exists for a language.
     Spawns + initializes on first use, blocking until ready. *)
 let ensure_lsp_process cs lang_id =
@@ -818,16 +829,7 @@ let ensure_lsp_process cs lang_id =
            ~on_exit:(Some (fun ~reason -> note_process_exit cs proc ~reason))
            ~on_notification:(fun ~client_id:_ ~method_ params ->
              send_client_notification cs method_ params);
-         let init_params =
-           `Assoc
-             [ "rootUri", `String ("file://" ^ workspace_root)
-             ; "rootPath", `String workspace_root
-             ; "processId", `Int (Unix.getpid ())
-             ; "capabilities", `Assoc
-                 [ "textDocument", `Assoc
-                     [ "publishDiagnostics", `Assoc [ "versionSupport", `Bool true ] ] ]
-             ]
-         in
+         let init_params = language_server_initialize_params ~workspace_root in
          let promise =
            Lsp_message_router.send_request
              cs.router
@@ -1295,6 +1297,7 @@ module For_testing = struct
   let anchor_authority_of_source = anchor_authority_of_source
   let workspace_root_after_initialize = workspace_root_after_initialize
   let initialize_result_json = initialize_result_json
+  let language_server_initialize_params = language_server_initialize_params
   let inbound_dispatch_worker_count = Lsp_proxy_limits.inbound_dispatch_worker_count
   let await_initialize_under_deadline = await_initialize_under_deadline
 

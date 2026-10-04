@@ -749,7 +749,12 @@ let run_keeper_invocation_turn_admitted_inner
                       Model_inference_metrics.compute
                         ~base_path:ctx.config.base_path
                         ~window_minutes
-                      |> Model_inference_metrics.render_keeper_prompt_feedback)
+                      |> Result.fold
+                        ~ok:Model_inference_metrics.render_keeper_prompt_feedback
+                        ~error:(fun error ->
+                          Log.Keeper.warn "%s: telemetry feedback unavailable: %s"
+                            meta.name (Model_inference_metrics.read_error_to_string error);
+                          ""))
                 | Some false | None -> ""
               in
               let dynamic_context =

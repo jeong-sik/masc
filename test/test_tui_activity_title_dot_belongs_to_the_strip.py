@@ -2,13 +2,11 @@
 import os
 import re
 import sys
-import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-)
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_observer as _keyboard_observer
+
+
 
 TITLE = b"MASC Activity"
 # A dot with nothing on its left: the row ran out of width, the strip drew
@@ -25,31 +23,31 @@ COUNTED = re.compile(rb"\(\d+ rows? \xc2\xb7 \d+ events? held\)")
 
 
 def title_row(rows: dict[int, bytes], columns: int) -> bytes:
-    index = h.screen_row_of(rows, TITLE)
+    index = _keyboard_harness.screen_row_of(rows, TITLE)
     if index < 0:
         raise AssertionError(f"at {columns} columns Activity drew no title")
     return rows[index].rstrip()
 
 
 def run(executable: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     # A feed that answers and closes empty, so the title holds a count. One
     # refused while opening reads "(load failed)" instead, and the reading this
     # scenario measures across widths would be a different one.
-    fixtures["/mcp"] = h.observer_http_fixtures()["/mcp"]
-    fixtures["/mcp?sse_kind=observer"] = h.RawHttpResponse(
+    fixtures["/mcp"] = _keyboard_observer.observer_http_fixtures()["/mcp"]
+    fixtures["/mcp?sse_kind=observer"] = _keyboard_harness.RawHttpResponse(
         200, b"", content_type="text/event-stream")
 
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
-        h.palette_go(process, fd, output, b"go activity", TITLE)
-        h.wait_for_output(process, fd, output, COUNTED, start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        _keyboard_harness.palette_go(process, fd, output, b"go activity", TITLE)
+        _keyboard_harness.wait_for_output(process, fd, output, COUNTED, start=0, timeout=10)
 
         # Wide: the strip draws, and the dot after it separates the tabs from
         # the reading the row holds.
-        drawn = h.resize_and_wait(process, fd, output, rows=22, columns=110,
-                                  needle=TITLE, controls=(h.FULL_REDRAW,))
-        row = title_row(h.screen_rows(drawn), 110)
+        drawn = _keyboard_harness.resize_and_wait(process, fd, output, rows=22, columns=110,
+                                  needle=TITLE, controls=(_keyboard_harness.FULL_REDRAW,))
+        row = title_row(_keyboard_harness.screen_rows(drawn), 110)
         for needle in (b"Events", b"Logs"):
             if needle not in row:
                 raise AssertionError(
@@ -63,9 +61,9 @@ def run(executable: str) -> None:
                 f"{row!r}")
 
         # Narrow: the strip has no room at all. The dot goes with it.
-        drawn = h.resize_and_wait(process, fd, output, rows=22, columns=66,
-                                  needle=TITLE, controls=(h.FULL_REDRAW,))
-        row = title_row(h.screen_rows(drawn), 66)
+        drawn = _keyboard_harness.resize_and_wait(process, fd, output, rows=22, columns=66,
+                                  needle=TITLE, controls=(_keyboard_harness.FULL_REDRAW,))
+        row = title_row(_keyboard_harness.screen_rows(drawn), 66)
         if b"Events" in row:
             raise AssertionError(
                 f"at 66 columns the strip still had room, so this scenario "
@@ -76,10 +74,10 @@ def run(executable: str) -> None:
         # And the reading the dot used to introduce is still there.
         if b"rows" not in row:
             raise AssertionError(f"at 66 columns the title lost its reading: {row!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
                             description="Activity title across widths",
                             interact=interact, http_fixtures=fixtures)
 

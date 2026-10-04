@@ -205,7 +205,7 @@ let try_handle_with_outcome
                          ; "op", `String op
                          ; "path", `String target
                          ; "pattern", `String pattern
-                         ; "via", `String Keeper_sandbox_read_runner.backend_via
+                         ; "via", `String (Keeper_sandbox_read_runner.backend_via ~meta)
                          ; "status", Keeper_alerting_path.process_status_to_json st
                          ; "matches", (if is_ok then lines_to_json ~limit out else `List [])
                          ]

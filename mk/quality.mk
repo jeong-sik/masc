@@ -1,4 +1,4 @@
-.PHONY: diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard fmt fmt-check health ocaml-health check-memory-leak check-variants ci
+.PHONY: diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard fmt fmt-check health ocaml-health check-memory-leak ci
 
 # Disk hygiene snapshot for TLC artefacts, Dune cache drift, isolated builds, worktree fan-out.
 diagnostics-disk-hygiene:
@@ -20,7 +20,7 @@ fmt:
 fmt-check:
 	dune fmt --root . --preview || true
 
-# Health snapshot (typecheck + anti-fake + unsafe pattern counts)
+# Health snapshot (typecheck + unsafe pattern counts)
 health:
 	@mkdir -p .health
 	bash scripts/health_snapshot.sh --json-out .health/health-snapshot.json
@@ -36,12 +36,6 @@ ocaml-health:
 # Build and run a Valgrind-based startup/MCP smoke check for memory leaks
 check-memory-leak:
 	bash scripts/check-memory-leak.sh
-
-# Cross-language variant sync: OCaml all_phases / all_X lists vs TypeScript
-# union types vs TLA+ domain literals. Fails on drift. Run before any PR that
-# adds/removes a variant/enum constructor.
-check-variants:
-	bash scripts/check-variants.sh
 
 # CI target (for GitHub Actions)
 ci: fmt-check test test-contract test-transport

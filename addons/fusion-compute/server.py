@@ -14,7 +14,7 @@ import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from protocol import (InvalidInput, SamplingClient, SamplingFailure, Source,
-                      boolean, evidence, number, object_value, optional_string, stable_id, string, serve)
+                      boolean, decode_json, evidence, number, object_value, optional_string, stable_id, string, serve)
 from fusion_sampling import coverage, response_problem, validate_sampling_result
 
 
@@ -68,7 +68,13 @@ def retained(value, label):
 def model_references(value, *, pending=False):
     value = object_value(value, "model evidence")
     keys = ("request",) if pending and "outcome" not in value else ("request", "outcome")
-    return {key: retained([value.get(key)], f"model {key}")[0]
+    if set(value) != set(keys):
+        raise InvalidInput("model evidence must contain exactly the retained request and permitted outcome")
+    for key in keys:
+        reference = object_value(value[key], f"model {key}")
+        if set(reference) != {"uri", "sha256"}:
+            raise InvalidInput(f"model {key} reference must contain exactly uri and sha256")
+    return {key: retained([value[key]], f"model {key}")[0]
             for key in keys}
 
 
@@ -171,7 +177,10 @@ def prepare(binding, sources):
                              " Answer in free text; identify missing evidence and failed inputs.",
                "includeContext": "none", "maxTokens": limit}
     if "temperature" in binding:
-        request["temperature"] = number(binding["temperature"], "temperature")
+        temperature = number(binding["temperature"], "temperature")
+        if not 0 <= temperature <= 2:
+            raise InvalidInput("temperature must be between 0 and 2")
+        request["temperature"] = temperature
     return analysis_id, role, request, references, statuses
 
 
@@ -203,7 +212,7 @@ def observe(binding: dict, sources: tuple[Source, ...], client: SamplingClient) 
         # A protocol error without evidence remains a tool error, not a made-up
         # provider result. The host broker serializes its outcome in message.
         try:
-            terminal = object_value(json.loads(error.get("message", "")), "host outcome")
+            terminal = object_value(decode_json(error.get("message", "")), "host outcome")
         except (json.JSONDecodeError, TypeError) as cause:
             raise InvalidInput("Sampling failure did not carry retained host evidence") from cause
         status = terminal.get("status")

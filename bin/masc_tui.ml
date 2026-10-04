@@ -4371,9 +4371,15 @@ let launch_memory_facts_read state ~mailbox ~key read =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (memory_facts, request) ->
       state.memory_facts <- memory_facts;
+      (* The read's answer belongs to the workspace authority that asked for
+         it. A same-port identity change withdraws this browser's owner and
+         with it this request; an unscoped delivery would let workspace A's
+         held facts land in workspace B's browser because the request key
+         names a Keeper, not a workspace (#41163). *)
+      let enqueue_scoped = workspace_enqueue state in
       Masc_tui_async_read.launch
         ~deliver:(fun result ->
-          enqueue_async mailbox (Memory_facts_loaded (request, result)))
+          enqueue_scoped mailbox (Memory_facts_loaded (request, result)))
         read
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
@@ -10110,6 +10116,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.presets_error <- None;
   state.presets_cursor <- 0;
   state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
+  (* The facts browser reads a workspace's keepers. The key names a Keeper,
+     so without this clear a held A read's late completion would still match
+     B's pending request and populate B's browser with A's facts (#41163). *)
+  state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
   state.preset_save_draft <- None;
   state.preset_restore_armed <- None;
   state.preset_report <- None;

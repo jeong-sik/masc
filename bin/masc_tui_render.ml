@@ -3567,7 +3567,7 @@ let render_exact_lane_provider_editor (state : state) editor =
      box_line_styled buf cols ~style:(Theme.recede ())
        "  J/K reorder · x remove · Enter/d settings · e TOML · Esc back";
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Changes save immediately; success is shown after the saved order reloads");
+       "  Changes save immediately; file and application results are shown separately");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;

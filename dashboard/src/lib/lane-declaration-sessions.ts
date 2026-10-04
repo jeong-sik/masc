@@ -33,7 +33,8 @@ function syncUnloadGuard() {
 export class LaneDeclarationSession {
   private authority: ExecutionWorkspaceAuthority | null = null
   readonly state = signal<{ target: LaneDeclarationEditorTarget | null; newEditorKey: string;
-    drafts: Record<string, LaneDeclarationDraft> }>({ target: null, newEditorKey: crypto.randomUUID(), drafts: {} })
+    activityTarget: { sourcePath: string; installationId: string } | null;
+    drafts: Record<string, LaneDeclarationDraft> }>({ target: null, activityTarget: null, newEditorKey: crypto.randomUUID(), drafts: {} })
   constructor(readonly workspaceRoot: string, readonly directory: string) {}
 
   attach(authority: ExecutionWorkspaceAuthority) {
@@ -80,6 +81,13 @@ export class LaneDeclarationSession {
     if (!state.drafts[key] && sourcePath !== null) void this.read(key, sourcePath, authority, true)
   }
   close() { this.state.value = { ...this.state.peek(), target: null } }
+
+  openActivity(sourcePath: string, installationId: string, authority: ExecutionWorkspaceAuthority) {
+    if (this.admits(authority)) this.state.value = { ...this.state.peek(), activityTarget: { sourcePath, installationId } }
+  }
+  closeActivity(authority: ExecutionWorkspaceAuthority) {
+    if (this.admits(authority)) this.state.value = { ...this.state.peek(), activityTarget: null }
+  }
 
   prepare(fileName: string, text: string, authority: ExecutionWorkspaceAuthority): string {
     if (!this.admits(authority)) throw new Error('Workspace changed. Review this package in the current workspace before preparing a draft.')
@@ -153,7 +161,7 @@ export class LaneDeclarationSession {
           ...(value.text !== request.source_text && value.text !== destination.text
             ? [{ text: value.text, sourceRevision: receipt.document.source_revision }] : [])] }
       } else remaining[savedKey] = next
-      this.state.value = { drafts: remaining,
+      this.state.value = { ...state, drafts: remaining,
         target: state.target?.key === key ? { key: savedKey, sourcePath: savedKey } : state.target,
         newEditorKey: state.newEditorKey === key ? crypto.randomUUID() : state.newEditorKey }
       syncUnloadGuard()

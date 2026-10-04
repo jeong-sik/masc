@@ -12,6 +12,7 @@ import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 import { LaneAddonReadings } from './lane-addon-readings'
 import { LaneDeclarationEditor } from './lane-declaration-editor'
 import { LanePackageInstaller } from './lane-package-installer'
+import { LanePackageActivityPanel } from './lane-package-activity-panel'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
@@ -371,7 +372,10 @@ export function LaneAddonsPanel() {
             <th>Declaration / file</th><th>Desired revision</th><th>Applied revision / instance</th><th>Configuration status</th>
           </tr></thead><tbody>${configuration.declarations.map(declaration => html`<tr key=${declaration.id}>
             <td>${declaration.id}<div class="break-all">${declaration.source_path}</div>
-              <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button></td>
+              <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button>
+              <button type="button" class=${buttonClass} disabled=${session === null || authority === null}
+                onClick=${() => { if (session && authority) session.openActivity(declaration.source_path, declaration.id, authority) }}
+                aria-label=${`Configure activity for ${declaration.id}`}>On / off</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
             <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
             <td>${!declaration.enabled
@@ -389,6 +393,10 @@ export function LaneAddonsPanel() {
     </div>` : session === null && html`<p role="status">${reading
       ? 'Reading the current workspace’s TOML configuration before opening retained drafts…'
       : 'Current workspace TOML configuration is unavailable. Refresh to retry; your retained drafts are unchanged.'}</p>`}
+    ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageActivityPanel}
+      documents=${session} authority=${authority} snapshot=${snapshot} onRefresh=${() => {
+        if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
+      }} />`}
     ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
       key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
       authority=${authority} documents=${session} snapshot=${snapshot} />`}

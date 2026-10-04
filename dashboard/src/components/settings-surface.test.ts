@@ -2104,7 +2104,7 @@ describe('SettingsSurface', () => {
       if (activity) {
         const session = exactLaneActivitySessionFor(executionWorkspaceAuthority.peek()!, { laneId: 'librarian_exact', required: false })
         await waitFor(() => expect(session.state.value.receipt).not.toBeNull())
-        await waitFor(() => expect(session.state.value.followupError).not.toBeNull())
+        await waitFor(() => expect(session.state.value.setupResumeError).not.toBeNull())
       }
       await waitFor(() => expect(container.textContent).toContain('late-save-visible-model'))
       if (providerFailure) {

@@ -7973,23 +7973,22 @@ let composing_for_keeper (state : state) keeper_name =
   && Buffer.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
-(* The first local item owns dispatch order even while it is retained. *)
+(* A fresh Enter may bypass input held by an explicit stop. A refused
+   preflight keeps its place until local resume; unmarked input remains owned
+   by the generic drainer and its composer/recall checks. *)
 let next_authorized_keeper_input state keeper_name =
-  match Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name with
-  | [] -> None
-  | item :: _ ->
-    match List.find_opt (fun (name, id, _) ->
-      name = keeper_name && id = item.request.request_id) state.keeper_interactive_waiting with
-    | Some (_, _, Awaiting_control held)
-      when held.generation = keeper_chat_control_generation state keeper_name ->
-        Some (item, held.target)
-    | Some (_, _, (Awaiting_control _ | Retained_after_stop | Retained_before_dispatch)) -> None
-    | None ->
-      let being_recalled = Option.exists (fun editing ->
-        String.equal editing.Masc_tui_keeper_chat_queue.request.keeper_name keeper_name)
-        state.msg_recall_replaces in
-      if composing_for_keeper state keeper_name || being_recalled then None
-      else Some (item, None)
+  let rec ready = function
+    | [] -> None
+    | (item : Masc_tui_keeper_chat_queue.item) :: rest ->
+      match List.find_opt (fun (name, id, _) ->
+        name = keeper_name && id = item.request.request_id) state.keeper_interactive_waiting with
+      | Some (_, _, Awaiting_control held)
+        when held.generation = keeper_chat_control_generation state keeper_name ->
+          Some (item, held.target)
+      | Some (_, _, Retained_before_dispatch) -> None
+      | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
+  in
+  ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that

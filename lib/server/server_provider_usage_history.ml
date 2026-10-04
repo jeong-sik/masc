@@ -33,6 +33,7 @@ let record_json ~scope ~observed_at (report : Usage.report) =
     | Complete_snapshot ->
         [ `Assoc [ "record", `String "complete_snapshot";
             "scope_id", `String scope_id; "source", `String source;
+            "state", `String (if report.windows = [] then "reported_no_windows" else "reported");
             "observed_at", `Float observed_at ] ] in
   snapshot @ List.map
     (fun (window : Usage.window) ->
@@ -174,11 +175,15 @@ let read config ~now ~window =
       let* scope_id = string "scope_id" json in
       let* source = string "source" json in
       let* observed_at = number "observed_at" json in
+      let* empty = match member "state" json with
+        | Some (`String "reported_no_windows") -> Ok true
+        | Some (`String "reported") | None -> Ok false
+        | Some _ -> Error "provider usage history: invalid snapshot state" in
       if in_window observed_at then (
         let key = scope_id, source, Log.format_utc_date_of observed_at in
         match Hashtbl.find_opt snapshots key with
-        | Some held when held >= observed_at -> ()
-        | Some _ | None -> Hashtbl.replace snapshots key observed_at);
+        | Some (held, _) when held >= observed_at -> ()
+        | Some _ | None -> Hashtbl.replace snapshots key (observed_at, empty));
       Ok ()
     in
     let consume_item item =
@@ -189,7 +194,7 @@ let read config ~now ~window =
           let* point = decode item in
           if in_window point.observed_at then (
             let day = Log.format_utc_date_of point.observed_at in
-            let key = point.scope_id, point.kind, point.limit_id, day in
+            let key = point.scope_id, point.source, point.kind, point.limit_id, day in
             match Hashtbl.find_opt latest key with
             | Some held when held.observed_at >= point.observed_at -> ()
             | Some _ | None -> Hashtbl.replace latest key point);
@@ -230,8 +235,19 @@ let read config ~now ~window =
         let points = Hashtbl.fold (fun _ point acc ->
           let key = point.scope_id, point.source, Log.format_utc_date_of point.observed_at in
           match Hashtbl.find_opt snapshots key with
-          | Some at when point.observed_at < at -> acc
+          | Some (at, _) when point.observed_at < at -> acc
           | Some _ | None -> point :: acc) latest [] in
+        (* Source replacement must happen before choosing one daily point:
+           a later empty source must not erase another source's observation. *)
+        let daily = Hashtbl.create 128 in
+        List.iter (fun point ->
+          let key = point.scope_id, point.kind, point.limit_id,
+            Log.format_utc_date_of point.observed_at in
+          match Hashtbl.find_opt daily key with
+          | Some held when compare (held.observed_at, held.source)
+              (point.observed_at, point.source) >= 0 -> ()
+          | Some _ | None -> Hashtbl.replace daily key point) points;
+        let points = Hashtbl.fold (fun _ point acc -> point :: acc) daily [] in
         let points =
           List.sort
             (fun a b ->
@@ -239,11 +255,28 @@ let read config ~now ~window =
               compare (key a) (key b))
             points
         in
+        (* An empty report is an observation, not a zero utilization point.
+           A different source's surviving windows still make that scope/day a
+           numeric report. Markers without a shape assert only replacement. *)
+        let empty_days = Hashtbl.create 16 in
+        Hashtbl.iter (fun (scope_id, _source, day) (observed_at, empty) ->
+          if empty && not (List.exists (fun point -> point.scope_id = scope_id
+            && Log.format_utc_date_of point.observed_at = day) points) then
+            let key = scope_id, day in
+            match Hashtbl.find_opt empty_days key with
+            | Some held when held >= observed_at -> ()
+            | Some _ | None -> Hashtbl.replace empty_days key observed_at) snapshots;
+        let empty_reports = Hashtbl.fold (fun (scope_id, _) observed_at rows ->
+            (scope_id, observed_at) :: rows) empty_days []
+          |> List.sort compare
+          |> List.map (fun (scope_id, observed_at) -> `Assoc [
+               "scope_id", `String scope_id; "observed_at", `Float observed_at]) in
         Ok
           (`Assoc
             [ "days", `Int (days_of_window window)
             ; "generated_at", `Float now
             ; "sampling", `String "latest_provider_report_per_utc_day"
             ; "unreadable_reports", `Int !unreadable
+            ; "reported_no_windows", `List empty_reports
             ; "points", `List (List.map point_json points)
             ])

@@ -49,6 +49,12 @@ function usageWindowText(window: ProviderUsageWindow): string {
   return `${usageWindowLabel(window)} ${value} · 관측 ${new Date(window.observed_at * 1000).toLocaleString()}${reset}`
 }
 
+function reportsUsageWindows(provider: DashboardRuntimeProviderSnapshot): boolean {
+  return provider.usage_read_configured === true
+    || provider.protocol === 'claude-code' || provider.protocol === 'codex-app-server'
+    || provider.protocol === 'antigravity-cli'
+}
+
 function ProviderAccount({ client, usage }: { client: DashboardRuntimeProviderSnapshot; usage: UsageState }) {
   const runtimeId = client.runtime_id ?? client.provider
   const providerId = client.provider_id ?? client.provider
@@ -118,7 +124,7 @@ export function OverviewRuntimeStats() {
   useEffect(() => { loadRuntimeCatalog() }, [])
   const catalog = runtimeCatalogState.value
   useEffect(() => {
-    if (catalog.status !== 'loaded' || catalog.data.length === 0) return
+    if (catalog.status !== 'loaded' || !catalog.data.some(reportsUsageWindows)) return
     const controller = new AbortController()
     let inFlight = false
     setUsage({ kind: 'loading' })
@@ -160,6 +166,7 @@ export function OverviewRuntimeStats() {
   const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()
   if (catalog.status === 'loaded') {
     for (const provider of catalog.data) {
+      if (!reportsUsageWindows(provider)) continue
       const id = provider.provider_id ?? provider.provider
       if (!accounts.has(id)) accounts.set(id, provider)
     }
@@ -187,7 +194,7 @@ export function OverviewRuntimeStats() {
     </div>
     <p class="text-sm text-text-muted">Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.</p>
     ${catalog.status === 'error' ? html`<p role="alert">제공자 계정 목록을 읽지 못했습니다: ${catalog.message}</p>` : null}
-    ${catalog.status === 'loaded' && clients.length === 0 ? html`<p>설정된 제공자 런타임이 없습니다.</p>` : null}
+    ${catalog.status === 'loaded' && clients.length === 0 ? html`<p>사용량 창을 보고할 수 있는 제공자 계정이 없습니다.</p>` : null}
     ${clients.length > 0 ? html`
       <div class="flex flex-wrap gap-2" aria-label="제공자 계정별 런타임" data-testid="overview-provider-accounts">
         ${clients.map(client => html`<${ProviderAccount}

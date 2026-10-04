@@ -23,7 +23,7 @@ const response = { window_minutes: 60,
 }
 it.each([false, true])('reads and renders HTTP dollar usage with official clients present=%s', async mixed => {
   const http = { provider: 'openrouter.one', runtime_id: 'openrouter.one', provider_id: 'openrouter',
-    provider_display_name: 'OpenRouter account', protocol: 'openai-compatible-http', models: [] }
+    provider_display_name: 'OpenRouter account', protocol: 'openai-compatible-http', usage_read_configured: true, models: [] }
   runtimeCatalogState.value = { status: 'loaded', data: [http,
     { ...http, provider: 'openrouter.two', runtime_id: 'openrouter.two' },
     ...(mixed ? [{ provider: 'codex.one', provider_id: 'codex', protocol: 'codex-app-server', models: [] }] : []),
@@ -99,6 +99,20 @@ it('shows each official client account once with its provider-reported usage', a
   expect(view.getByTestId('overview-client-codex_two').textContent).toContain('로그인 미측정')
   expect(post).toHaveBeenCalledWith('/api/v1/runtime/official-client/probe', { runtime_id: 'claude_one.shared' })
 })
+it('omits ordinary HTTP/local and Muse rows without a usage-window producer', async () => {
+  runtimeCatalogState.value = { status: 'loaded', data: [
+    { provider: 'plain.model', provider_id: 'plain', protocol: 'openai-compatible-http', usage_read_configured: false, models: [] },
+    { provider: 'local.model', provider_id: 'local', protocol: 'ollama-http', models: [] },
+    { provider: 'muse.model', provider_id: 'muse', protocol: 'muse-serve', models: [] },
+  ] }
+  vi.mocked(get).mockResolvedValue(response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())
+  expect(view.queryByTestId('overview-provider-accounts')).toBeNull()
+  expect(view.getByText('사용량 창을 보고할 수 있는 제공자 계정이 없습니다.')).toBeTruthy()
+  expect(vi.mocked(get).mock.calls.some(([path]) => path === '/api/v1/runtime/resolved')).toBe(false)
+})
+
 it('shows a catalog failure instead of silently omitting account monitoring', async () => {
   runtimeCatalogState.value = { status: 'error', message: 'HTTP 503' }
   vi.mocked(get).mockResolvedValue(response)

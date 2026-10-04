@@ -16,13 +16,18 @@ let fixture test = Eio_main.run (fun env ->
     Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ -> ());
     Fs_compat.remove_tree base) (fun () -> History.install config; test config scope day))
 
-let points config now =
+let history config now =
   match History.read config ~now ~window:History.Seven_days with
   | Error detail -> fail detail
   | Ok json ->
       let open Yojson.Safe.Util in
       check int "all persisted records remain readable" 0 (json |> member "unreadable_reports" |> to_int);
-      json |> member "points" |> to_list
+      (match Tui_decode_usage.decode_provider_usage_history json with
+       | Ok _ -> () | Error detail -> fail detail);
+      json
+
+let points config now = Yojson.Safe.Util.(history config now |> member "points" |> to_list)
+let empty_reports config now = Yojson.Safe.Util.(history config now |> member "reported_no_windows" |> to_list)
 
 let kind point = Yojson.Safe.Util.(point |> member "kind" |> to_string)
 let observed point = Yojson.Safe.Util.(point |> member "observed_at" |> to_float)
@@ -46,6 +51,9 @@ let removed_cap_and_empty_snapshot () = fixture (fun config scope day ->
     (decode Usage.decode_openrouter_key {|{"data":{"limit":null}}|});
   let rows = points config (day +. 31.) in
   check int "empty report clears today, not prior days" 1 (List.length rows);
+  let empty = empty_reports config (day +. 31.) in
+  check int "successful empty day remains reported" 1 (List.length empty);
+  check (float 0.) "empty snapshot has its actual observation time" (day +. 30.) (observed (List.hd empty));
   check (float 0.) "yesterday retains its observed cap" (day -. 1.) (observed (List.hd rows));
   (* A delayed old-format journal append must not revive a window removed by
      the later snapshot. This also covers reading the pre-marker store format. *)
@@ -78,6 +86,41 @@ let complete_and_sparse_sources () = fixture (fun config scope day ->
   let primary = List.find (fun row -> kind row = "five_hour") rows in
   check (float 0.) "sparse primary retains its original observation" (day +. 10.) (observed primary))
 
+let empty_day_and_recovery () = fixture (fun config scope day ->
+  let empty = decode Usage.decode_openrouter_key {|{"data":{"limit":null}}|} in
+  Usage.record ~scope ~observed_at:(day +. 10.) empty;
+  check int "empty-only account has no invented utilization" 0 (List.length (points config (day +. 11.)));
+  check int "empty-only account retains the successful report" 1 (List.length (empty_reports config (day +. 11.)));
+  Usage.record ~scope ~observed_at:(day +. 20.)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":20,"limit_remaining":15}}|});
+  check int "numeric recovery replaces empty state" 0 (List.length (empty_reports config (day +. 21.)));
+  check int "numeric recovery remains measured" 1 (List.length (points config (day +. 21.)));
+  Usage.record ~scope ~observed_at:(day +. 30.) empty;
+  Usage.record ~scope ~observed_at:(day +. 40.)
+    (decode Usage.decode_codex_rate_limits_updated {|{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300}}}|});
+  check int "another source's surviving window prevents an empty-day claim" 0
+    (List.length (empty_reports config (day +. 41.)));
+  check int "another source's window remains" 1 (List.length (points config (day +. 41.))))
+
+let overlapping_sources () = fixture (fun config scope day ->
+  let codex = decode Usage.decode_codex_rate_limits_updated
+    {|{"rateLimits":{"limitId":"shared","primary":{"usedPercent":10,"windowDurationMins":300}}}|} in
+  let antigravity disabled = decode Usage.decode_antigravity_usage (Printf.sprintf
+    {|{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"shared","window":"5h","remaining_fraction":0.2,"disabled":%b}]}]}}}|} disabled) in
+  Usage.record ~scope ~observed_at:(day +. 10.) codex;
+  Usage.record ~scope ~observed_at:(day +. 20.) (antigravity false);
+  let rows = points config (day +. 21.) in
+  check int "same logical window has one daily point" 1 (List.length rows);
+  check (float 0.) "newest surviving source selected" (day +. 20.) (observed (List.hd rows));
+  Usage.record ~scope ~observed_at:(day +. 30.) (antigravity true);
+  let rows = points config (day +. 31.) in
+  check int "other source survives complete omission of same-kind window" 1 (List.length rows);
+  check (float 0.) "surviving source keeps its original timestamp" (day +. 10.) (observed (List.hd rows));
+  check int "another surviving source prevents a false empty day" 0
+    (List.length (empty_reports config (day +. 31.))))
+
 let () = run "provider usage durable snapshots" ["history", [
+  test_case "overlapping source windows survive another source's empty report" `Quick overlapping_sources;
+  test_case "empty-only day, recovery and another reporting source" `Quick empty_day_and_recovery;
   test_case "removed cap, empty report, prior day and delayed journal" `Quick removed_cap_and_empty_snapshot;
   test_case "complete bucket omission and sparse event semantics" `Quick complete_and_sparse_sources]]

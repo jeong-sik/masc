@@ -72,6 +72,11 @@ type provider_usage_history_point = {
   puhp_observed_at : float;
 }
 
+type provider_usage_empty_report = {
+  puhe_scope_id : string;
+  puhe_observed_at : float;
+}
+
 type provider_usage_history = {
   puh_days : int;
   puh_generated_at : float;
@@ -79,6 +84,7 @@ type provider_usage_history = {
       (** Stored reports in the window the server could not read and left
           out. A gap they leave is unknown, not a quiet day. *)
   puh_points : provider_usage_history_point list;
+  puh_reported_no_windows : provider_usage_empty_report list;
 }
 
 val decode_provider_usage_history :

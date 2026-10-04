@@ -73,6 +73,27 @@ describe('raw runtime.toml revision-checked write', () => {
     expect(error).not.toBeInstanceOf(RuntimeTomlRevisionConflict)
   })
 
+  it.each([
+    { error: 'runtime config parse failed: invalid TOML' },
+    { ok: false, error: 'runtime value rejected', validation: { valid: false, issues: [] } },
+  ])('classifies the raw route structured 400 as a definite precommit refusal', async body => {
+    const fetchMock = reply(body, 400)
+    await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.toMatchObject({ name: 'RuntimeTomlSaveRejected' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    [500, { error: 'write failed' }], [422, { error: 'validation failed' }],
+    [400, { error: { detail: 'unrecognized response' } }],
+    [400, { error: 'applied but refresh failed', config_applied: true }],
+    [400, { error: 'unknown outcome', config_application: { state: 'indeterminate' } }],
+    [400, { error: 'read required', authoritative_reload_required: true }],
+  ])('does not turn status %s or an ambiguous error into a definite rejection', async (status, body) => {
+    reply(body, status as number)
+    const error = await saveRuntimeTomlConfig('# draft', revision).catch(error => error)
+    expect(error).toBeInstanceOf(ApiRequestError)
+  })
+
   it('keeps a network failure indeterminate instead of inventing a current revision', async () => {
     const failure = new TypeError('connection lost')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure))

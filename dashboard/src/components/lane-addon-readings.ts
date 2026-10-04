@@ -4,17 +4,20 @@ import { isRecord } from './common/normalize'
 
 type ReadingValue =
   | { kind: 'value'; text: string }
-  | { kind: 'unavailable'; reason: 'missing' | 'not_object' | 'wrong_type' | 'unsafe_integer' }
+  | { kind: 'unavailable'; reason: 'missing' | 'not_object' | 'wrong_type' | 'unsafe_integer' | 'formatter_limit' }
 
 function jsonNumberError(value: unknown): 'unsafe_integer' | 'wrong_type' | null {
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return 'wrong_type'
-    return Number.isInteger(value) && !Number.isSafeInteger(value) ? 'unsafe_integer' : null
-  }
-  const children = Array.isArray(value) ? value : isRecord(value) ? Object.values(value) : []
-  for (const child of children) {
-    const reason = jsonNumberError(child)
-    if (reason !== null) return reason
+  const pending: unknown[] = [value]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (typeof current === 'number') {
+      if (!Number.isFinite(current)) return 'wrong_type'
+      if (Number.isInteger(current) && !Number.isSafeInteger(current)) return 'unsafe_integer'
+      continue
+    }
+    const children = Array.isArray(current) ? current : isRecord(current) ? Object.values(current) : []
+    // Reverse push preserves the original depth-first, left-to-right error order.
+    for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index])
   }
   return null
 }
@@ -44,8 +47,13 @@ function readingValue(reading: LaneAddonReading, fields: LaneAddonRow['fields'])
     case 'json': {
       const reason = jsonNumberError(value)
       if (reason !== null) return { kind: 'unavailable', reason }
-      const text = JSON.stringify(value)
-      if (text !== undefined) return { kind: 'value', text }
+      try {
+        const text = JSON.stringify(value)
+        if (text !== undefined) return { kind: 'value', text }
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error
+        return { kind: 'unavailable', reason: 'formatter_limit' }
+      }
       break
     }
   }
@@ -57,6 +65,7 @@ const unavailableReason = {
   not_object: 'field path does not address an object',
   wrong_type: 'field does not match declared display format',
   unsafe_integer: 'integer exceeds JavaScript’s exact range',
+  formatter_limit: 'JSON nesting exceeds this browser’s formatter capacity',
 } as const
 
 /** Package-local Lane IDs are resolved only within the declaring instance.

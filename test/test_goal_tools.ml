@@ -287,8 +287,8 @@ let test_goal_upsert_and_list () =
 ;;
 
 (* A goal in [phase], for fixtures. upsert_goal only creates Executing goals;
-   the phase is then moved with the store's compare-and-update, the same
-   primitive the lifecycle handlers write through. *)
+   the phase is then seeded with the store's compare-and-update. Production
+   cancellation decides and records its audit through a Goal transaction. *)
 let upsert_goal_in_phase config ~title phase =
   match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
   | Error error -> Error error

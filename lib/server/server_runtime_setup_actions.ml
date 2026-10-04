@@ -23,7 +23,7 @@ let status_of_error : error -> Httpun.Status.t = function
       | Runtime_setup_batch.Validation_failed _ | Runtime_setup_batch.Commit_refused _) -> `Bad_request
   | Save_failed (Runtime_setup_batch.Changed_configuration | Runtime_setup_batch.Lock_unavailable) -> `Conflict
   | Save_failed (Runtime_setup_batch.Configuration_unavailable | Runtime_setup_batch.Child_not_started _
-      | Runtime_setup_batch.Write_failed | Runtime_setup_batch.Rollback_failed) -> `Service_unavailable
+      | Runtime_setup_batch.Write_failed _) -> `Service_unavailable
   | Save_failed (Runtime_setup_batch.Verification_failed _ | Runtime_setup_batch.Verification_unreadable _) -> `Bad_gateway
 let ( let* ) = Result.bind
 let fields allowed required = function

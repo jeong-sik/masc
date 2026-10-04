@@ -36,6 +36,10 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+type config_commit_error =
+  | Config_commit_refused of string
+  | Config_commit_write_failed of Fs_compat.atomic_replace_failure
+
 (* Where the exact-output registry reads its targets. The server builds them
    from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
    full replacement catalog, whose [[targets]] rows are then the whole set and
@@ -2266,7 +2270,7 @@ let runtime_config_atomic_failure
     match failure.Fs_compat.exception_ with
     | Eio.Cancel.Cancelled _ ->
       Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)
+    | _ -> Error (Config_commit_write_failed failure)
 ;;
 
 let runtime_config_write_outcome
@@ -2930,14 +2934,15 @@ let record_exact_output_commit ~path ~previous_view (receipt : config_commit_rec
   receipt
 ;;
 
-let commit_runtime_config_text
+let commit_config_text_locked
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
-    ~path
+    ~runtime_config_path:path
     content
   =
   let observation = config_observation ~path content in
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     validate_save_text ~config_path:path content
+    |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   let previous_view = exact_output_report_view () in
   let committed = record_exact_output_commit ~path ~previous_view in
@@ -2952,6 +2957,7 @@ let commit_runtime_config_text
   let runtimes, _, _, _, _, _, _, _ = loaded in
   let* plan =
     plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
+    |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   match plan with
   | Commit_without_registry ->
@@ -2991,8 +2997,8 @@ let commit_runtime_config_text
      with
      | Error error ->
        Error
-         ("exact-output registry replacement reservation rejected: "
-          ^ Runtime_exact_output_registry.publication_error_to_string error)
+         (Config_commit_refused ("exact-output registry replacement reservation rejected: "
+          ^ Runtime_exact_output_registry.publication_error_to_string error))
      | Ok (Runtime_exact_output_registry.Not_committed failure) ->
        runtime_config_atomic_failure
          ~replacement_visible:false
@@ -3014,6 +3020,13 @@ let commit_runtime_config_text
        |> Result.map committed)
 ;;
 
+let commit_runtime_config_text ?replace_file ~path content =
+  commit_config_text_locked ?replace_file ~runtime_config_path:path content
+  |> Result.map_error (function
+      | Config_commit_refused detail -> detail
+      | Config_commit_write_failed failure -> Fs_compat.atomic_replace_failure_to_string failure)
+;;
+
 let save_config_text_with_replace_file
     ?runtime_config_path
     ~replace_file
@@ -3033,18 +3046,6 @@ let save_config_text ?runtime_config_path content =
     ?runtime_config_path
     ~replace_file:Fs_compat.save_file_atomic_strict_staged
     content
-;;
-
-(* The write half of {!save_config_text} for a caller already inside the
-   config write lock: [with_config_lock] took the durable lock and resolved
-   the keeper journal, so this goes straight to the commit -- validation, the
-   atomic replace and the registry republish. The setup wizard saves through
-   this rather than replacing the file itself; a plain file write leaves the
-   published runtime list at its previous snapshot until the next restart,
-   so the account the wizard saved was invisible to the running server
-   (task-2054). *)
-let commit_config_text_locked ?replace_file ~runtime_config_path content =
-  commit_runtime_config_text ?replace_file ~path:runtime_config_path content
 ;;
 
 (* The read-modify-write form of [save_config_text]. A caller that loads the

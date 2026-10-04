@@ -202,7 +202,7 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
     | Ok _
     | Error (Batch.Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
             | Child_not_started _ | Validation_failed _ | Commit_refused _ | Verification_failed _
-            | Verification_unreadable _ | Write_failed | Rollback_failed | Lock_unavailable) -> false in
+            | Verification_unreadable _ | Write_failed _ | Lock_unavailable) -> false in
   Alcotest.check Alcotest.bool "verified status with a failure attached is refused" true
     (unreadable "print(report(a[3],failure={'code':'timed_out','message':'late','detail':None}))");
   Alcotest.check Alcotest.bool "a key the writer never writes is refused" true
@@ -261,26 +261,50 @@ let test_usage_limit_publishes () = fixture (fun base runtime binary spec origin
      | Error (Batch.Verification_failed { runtime_id; code = "provider_rejected"; _ }) -> runtime_id = verified_id
      | Ok _ | Error _ -> false);
   Alcotest.check Alcotest.string "a refused save publishes nothing" before (text runtime))
-let test_rollback () = fixture (fun _base runtime _binary _spec original ->
-  let sibling = Filename.concat (Filename.dirname runtime) "sibling.toml" in
-  let real path mode contents = Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
-    Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out contents) in
-  List.iter (fun stage ->
-    let injected = ref false in
-    let replace path mode contents =
-      if path = runtime && not !injected then (
-        injected := true;
+let test_commit_failures () =
+  List.iter (fun stage -> fixture (fun base runtime binary spec original ->
+    let registry = Runtime.For_testing.snapshot () in
+    Fun.protect ~finally:(fun () -> Runtime.For_testing.restore registry) (fun () ->
+      fake base binary "pass";
+      let added = spec "atomic-account" in
+      let id = (Runtime_setup_spec.render added).runtime_id in
+      let revision = get (Batch.observe ~base_path:base) in
+      let before = Runtime.get_runtimes () in
+      let replace_file path mode contents =
         (match stage with Fs_compat.Before_rename -> () | Fs_compat.After_rename ->
-          (match real path mode contents with Ok () -> () | Error _ -> Alcotest.fail "fixture write failed"));
-        Error {Fs_compat.path;stage;exception_=Sys_error "fixture replacement failure";
-               backtrace=Printexc.get_callstack 0})
-      else real path mode contents in
-    Alcotest.check Alcotest.bool "reported write failure restores both files" true
-      (Batch.For_testing.publish ~replace ~files:[sibling,"new sibling";runtime,"new runtime"] = Error Batch.Write_failed);
-    Alcotest.check Alcotest.string "runtime restored even after visible failed rename" original (text runtime);
-    Alcotest.check Alcotest.bool "new sibling removed by rollback" false (Sys.file_exists sibling);
-    Alcotest.check Alcotest.int "rollback retains permissions" 0o640 (Unix.stat runtime).st_perm)
-    [Fs_compat.Before_rename;Fs_compat.After_rename])
+          match Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
+            Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out contents) with
+          | Ok () -> () | Error _ -> Alcotest.fail "fixture rename failed");
+        Error {Fs_compat.path;stage;exception_=Sys_error "fixture storage failure";
+               backtrace=Printexc.get_callstack 0} in
+      let result = Batch.For_testing.configure ~replace_file ~binary ~base_path:base
+        ~expected_revision:revision ~specs:[added] ~runtime_ids:[id]
+        ~default_runtime_id:id ~verify:false () in
+      match stage, result with
+      | Fs_compat.Before_rename, Error (Batch.Write_failed _) ->
+        Alcotest.check Alcotest.string "prior bytes preserved" original (text runtime);
+        Alcotest.check Alcotest.bool "registry unchanged before rename" true
+          (before = Runtime.get_runtimes ())
+      | Fs_compat.After_rename, Ok receipt ->
+        Alcotest.check Alcotest.bool "visible source is retained" true (text runtime <> original);
+        Alcotest.check Alcotest.bool "visible account published" true
+          (List.exists (fun (runtime:Runtime_instance.t) -> runtime.id=id) (Runtime.get_runtimes ()));
+        Alcotest.check Alcotest.string "HTTP and CLI receipt retains uncertainty" "unconfirmed"
+          Yojson.Safe.Util.(Batch.receipt_json receipt |> member "commit" |> member "durability" |> to_string);
+        Alcotest.check Alcotest.bool "typed receipt retains uncertainty" true
+          (match receipt.commit.durability with Runtime.Durability_unconfirmed _ -> true | Durable -> false)
+      | _, Error error -> Alcotest.fail (Batch.error_message error)
+      | _, Ok _ -> Alcotest.fail "pre-rename failure reported a commit")))
+    [Fs_compat.Before_rename; Fs_compat.After_rename]
+let test_final_validation_refusal () = fixture (fun base runtime binary spec original ->
+  fake base binary "p.write_text('invalid = [')";
+  let added = spec "refused-account" in
+  let id = (Runtime_setup_spec.render added).runtime_id in
+  let revision = get (Batch.observe ~base_path:base) in
+  Alcotest.check Alcotest.bool "final validation remains a refusal, not storage failure" true
+    (match apply base binary [added] [id] revision false with
+     | Error (Batch.Commit_refused _) -> true | Ok _ | Error _ -> false);
+  Alcotest.check Alcotest.string "refusal retains original bytes" original (text runtime))
 let test_credential_commit_join () = fixture (fun base _runtime binary _spec _original ->
   Eio.Switch.run (fun sw ->
     let previous = Sys.getenv_opt "XDG_CONFIG_HOME" in
@@ -360,5 +384,6 @@ let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "verification report is read back typed" `Quick test_verification_report;
   Alcotest.test_case "a usage limit publishes the runtime unmeasured" `Quick test_usage_limit_publishes;
   Alcotest.test_case "verification probes only what the save changes" `Quick test_probes_only_what_changes;
-  Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback;
+  Alcotest.test_case "atomic commit failure preserves visibility and durability" `Quick test_commit_failures;
+  Alcotest.test_case "final validation remains a typed refusal" `Quick test_final_validation_refusal;
   Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

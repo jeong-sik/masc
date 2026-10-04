@@ -432,6 +432,8 @@ let test_bound_models_follow_account_home () = fixture (fun base runtime binary 
 let test_status_of_error () =
   let check name expected error =
     Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
+  check "commit storage failure is 503" `Service_unavailable (Actions.Save_failed (Runtime_setup_batch.Write_failed "disk full"));
+  check "commit validation refusal is 400" `Bad_request (Actions.Save_failed (Runtime_setup_batch.Commit_refused "invalid source"));
   check "missing net is 503" `Service_unavailable Actions.Network_unavailable;
   check "unreadable configuration is 503" `Service_unavailable Actions.Configuration_unavailable;
   check "wrong body is 400" `Bad_request Actions.Invalid_request;

@@ -240,9 +240,24 @@ let contains text part =
    unmeasured. The screen says so and names each such runtime on its own row,
    so a long runtime id is never cut behind the notice, and re-reading the
    list keeps that account instead of reporting a verified save. *)
+let uncertain_durability_save () =
+  let receipt durability = `Assoc ["configured",`Bool true; "readiness",`String "verified";
+    "commit",`Assoc ["durability",durability]] in
+  let t=Login.create "codex" in
+  let saved=match Login.saved t (receipt (`String "unconfirmed")) with
+    | Ok saved -> saved | Error detail -> fail detail in
+  check bool "visible save retains uncertain durability" true
+    (saved=Login.Saved_durability_unconfirmed Login.Saved_verified);
+  check bool "warning is visible" true (contains t.notice "내구성을 확인하지 못했습니다");
+  Login.refresh_saved t saved (Error "offline");
+  check bool "refresh failure keeps durability warning" true (contains t.notice "내구성을 확인하지 못했습니다");
+  check bool "retry refreshes and does not save again" true (Login.key t "r"=Login.Refresh_saved saved);
+  List.iter (fun unknown -> check bool "missing or unknown durability is not durable" true
+    (Result.is_error (Login.saved (Login.create "codex") (receipt unknown))))
+    [`Null; `String "unknown"; `Bool true]
 let usage_limited_save () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  let receipt ?(selected=["codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]) rows = `Assoc ["configured",`Bool true;
+  let receipt ?(selected=["codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]) rows = `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable"];
     "readiness",`String "usage_limited";"runtime_ids",`List (List.map (fun id -> `String id) selected);"unverified",`List rows] in
   let row id code = `Assoc ["runtime_id",`String id;"code",`String code] in
   let saved = match Login.saved t (receipt [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"]) with
@@ -265,7 +280,7 @@ let usage_limited_save () =
       "an unmeasured row without a code is unreadable", receipt [`Assoc ["runtime_id",`String "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]];
       "an unmeasured runtime the save did not select is unreadable", receipt ~selected:["other"] [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"];
       "a verified receipt with an unmeasured list is unreadable",
-        `Assoc ["configured",`Bool true;"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
+        `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable"];"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
 (* A save that left selected runtimes uncalled is neither verified nor
    usage-limited. The screen summarizes retained connections, and a receipt that
    claims verified beside a not_rechecked list is unreadable rather than shown
@@ -274,7 +289,7 @@ let partly_checked_save () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   let kept = "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" and added = "codex_1a2b3c4d.gpt-6-luna_1a2b3c4d" in
   let receipt ?(readiness="partly_checked") ?(unverified=`List []) ?(rechecked=`List [`String kept]) () =
-    `Assoc ["configured",`Bool true;"readiness",`String readiness;
+    `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable"];"readiness",`String readiness;
       "runtime_ids",`List [`String added;`String kept];"unverified",unverified;"not_rechecked",rechecked] in
   let saved = match Login.saved t (receipt ()) with
     | Ok saved -> saved | Error message -> fail message in
@@ -728,6 +743,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
+  test_case "visible save preserves durability uncertainty without resubmitting" `Quick uncertain_durability_save;
   test_case "a partly checked save summarizes retained connections and names failures" `Quick partly_checked_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;

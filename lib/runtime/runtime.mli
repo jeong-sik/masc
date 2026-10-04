@@ -29,6 +29,12 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+type config_commit_error =
+  | Config_commit_refused of string
+  | Config_commit_write_failed of Fs_compat.atomic_replace_failure
+(** A refusal happens before replacement; a write failure here also precedes
+    rename. A visible replacement returns a receipt, including uncertain durability. *)
+
 (** Where the exact-output registry's targets come from. *)
 type exact_output_target_source =
   | Runtime_binding_targets
@@ -819,7 +825,7 @@ val commit_config_text_locked :
   ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
   runtime_config_path:string ->
   string ->
-  (config_commit_receipt, string) result
+  (config_commit_receipt, config_commit_error) result
 (** Validate and commit runtime.toml, then republish the live runtime
     registry, for a caller that already holds the config write lock:
     {!with_config_lock} took the durable lock and resolved the keeper

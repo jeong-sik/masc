@@ -177,7 +177,7 @@ let record_external_attention_exn config ~keeper_name index =
   | `Error err -> fail ("external attention record failed: " ^ err)
 ;;
 
-let create_schedule_exn config ~schedule_id ~scheduled_by =
+let create_schedule_exn ?(payload = schedule_payload) config ~schedule_id ~scheduled_by =
   match
     Schedule_service.create
       config
@@ -188,7 +188,7 @@ let create_schedule_exn config ~schedule_id ~scheduled_by =
       ~requested_by:(human "operator")
       ~scheduled_by
       ~due_at:200.0
-      ~payload:schedule_payload
+      ~payload
       ~source:Schedule_domain.Operator_request
       ()
   with
@@ -745,7 +745,7 @@ let test_scoped_confirmations_keep_target_identity () =
     (U.(failed |> member "global_waiting_on" |> to_list) |> List.map (json_string_member "source"))
 ;;
 
-let test_scoped_schedules_keep_actor_identity () =
+let test_scoped_schedules_keep_participant_identity () =
   with_workspace @@ fun config ->
   let requested = "schedule-requested" and other = "schedule-other" in
   ensure_keeper config requested;
@@ -755,19 +755,51 @@ let test_scoped_schedules_keep_actor_identity () =
     ["sched-a", automated requested; "sched-b", automated other;
      "sched-unknown", automated "unknown-actor"; "sched-human", human "operator";
      "sched-system", {Schedule_domain.id="system"; kind=System; display_name=None}];
+  let wake_payload target =
+    `Assoc ["kind", `String "masc.keeper_wake";
+      "body", `Assoc ["keeper_name", `String target; "message", `String "check work"]] in
+  let system : Schedule_domain.actor = {id="system"; kind=System; display_name=None} in
+  List.iter (fun (schedule_id, scheduled_by, target) ->
+    ignore (create_schedule_exn ~payload:(wake_payload target) config ~schedule_id ~scheduled_by
+      : Schedule_domain.schedule_request))
+    ["wake-b-a", automated other, requested;
+     "wake-a-b", automated requested, other;
+     "wake-a-a", automated requested, requested;
+     "wake-human-a", human "operator", requested;
+     "wake-human-b", human "operator", other;
+     "wake-system-a", system, requested;
+     "wake-system-b", system, other;
+     "wake-unknown-a", automated "unknown-actor", requested];
   let ids rows = rows |> List.map (fun row -> U.(row |> member "detail" |> member "schedule_id" |> to_string))
       |> List.sort String.compare in
   let json = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:requested in
-  check (list string) "scoped global reservations are human/system only"
-    ["sched-human";"sched-system"] (ids U.(json |> member "global_waiting_on" |> to_list));
+  check (list string) "unrelated workspace reservations are absent from the Keeper view"
+    [] (ids U.(json |> member "global_waiting_on" |> to_list));
   let keeper = match find_keeper json requested with Some row -> row | None -> fail "missing keeper" in
-  check (list string) "only this actor's schedule is local"
-    ["sched-a"] (ids U.(keeper |> member "waiting_on" |> to_list));
-  check int "scoped totals exclude other automated actors" 3 (json_int_member "total_row_count" json);
+  check (list string) "creator and wake target both see the schedule locally"
+    ["sched-a"; "wake-a-a"; "wake-a-b"; "wake-b-a"; "wake-human-a";
+     "wake-system-a"; "wake-unknown-a"]
+    (ids U.(keeper |> member "waiting_on" |> to_list));
+  check int "self-wake is counted once and unrelated targets are excluded" 7
+    (json_int_member "total_row_count" json);
+  let other_json = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:other in
+  let other_keeper = match find_keeper other_json other with Some row -> row | None -> fail "missing other keeper" in
+  check (list string) "the other participant sees both directions and only its own wake targets"
+    ["sched-b"; "wake-a-b"; "wake-b-a"; "wake-human-b"; "wake-system-b"]
+    (ids U.(other_keeper |> member "waiting_on" |> to_list));
   let fleet = Server_keeper_waiting_inventory.dashboard_json config in
   check (list string) "fleet keeps unknown-actor reservations visible"
     ["sched-human";"sched-system";"sched-unknown"]
     (ids U.(fleet |> member "global_waiting_on" |> to_list));
+  check int "fleet counts each reservation once, including cross-Keeper wakes" 13
+    (json_int_member "total_row_count" fleet);
+  let fleet_rows = U.(fleet |> member "keepers" |> to_list)
+    |> List.concat_map (fun row -> U.(row |> member "waiting_on" |> to_list)) in
+  let cross_wake = List.find (fun row ->
+    U.(row |> member "detail" |> member "schedule_id" |> to_string) = "wake-b-a") fleet_rows in
+  check (list string) "fleet row retains both participants"
+    [other; requested]
+    U.(cross_wake |> member "detail" |> member "keeper_participants" |> to_list |> List.map to_string);
   save_text (Filename.concat (Workspace_utils.masc_dir config) "schedules.json") "{broken";
   let failed = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:requested in
   check (list string) "scoped schedule read failure stays visible" ["read_error"]
@@ -1009,7 +1041,7 @@ let () =
             test_owner_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
-        ; test_case "scoped schedules preserve actors" `Quick test_scoped_schedules_keep_actor_identity
+        ; test_case "scoped schedules preserve participants" `Quick test_scoped_schedules_keep_participant_identity
         ; test_case "scoped confirmations preserve targets" `Quick test_scoped_confirmations_keep_target_identity
         ; test_case "nonlive keeper has no current execution" `Quick test_nonlive_keeper_has_no_current_execution
         ; test_case "live turn keeper is busy without waiting rows" `Quick

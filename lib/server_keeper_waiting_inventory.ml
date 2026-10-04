@@ -825,22 +825,19 @@ let schedule_waiting_on (request : Schedule_domain.schedule_request) =
   | None -> request.schedule_id
 ;;
 
-let schedule_actor_id (request : Schedule_domain.schedule_request) =
-  match request.scheduled_by.kind with
-  | Human_operator | System -> None
-  | Automated_actor -> Some request.scheduled_by.id
-;;
-
 let schedule_keeper_owner keeper_names request =
-  match schedule_actor_id request with
-  | Some owner when List.mem owner keeper_names -> Some owner
-  | Some _ | None -> None
+  (* A fleet inventory counts each reservation once, preferring its creator.
+     A scoped inventory contains only its selected Keeper, so a wake target
+     receives the same reservation locally even when another Keeper made it. *)
+  Schedule_payload_projection.keeper_participants request
+  |> List.find_opt (fun name -> List.mem name keeper_names)
 ;;
 
 let schedule_rows ?keeper_name ~keeper_names state =
   state.Schedule_store.schedules
   |> List.filter (fun request ->
-    schedule_active request && scope_includes_actor ~keeper_name (schedule_actor_id request))
+    schedule_active request
+    && Schedule_payload_projection.visible_to_keeper keeper_name request)
   |> List.map (fun (request : Schedule_domain.schedule_request) ->
     { keeper_name = schedule_keeper_owner keeper_names request
     ; source = Schedule_waiting
@@ -857,6 +854,9 @@ let schedule_rows ?keeper_name ~keeper_names state =
         `Assoc
           [ "schedule_instance_id", `String request.schedule_instance_id
           ; "schedule_id", `String request.schedule_id
+          ; "keeper_participants",
+            `List (List.map (fun name -> `String name)
+              (Schedule_payload_projection.keeper_participants request))
           ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
           ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
           ; ( "payload_kind"

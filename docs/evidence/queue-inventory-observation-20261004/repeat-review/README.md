@@ -1,3 +1,6 @@
+> Historical evidence: the actor-only schedule follow-up below is superseded
+> by [participant-aware scoping](../participant-review/README.md).
+
 # Repeated review: one live projection and scoped confirmations
 
 Reviewed baseline: `009a43c3d099bded03f80cdbf2413be6caeb0444`.

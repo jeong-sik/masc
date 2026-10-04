@@ -1028,6 +1028,47 @@ let test_identity_outage_retains_only_existing_local_holds () =
    | None -> fail "unrelated NEXT was converted into a manual hold")
 ;;
 
+let test_workspace_suspension_preserves_real_stop_ownership () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let entry, _ = preflight_input () in
+  Tui_types.retain_preflight_inputs state [entry];
+  let local = Tui_types.suspend_keeper_input state in
+  Tui_types.withdraw_keeper_chat_requests state;
+  Tui_types.restore_suspended_keeper_input state local;
+  check bool "workspace return permits explicit local preflight resume" true
+    (Tui_types.resume_preflight_keeper_input state "alpha");
+  ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
+  let stopped = Tui_types.suspend_keeper_input state in
+  Tui_types.withdraw_keeper_chat_requests state;
+  Tui_types.restore_suspended_keeper_input state stopped;
+  check bool "workspace return never converts a real stop to local resume" false
+    (Tui_types.resume_preflight_keeper_input state "alpha");
+  check bool "real stopped input remains undispatchable" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
+let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let _, item = preflight_input () in
+  state.msg_queued <- Q.restore_unsent Q.empty item;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_recall_replaces <- Some item;
+  check bool "background turn refresh cannot dispatch the recalled old body" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  state.msg_recall_replaces <- None;
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.composer_focused <- true;
+  state.coalesce_queued_input <- true;
+  Buffer.add_string state.msg_input "still composing";
+  check bool "unmarked fallback respects coalescing composer ownership" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
+    Tui_types.Awaiting_control {generation=0; target=None}];
+  check bool "explicit Enter authorization still dispatches its accepted input" true
+    (Option.is_some (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
 let test_offscreen_preflight_recovery_retains_its_owner () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -4242,6 +4283,8 @@ let () =
         ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
         ; test_case "preflight local resume preserves FIFO and server stops" `Quick test_preflight_local_resume_keeps_fifo_and_respects_server_stop
         ; test_case "identity outage preserves unrelated NEXT authorization" `Quick test_identity_outage_retains_only_existing_local_holds
+        ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
+        ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
         ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal

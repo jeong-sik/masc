@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41161-runtime-cache-integration-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-runtime-raw-save.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts src/lib/runtime-catalog-resource.test.ts src/lib/runtime-workspace-resource.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41161-runtime-cache-integration-20261004/dashboard
+
+
+ Test Files  5 passed (5)
+      Tests  184 passed (184)
+   Start at  03:23:43
+   Duration  7.52s (tests 47%, import 20%, transform 15%, environment 10%, setup 8%)
+
+    Isolate  5 workers spawned · ~242ms startup each (spawn + environment, per file)
+             at least ~967ms faster with isolate: false — reuses workers across files instead of one per file
+

@@ -1,0 +1,40 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts -t 'deeply nested valid JSON'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-addons-panel.test.ts (29 tests | 1 failed | 28 skipped) 6ms
+   ❯ optional Lane Add-on surface (29)
+     × renders deeply nested valid JSON readings without recursive validation overflow 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > renders deeply nested valid JSON readings without recursive validation overflow
+RangeError: Maximum call stack size exceeded
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:15:23
+     13|   }
+     14|   const children = Array.isArray(value) ? value : isRecord(value) ? Ob…
+     15|   for (const child of children) {
+       |                       ^
+     16|     const reason = jsonNumberError(child)
+     17|     if (reason !== null) return reason
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+ ❯ jsonNumberError src/components/lane-addon-readings.ts:16:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 28 skipped (29)
+   Start at  02:23:18
+   Duration  652ms (import 33%, environment 24%, transform 23%, setup 18%, tests 1%, worker 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.

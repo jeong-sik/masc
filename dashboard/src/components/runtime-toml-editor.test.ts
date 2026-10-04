@@ -1,3 +1,5 @@
+import * as devToken from '../api/dev-token'
+import { saveRuntimeTomlConfig as actualSaveRuntimeTomlConfig } from '../api/dashboard-runtime'
 import * as coreApi from '../api/core'
 import { RuntimeTomlRevisionConflict } from '../api/dashboard-runtime'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
@@ -1333,7 +1335,42 @@ describe('RuntimeTomlEditor', () => {
     expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('keeps the dirty draft when save validation fails', async () => {
+  it('allows correcting and retrying an actual raw-save validation refusal without adopting a file', async () => {
+    vi.spyOn(devToken, 'ensureDevToken').mockResolvedValue(undefined)
+    apiMocks.saveRuntimeTomlConfig.mockImplementation(actualSaveRuntimeTomlConfig)
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      error: 'runtime config parse failed: invalid fixture declaration',
+    }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockImplementation(async (_path: string, init: RequestInit) => {
+        const request = JSON.parse(init.body as string) as { source_text: string }
+        const receipt = committedRuntimeTomlConfigFixture({ ...baseConfig, source_text: request.source_text })
+        receipt.source_revision = 'b'.repeat(64); receipt.commit.source_revision = receipt.source_revision
+        receipt.application.skills = { state: 'published', input_source_revision: receipt.source_revision,
+          snapshot_revision: 'skill-snapshot', catalog_revision: 'skill-catalog', config_state: 'configured' }
+        return new Response(JSON.stringify(receipt), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      render(html`<${RuntimeTomlEditor} />`, container)
+      await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+      const draft = baseConfig.source_text + '# rejected declaration\n'
+      const textarea = container.querySelector('textarea')!, save = container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement
+      fireEvent.input(textarea, { target: { value: draft } }); fireEvent.click(save)
+      await waitFor(() => expect(container.textContent).toContain('invalid fixture declaration'))
+      expect(textarea.value).toBe(draft)
+      expect(save.disabled).toBe(false)
+      expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+      expect(coreApi.postControlPlane).not.toHaveBeenCalled()
+      const corrected = baseConfig.source_text + '# corrected declaration\n'
+      fireEvent.input(textarea, { target: { value: corrected } }); fireEvent.click(save)
+      await waitFor(() => expect(coreApi.postControlPlane).toHaveBeenCalledTimes(1))
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual({ source_text: corrected, expected_source_revision: baseConfig.source_revision })
+      expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('keeps a prose-only save failure uncertain instead of inferring rejection from its message', async () => {
     apiMocks.saveRuntimeTomlConfig.mockRejectedValueOnce(new Error('runtime config parse failed'))
     render(html`<${RuntimeTomlEditor} />`, container)
 

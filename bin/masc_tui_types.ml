@@ -7416,10 +7416,11 @@ let keeper_chat_control_generation state keeper_name =
 
 (* These messages never paused the server. Explicit local resume authorizes
    their first POST; an actual stop still needs the server's resume receipt. *)
-let resume_preflight_keeper_input state keeper_name =
+let resume_preflight_keeper_input ~owner_paused state keeper_name =
   let holds = List.filter_map (fun (name, _, intervention) ->
     if name = keeper_name then Some intervention else None) state.keeper_interactive_waiting in
-  if List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
+  if not owner_paused
+     && List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
   then begin
     let generation = keeper_chat_control_generation state keeper_name in
     state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->

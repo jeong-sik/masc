@@ -991,8 +991,12 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
     Tui_types.Awaiting_control {generation=0; target=None}) :: state.keeper_interactive_waiting;
   check bool "later Enter cannot bypass retained first input" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  check bool "an already-paused owner still needs a server resume" false
+    (Tui_types.resume_preflight_keeper_input ~owner_paused:true state "alpha");
+  check bool "paused owner refusal preserves the queued input hold" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
   check bool "operator can resume never-posted input locally" true
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
   (match Tui_types.next_authorized_keeper_input state "alpha" with
    | Some (first, _) -> check string "resume dispatches original input first"
        item.request.request_id first.request.request_id
@@ -1003,7 +1007,7 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
     Tui_types.Retained_before_dispatch];
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   check bool "a real stop still requires its server resume receipt" false
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
   check bool "server-stopped input remains held" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
@@ -1016,13 +1020,13 @@ let test_workspace_suspension_preserves_real_stop_ownership () =
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state local;
   check bool "workspace return permits explicit local preflight resume" true
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   let stopped = Tui_types.suspend_keeper_input state in
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state stopped;
   check bool "workspace return never converts a real stop to local resume" false
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
   check bool "real stopped input remains undispatchable" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;

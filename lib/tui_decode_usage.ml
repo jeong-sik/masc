@@ -29,6 +29,7 @@ type provider_usage_window = {
 
 type provider_usage_state =
   | Account_not_reported_since_start
+  | Account_reported_no_windows of { observed_at : float; source : string }
   | Account_reported of provider_usage_window * provider_usage_window list
 
 type provider_usage_provider = {
@@ -148,6 +149,10 @@ let decode_provider_usage_account json =
     | "reported", [] ->
         Error (Printf.sprintf "account %S is reported with no window" pua_scope)
     | "not_reported_since_start", [] -> Ok Account_not_reported_since_start
+    | "reported_no_windows", [] ->
+        let* observed_at = required_number_field json "observed_at" in
+        let* source = required_string_field json "source" in
+        Ok (Account_reported_no_windows { observed_at; source })
     | "not_reported_since_start", _ :: _ ->
         Error
           (Printf.sprintf "account %S carries windows but is not reported"

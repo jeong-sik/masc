@@ -844,6 +844,7 @@ let http_readable ~provider_id ~url ~key ~refresh_s =
 let reported scope =
   match Usage.state ~scope with
   | Usage.Reported _ -> true
+  | Usage.Reported_no_windows _ -> true
   | Usage.Not_reported_since_start -> false
 ;;
 

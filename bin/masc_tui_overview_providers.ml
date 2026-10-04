@@ -270,7 +270,7 @@ type row =
       heard : string option;
       tag : string option;
     }
-  | Silent_row of { name : string; tag : string option }
+  | Silent_row of { name : string; tag : string option; state_text : string }
       (** No report is an explicit state, not an absent account or zero use. *)
   | Email_row of string
       (** Account identity metadata, separate from window measurements. *)
@@ -282,13 +282,18 @@ let account_rank observed (account : Masc.Tui_decode_usage.provider_usage_accoun
   match (observed, account.pua_state) with
   | Observed_exhausted _, _ -> 0
   | Not_observed_exhausted, Masc.Tui_decode_usage.Account_reported _ -> 1
+  | Not_observed_exhausted, Masc.Tui_decode_usage.Account_reported_no_windows _ -> 1
   | Not_observed_exhausted, Masc.Tui_decode_usage.Account_not_reported_since_start -> 2
 
 let account_rows ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
   let name = scope_name account in
   let tag = exhausted_tag ~now observed in
   match account.pua_state, tag with
-  | Masc.Tui_decode_usage.Account_not_reported_since_start, tag -> [ Silent_row { name; tag } ]
+  | Masc.Tui_decode_usage.Account_not_reported_since_start, tag ->
+      [ Silent_row { name; tag; state_text = "No usage report since server start" } ]
+  | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source }, tag ->
+      [ Silent_row { name; tag; state_text = "Provider reported no usage windows · Last report "
+          ^ clock_text ~now observed_at ^ " · " ^ Terminal_text.single_line source } ]
   | Masc.Tui_decode_usage.Account_reported (first, rest), (None | Some _) ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
@@ -413,7 +418,7 @@ let draw_rows ~now ~width rows =
     let color = if blocked then Theme.bad () else Theme.info () in
     let body = List.concat_map (function
       | Email_row email -> wrap ~tone:quiet email
-      | Silent_row { tag; _ } -> wrap "No usage report since server start"
+      | Silent_row { tag; state_text; _ } -> wrap state_text
           @ (match tag with None -> []
              | Some tag -> wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag))
       | Window_row { window; heard; tag; _ } ->

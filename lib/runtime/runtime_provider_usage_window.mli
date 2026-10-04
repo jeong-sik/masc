@@ -195,6 +195,8 @@ type recorded =
 
 type scope_state =
   | Not_reported_since_start
+  | Reported_no_windows of { source : source; observed_at : float }
+      (** A complete provider report states no applicable windows. *)
   | Reported of recorded * recorded list
 
 val recording_since : float
@@ -203,9 +205,12 @@ val recording_since : float
     since this time". *)
 
 val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit
-(** Keep each window of [report] as the latest for
-    [(scope, limit_id, kind)]. An older or equal [observed_at] does not
-    replace the one held. A report with no windows changes nothing. *)
+(** HTTP and Antigravity reads are complete snapshots: windows omitted by a
+    newer report from the same source are removed. Claude/Codex events and
+    Codex reads allow absent windows, so they merge only stated values.
+    An older or equal observation cannot replace a window or restore one
+    removed by a newer complete report. Empty complete reports retain their
+    observation time; empty sparse updates change nothing. *)
 
 val set_record_observer :
   (scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit) -> unit
@@ -222,5 +227,5 @@ val state : scope:Runtime_quota_window.scope -> scope_state
 (** The windows held for [scope], ordered by limit then kind. *)
 
 val recorded_scopes : unit -> Runtime_quota_window.scope list
-(** Every scope with at least one window, so a projection can show a scope
-    that is no longer configured but did report. *)
+(** Every scope that reported, including complete reports without windows,
+    so a projection can show one that is no longer configured. *)

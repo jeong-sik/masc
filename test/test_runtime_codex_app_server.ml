@@ -1667,7 +1667,8 @@ let test_background_read_outlives_the_turn () =
                 | Runtime_provider_usage_window.Not_reported_since_start when tries > 0 ->
                   Eio.Time.sleep clock 0.05;
                   wait (tries - 1)
-                | Runtime_provider_usage_window.Not_reported_since_start -> false
+                | Runtime_provider_usage_window.Not_reported_since_start
+                | Runtime_provider_usage_window.Reported_no_windows _ -> false
               in
               wait 100)
           in
@@ -1720,7 +1721,8 @@ let read_after_spent_usage_refusal ~provider_id read_result =
              = Runtime_provider_usage_read.Started)))));
   (match Runtime_provider_usage_window.state ~scope with
    | Runtime_provider_usage_window.Reported _ -> ()
-   | Runtime_provider_usage_window.Not_reported_since_start ->
+   | Runtime_provider_usage_window.Not_reported_since_start
+   | Runtime_provider_usage_window.Reported_no_windows _ ->
      fail "the read after the refusal recorded no window");
   scope
 ;;

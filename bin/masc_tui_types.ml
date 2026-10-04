@@ -10751,6 +10751,7 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
     | None -> Error "account usage not reported"
     | Some { pua_state = Account_not_reported_since_start; _ } ->
         Error "account usage not reported since server start"
+    | Some { pua_state = Account_reported_no_windows _; _ } -> Ok []
     | Some { pua_state = Account_reported (first, rest); _ } ->
         Ok (List.filter (fun window ->
           match window.puw_role with

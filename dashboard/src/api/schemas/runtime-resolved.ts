@@ -110,7 +110,9 @@ const ProviderUsageProviderSchema = object({
 const ProviderUsageScopeSchema = object({
   scope: string(),
   providers: array(ProviderUsageProviderSchema),
-  state: union([literal('reported'), literal('not_reported_since_start')]),
+  state: union([literal('reported'), literal('reported_no_windows'), literal('not_reported_since_start')]),
+  observed_at: optional(number()),
+  source: optional(string()),
   windows: array(ProviderUsageWindowSchema),
 })
 

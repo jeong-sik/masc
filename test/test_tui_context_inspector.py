@@ -5,7 +5,6 @@ import sys
 
 import test_tui_keyboard_input as _keyboard_entry
 import tui_keyboard_harness as keyboard
-from tui_keyboard_context import run_context_catalog_read_scope
 
 
 
@@ -15,5 +14,3 @@ if __name__ == "__main__":
         _keyboard_entry.SCENARIO_FAMILIES,
         _keyboard_entry.KEYBOARD_FAMILY,
     )
-
-    run_context_catalog_read_scope(sys.argv[1])

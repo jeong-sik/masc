@@ -19,25 +19,25 @@ let kind_json = function
   | Usage.Provider_label label -> `String ("provider:" ^ label)
 
 let utilization_json = function
-  | Usage.Fraction value -> "fraction", `Float value
-  | Usage.Percent value -> "percent", `Int value
+  | Usage.Fraction value -> [ "unit", `String "fraction"; "value", `Float value ]
+  | Usage.Percent value -> [ "unit", `String "percent"; "value", `Int value ]
+  | Usage.Usd { used; limit } ->
+      [ "unit", `String "usd"; "value", `Float used
+      ; "limit", Json_util.float_opt_to_json limit ]
 
 let record_json ~scope ~observed_at (report : Usage.report) =
   let scope_id = scope_id scope in
   let source = Usage.source_to_string report.source in
   List.map
     (fun (window : Usage.window) ->
-      let unit, value = utilization_json window.utilization in
       `Assoc
-        [ "scope_id", `String scope_id
+        ([ "scope_id", `String scope_id
         ; "source", `String source
         ; "kind", kind_json window.kind
         ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) window.limit_id
-        ; "unit", `String unit
-        ; "value", value
         ; "observed_at", `Float observed_at
         ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) window.resets_at
-        ])
+        ] @ utilization_json window.utilization))
     report.windows
 
 let install config =
@@ -104,6 +104,17 @@ let utilization_of_json json =
   | Some (`String "fraction"), Some (`Int value) ->
       Ok (Usage.Fraction (float_of_int value))
   | Some (`String "percent"), Some (`Int value) -> Ok (Usage.Percent value)
+  | Some (`String "usd"), _ ->
+      let* used = number "value" json in
+      let* limit = match member "limit" json with
+        | Some `Null -> Ok None
+        | Some _ -> let* limit = number "limit" json in
+            if limit > 0.0 then Ok (Some limit)
+            else Error "provider usage history: invalid USD limit"
+        | None -> Error "provider usage history: missing USD limit"
+      in
+      if used >= 0.0 then Ok (Usage.Usd { used; limit })
+      else Error "provider usage history: invalid USD usage"
   | _ -> Error "provider usage history: invalid unit or value"
 
 let decode json =
@@ -117,17 +128,14 @@ let decode json =
   Ok { scope_id; source; kind; limit_id; utilization; observed_at; resets_at }
 
 let point_json point =
-  let unit, value = utilization_json point.utilization in
   `Assoc
-    [ "scope_id", `String point.scope_id
+    ([ "scope_id", `String point.scope_id
     ; "source", `String point.source
     ; "kind", `String point.kind
     ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) point.limit_id
-    ; "unit", `String unit
-    ; "value", value
     ; "observed_at", `Float point.observed_at
     ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) point.resets_at
-    ]
+    ] @ utilization_json point.utilization)
 
 let window_start ~now ~window =
   (floor (now /. 86400.0) -. float_of_int (days_of_window window - 1)) *. 86400.0

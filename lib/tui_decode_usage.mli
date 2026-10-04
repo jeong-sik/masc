@@ -14,6 +14,8 @@ type provider_usage_window_kind =
 type provider_usage_utilization =
   | Utilization_fraction of float  (** [0.67] is 67 %. *)
   | Utilization_percent of int
+  | Utilization_usd of { used : float; limit : float option }
+      (** A reported USD credit amount; [None] means no key cap. *)
 
 (** What a window limits, as the server's decoder classified it from the
     provider's own shape. *)

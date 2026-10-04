@@ -472,6 +472,8 @@ let window_spent (window : Runtime_provider_usage_window.window) =
   match window.utilization with
   | Runtime_provider_usage_window.Fraction used -> Float.compare used 1.0 >= 0
   | Runtime_provider_usage_window.Percent used -> used >= 100
+  | Runtime_provider_usage_window.Usd { used; limit = Some limit } -> used >= limit
+  | Runtime_provider_usage_window.Usd { limit = None; _ } -> false
 ;;
 
 (* Only a window that gates model calls can explain a refused model call. *)

@@ -37,6 +37,9 @@ type window_kind =
 type utilization =
   | Fraction of float  (** Claude Code: [0.67] is 67 %. Not clamped. *)
   | Percent of int  (** Codex [usedPercent]. Not clamped. *)
+  | Usd of { used : float; limit : float option }
+      (** USD-denominated credit use. [None] means no key cap was reported,
+          so no percentage can be calculated. *)
 
 type source =
   | Claude_code_rate_limit_event
@@ -60,7 +63,7 @@ type window_role =
   | Counts_other_use
       (** It counts something a model call does not need: Z.AI's
           TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
-          requests. *)
+          requests, and uncapped credit usage totals. *)
   | Unclassified_limit
       (** A Z.AI limit type this decoder does not know. *)
 
@@ -135,9 +138,10 @@ val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) resu
 
 val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
 (** OpenRouter [GET /api/v1/key].  A numeric [data.limit] above 0 gives one
-    {!Provider_label} window "credit limit" used by
-    [(limit - limit_remaining) / limit], with [limit_remaining] within
-    [0..limit]; a null [limit] means no cap and no window.  [limit_reset] is
+    {!Provider_label} window "credit limit" with {!Usd} use
+    [limit - limit_remaining] and its cap, with [limit_remaining] within
+    [0..limit]. With a null [limit], a reported [usage] gives an uncapped
+    "credit usage (all time)" window; absent usage gives no window. [limit_reset] is
     not read.  [data.free_model_daily_requests] gives "free model requests,
     daily" as [used / limit], with [used] within [0..limit].  Neither states
     a reset time.

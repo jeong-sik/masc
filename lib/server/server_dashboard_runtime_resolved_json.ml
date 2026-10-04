@@ -241,6 +241,9 @@ let usage_window_kind_json : Usage.window_kind -> Yojson.Safe.t = function
 let usage_utilization_json : Usage.utilization -> Yojson.Safe.t = function
   | Fraction value -> `Assoc [ "unit", `String "fraction"; "value", `Float value ]
   | Percent value -> `Assoc [ "unit", `String "percent"; "value", `Int value ]
+  | Usd { used; limit } ->
+    `Assoc [ "unit", `String "usd"; "value", `Float used
+           ; "limit", Json_util.float_opt_to_json limit ]
 ;;
 
 let usage_window_json ({ window; source; observed_at } : Usage.recorded) : Yojson.Safe.t =

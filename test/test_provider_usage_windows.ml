@@ -541,6 +541,8 @@ let kind_to_string : Usage.window_kind -> string = function
 let utilization_to_string : Usage.utilization -> string = function
   | Fraction value -> Printf.sprintf "fraction %g" value
   | Percent value -> Printf.sprintf "percent %d" value
+  | Usd { used; limit } -> Printf.sprintf "usd %g limit=%s" used
+      (Option.fold ~none:"none" ~some:(Printf.sprintf "%g") limit)
 ;;
 
 let role_to_string : Usage.window_role -> string = function
@@ -574,18 +576,25 @@ let refused decode body =
 
 let test_openrouter_key () =
   check (list string) "windows"
-    [ "limit=- label \"credit limit\" fraction 1 resets=- role=gates"
+    [ "limit=- label \"credit limit\" usd 100 limit=100 resets=- role=gates"
     ; "limit=- label \"free model requests, daily\" fraction 0 resets=- role=other"
     ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        openrouter_key_response);
   check (list string) "a stated reset period is not part of the label, which keys the row"
-    [ "limit=- label \"credit limit\" fraction 0.25 resets=- role=gates" ]
+    [ "limit=- label \"credit limit\" usd 5 limit=20 resets=- role=gates" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
   check (list string) "a null limit has no credit window" []
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null}}|});
+  check (list string) "uncapped all-time USD usage is retained"
+    [ "limit=- label \"credit usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
+    (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
+       {|{"data":{"limit":null,"limit_remaining":null,"usage":12.3456}}|});
+  check string "invalid USD totals do not become zero"
+    "openrouter-key.data.usage must be a finite nonnegative USD amount"
+    (refused Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":-1}}|});
   check string "limit_remaining as a string is refused with its path"
     "openrouter-key.data.limit_remaining must be a number"
     (refused Usage.decode_openrouter_key
@@ -600,6 +609,24 @@ let test_openrouter_key () =
     "openrouter-key.data.free_model_daily_requests.used must be within 0..1000"
     (refused Usage.decode_openrouter_key
        {|{"data":{"limit":null,"free_model_daily_requests":{"used":1001,"limit":1000}}}|})
+;;
+
+let test_openrouter_amounts_reach_operator_api () =
+  with_runtimes (fun () ->
+    let scope = Runtime_quota_window.scope_of_credential
+        ~provider_id:"usage_openrouter_amounts" None in
+    let report = decode_ok (Usage.decode_openrouter_key (Yojson.Safe.from_string
+        {|{"data":{"limit":20,"limit_remaining":15}}|})) in
+    Usage.record ~scope ~observed_at:1790600000.0 report;
+    let reading = match Tui_decode_usage.decode_provider_usage_windows (resolved ()) with
+      | Ok reading -> reading | Error detail -> fail detail in
+    let account = List.find (fun (account : Tui_decode_usage.provider_usage_account) ->
+      account.pua_scope_id = Server_provider_usage_history.scope_id scope) reading.puws_accounts in
+    match account.pua_state with
+    | Tui_decode_usage.Account_reported ({ puw_utilization = Utilization_usd { used; limit }; _ }, []) ->
+        check (float 0.0001) "USD use survives provider to wire to TUI" 5.0 used;
+        check (option (float 0.0001)) "USD cap survives provider to wire to TUI" (Some 20.0) limit
+    | _ -> fail "operator projection lost USD credit values")
 ;;
 
 let test_zai_quota_limit () =
@@ -1095,6 +1122,7 @@ let () =
         ] )
     ; ( "http usage endpoints"
       , [ test_case "openrouter-key" `Quick test_openrouter_key
+        ; test_case "OpenRouter USD reaches operator API" `Quick test_openrouter_amounts_reach_operator_api
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
         ; test_case "ollama-usage" `Quick test_ollama_usage

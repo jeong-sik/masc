@@ -9,6 +9,7 @@ type window_kind =
 type utilization =
   | Fraction of float
   | Percent of int
+  | Usd of { used : float; limit : float option }
 
 type source =
   | Claude_code_rate_limit_event
@@ -348,7 +349,7 @@ let positive_int ~path value =
 ;;
 
 let positive_number ~path value =
-  if Float.compare value 0.0 > 0
+  if Float.is_finite value && Float.compare value 0.0 > 0
   then Ok value
   else Error (Unexpected_value { path; expected = greater_than_zero })
 ;;
@@ -399,14 +400,28 @@ let distinct_windows ~path (report : report) =
     Error (Duplicate_window { path; limit_id = window.limit_id; kind = window.kind })
 ;;
 
-(* OpenRouter, GET /api/v1/key (openrouter.ai/docs/api-reference/limits).
-   [limit] null means the key has no credit cap, so there is no credit
-   window.  The response states no reset time.  [limit_reset] is not read:
+(* OpenRouter, GET /api/v1/key (openrouter.ai/docs/api_reference/limits).
+   Credits are denominated in USD (openrouter.ai/support/). A null [limit]
+   states no key cap; [usage] is the all-time spend, not an empty meter.
+   The response states no reset time. [limit_reset] is not read:
    the label is part of the row key in {!record}, so a label carrying the
    reset period would leave the old row behind when the period changes. *)
 let openrouter_credit_window ~path fields =
   match List.assoc_opt "limit" fields with
-  | None | Some `Null -> Ok None
+  | None | Some `Null ->
+    let* usage = optional_as number_at ~path "usage" fields in
+    (match usage with
+     | None -> Ok None
+     | Some used when Float.is_finite used && used >= 0.0 ->
+       Ok (Some
+         { limit_id = None
+         ; kind = Provider_label "credit usage (all time)"
+         ; role = Counts_other_use
+         ; utilization = Usd { used; limit = None }
+         ; resets_at = None
+         })
+     | Some _ -> Error (Unexpected_value
+         { path = member_path path "usage"; expected = "a finite nonnegative USD amount" }))
   | Some limit_json ->
     let limit_path = member_path path "limit" in
     let* limit = number_at ~path:limit_path limit_json in
@@ -425,7 +440,7 @@ let openrouter_credit_window ~path fields =
          { limit_id = None
          ; kind = Provider_label "credit limit"
          ; role = Gates_model_calls
-         ; utilization = Fraction ((limit -. remaining) /. limit)
+         ; utilization = Usd { used = limit -. remaining; limit = Some limit }
          ; resets_at = None
          })
 ;;

@@ -11,6 +11,7 @@ type provider_usage_window_kind =
 type provider_usage_utilization =
   | Utilization_fraction of float
   | Utilization_percent of int
+  | Utilization_usd of { used : float; limit : float option }
 
 type provider_usage_window_role =
   | Role_gates_model_calls
@@ -76,6 +77,15 @@ let decode_provider_usage_utilization json =
   | "percent" ->
       let* value = required_int_field json "value" in
       Ok (Utilization_percent value)
+  | "usd" ->
+      let* used = required_number_field json "value" in
+      let* limit = required_nullable_float_field json "limit" in
+      if not (Float.is_finite used) || used < 0.0 then
+        Error "invalid USD usage amount"
+      else if Option.fold ~none:false
+          ~some:(fun limit -> not (Float.is_finite limit) || limit <= 0.0) limit then
+        Error "invalid USD usage limit"
+      else Ok (Utilization_usd { used; limit })
   | other -> Error (Printf.sprintf "unknown usage unit %S" other)
 
 let decode_provider_usage_window_role json =
@@ -184,6 +194,7 @@ let decode_provider_usage_history_point json =
     | "percent" ->
         let* value = required_int_field json "value" in
         Ok (Utilization_percent value)
+    | "usd" -> decode_provider_usage_utilization json
     | _ -> Error ("provider usage history: unknown unit " ^ unit)
   in
   Ok { puhp_scope_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }

@@ -33,14 +33,20 @@ function usageWindowLabel(window: ProviderUsageWindow): string {
 }
 
 function usageWindowText(window: ProviderUsageWindow): string {
-  const percent = window.utilization.unit === 'fraction'
+  const utilization = window.utilization
+  const percent = utilization.unit === 'fraction'
     ? Math.trunc(window.utilization.value * 100)
     : window.utilization.value
+  const value = utilization.unit === 'usd'
+    ? `$${utilization.value.toFixed(4)} 사용${utilization.limit == null
+      ? ' · 키 한도 없음'
+      : ` / $${utilization.limit.toFixed(4)} 한도 · $${(utilization.limit - utilization.value).toFixed(4)} 남음`}`
+    : `${number(percent, '%')} 사용`
   const reset = window.resets_at == null ? ''
     : window.resets_at * 1000 <= Date.now()
       ? ' · 리셋 시각 경과, 새 보고 없음'
       : ` · 리셋 보고 ${new Date(window.resets_at * 1000).toLocaleString()}`
-  return `${usageWindowLabel(window)} ${number(percent, '%')} 사용 · 관측 ${new Date(window.observed_at * 1000).toLocaleString()}${reset}`
+  return `${usageWindowLabel(window)} ${value} · 관측 ${new Date(window.observed_at * 1000).toLocaleString()}${reset}`
 }
 
 function OfficialClientAccount({ client, usage }: { client: DashboardRuntimeProviderSnapshot; usage: UsageState }) {

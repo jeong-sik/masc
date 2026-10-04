@@ -10797,7 +10797,7 @@ let provider_history_lines ~cols (state : state) =
         @ [ Printf.sprintf "   %s  %d/%d UTC days reported" row.marks row.reported_days days; "" ]
       in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report"
+         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report · $ means uncapped USD use"
          days
          (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
          as_of.Unix.tm_hour as_of.Unix.tm_min)

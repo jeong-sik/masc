@@ -90,6 +90,7 @@ const ProviderUsageWindowSchema = object({
   utilization: union([
     object({ unit: literal('fraction'), value: number() }),
     object({ unit: literal('percent'), value: number() }),
+    object({ unit: literal('usd'), value: number(), limit: nullable(number()) }),
   ]),
   resets_at: nullable(number()),
   observed_at: number(),

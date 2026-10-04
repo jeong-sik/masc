@@ -68,7 +68,7 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
              List.init history.puh_days (fun offset ->
                  match Day_map.find_opt (first_day + offset) reported with
                  | None -> no_report_mark
-                 | Some value -> mark (share value))
+                 | Some value -> (match share value with Some share -> mark share | None -> "$"))
              |> String.concat ""
            in
            { scope_id; kind; limit_id; marks;

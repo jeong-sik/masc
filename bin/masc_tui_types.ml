@@ -10758,7 +10758,9 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
           | Role_gates_model_calls ->
               match window.puw_utilization with
               | Utilization_fraction value -> Float.compare value 1.0 >= 0
-              | Utilization_percent value -> value >= 100) (first :: rest))
+              | Utilization_percent value -> value >= 100
+              | Utilization_usd { used; limit = Some limit } -> used >= limit
+              | Utilization_usd { limit = None; _ } -> false) (first :: rest))
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited

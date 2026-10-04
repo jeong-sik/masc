@@ -4,6 +4,7 @@ type jsonl_snapshot = { entry_count : int; reference : evidence }
 type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }
 let create ~root =
+  let root = if Filename.is_relative root then Filename.concat (Sys.getcwd ()) root else root in
   let rec trim_separator root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
@@ -45,6 +46,11 @@ let write_with ~sync_parent t relative bytes = protect (fun () ->
   Fs_compat.save_file_atomic_strict path bytes)
 let write = write_with ~sync_parent:sync_parent_directory
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
+let canonical_blob_kind t hash = protect (fun () ->
+  let* _ = Fs_compat.inspect_owned_directory_chain
+      ~ownership_root:t.root (Filename.concat t.root "evidence")
+    |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string in
+  Ok (Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root (blob_path hash))))
 let blob_reference bytes =
   let hash = digest bytes in
   { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
@@ -59,14 +65,11 @@ let write_sampling_blob t bytes =
   | Error detail -> protect (fun () ->
       (* A missing leaf under a symlinked parent is not an owned missing
          canonical blob and cannot authorize fallback publication. *)
-      let* () = match Fs_compat.inspect_owned_directory_chain
-          ~ownership_root:t.root (Filename.concat t.root "evidence") with
-        | Ok _ -> Ok ()
-        | Error _ -> Error detail in
+      let* kind = canonical_blob_kind t (digest bytes)
+        |> Result.map_error (fun _ -> detail) in
       (* The immutable address is readable from recovery only for these
          canonical states. Do not advertise a blob behind an unreadable parent. *)
-      match Fs_compat.exact_path_kind ~follow:false
-        (Filename.concat t.root (blob_path (digest bytes))) with
+      match kind with
       | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR ->
           let* () = write t (recovery_blob_path (digest bytes)) bytes in
           Ok (blob_reference bytes)
@@ -123,8 +126,8 @@ let read_blob_bounded ~budget t reference =
   | Sequence -> read (sequence_path hash)
   | Blob ->
       let canonical = blob_path hash in
-      let* kind = bounded_protect (fun () ->
-        Ok (Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root canonical))) in
+      let* kind = canonical_blob_kind t hash
+        |> Result.map_error (fun detail -> Read_failed detail) in
       (match kind with
        | Fs_compat.Exact_kind Unix.S_REG -> read canonical
        | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR -> read (recovery_blob_path hash)
@@ -404,8 +407,8 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
                                 | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
                                     Error "sampling outcome blob is not a regular file" in
                               let canonical = blob_path (digest bytes) in
-                              (match Fs_compat.exact_path_kind ~follow:false
-                                      (Filename.concat t.root canonical) with
+                              let* kind = canonical_blob_kind t (digest bytes) in
+                              (match kind with
                               | Fs_compat.Exact_kind Unix.S_REG -> retain canonical
                               | Fs_compat.Exact_missing ->
                                   (match Fs_compat.exact_path_kind ~follow:false

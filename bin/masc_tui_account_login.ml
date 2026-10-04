@@ -31,7 +31,7 @@ type activation = Activating | Activation_failed of string
    that adds a new one. *)
 type account_group = { group_id : string; provider_ids : string list; runtime_ids : string list }
 type list_view = Clients | Accounts of client | Account_providers of client * string list
-type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
+type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving | Removing
   | Finished of { saved : saved; activation : activation; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
@@ -216,12 +216,12 @@ let show_account_providers t client ids =
 let focused_row t = match t.phase with
   | Providers (Accounts client) -> List.nth_opt (account_rows t client) t.cursor
   | Providers (Account_providers (_, ids)) -> Option.map (fun provider -> Account provider) (List.nth_opt (member_rows t ids) t.cursor)
-  | Providers Clients | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> None
+  | Providers Clients | Loading | Logging | Models | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> None
 let focused_client t = match t.phase with
   | Providers Clients -> List.nth_opt (clients t) t.cursor
   | Providers (Accounts client) -> Some client
   | Providers (Account_providers (client, _)) -> Some client
-  | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ ->
+  | Loading | Logging | Models | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ ->
     Option.map (fun (p:provider) -> p.client) t.provider
 let requested_client = function
   | "codex" -> Some Codex | "claude" -> Some Claude
@@ -234,20 +234,24 @@ let requested_matches t (p:provider) =
   || (not (List.exists (fun (row:provider) -> String.equal row.id t.requested) t.providers)
       && requested_client t.requested = Some p.client)
 let activation_incomplete t = match t.phase with
-  | Finished {activation = Activating | Activation_failed _; _} -> true
+  | Saving | Finished {activation = Activating | Activation_failed _; _} -> true
+  | Failed -> t.recovery = Refresh_configuration
   | Finished {activation = Active _; _}
-  | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ -> false
-let reopen_saved ~requested t = match t.phase with
-  | Finished _ ->
-    let matches = match t.provider with
-      | Some provider ->
-        (* Catalog entries such as [codex] name a client, not a competing
-           configured account. Explicit configured IDs retain precedence. *)
-        let providers = List.filter (fun (row:provider) -> row.origin=Configured) t.providers in
-        requested_matches {t with requested; providers} provider
-      | None -> requested = "" || String.equal requested t.requested in
-    if matches then Some t else None
-  | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ -> None
+  | Loading | Providers _ | Logging | Models | Documented_context _ | Removing | Removal _ -> false
+let reopen_saved ~requested t =
+  let recoverable = match t.phase with
+    | Saving | Finished _ -> true
+    | Failed -> t.recovery = Refresh_configuration
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Removing | Removal _ -> false in
+  if not recoverable then None else
+  let matches = match t.provider with
+    | Some provider ->
+      (* Catalog entries such as [codex] name a client, not a competing
+         configured account. Explicit configured IDs retain precedence. *)
+      let providers = List.filter (fun (row:provider) -> row.origin=Configured) t.providers in
+      requested_matches {t with requested; providers} provider
+    | None -> requested = "" || String.equal requested t.requested in
+  if matches then Some t else None
 let retain_activation t retained =
   if activation_incomplete t then t :: List.filter (fun held -> held != t) retained
   else retained
@@ -446,7 +450,7 @@ let reconcile_saved_account t json =
 let refresh_saved t saved result =
   let activation = match t.phase with
     | Finished {activation; _} -> activation
-    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ ->
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Removing | Failed | Removal _ ->
       Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
   let refreshed = match result with
     | Ok json -> (match inventory t json with
@@ -584,7 +588,7 @@ let paste t text = match t.phase with
     (match pasted_line text with
      | Some text -> append_draft t text
      | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
-  | Loading | Providers _ | Models | Saving | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
+  | Loading | Providers _ | Models | Saving | Removing | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
@@ -633,7 +637,7 @@ let key t key =
     | Providers (Account_providers (client, ids)) ->
         show_accounts ?on:(List.nth_opt (member_rows t ids) 0) t client; Nothing
     | Documented_context _ -> t.phase <- Models; t.draft <- ""; Nothing
-    | Loading | Providers Clients | Logging | Models | Saving | Finished _ | Failed -> Close) else
+    | Loading | Providers Clients | Logging | Models | Saving | Removing | Finished _ | Failed -> Close) else
   match t.phase with
   | Removal {provider; revision; removal = Removable {login_store; _}} ->
     if key="\r" || key="\n" || key="enter" then Remove {provider; revision; login_store} else Nothing
@@ -664,7 +668,7 @@ let key t key =
        | _ -> t.notice<-"확인한 한도를 양의 정수로 입력하세요."; Nothing)
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
-  | Loading | Saving -> Nothing
+  | Loading | Saving | Removing -> Nothing
   | Models when key=" " ->
     (match List.nth_opt t.models t.cursor with
      | Some model -> toggle_model t model
@@ -689,14 +693,14 @@ let key t key =
         | Providers Clients -> List.length (clients t)
         | Providers (Accounts client) -> List.length (account_rows t client)
         | Providers (Account_providers (_, ids)) -> List.length (member_rows t ids)
-        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ -> List.length t.models in
+        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ -> List.length t.models in
       t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
     else if key="r" then (match t.phase with
       | Models -> Discover
       | Finished {saved; _} -> Refresh_saved saved
       | Failed when t.recovery=Refresh_configuration -> Refresh_retry
       | Providers view when Option.is_none t.login_id -> Refresh_list view
-      | Providers _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+      | Providers _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
         if Option.is_some t.login_id then Recover else Inventory)
     else if key="D" then
       (match focused_row t with
@@ -712,7 +716,7 @@ let key t key =
          (match Option.bind (focused_client t) (new_account_provider t) with
           | Some provider -> start_login t provider ~existing:false
           | None -> Nothing)
-       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
          (match t.provider with
           | Some provider -> start_login t provider ~existing:false
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
@@ -722,7 +726,7 @@ let key t key =
          (match focused_row t with
           | Some (Account provider) -> start_login t provider ~existing:true
           | Some (New_account _) | None -> Nothing)
-       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
          (match t.provider with
           | Some provider -> start_login t provider ~existing:true
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
@@ -748,7 +752,7 @@ let key t key =
               "이 계정의 모델은 모두 연결되어 있습니다. Esc로 닫으세요."
               else "선택한 모델이 없습니다. Space로 모델을 고르세요."); Nothing
           | models -> Save models)
-       | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> Nothing)
+       | Loading | Logging | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> Nothing)
     else Nothing
 let save_body t models =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
@@ -770,7 +774,8 @@ let hints t = match t.phase with
   | Finished {activation = Activating; _} -> "j/k:스크롤  런타임 활성화 중  Esc:닫기"
   | Finished {activation = Activation_failed _; _} -> "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기"
   | Finished {activation = Active _; _} -> "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기"
-  | Loading | Saving | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Saving -> "저장 결과 대기 중 · Esc:닫기 (백그라운드에서 계속)"
+  | Loading | Removing | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
@@ -843,7 +848,7 @@ let body_rows t =
        (if exact_output_available then [] else [Text "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."]))
     @ List.map (fun row -> Text row) (saved_rows saved)
     @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
-  | Loading | Saving | Failed -> []
+  | Loading | Saving | Removing | Failed -> []
 let lines t = Text t.notice :: body_rows t
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 (* The notice wraps rather than being cut at the pane's edge: a refused
@@ -869,7 +874,7 @@ let visible_lines ~height ~width t =
       let skip = min t.cursor t.saved_scroll_max in
       t.cursor <- skip;
       skip
-    | Loading | Logging | Documented_context _ | Saving | Failed -> max 0 (List.length rows - height) in
+    | Loading | Logging | Documented_context _ | Saving | Removing | Failed -> max 0 (List.length rows - height) in
   List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

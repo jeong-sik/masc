@@ -206,6 +206,44 @@ let closed_activation_recovery () =
     (Option.is_some (Login.reopen_saved ~requested:"codex" t));
   check bool "completed activation does not need retaining on another close" false (Login.activation_incomplete t);
   check bool "the completed receipt refreshes without repeating activation" true (Login.key t "r"=Login.Refresh_saved saved)
+let closed_saving_recovery () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  t.provider <- Some provider; t.phase <- Login.Saving; t.generation <- 7;
+  let cancelled=ref false in t.cancel_stream <- Some (fun () -> cancelled:=true);
+  check bool "saving closes into detached recovery" true (Login.key t "esc"=Login.Close);
+  check bool "save stays owned before its receipt arrives" true (Login.activation_incomplete t);
+  let retained=Login.retain_activation t [] in
+  let restored, rest=Login.take_saved ~requested:"codex" retained in
+  let view=Option.get restored in
+  check bool "pending save reopens the same view" true (view==t);
+  check int "pending save keeps its generation" 7 view.generation;
+  check bool "pending save has not been cancelled" false !cancelled;
+  check int "reopened save is removed once" 0 (List.length rest);
+  check bool "pending save cannot submit again" true (Login.key view "enter"=Login.Nothing);
+  let retained=Login.retain_activation view rest in
+  let saved=match Login.saved view (`Assoc ["configured",`Bool true;"readiness",`String "verified";
+    "runtime_ids",`List [`String "saved-account.model"];
+    "commit",`Assoc ["durability",`String "unconfirmed";"warnings",`List []]]) with
+    | Ok saved -> saved | Error detail -> fail detail in
+  check bool "detached save keeps its actual warning receipt" true
+    (saved=Login.Saved_durability_unconfirmed Login.Saved_verified);
+  Login.activating view saved;
+  ignore (Login.activated view saved (Error "lost activation response"));
+  let reopened,_=Login.take_saved ~requested:"codex" retained in
+  check bool "after receipt only activation is retried" true
+    (Login.key (Option.get reopened) "r"=Login.Activate_saved saved);
+  let failed=Login.create "codex" in failed.provider<-Some provider;failed.phase<-Login.Saving;
+  let held=Login.retain_activation failed [] in
+  Login.save_failed failed "save result unavailable";
+  let reopened,_=Login.take_saved ~requested:"codex" held in
+  check bool "closed save failure remains available for explicit reconciliation" true
+    (Login.key (Option.get reopened) "r"=Login.Refresh_retry);
+  check bool "failed receipt never fabricates an activation" true
+    (Login.key (Option.get reopened) "enter"=Login.Nothing);
+  let removing=Login.create "codex" in removing.phase<-Login.Removing;
+  check bool "account deletion is not mistaken for model saving" false (Login.activation_incomplete removing);
+  check int "deletion retains no model-save receipt" 0 (List.length (Login.retain_activation removing []))
+
 let closed_activation_accounts () =
   let first=Login.create "codex" and second=Login.create "codex" in
   first.provider <- Some {provider with id="codex_first"};
@@ -1031,6 +1069,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
   test_case "saved activation retry cannot repeat save or login" `Quick saved_activation_retry;
+  test_case "closed saving retains its in-flight receipt and failure" `Quick closed_saving_recovery;
   test_case "closed activation retains its request and recovery receipt" `Quick closed_activation_recovery;
   test_case "closed activation recovery preserves multiple accounts" `Quick closed_activation_accounts;
   test_case "generated account ID restores its saved activation" `Quick generated_account_activation_recovery;

@@ -366,7 +366,9 @@ def scoped_roster_authority(binary: str) -> None:
                 rows=32, columns=80, needle=b"MASC Dashboard",
                 controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
-            await_screen(lambda text: b"workspace-b-board" in text, "B Board read did not settle")
+            await_screen(lambda text: b"workspace identity is unverified" in text
+                         and b"[workspace mismatch]" in text,
+                         "B authority did not refuse the unverified Board read")
             with wire.lock:
                 wire.hold_roster = True
             _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
@@ -374,7 +376,7 @@ def scoped_roster_authority(binary: str) -> None:
                 timeout=WAIT_SECONDS), "the scoped B roster was not held"
             _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
             wire.publish("b-after-late")
-            _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=300,
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=500,
                              needle=b"MASC Board", controls=(_keyboard_harness.FULL_REDRAW,))
             os.write(fd, b"r")
             # While a scoped read is held the full revalidation still owns

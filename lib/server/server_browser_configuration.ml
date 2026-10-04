@@ -1,6 +1,7 @@
-let install_activity_observer ~sw =
-  let observe lane =
-    match Runtime.browser_configuration () with
+let activity_snapshot () =
+  let config = Runtime.browser_configuration () in
+  fun lane ->
+    match config with
     | None -> Browser_lane.Unobserved
     | Some config ->
       let enabled = match lane with
@@ -9,6 +10,7 @@ let install_activity_observer ~sw =
         | Stagehand -> config.stagehand_enabled
       in
       if enabled then Browser_lane.Enabled else Browser_lane.Disabled
-  in
-  Browser_lane.install_activity_observer (Some observe);
+
+let install_activity_observer ~sw =
+  Browser_lane.install_activity_observer (Some (fun lane -> activity_snapshot () lane));
   Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None)

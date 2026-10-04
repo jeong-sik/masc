@@ -116,7 +116,7 @@ let parse_runtime_lane_action json =
   | Some (`String other) ->
     Error
       (Printf.sprintf
-         "unknown lane action: %s (expected set, create, remove, rename, append, drop \
+         "unknown lane action: %s (expected set, create, remove, rename, append, drop, \
           move or replace)"
          other)
   | Some _ -> Error "action must be a string"

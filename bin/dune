@@ -2305,7 +2305,8 @@
  (name masc_tui_queue_inspection)
  (wrapped false)
  (modules masc_tui_queue_inspection)
- (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity masc_tui_message_layout unix yojson))
+ (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity
+  masc.masc_schedule masc.masc_types masc_tui_message_layout unix yojson))
 
 ;; Offline replay of the Librarian read rules over a live workspace (RFC
 ;; librarian-lifecycle §9). Reads the turn-boundary logs and the checkpoints

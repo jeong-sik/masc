@@ -73,6 +73,71 @@ async function draft() {
 }
 
 describe('Exact activity operator flow', () => {
+  it('does not expose an invalid conflict document as an editable source', async () => {
+    const { authority, session } = await draft(), previous = session.state.value.draft
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlRevisionConflict(
+      'changed path', document('[broken', '/another/runtime.toml')))
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.draft).toBe(previous)
+    expect(session.ready(authority)).toBe(false)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains a known conflict at another file until explicit discard', async () => {
+    const { authority, session } = await draft(), previous = session.state.value.draft
+    const current = document(source, '/another/runtime.toml')
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlRevisionConflict('changed path', current))
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toEqual(current)
+    expect(session.state.value.draft).toBe(previous)
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    session.reapply(authority)
+    expect(session.state.value.draft).toBe(previous)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    session.discard(authority)
+    expect(session.state.value.draft?.base).toEqual(current)
+    expect(session.modified()).toBe(false)
+  })
+  it('keeps invalidation after a late preview failure without dispatching a save', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    api.previewRuntimeTomlConfig.mockImplementationOnce(async () => {
+      await pending.promise
+      throw new Error('late preview unavailable')
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.previewRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    announceRuntimeTomlWritten()
+    expect(session.state.value.current).toBeNull()
+    pending.resolve(); expect(await saving).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.ready(authority)).toBe(false)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+  it('does not adopt a conflict response superseded by another source generation', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async () => {
+      await pending.promise
+      throw new RuntimeTomlRevisionConflict('changed path', document(source, '/another/runtime.toml'))
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    announceRuntimeTomlWritten()
+    pending.resolve(); expect(await saving).toBe(false)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.ready(authority)).toBe(false)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['Runtime', 'All Lanes'].flatMap(surface => [false, true].map(remount => ({ surface, remount }))))(
     'refreshes $surface after a delayed resume (remount: $remount)', async ({ surface, remount }) => {
     const resume = deferred<{ kind: 'active'; exactOutputAvailable: boolean }>()

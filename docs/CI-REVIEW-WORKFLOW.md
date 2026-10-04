@@ -44,7 +44,13 @@ verification and does not grant merge permission.
 profile, dashboard, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
 uses `release.yml` with an existing version tag, `rc_run_id`, and explicit
-`publish=true`. The tagged commit must match the latest successful full RC.
+`publish=true`. The tagged commit must match the latest successful complete candidate run.
+Here complete candidate verification means full type/compile, four-platform
+installation and every suite in the versioned essential behavior manifest. It
+does not mean repository-wide regression. Artifact publication and production
+readiness are separate claims: production-ready also requires every quantitative
+fleet, continuity, performance and Agent Core gate in
+[Production Readiness Gates](PRODUCTION-READINESS-GATES.md).
 The publication job verifies its receipt and artifact checksums and uploads the
 existing distribution; it does not rebuild or rerun tests. A publication run is
 not full verification evidence for approval or merge. Development and release-profile OCaml type checks share

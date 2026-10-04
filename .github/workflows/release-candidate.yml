@@ -96,6 +96,11 @@ jobs:
               summary.write('Candidate commit: `' + receipt['commit'] + '`\n\n')
               for name, result in results.items():
                   summary.write('- ' + name + ': ' + result + '\n')
+              scope = receipt['behavior_scope']
+              summary.write('\nBehavior profile: `' + scope['profile'] + '`\n')
+              summary.write('Manifest SHA-256: `' + scope['manifest_sha256'] + '`\n')
+              summary.write('Selected suites: ' + ', '.join(scope['suites']) + '\n')
+              summary.write('Coverage is selected release behavior; full regression and production readiness are not established.\n')
               summary.write('\nPublication: not performed.\n')
           PYCODE
 

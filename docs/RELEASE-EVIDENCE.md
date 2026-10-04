@@ -5,22 +5,38 @@ status: runbook
 # Release Evidence
 
 > Version source: [`dune-project`](../dune-project)
-> Updated: 2026-09-08
+> Updated: 2026-10-04
 
-`masc`의 release/readiness 상태를 말할 때는 문구보다 증거가 먼저여야 한다.
-기본 증거 형식은 release-evidence bundle이며, 최소한 아래 항목이 함께 있어야 한다.
+증거는 릴리즈 산출물 게시 준비와 운영 준비를 구분합니다. 설치 가능한 후보의 검증과
+태그·자산 게시가 성공했다고 fleet 연속성이나 performance SLO까지 통과한 것은 아닙니다.
 
-## Required Bundle
+## Artifact-publication-ready bundle
 
-- artifact install smoke: release-shaped binary를 설치 경로에서 직접 실행해 `--version`이 맞는지 확인
-- local boot + `/health`: isolated base path에서 서버 부팅 후 health payload 저장
-- MCP handshake: `initialize` + `tools/list` raw capture 저장
-- repo workspace collaboration read path: `masc_status` raw capture 저장
-- dashboard read paths: `/api/v1/dashboard/briefing`, `/api/v1/dashboard/project-snapshot` raw capture 저장
-- quantitative readiness: `docs/PRODUCTION-READINESS-GATES.md`의 release artifact, keeper turn evidence, performance SLO, agent core pin/boundary gate 결과를 함께 첨부
-- raw evidence: headers/body/json 정규화본 + `server.log`
+- exact source SHA: 후보 원장, 독립 소스 리뷰, 모든 후보 검증 단계와 산출물 identity 연결
+- full type/compile: development/release OCaml과 Agent Core, dashboard 타입·payload 소비자 검사
+- supported-platform installation: macOS ARM64/x64와 Linux ARM64/x64의 같은 후보 산출물 설치 검증
+- declared essential behavior: 고정된 core flow와 변경 표면의 실제 동작 검사; 고정된 profile 버전·suite 목록·hash를 receipt에 기록
+- artifact install smoke: 설치 경로에서 binary를 실행하고 version·isolated boot·`/health` 확인
+- public API smoke: MCP `initialize`·`tools/list`, `masc_status`, dashboard briefing·project-snapshot raw captures
+- raw evidence: 실행 결과와 headers/body/json 정규화본·`server.log`, checksums와 배포 묶음
 
-이 bundle이 없으면 최신 release/main에 대해 release-ready 또는 production-ready claim을 하지 않는다.
+이 후보의 RC는 `config/release-behavior.json`에 고정된 `release-essential-v1`을 실행합니다.
+같은 SHA의 full compile/type·4-platform install·선언된 필수 동작을 모두 통과해야
+산출물 게시 준비로 판정합니다. receipt의 profile·정확한 suite 목록·manifest hash가
+태그의 manifest와 다르면 게시를 거부합니다. 선택을 실패 후 축소해 통과시킬 수 없습니다.
+repository 전체 `@runtest` 회귀는 별도 manual lane이며 필수 profile 통과가 전체 회귀
+또는 production-ready 판정을 뜻하지 않습니다.
+
+## Production-ready bundle
+
+위 artifact 증거에 [Production Readiness Gates](PRODUCTION-READINESS-GATES.md)의
+Keeper fleet turn/evidence chain, performance SLO, generic Agent Core package/source
+boundary 검증을 모두 추가해야 합니다. 네 gate 모두 REQUIRED이며 누락·blocked·not
+evaluated를 성공으로 간주하지 않습니다. artifact-publication-ready와 production-ready는
+각각의 증거 범위로만 말합니다. 단순 게시 성공은 운영 준비 판정이 아닙니다.
+
+공개 tag·asset·checksum이 검증된 후보와 일치하는지는 검증 후 게시 단계에서 확인합니다.
+미게시 후보의 사전 검증에 이미 게시된 자산을 요구하지 않습니다.
 
 ## Canonical Commands
 

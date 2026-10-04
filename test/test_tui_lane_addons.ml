@@ -40,6 +40,9 @@ let read directory session =
     ~body:(Yojson.Safe.to_string (Owner.document_to_json document)) |> ok
 
 let create_and_conflict_repair () = with_directory (fun directory ->
+  ignore (Draft.create ".toml" |> ok);
+  check bool "enumerated suffix-only declaration is selectable" true
+    (Draft.editable_source_path ~directory (Filename.concat directory ".toml"));
   let session = { (Draft.create "observer.toml" |> ok) with text=source } in
   let created = save directory session in
   let session = Draft.after_response session created in

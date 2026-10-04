@@ -50,6 +50,16 @@ const actionReceipt = {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
+  it('offers the editor for the loader-supported suffix-only TOML filename', async () => {
+    const sourcePath = '/config/.toml'
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete: true, issues: [], declarations: [
+        { id: 'suffix-only', source_path: sourcePath, desired_revision: 'r1', applied_revision: null, instance_id: null },
+      ] }, instances: [],
+    }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    expect(await view.findByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeTruthy()
+  })
   it('renders the owning package display contract in order while retaining raw fields and binding schema', async () => {
     const bindingSchema = { type: 'object', properties: { sources: { type: 'array' } }, required: ['sources'] }
     const readings = [

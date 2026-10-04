@@ -804,6 +804,8 @@ let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
     let* () = if Filename.basename path = Lane_addon_store.digest instance_id ^ ".json"
       then Ok () else Error "binding filename does not match its instance identity" in
     let* incarnation = text fields "incarnation" in
+    let* () = if incarnation=instance_id then Ok ()
+      else Error "retained incarnation does not match its instance identity" in
     let* run_id = text fields "run_id" in
     let* package_id = text fields "addon_id" in
     let* title = text fields "title" in

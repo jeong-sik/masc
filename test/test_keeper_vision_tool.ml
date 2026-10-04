@@ -2182,13 +2182,14 @@ let test_browser_screenshot_reaches_vision_reader () =
       Eio_main.run (fun env ->
         Time_compat.set_clock (Eio.Stdenv.clock env);
         Eio.Switch.run (fun sw ->
+          Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
           Browser_lane.install_automation_executor (Some (function
             | Browser_lane.Page_capture {tab_id=73} -> Browser_lane.Answered
                 (`Assoc ["ok",`Bool true;"data",`Assoc [
                   "tabId",`Int 73;"url",`String "https://example.org/form";
                   "title",`String "Form";"mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]])
             | _ -> failwith "unexpected screenshot command"));
-          Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
+          Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None; Browser_lane.install_automation_executor None);
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
             ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
           assert (result.disposition = Tool_result.Completed ());

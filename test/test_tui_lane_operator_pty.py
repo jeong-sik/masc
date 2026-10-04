@@ -36,6 +36,7 @@ def main(executable: str, captures: Path | None) -> None:
         instance['rows_count'] = 1
     data['configuration']['declarations'] = [{
         'id': 'unapplied-installation', 'source_path': '/fixture/lane-addons/pending.toml',
+        'enabled': True,
         'desired_revision': 'pending', 'applied_revision': None, 'instance_id': None,
     }]
     fixtures = terminal.overview_event_http_fixtures()

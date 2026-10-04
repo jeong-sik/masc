@@ -24,7 +24,7 @@ const configurationSchema = Schema.Struct({
   directory: text, complete: Schema.Boolean,
   issues: Schema.Array(Schema.Struct({ source_path: text, id: nullableText, message: text })),
   declarations: Schema.Array(Schema.Struct({
-    id: text, source_path: text, desired_revision: text,
+    id: text, source_path: text, enabled: Schema.Boolean, desired_revision: text,
     applied_revision: nullableText, instance_id: nullableText,
   })),
 })

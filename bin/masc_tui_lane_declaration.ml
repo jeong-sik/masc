@@ -14,7 +14,7 @@ type session = {
 }
 type request = Read of string | Save of session
 type response = Read_document of document | Written of receipt | Rejected of failure
-let template = "id = \"\"\nrun_id = \"\"\nmanifest_path = \"\"\n\n[binding]\nsources = []\n"
+let template = "enabled = true\nid = \"\"\nrun_id = \"\"\nmanifest_path = \"\"\n\n[binding]\nsources = []\n"
 let ( let* ) = Result.bind
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some value -> Ok value | None -> Error ("missing " ^ name))
@@ -130,9 +130,34 @@ let replace_with_current session = match session.current with
   | None -> Error "Read the current file first (l)"
   | Some current -> Ok {session with base=Some current;text=current.source_text;
       message=Some "Draft replaced with the current file; E edits TOML."}
+let parse_source text =
+  try match Otoml.Parser.from_string_result text with
+    | Ok (Otoml.TomlTable fields) -> Ok fields
+    | Ok _ -> Error "Declaration requires a TOML table"
+    | Error detail -> Error detail
+  with Otoml.Duplicate_key detail -> Error detail
+let draft_enabled (session : session) =
+  let* fields = parse_source session.text in
+  match List.assoc_opt "enabled" fields with
+  | None -> Ok true
+  | Some (Otoml.TomlBoolean enabled) -> Ok enabled
+  | Some _ -> Error "enabled requires a boolean; repair the draft with E"
+let toggle_enabled (session : session) =
+  let* enabled = draft_enabled session in
+  let text = Toml_line_editor.edit_root_bool session.text ~key:"enabled" ~value:(not enabled) in
+  let changed = {session with text} in
+  let* observed = draft_enabled changed in
+  if observed = enabled then Error "The draft enabled key did not change"
+  else Ok {changed with message=Some
+    ((if observed then "Enable" else "Disable")
+     ^ " staged in draft; s saves. Actual worker state is read with r after saving.")}
 let summary (session : session) =
   ["TOML draft " ^ session.file_name;
-   " E:edit  s:save  l:read current  u:use current revision  U:replace draft  Esc:back (draft kept)";
+   (match draft_enabled session with
+    | Ok true -> "Draft: enabled · saved configuration and worker state are separate"
+    | Ok false -> "Draft: disabled · save requests worker cleanup and keeps this file"
+    | Error detail -> "Draft activity unknown: " ^ detail);
+   " Space:on/off draft  E:edit  s:save  l:read current  u:use current revision  U:replace draft  Esc:back (draft kept)";
    (match session.base with None -> "Create only; no existing file will be overwritten"
     | Some base -> "Base " ^ base.source_revision ^ " · " ^ base.source_path)]
   @ (match session.message with None -> [] | Some message -> [message])

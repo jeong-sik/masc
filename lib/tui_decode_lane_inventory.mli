@@ -20,7 +20,7 @@ type configuration =
 
 type declaration =
   | Valid of {
-      installation_id : string; run_id : string; package_id : string;
+      installation_id : string; enabled : bool; run_id : string; package_id : string;
       title : string; desired_revision : string;
     }
   | Invalid of string list

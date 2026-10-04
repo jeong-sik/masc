@@ -298,8 +298,10 @@ export function LaneAddonsPanel() {
               <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
             <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
-            <td>${declaration.applied_revision === null ? 'Not yet applied'
-              : declaration.applied_revision === declaration.desired_revision ? 'Desired revision applied' : 'Revision change pending'}</td>
+            <td>${!declaration.enabled
+              ? declaration.instance_id === null ? 'Configured off · no current worker observed' : 'Off requested · worker cleanup not yet confirmed'
+              : declaration.applied_revision === null ? 'Not yet applied'
+                : declaration.applied_revision === declaration.desired_revision ? 'Desired revision applied' : 'Revision change pending'}</td>
           </tr>`)}</tbody></table></div>
           ${configuration.declarations.length === 0 && html`<p>No readable TOML declarations.</p>`}
           <p>Configuration status tracks installed revisions. Observation status is shown per instance below.</p>`}

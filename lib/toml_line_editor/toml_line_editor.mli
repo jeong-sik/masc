@@ -76,6 +76,11 @@ val edit_table_bool : string -> path:string -> key:string -> value:bool -> strin
     [true]/[false], not a quoted string: a reader that expects a boolean
     refuses ["true"]. *)
 
+val edit_root_bool : string -> key:string -> value:bool -> string
+(** Update a boolean in the root table, before any table header. Unrelated
+    bytes and the key's trailing comment are retained. The caller validates
+    the document and boolean type before editing and parses the result. *)
+
 val edit_table_float : string -> path:string -> key:string -> value:float -> string
 (** Set a typed float while retaining unrelated lines and comments. The value
     always carries a decimal point or exponent, so a reader that expects a

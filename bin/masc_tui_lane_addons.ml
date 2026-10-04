@@ -11,7 +11,7 @@ type instance = {
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; desired : string option;
+  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
 }
@@ -99,10 +99,11 @@ let configuration = function
       let* declarations = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = get text "id" json in
+        let* enabled = get boolean "enabled" json in
         let* desired = get text "desired_revision" json in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration})) "declarations" json in
+        Ok {source_path;installation_id=Some installation_id;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -110,7 +111,7 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only}]) declarations issues in
       Ok (Some {directory;complete;declarations})
 let phase json =
   let* kind = get text "kind" json in
@@ -600,6 +601,11 @@ let configuration_lines view snapshot = match snapshot.configuration with
       @ List.concat (List.mapi (fun index (declaration : declaration) ->
         [Printf.sprintf "%s %s · %s" (if view.configuration_cursor=index then ">" else " ")
            (Option.value ~default:"unresolved installation" declaration.installation_id) declaration.source_path;
+         (match declaration.enabled, declaration.instance_id with
+          | Some false, Some _ -> "   Off requested · worker cleanup not yet confirmed"
+          | Some false, None -> "   Configured off · no current worker observed"
+          | Some true, _ -> "   Configured on"
+          | None, _ -> "   Desired activity unknown");
          "   desired " ^ Option.value ~default:"unknown" declaration.desired;
          "   applied " ^ Option.value ~default:"none" declaration.applied]
         @ (if Document.editable_source_path ~directory:config.directory declaration.source_path then []
@@ -873,7 +879,7 @@ let instance_controls (instance : instance) =
   match instance.phase with
   | Row.Attached | Row.Observing ->
       "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
-  | Row.Detaching -> "removal pending"
+  | Row.Detaching -> "worker cleanup pending"
   | Row.Detached -> "retained history · D:details"
   | Row.Failed _ -> "o:retry observation" ^
       (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
@@ -883,7 +889,7 @@ let instance_controls (instance : instance) =
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
+    "?:help  Esc:back  Space:on/off draft  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
@@ -1070,6 +1076,7 @@ let overview_lines ~width view =
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
                 let status = if Option.is_none declaration.desired then "configuration issue"
                   else if declaration.issues<>[] then "needs attention"
+                  else if declaration.enabled=Some false then "configured off"
                   else if Option.is_some declaration.applied then "no current worker" else "pending" in
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
@@ -1090,7 +1097,14 @@ let overview_lines ~width view =
                         [name ^ " · add-on " ^ item.addon_id ^ " · run " ^ item.run_id] in
                 let count_text = if item.observation_seq=0 then "awaiting first observation"
                   else Printf.sprintf "%d records" item.rows_count in
+                let activity = match snapshot.configuration with
+                  | Some config when List.exists (fun (d : declaration) ->
+                      d.enabled = Some false && d.instance_id = Some item.id
+                      && Some d.source_path = item.source_path) config.declarations ->
+                      "off requested · "
+                  | Some _ | None -> "" in
                 let lead = marker ^ instance_heading snapshot item ^ " · " ^
+                  activity ^
                   (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^
                   " · " ^ count_text in
                 let controls = "    Enter:open  " ^ instance_controls item in
@@ -1121,7 +1135,8 @@ let help_lines = [
   "Manual attachments remove only the worker and its owned resources.";
   "Declarations now owned by another instance are preserved; observations and evidence remain.";
   "Actions: t check last request · D raw details · f flow";
-  "Installation: E edit · s save · l reload · u/U revision";
+  "Installation: Space on/off draft · E edit · s save · l reload · u/U revision";
+  "Saving off keeps the TOML and evidence; r reads the actual worker cleanup state.";
   "Links: S subscriptions · Left/Right lane";
   "Records: Space mark row · e export marked rows";
   "Navigation: : command palette · Esc returns to Lane Add-ons";
@@ -1192,7 +1207,11 @@ let detail_lines ~width view =
              | Some config ->
                  List.concat_map (fun (declaration : declaration) ->
                    if Some declaration.source_path = item.source_path
-                   then ["Desired: " ^ Option.value ~default:"unknown" declaration.desired;
+                   then ["Current declaration: " ^ (match declaration.enabled with
+                           | Some true -> "configured on"
+                           | Some false -> "configured off"
+                           | None -> "desired activity unknown");
+                         "Desired: " ^ Option.value ~default:"unknown" declaration.desired;
                          "Applied: " ^ Option.value ~default:"unknown" declaration.applied]
                         @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
                    else []) config.declarations)

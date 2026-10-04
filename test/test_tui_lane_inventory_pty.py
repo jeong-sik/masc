@@ -45,7 +45,7 @@ def inventory_response(*, owner_present=True):
         name = "broken" if index == 0 else f"package-{index:02d}"
         path = DIRECTORY + "/" + name + ".toml"
         declaration = {"kind": "invalid", "messages": ["unterminated fixture binding"]} if index == 0 else {
-            "kind": "valid", "installation_id": name, "run_id": "fixture-world",
+            "kind": "valid", "enabled": True, "installation_id": name, "run_id": "fixture-world",
             "package_id": "observer", "title": name, "desired_revision": "desired-1",
         }
         workers = [instance("broken-worker", managed=True)] if index == 0 else []

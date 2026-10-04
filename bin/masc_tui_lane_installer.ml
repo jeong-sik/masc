@@ -59,7 +59,7 @@ let draft preview json =
   let* id = text "installation_id" json in let* run_id = text "run_id" json in
   let* session = Document.create (id ^ ".toml") in
   let* binding = field "binding" json in let* binding = toml binding in
-  let source = Otoml.TomlTable ["id",Otoml.TomlString id;"run_id",Otoml.TomlString run_id;
+  let source = Otoml.TomlTable ["enabled",Otoml.TomlBoolean true;"id",Otoml.TomlString id;"run_id",Otoml.TomlString run_id;
       "manifest_path",Otoml.TomlString preview.path;"binding",binding] in
   Ok {session with text=Otoml.Printer.to_string source;
       message=Some "Local draft only. Review TOML, then s saves and requests application; inspect actual state afterwards."}

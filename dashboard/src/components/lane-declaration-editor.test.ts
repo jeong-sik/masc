@@ -35,7 +35,7 @@ const document: LaneDeclarationDocument = {
 }
 const snapshot = {
   configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true, issues: [], declarations: [
-    { id: 'custom', source_path: path, desired_revision: 'semantic-revision-1', applied_revision: null, instance_id: null },
+    { id: 'custom', source_path: path, enabled: true, desired_revision: 'semantic-revision-1', applied_revision: null, instance_id: null },
   ] }, instances: [], rows: [], coverage: [],
 }
 function receipt(source_text: string, source_revision = 'raw-revision-2') {

@@ -160,14 +160,31 @@ describe('optional Lane Add-on surface', () => {
     expect(screen.queryByRole('region', { name: 'Package actions' })).toBeNull()
     expect(screen.queryByLabelText('Action JSON')).toBeNull()
   })
+  it('separates requested off from observed worker cleanup', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: false, issues: [],
+        declarations: [
+          { id: 'stopping', source_path: '/workspace/.masc/config/lane-addons/stopping.toml',
+            enabled: false, desired_revision: 'same-inputs', applied_revision: 'same-inputs', instance_id: 'instance-1' },
+          { id: 'off', source_path: '/workspace/.masc/config/lane-addons/off.toml',
+            enabled: false, desired_revision: 'same-inputs', applied_revision: null, instance_id: null },
+        ] },
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const table = within(await screen.findByRole('table', { name: 'TOML declarations' }))
+    expect(table.getByText('Off requested · worker cleanup not yet confirmed')).toBeTruthy()
+    expect(table.getByText('Configured off · no current worker observed')).toBeTruthy()
+    expect(table.queryByText('Desired revision applied')).toBeNull()
+    expect(table.queryByText('Not yet applied')).toBeNull()
+  })
   it('shows installed and pending TOML declarations independently of observation health', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
       configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true, issues: [],
         declarations: [
           { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml',
-            desired_revision: 'configuration-1', applied_revision: 'configuration-1', instance_id: 'instance-1' },
+            enabled: true, desired_revision: 'configuration-1', applied_revision: 'configuration-1', instance_id: 'instance-1' },
           { id: 'game', source_path: '/workspace/.masc/config/lane-addons/game.toml',
-            desired_revision: 'configuration-2', applied_revision: null, instance_id: null },
+            enabled: true, desired_revision: 'configuration-2', applied_revision: null, instance_id: null },
         ] },
       instances: [{ ...snapshot.instances[0], phase: { kind: 'failed', message: 'Browser owner is busy' },
         configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
@@ -193,7 +210,7 @@ describe('optional Lane Add-on surface', () => {
           { source_path: '/workspace/.masc/config/lane-addons/broken.toml', id: null, message: 'Expected a closing quote' },
         ],
         declarations: [{ id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml',
-          desired_revision: 'configuration-2', applied_revision: 'configuration-1', instance_id: 'instance-1' }] },
+          enabled: true, desired_revision: 'configuration-2', applied_revision: 'configuration-1', instance_id: 'instance-1' }] },
       instances: [{ ...snapshot.instances[0],
         configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
     }))
@@ -239,7 +256,7 @@ describe('optional Lane Add-on surface', () => {
     expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeNull()
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
       configuration: { directory, complete: true, issues: [], declarations: [{ id: 'replacement-owner', source_path: sourcePath,
-        desired_revision: 'configuration-2', applied_revision: null, instance_id: null }] }, instances: [historical],
+        enabled: true, desired_revision: 'configuration-2', applied_revision: null, instance_id: null }] }, instances: [historical],
     }))
     fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
     await screen.findByText('replacement-owner')

@@ -178,7 +178,7 @@ def run_installation_detail(executable: str) -> None:
         "instances": [], "rows": [], "coverage": [],
         "configuration": {"directory": "/fixture/lane-addons", "complete": False,
                           "declarations": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
-                                            "desired_revision": "r1", "applied_revision": None,
+                                            "enabled": True, "desired_revision": "r1", "applied_revision": None,
                                             "instance_id": None}],
                           "issues": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
                                       "message": "Docker image missing"}]},
@@ -226,7 +226,7 @@ def run_declared_layers(executable: str, captures: Path | None) -> None:
                 "installation_id": producer, "output_id": "events", "selection": "latest_completed"}
                 for producer in upstream]}})
         declarations.append({"id": name, "source_path": path, "instance_id": owner,
-            "desired_revision": "1", "applied_revision": "1"})
+            "enabled": True, "desired_revision": "1", "applied_revision": "1"})
     captured["instances"], captured["rows"] = workers, []
     captured["configuration"]["declarations"] = declarations
     fixtures["/api/v1/lane-addons"] = (200, captured)
@@ -278,7 +278,7 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
             "title": "Preserved old result", "subject_id": f"retained world/{index}", "fields": {"old_run": owner}})
     captured["instances"] = [old_runs[0], active, *old_runs[1:]]
     captured["configuration"]["declarations"] = [{"id": "report", "source_path": active["configuration"]["source_path"],
-        "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
+        "enabled": True, "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
     inventory_reads: list[str] = []
     def inventory(path: str):
         inventory_reads.append(path)

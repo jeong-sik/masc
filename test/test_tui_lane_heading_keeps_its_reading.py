@@ -76,7 +76,7 @@ def unapplied_inventory():
             "purpose": "Package declaration and its owned observation workers.",
             "selection": {"kind": "declaration", "source_path": path},
             "state": {"kind": "package", "instances": [], "declaration": {
-                "kind": "valid", "installation_id": name, "run_id": "fixture-world",
+                "kind": "valid", "enabled": True, "installation_id": name, "run_id": "fixture-world",
                 "package_id": name, "title": name, "desired_revision": "revision-1",
             }},
         })
@@ -101,7 +101,7 @@ def run_unapplied_installations(executable: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"d", b"no worker observed")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         frame = _keyboard_harness.screen_text(bytes(output))
-        if b"declaration valid" not in frame or b"no worker observed" not in frame:
+        if b"enabled" not in frame or b"no worker observed" not in frame:
             raise AssertionError(f"unapplied TOML lost its observed state: {frame!r}")
         if any(path.split("?", 1)[0] == "/api/v1/lane-addons" for path, _ in requests):
             raise AssertionError("first common inventory required opening the Add-ons surface")

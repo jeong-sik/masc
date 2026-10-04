@@ -132,7 +132,7 @@ let write_payload ~masc_root ~keeper_name ~turn_label (payload : Yojson.Safe.t) 
   | Dated_jsonl.Skipped_rotation_exhausted { sequence_limit } ->
     record_skip ~store ~keeper_name ~turn_label Rotation_sequence_exhausted
       (Printf.sprintf
-         "day already holds %d rotated segments of %d bytes"
+         "rotation sequence reached %d for segments of %d bytes"
          sequence_limit
          segment_bytes)
   | Dated_jsonl.Skipped_by_append_guard ->

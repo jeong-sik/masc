@@ -51,3 +51,19 @@ scenario exercises navigation, late creation and workspace separation.
 
 These are frontend and scoped source-review results. Real backend writes, native
 TUI/PTY, deployment, GitHub independent approval and merge remain unverified.
+
+## Current parent integration
+
+Integrated published parent `4ea9a34a60f7e0b81839a477e94ad4573446c4ec` cleanly.
+The session owner, editor, editor tests, panel, authority store and declaration
+transport retain their audited child bytes. The parent unsafe-integer reading
+refusal and regression, plus removal labels and guidance, are preserved.
+Sessions still separate workspace root and configuration directory, fence pending
+responses by exact accepted authority identity, and require fresh comparison
+following a request that crosses authority changes.
+
+Current local verification: 60/60 tests passed in the four suites listed above
+(4.58 seconds); TypeScript and scoped ESLint exited 0. No native build, new
+browser capture, real backend/filesystem write, CI or deployment was performed.
+Earlier screenshots, manifests and logs remain historical with their original
+source scope; these new checks do not reclassify them as current browser proof.

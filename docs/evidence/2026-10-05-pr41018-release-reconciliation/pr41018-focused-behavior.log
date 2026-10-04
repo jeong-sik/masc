@@ -1,0 +1,114 @@
+START native test_keeper_portrait_http
+[2026-10-05 07:29:08] [INFO] [MCP] Tag registry initialized: 190 tools registered
+Testing `Keeper portrait HTTP'.
+This run has ID `9EX9A2T1'.
+
+  [OK]          answer          0   route is exact.
+  [OK]          answer          1   default and requested size.
+  [OK]          answer          2   bad sizes are refused, not clamped.
+  [OK]          answer          3   name, size, presence, in that order.
+  [OK]          answer          4   same name, same bytes.
+  [OK]          answer          5   a held tag is answered without drawing.
+  [OK]          answer          6   tags follow build, name and size.
+  [OK]          answer          7   unscoped tags follow the bytes.
+  [OK]          answer          8   cache stays within its byte budget.
+  [OK]          answer          9   equipment wire changes actual PNG and cac...
+  [OK]          answer         10   expected equipment is checked once before...
+  [OK]          answer         11   account identity binds facts, not natural...
+  [OK]          router          0   preview preserves current equipment.
+  [OK]          router          1   PNG with a strong tag and 304.
+  [OK]          router          2   400 and 404.
+  [OK]          router          3   Gate operator revisions bypass shared met...
+  [OK]          router          4   strict auth needs a read token.
+  [OK]          router          5   GET leaves keeper metadata untouched.
+  [OK]          router          6   purchase equip reset and remote portrait ...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41018-release-parent-20261005/_build/_tests/Keeper portrait HTTP'.
+Test Successful in 0.782s. 19 tests run.
+START native test_tui_keeper_portrait
+Testing `tui_keeper_portrait'.
+This run has ID `RSX5M7OT'.
+
+  [OK]          band               0   a small pane keeps its rows for facts.
+  [OK]          band               1   no picture is no band.
+  [OK]          band               2   Item Mosaic selection changes accessor...
+  [OK]          band               3   Mosaic previews every catalog accessory.
+  [OK]          band               4   the band is compact.
+  [OK]          band               5   the still portrait the name draws.
+  [OK]          band               6   observed facial equipment remains visi...
+  [OK]          band               7   facts stand beside the portrait.
+  [OK]          placement          0   pixels go only where the whole portrai...
+  [OK]          placement          1   the picture leaves with the detail.
+  [OK]          cache              0   the cache is bounded.
+  [OK]          cache              1   equipment replaces same Keeper pixels.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41018-release-parent-20261005/_build/_tests/tui_keeper_portrait'.
+Test Successful in 0.437s. 12 tests run.
+START resource withdrawal
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 60122)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 496, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 484, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41018-release-parent-20261005/test/test_tui_keyboard_input.py", line 368, in do_GET
+    self.respond()
+    ~~~~~~~~~~~~^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41018-release-parent-20261005/test/test_tui_keyboard_input.py", line 365, in respond
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 60298)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 496, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 484, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41018-release-parent-20261005/test/test_tui_keyboard_input.py", line 368, in do_GET
+    self.respond()
+    ~~~~~~~~~~~~^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41018-release-parent-20261005/test/test_tui_keyboard_input.py", line 365, in respond
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+PASS resource withdrawal
+START HTTP badge
+PASS HTTP badge
+START chat resize
+PASS chat resize
+START item withdrawal
+PASS item withdrawal
+START item roster withdrawal
+PASS item roster withdrawal

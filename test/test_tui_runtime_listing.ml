@@ -8,7 +8,7 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
-    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_account_scope_id = None;
+    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_quota_scope_id = None;
     ro_rate_limited = false; ro_rate_limit_resets_at = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -1460,7 +1460,7 @@ let test_selected_status_wraps_and_reserves_rows () =
   let observed = { (runtime "a") with
     ro_provider_id = "codex-account-two"; ro_provider = "Account Two";
     ro_quota_exhausted = true; ro_rate_limited = true; ro_quota_scope = Some "account:status";
-    ro_account_scope_id = Some "status" } in
+    ro_quota_scope_id = Some "status" } in
   let resolved = { snapshot.rss_resolved with
     rrs_usage = Ok { puws_since = 0.; puws_accounts = [account] };
     rrs_runtimes = [observed; runtime "b"; runtime "c"] } in
@@ -1472,7 +1472,7 @@ let test_selected_status_wraps_and_reserves_rows () =
     let text = String.concat " " (List.map String.trim lines) in
     List.iter (fun fact -> Alcotest.(check bool) ("complete selected fact: " ^ fact) true
         (Astring.String.is_infix ~affix:fact text))
-      [ "Account status"; "Connection codex-account-two"; "Account Two / model";
+      [ "Lane primary"; "Quota scope status"; "Connection codex-account-two"; "Account Two / model";
         "quota exhausted (no reset stated)"; "rate limited"; "account limit spent / unobserved" ];
     List.iter (fun line -> Alcotest.(check bool) "wrapped status fits frame" true
         (Masc_tui_message_layout.display_width line <= Masc_tui_frame.inner_width ~cols)) lines;
@@ -1484,17 +1484,20 @@ let test_selected_status_wraps_and_reserves_rows () =
       (without_selection + List.length lines + 1) chrome)
     [80;132]
 
-let test_account_label_tracks_quota_scope () =
+let test_quota_scope_label_preserves_correlation () =
   let first = { (runtime "a") with ro_provider_id = "connection-a";
-    ro_quota_scope = Some "account:1"; ro_account_scope_id = Some "stable-first" } in
+    ro_quota_scope = Some "account:1"; ro_quota_scope_id = Some "stable-first" } in
   let sibling = { first with ro_provider_id = "connection-b" } in
-  Alcotest.(check string) "account label uses retained Usage identity" "stable-first"
-    (runtime_account_label first);
-  Alcotest.(check string) "connections sharing quota share account identity"
-    (runtime_account_label first) (runtime_account_label sibling);
-  Alcotest.(check string) "ordinal is never used as account identity"
-    "unknown (Usage account identity unavailable)"
-    (runtime_account_label {first with ro_account_scope_id = None})
+  Alcotest.(check string) "quota scope label uses retained Usage scope" "stable-first"
+    (runtime_quota_scope_label first);
+  Alcotest.(check string) "connections sharing quota share scope label"
+    (runtime_quota_scope_label first) (runtime_quota_scope_label sibling);
+  Alcotest.(check string) "unjoined ordinal remains explicitly response-local"
+    "unavailable; response-local scope account:1"
+    (runtime_quota_scope_label {first with ro_quota_scope_id = None});
+  Alcotest.(check string) "no reported quota scope remains unavailable"
+    "unavailable (no quota scope reported)"
+    (runtime_quota_scope_label {first with ro_quota_scope_id = None; ro_quota_scope = None})
 
 let test_short_viewport_preserves_selected_list_row () =
   let state = lane_state () in
@@ -1527,8 +1530,8 @@ let test_short_viewport_preserves_selected_list_row () =
       (runtime_selection_summary_for_viewport ~rows:100 ~cols state)) [80; 132]
 
 let () = Alcotest.run "runtime list geometry"
-  ["operator states", [ Alcotest.test_case "account label follows quota scope" `Quick
-        test_account_label_tracks_quota_scope;
+  ["operator states", [ Alcotest.test_case "quota scope label preserves correlation" `Quick
+        test_quota_scope_label_preserves_correlation;
       Alcotest.test_case "short viewport retains selected list row" `Quick
         test_short_viewport_preserves_selected_list_row;
       Alcotest.test_case "account scope spans provider connections" `Quick

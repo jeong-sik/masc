@@ -9305,14 +9305,22 @@ let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidat
   let candidate_heading =
     match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"
   in
-  (* Reserve the candidate heading's measured width before allocating status.
-     A fixed status width left only an ellipsis for every identity at30 cols. *)
-  let status_width =
-    min status_width
-      (max 1 (inner_width - Message_layout.display_width candidate_heading
-              - Masc_tui_table.cell_gap))
+  (* Reserve the mode's identifying columns before allocating long status. *)
+  let status_width, candidate_floor, drop_order = match mode with
+    | Masc_tui_types.Runtime_lanes ->
+        (* Lane identity and candidate order stay visible even when another
+           row has a long combined status. Full status is in summary/detail. *)
+        let remaining = inner_width - lane_width - (2 * Masc_tui_table.cell_gap) in
+        let candidate_floor = min candidate_width (max 1 (remaining - 1)) in
+        min status_width (max 1 (remaining - candidate_floor)), candidate_floor,
+        [Runtime_detail_column; Runtime_identity_column]
+    | Runtime_all ->
+        let status_width = min status_width
+          (max 1 (inner_width - Message_layout.display_width candidate_heading
+                  - Masc_tui_table.cell_gap)) in
+        status_width, min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)),
+        [Runtime_detail_column; Runtime_identity_column; Runtime_lane_column]
   in
-  let candidate_floor = min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)) in
   let width = function
     | Runtime_lane_column -> lane_width
     | Runtime_candidate_column -> candidate_floor
@@ -9324,7 +9332,7 @@ let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidat
            - (4 * Masc_tui_table.cell_gap)) in
   let layout = Masc_tui_table.fit ~inner_width ~width
     ~flex:Runtime_candidate_column
-    ~drop_order:[Runtime_detail_column; Runtime_identity_column; Runtime_lane_column]
+    ~drop_order
     [Runtime_lane_column; Runtime_candidate_column; Runtime_identity_column;
      Runtime_status_column; Runtime_detail_column] in
   List.map (fun column ->
@@ -9458,7 +9466,9 @@ let runtime_detail_lines state target ~width =
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
-        @ runtime_detail_field ~width ~style:Ansi.reset "Account" (runtime_account_label runtime)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Quota scope" (runtime_quota_scope_label runtime)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Response-local quota scope"
+            (Option.value ~default:"not reported" runtime.ro_quota_scope)
         @ runtime_detail_field ~width ~style:Ansi.reset "Connection / provider ID" runtime.ro_provider_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
         @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"

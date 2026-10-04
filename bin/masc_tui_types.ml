@@ -9983,12 +9983,14 @@ let prev_memory_category (current : memory_category_filter)
       in
       before rev
 
-(* The decoder retains the account identity from the same response as this
-   runtime row. Catalogue and surface refreshes cannot cross-join ordinals. *)
-let runtime_account_label (runtime : Tui_decode.runtime_option) =
-  match runtime.ro_account_scope_id with
+(* The decoder retains a credential-location quota scope from the same response.
+   It cannot identify a subscription after credentials change at that location. *)
+let runtime_quota_scope_label (runtime : Tui_decode.runtime_option) =
+  match runtime.ro_quota_scope_id with
   | Some scope_id -> scope_id
-  | None -> "unknown (Usage account identity unavailable)"
+  | None -> (match runtime.ro_quota_scope with
+      | Some scope -> "unavailable; response-local scope " ^ scope
+      | None -> "unavailable (no quota scope reported)")
 
 type runtime_picker_projection = {
   rlp_lane : string;
@@ -11149,16 +11151,18 @@ let runtime_selection_summary_lines ~cols state =
     | None, _ -> None
     | Some snapshot, Runtime_lanes ->
         List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor
-        |> Option.map (fun row -> row.Tui_decode.rcr_runtime, row.rcr_probe)
+        |> Option.map (fun row -> row.Tui_decode.rcr_runtime, row.rcr_probe, Some row.rcr_lane_id)
     | Some snapshot, Runtime_all ->
         List.nth_opt snapshot.Tui_decode.rss_resolved.rrs_runtimes state.runtime_cursor
         |> Option.map (fun runtime -> runtime,
-            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.ro_id) in
+            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.ro_id, None) in
   match selected with
   | None -> []
-  | Some (runtime, probe) ->
+  | Some (runtime, probe, lane) ->
       let width = max 1 (Masc_tui_frame.inner_width ~cols - 2) in
-      [ "Selected " ^ runtime.ro_id ^ " · Account " ^ runtime_account_label runtime
+      [ "Selected " ^ runtime.ro_id
+          ^ Option.fold ~none:"" ~some:(fun lane -> " · Lane " ^ lane) lane
+          ^ " · Quota scope " ^ runtime_quota_scope_label runtime
           ^ " · Connection " ^ runtime.ro_provider_id
           ^ " · " ^ runtime.ro_provider ^ " / " ^ runtime.ro_model
       ; runtime_route_probe_text state runtime probe ]
@@ -11196,7 +11200,7 @@ let runtime_selection_summary_for_viewport ~rows ~cols state =
   let lines = runtime_selection_summary_lines ~cols state in
   let spare = rows - runtime_surface_base_chrome ~cols state - 1 in
   if lines = [] || List.length lines + 1 <= spare then lines
-  else if spare >= 2 then ["  Enter: full account and status details"]
+  else if spare >= 2 then ["  Enter: full connection and status details"]
   else []
 
 let runtime_surface_listing_chrome ~rows ~cols state =

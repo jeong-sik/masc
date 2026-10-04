@@ -2,6 +2,8 @@
     no cached query result is authoritative. All paths are below [root]. *)
 type t
 val create : root:string -> t
+(** Resolve a relative root against the working directory at creation. The
+    resulting absolute ownership boundary is retained by the store. *)
 val root : t -> string
 val digest : string -> string
 val blob_reference : string -> Lane_addon_types.evidence

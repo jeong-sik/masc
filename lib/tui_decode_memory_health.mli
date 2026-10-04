@@ -9,6 +9,10 @@ type memory_alert_code =
   | Librarian_starvation
   | Vision_ingest_errors
 
+val memory_alert_is_history : memory_alert_code -> bool
+(** Failed-pass totals and starvation from historical failures describe
+    server-start history, not the outcome of the current Librarian pass. *)
+
 (** The severity the server is contractually required to send for a code. *)
 val memory_alert_severity : memory_alert_code -> [ `Warn | `Error ]
 

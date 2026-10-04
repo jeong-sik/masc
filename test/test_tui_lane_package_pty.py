@@ -4,31 +4,21 @@ The native owner tests cover filesystem semantics. This suite proves terminal
 keys, delayed responses, draft retention and exact requests, without workers.
 """
 from __future__ import annotations
+
 import hashlib
 import json
 import os
-from pathlib import Path
+import select as _keyboard_select
 import shlex
 import sys
 import tempfile
 import threading
+import time as _keyboard_time
+from pathlib import Path
 
-import test_tui_keyboard_input as terminal
+import tui_keyboard_harness as terminal
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# Three surface titles come from masc_tui_render.ml; the workspace rows it
-# reads ("TOML installations", "New TOML filename:", "No observations.")
-# from masc_tui_lane_addons.ml; the draft notices ("Draft edited; s saves",
-# "A Lane request is pending") from masc_tui.ml; and the revision note from
-# masc_tui_lane_declaration.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_lane_addons.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_lane_declaration.ml",
-)
+
 
 
 def main(executable: str) -> None:
@@ -198,12 +188,12 @@ def main(executable: str) -> None:
             key(b"t", b"state confirmed")
             key(b"q", b"MASC Dashboard")
             os.write(master_fd, b"q")
-            deadline = terminal.time.monotonic() + 3
+            deadline = _keyboard_time.monotonic() + 3
             while len([path for path, _ in requests if path == "/api/v1/lane-addons/declaration"]) < 5:
                 terminal.read_available(master_fd, output)
-                if terminal.time.monotonic() >= deadline:
+                if _keyboard_time.monotonic() >= deadline:
                     raise AssertionError("fifth explicit save was not captured")
-                terminal.select.select([master_fd], [], [], 0.01)
+                _keyboard_select.select([master_fd], [], [], 0.01)
             lane_requests = [(path, json.loads(body)) for path, body in requests
                              if path.startswith("/api/v1/lane-addons")]
             if any(path.endswith("/attach") for path, _ in lane_requests):

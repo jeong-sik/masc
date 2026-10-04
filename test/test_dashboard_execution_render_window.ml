@@ -60,7 +60,7 @@ let test_workspace_root_matches_item_admission_through_symlink () =
   let root = Filename.temp_dir "execution-root-" "" in
   let alias = root ^ "-alias" in
   Unix.symlink root alias;
-  Fun.protect ~finally:(fun () -> Unix.unlink alias; Masc.Fs_compat.remove_tree root) (fun () ->
+  Fun.protect ~finally:(fun () -> Unix.unlink alias; Fs_compat.remove_tree root) (fun () ->
     let config = Masc.Workspace.default_config alias in
     let diagnostics = Masc.Server_base_path_diagnostics.detect
       ~effective_base_path:config.base_path ~effective_masc_root:(Masc.Workspace.masc_dir config) () in

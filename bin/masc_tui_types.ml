@@ -156,6 +156,21 @@ let workspace_identity_of_refresh ~local_base_path reading =
     else Workspace_identity_mismatch { local_base_path; server_base_path }
 ;;
 
+(* A Broadcast retry belongs to the verified workspace store, not to the
+   TCP port that happened to serve it. Include the server's resolved MASC
+   root because two stores under one base path cannot share a request ID. *)
+let broadcast_workspace_scope ~local_base_path identity =
+  match identity with
+  | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
+    let local = canonical_path local_base_path in
+    let server = canonical_path reading.sid_base_path in
+    let root = canonical_path reading.sid_masc_root in
+    if local <> "" && String.equal local server && root <> ""
+    then Some (Yojson.Safe.to_string (`List [`String server; `String root]))
+    else None
+  | Some _ | None -> None
+;;
+
 (* Retained input belongs to the complete observed server workspace. Local
    match/mismatch is a permission classification, not a durable input key. *)
 let workspace_input_identity_of_server = function
@@ -2523,6 +2538,18 @@ type identity_login_request = {
   ilr_generation: int;
 }
 
+(* Login-completion expectation, held across a transient authority loss.
+   Where [identity_login_started] is the consent the pane presents, this is
+   only what the tick polls on: the workspace that admitted the login and
+   which Keeper/provider is still waiting. No URL is carried, so an old
+   consent is never resurrected, and the expectation alone cannot attach
+   anyone to anything. *)
+type identity_login_expectation = {
+  ile_origin: Tui_decode.server_identity;
+  ile_keeper: string;
+  ile_provider: string;
+}
+
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
     destinations makes a new Keeper sub-view an explicit compiler error
     instead of silently becoming the detail view. *)
@@ -3361,28 +3388,48 @@ type memory_state =
   | Memory_read_error
 
 let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let librarian_failed =
+    match k.mkh_librarian.mlh_state with
+    | Some (Masc.Tui_decode_memory_health.Pass_stopped _
+           | Masc.Tui_decode_memory_health.Pass_raised _) -> true
+    | Some (Masc.Tui_decode_memory_health.Pass_off
+           | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
+           | Masc.Tui_decode_memory_health.Pass_drained
+           | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+           | Masc.Tui_decode_memory_health.Pass_not_committed)
+    | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
-    && k.mkh_librarian_failures > 0
+    && librarian_failed
     && not k.mkh_source_snapshot_present
   then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
   then Memory_source_only
   else if not k.mkh_snapshot_present
   then Memory_no_current
-  else if k.mkh_librarian_failures > 0
+  else if librarian_failed
   then Memory_degraded
   else if
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.Masc.Tui_decode_memory_health.ma_code
+        then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
   then Memory_warning
   else Memory_ordinary
+
+let current_memory_starving_count (snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot) =
+  if snapshot.mhs_refused_keepers <> [] then None
+  else Some (List.fold_left (fun count keeper ->
+    match memory_state keeper with
+    | Memory_starving -> count + 1
+    | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
+    | Memory_source_only | Memory_read_error -> count) 0 snapshot.mhs_keepers)
 
 let memory_state_label = function
   | Memory_ordinary -> "ok"
@@ -5210,11 +5257,18 @@ type state = {
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
+  (* Opaque workspace epoch shared by non-ticket detail loaders. *)
+  mutable detail_read_authority: unit ref;
+  (* Navigation intent only: never a retained Keeper row or read authority. *)
+  mutable detail_focus_recovery: (Tui_decode.server_identity * string * keeper_detail_tab) option;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
+  (* A visible first log read must resume even before it has any result. *)
+  mutable keeper_sandbox_logs_requested: string option;
+  mutable keeper_sandbox_logs_origin: Tui_decode.server_identity option;
   (* The container-log read, which is its own read: the operator opens the
      Sandbox tab, waits for its status, and presses o/l later. Its start lives
      with the request rather than beside it, so an in-flight log read cannot
@@ -5247,6 +5301,7 @@ type state = {
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
+  mutable identity_login_expectations: identity_login_expectation list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -5721,6 +5776,7 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
+  mutable connector_unbind_offer_origin: Tui_decode.server_identity option;
   (* The offer after a pause or shutdown, while it waits for its one key.
      Separate from the unbind-all arm: that arm answers [U], and on the
      Keeper list [U] is the runtime picker. *)
@@ -6214,10 +6270,115 @@ type state = {
   refresh_interval: float;
 }
 
+(* Pending reads and post-action offers belong to the workspace that admitted
+   them. A successful health response with missing paths is still unread;
+   only comparable paths can confirm that an origin has been replaced. *)
+let server_authority_ready state =
+  match state.server_identity with
+  | Some identity ->
+      identity.Tui_decode.sid_state_ready <> Some false
+      && not (String.equal identity.sid_base_path "")
+      && not (String.equal identity.sid_masc_root "")
+  | None -> false
+
+(* The one definition of "same workspace" used to admit a held expectation
+   back into the poll after authority is restored. Same answer as the screen
+   itself uses, so the pane never polls across a workspace change it would
+   refuse to display. *)
+let identity_expectation_workspace_matches ~(origin : Tui_decode.server_identity) state =
+  match state.server_identity with
+  | None -> false
+  | Some current ->
+      String.equal (canonical_path origin.sid_base_path)
+        (canonical_path current.sid_base_path)
+      && String.equal (canonical_path origin.sid_masc_root)
+           (canonical_path current.sid_masc_root)
+
+let identity_expectations_for_keeper (state : state) keeper_name =
+  List.filter
+    (fun expectation -> String.equal expectation.ile_keeper keeper_name)
+    state.identity_login_expectations
+
+let remember_identity_login_expectation (state : state) expectation =
+  (* One expectation per (Keeper, provider). Replaying the same login keeps
+     the newest one; everything else stays held. *)
+  state.identity_login_expectations <-
+    List.filter
+      (fun held ->
+        not
+          (String.equal held.ile_keeper expectation.ile_keeper
+          && String.equal held.ile_provider expectation.ile_provider))
+      state.identity_login_expectations;
+  state.identity_login_expectations <-
+    expectation :: state.identity_login_expectations
+
+let reconcile_detail_intent_origins (state : state) reading =
+  match reading with
+  | Error _ -> ()
+  | Ok (current : Tui_decode.server_identity) ->
+      if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
+        let belongs (candidate : Tui_decode.server_identity) =
+          String.equal (canonical_path candidate.sid_base_path)
+            (canonical_path current.sid_base_path)
+          && String.equal (canonical_path candidate.sid_masc_root)
+               (canonical_path current.sid_masc_root)
+        in
+        (* Expectations survive a workspace change only if they belong to the
+           workspace the read just confirmed. Compared against [current]
+           directly — [state.server_identity] is still the previous identity
+           here, and leaning on that update order would invert the filter. *)
+        state.identity_login_expectations <-
+          List.filter
+            (fun expectation ->
+              belongs expectation.ile_origin)
+            state.identity_login_expectations;
+        let foreign = function
+          | None -> false
+          | Some (origin : Tui_decode.server_identity) ->
+              not (String.equal (canonical_path origin.sid_base_path)
+                     (canonical_path current.sid_base_path)
+                   && String.equal (canonical_path origin.sid_masc_root)
+                        (canonical_path current.sid_masc_root))
+        in
+        (match state.detail_focus_recovery with
+         | Some (origin, _, _) when foreign (Some origin) -> state.detail_focus_recovery <- None
+         | Some _ | None -> ());
+        if foreign state.connector_unbind_offer_origin then begin
+          state.connector_unbind_offer_pending <- [];
+          state.connector_unbind_offer_origin <- None
+        end;
+        if foreign state.keeper_sandbox_logs_origin then begin
+          state.keeper_sandbox_logs_requested <- None;
+          state.keeper_sandbox_logs_origin <- None
+        end
+      end
+
+
+(* Keeper/provider keys do not include a workspace. Authority withdrawal must
+   retire both queued responses and consent already presented by that origin. *)
+let withdraw_identity_readings (state : state) =
+  state.identity_login_requests <- [];
+  state.identity_logins <- [];
+  state.identity_view <- None;
+  state.identity_view_error <- None;
+  state.identity_attempt_error <- None;
+  state.identity_app_form <- None;
+  state.github_identity_view <- None;
+  state.github_identity_view_error <- None
+
 let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)
     state.identity_logins
+
+(* A recovered provider read may still be pending browser consent. Continue
+   the existing cadence without resurrecting the withdrawn consent URL. *)
+let identity_login_pending_for_keeper (state : state) keeper_name =
+  server_authority_ready state
+  && List.exists (fun expectation ->
+       String.equal expectation.ile_keeper keeper_name
+       && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
+       state.identity_login_expectations
 
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
@@ -6250,6 +6411,16 @@ let finish_identity_login_request (state : state) request =
   else false
 
 let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  (* An operator-initiated stop (restart, forget) ends the login for good, so
+     its completion expectation is retired too. A transient authority loss
+     never routes through here -- that is exactly the case the expectation
+     exists to survive. *)
+  state.identity_login_expectations <-
+    List.filter
+      (fun expectation ->
+        not (String.equal expectation.ile_keeper keeper_name
+             && String.equal expectation.ile_provider provider_id))
+      state.identity_login_expectations;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6260,15 +6431,32 @@ let forget_identity_login (state : state) ~keeper_name ~provider_id =
 let remember_identity_login (state : state) login =
   forget_identity_login state ~keeper_name:login.ils_keeper
     ~provider_id:login.ils_provider;
-  state.identity_logins <- state.identity_logins @ [login]
+  state.identity_logins <- state.identity_logins @ [login];
+  (match state.server_identity with
+   | Some origin when server_authority_ready state ->
+       remember_identity_login_expectation state
+         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider }
+   | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_login_expectations <- List.filter
+    (fun expectation ->
+      not (String.equal expectation.ile_keeper keeper_name
+           && identity_provider_attached ~providers ~provider_id:expectation.ile_provider))
+    state.identity_login_expectations;
   state.identity_logins <-
     List.filter
       (fun login ->
         not (String.equal login.ils_keeper keeper_name
              && identity_login_landed ~providers ~login))
       state.identity_logins
+
+(* A workspace rework rerun keeps the workspace but ends every login it had
+   admitted, so every expectation retires with it. Nothing here runs for a
+   transient authority loss — that path must keep the expectations so the
+   recovery tick can reopen the poll for logins still being completed. *)
+let retire_identity_login_expectations (state : state) =
+  state.identity_login_expectations <- []
 
 let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
@@ -7374,6 +7562,13 @@ let pending_detail_read (state : state) ~tab ~keeper =
     (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
     state.detail_reads
 
+(* The tick may reopen a provider read only after the old response settles and
+   the same workspace confirms the waiting Keeper's login. The expectation
+   carries no consent URL or authorization; it only keeps the read alive. *)
+let identity_login_recovery_poll_ready (state : state) keeper_name =
+  identity_login_pending_for_keeper state keeper_name
+  && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
+
 let detail_read_started state ~tab ~keeper =
   Option.map (fun request -> request.drr_started_ns)
     (pending_detail_read state ~tab ~keeper)
@@ -7421,6 +7616,39 @@ let detail_read_waiting state ~tab ~keeper =
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
+
+let remember_keeper_detail_focus state =
+  match state.detail_focus_recovery, state.view, state.workspace_identity,
+        state.server_identity, selected_keeper state with
+  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
+    when state.detail_tab <> Detail_items ->
+      state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
+  | _ -> ()
+
+let restore_keeper_detail_focus state =
+  match state.detail_focus_recovery with
+  | None -> false
+  | Some _ when state.view <> Keepers Keeper_detail && state.view <> Keepers Keeper_list ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (_, _, tab) when state.detail_tab <> tab ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (origin, name, tab)
+    when state.workspace_identity = Workspace_identity_match
+      && state.local_workspace = Local_workspace_read
+      && Option.is_none state.keepers_error
+      && server_workspace_matches ~expected:(Some origin)
+           (match state.server_identity with Some value -> Ok value | None -> Error "unread") ->
+      state.detail_focus_recovery <- None;
+      (match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name name) state.keepers with
+       | None -> false
+       | Some cursor ->
+           state.keeper_cursor <- cursor;
+           state.detail_tab <- tab;
+           state.view <- Keepers Keeper_detail;
+           true)
+  | Some _ -> false
 
 let keeper_detail_target_matches state keeper_name =
   match selected_keeper state with
@@ -7954,11 +8182,15 @@ let create_state
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
+  detail_read_authority = ref ();
+  detail_focus_recovery = None;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_requested = None;
+  keeper_sandbox_logs_origin = None;
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
@@ -7971,6 +8203,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_logins = [];
+  identity_login_expectations = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;
@@ -8216,6 +8449,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
+  connector_unbind_offer_origin = None;
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;
@@ -9758,8 +9992,8 @@ let runtime_picker_label_for = function
   | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> runtime_model_picker_label
   | _ -> runtime_picker_label
 
-(* The picker opens on the first row with no filter, and closing it drops
-   both. *)
+(* The picker opens on the first row. Exact lanes start typing a filter
+   immediately; the other pickers wait for [/]. Closing drops both. *)
 let open_runtime_lane_pick (state : state) pick =
   let list = match pick with
     | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
@@ -10132,11 +10366,13 @@ let plan_runtime_lane_edit (state : state) = function
                   "%s is a runtime, not a declared lane; there is no table to remove"
                   lane))
         | Rename_lane, _ ->
-          (* The name is the routing key, so the writer changes the table and
-             every reference in one write. Nothing to check here beyond having
-             a lane under the cursor: the file decides whether the lane is
-             declared as its own table and whether the new name is free. *)
-          Open_lane_rename_field lane
+          if runtime_lane_write_busy state then
+            Refuse_lane_edit Lane_write_pending
+          else
+            (* The name is the routing key, so the writer changes the table and
+               every reference in one write. The file decides whether the lane
+               is declared as its own table and whether the new name is free. *)
+            Open_lane_rename_field lane
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->

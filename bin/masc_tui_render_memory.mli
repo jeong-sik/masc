@@ -67,6 +67,9 @@ val facts_title :
     name folds to its floor and the counts and filters are cut before the name
     goes further ({!Masc_tui_ansi.detail_heading}). *)
 
+val storage_size : int -> string
+(** Observed snapshot bytes rendered as B/KiB/MiB; never a model-token estimate. *)
+
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list
@@ -100,6 +103,8 @@ val memory_fact_list_floor_rows : int
     few hundred facts showing a single row. *)
 
 val memory_facts_content_height : cols:int -> budget:int -> cursor:int -> state -> int
+val memory_facts_pane_cols : int -> int
+(** Fact-pane width shared by rendering and cursor/page geometry. *)
 (** The fact list's height after reserving the selected detail, filters and
     errors. [budget] excludes the surrounding surface chrome. *)
 

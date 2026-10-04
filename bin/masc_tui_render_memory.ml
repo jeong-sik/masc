@@ -112,11 +112,12 @@ let memory_updated_text = function
   | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
-(* Snapshot sizes describe the stored knowledge available through search and
-   paged artifacts. They are not the much smaller recall index injected into
-   a turn; the prompt inspector carries that turn's actual block bytes. *)
-let recall_tokens bytes =
-  Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
+(* Stored JSON bytes are not model input and cannot establish a token count.
+   The Context inspector carries observed per-turn prompt block bytes. *)
+let storage_size bytes =
+  if bytes >= 1024 * 1024 then Printf.sprintf "%.1f MiB" (float bytes /. 1048576.)
+  else if bytes >= 1024 then Printf.sprintf "%.1f KiB" (float bytes /. 1024.)
+  else Printf.sprintf "%d B" bytes
 ;;
 (* One break, and no more. The block sits under the list and is paid for out
    of the same frame, so a reading never takes more than two rows. At a
@@ -204,9 +205,9 @@ type memory_context_projection =
 
 let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · stored %s tok · updated %s"
+    Printf.sprintf "  %s · %s · snapshot r%d · stored %s · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
-      (recall_tokens k.mkh_snapshot_bytes)
+      (storage_size k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
   in
   let facts_line =
@@ -358,9 +359,9 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
   in
   let source_line =
     Printf.sprintf
-      "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s tok · %s"
+      "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s · %s"
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
-      (recall_tokens k.mkh_source_snapshot_bytes)
+      (storage_size k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
   in
   let vision_line =
@@ -380,9 +381,11 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
     List.map
       (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
         Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
-          (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
-           | `Warn -> "warn"
-           | `Error -> "error")
+          ((if Masc.Tui_decode_memory_health.memory_alert_is_history a.ma_code
+            then "history " else "")
+           ^ (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
+              | `Warn -> "warn"
+              | `Error -> "error"))
           a.ma_label
           (Terminal_text.single_line a.ma_message))
       k.mkh_alerts
@@ -413,7 +416,8 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
   let rows =
     if detail
     then
-      [ current_line; facts_line; source_line ]
+      [ current_line; facts_line; source_line;
+        "  Turn recall bytes: open Keeper chat /context; Librarian status is memory processing, not Keeper execution." ]
       @ clause_rows ~cols librarian_clauses
       @ librarian_stalled_lines
       @ librarian_cause_lines @ context_lines
@@ -425,7 +429,7 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
          changes without a save succeeding. The action rows follow only when
          [memory_row_visibility] lets them through. *)
       let status_row =
-        Printf.sprintf "  %s · %s · %s" k.mkh_keeper_id
+        Printf.sprintf "  %s · memory %s · %s" k.mkh_keeper_id
           (memory_state_label (memory_state k)) memory_saved
       in
       let when_shown kind clauses = if shown_by_default kind then clauses else [] in
@@ -467,7 +471,8 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
   let server_error =
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.ma_code then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Error -> true
         | `Warn -> false)
       k.mkh_alerts
@@ -490,9 +495,9 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
   let source =
     if Option.is_some k.mkh_source_read_error then "read error"
     else if k.mkh_source_snapshot_present then
-      Printf.sprintf "r%d i%d %s tok" k.mkh_source_revision
+      Printf.sprintf "r%d i%d %s" k.mkh_source_revision
         k.mkh_source_invalidations
-        (recall_tokens k.mkh_source_snapshot_bytes)
+        (storage_size k.mkh_source_snapshot_bytes)
     else no_value
   in
   let delta =
@@ -513,14 +518,13 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
       ; mrow_updated = memory_updated_text k.mkh_updated_at
       ; mrow_facts = ordinary_reading (fun () -> string_of_int k.mkh_facts)
       ; mrow_size =
-          ordinary_reading (fun () -> recall_tokens k.mkh_snapshot_bytes)
+          ordinary_reading (fun () -> storage_size k.mkh_snapshot_bytes)
       ; mrow_source = source
       ; mrow_delta = delta
       }
 
 (* What a row wears in its first cell. The category is the librarian
-   taxonomy, a closed sum the producer writes and the model's schema enum is
-   built from ([Keeper_memory_os_types.category]); the other two are this
+   label the producer writes ([Keeper_memory_os_types.category]); the other two are this
    pane's own words for rows that are not ordinary facts, and the call sites
    know which they are drawing, so they say so rather than handing over a
    string to be recognised. *)
@@ -553,7 +557,7 @@ let format_row_badge badge =
           | Memory_category.Code_change | Memory_category.Fact
           | Memory_category.Preference | Memory_category.Goal
           | Memory_category.Constraint | Memory_category.Validated_approach
-          | Memory_category.Lesson ->
+          | Memory_category.Lesson | Memory_category.Custom _ ->
               Theme.recede ()
         in
         ( style
@@ -562,7 +566,12 @@ let format_row_badge badge =
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
-      Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
+      match badge with
+      | Badge_category (Memory_category.Custom _) ->
+          Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
+          ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
+      | Badge_category _ | Badge_source | Badge_dropped ->
+          Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
   let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
@@ -901,10 +910,11 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
              (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact"
          ; Printf.sprintf "%d ordinary + %d source"
              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         ; Printf.sprintf "stored %s tok"
-             (recall_tokens
+         ; Printf.sprintf "stored %s"
+             (storage_size
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          ; Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper"
+         ; "storage, not turn input"
          ]
   in
   let readings =
@@ -1267,13 +1277,18 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   in
   (detail_lines, height, overflowing, scroll)
 
+let memory_facts_pane_cols cols =
+  if cols >= Masc_tui_roster_pane.threshold_cols then
+    cols - Masc_tui_roster_pane.pane_cols - Message_layout.display_width " │ "
+  else cols
+
 let memory_facts_content_height ~cols ~budget ~cursor state =
   let _, height, _, _ =
-    memory_facts_layout ~cols ~budget ~cursor state (memory_fact_rows state)
+    memory_facts_layout ~cols:(memory_facts_pane_cols cols) ~budget ~cursor state (memory_fact_rows state)
   in
   height
 
-let render_memory_facts_body ~cols ~budget (state : state)
+let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~(push_selected : string -> unit)
@@ -1326,7 +1341,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
           facts_stats_row ~ordinary:ordinary_count ~source:source_count
             ~dropped:dropped_count ~sort_label
         in
-        let all_categories = memory_fact_categories state in
+        let all_categories = if show_category_strip then memory_fact_categories state else [] in
         (* Through [tab_strip], the one drawing every in-screen strip shares,
            the way the Themes filter draws its chips: the key that walks the
            entries first, then the entries with the one being read marked.
@@ -1345,7 +1360,8 @@ let render_memory_facts_body ~cols ~budget (state : state)
         in
         let keys = "  c/C:category  " in
         let pills =
-          Ansi.dim ^ keys ^ Ansi.reset
+          if not show_category_strip then "  c/C:category · Enter:fact detail"
+          else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after:"")
               ~press:(fun filt text ->
@@ -1457,3 +1473,91 @@ let render_memory_facts_body ~cols ~budget (state : state)
    | lines ->
        push_divider ();
        List.iter push lines)
+
+let render_memory_facts_body ~cols ~budget (state : state)
+    ~push ~push_styled ~push_selected ~push_divider ~push_empty =
+  if cols < Masc_tui_roster_pane.threshold_cols then
+    render_memory_facts_body_single ~cols ~budget state
+      ~push ~push_styled ~push_selected ~push_divider ~push_empty
+  else begin
+    let width = Masc_tui_roster_pane.pane_cols in
+    let fact_cols = memory_facts_pane_cols cols in
+    let facts = ref [] in
+    let collect text = facts := text :: !facts in
+    render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
+      ~push:collect
+      ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
+      ~push_selected:(fun text -> collect (Theme.selection ^ text ^ Ansi.reset))
+      ~push_divider:(fun () -> collect (String.make fact_cols '-'))
+      ~push_empty:(fun () -> collect "");
+    let count category =
+      match memory_facts_snapshot state with
+      | None -> None
+      | Some snapshot ->
+        let ordinary = match snapshot.mfs_ordinary with
+          | Memory_store_present store -> Some store.mos_facts
+          | Memory_store_absent -> Some [] | Memory_store_read_error _ -> None in
+        let source = match snapshot.mfs_source with
+          | Memory_store_present store -> Some (List.length store.mss_facts, List.length store.mss_invalidations)
+          | Memory_store_absent -> Some (0,0) | Memory_store_read_error _ -> None in
+        match category, ordinary, source with
+        | Category_ordinary cat, Some facts, _ ->
+          Some (List.length (List.filter (fun (fact : memory_fact) -> fact.mf_category = cat) facts))
+        | Category_source, _, Some (count, _) | Category_dropped, _, Some (_, count) -> Some count
+        | Category_all, Some facts, Some (source, dropped) -> Some (List.length facts + source + dropped)
+        | _ -> None
+    in
+    let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
+    let height = max 0 (budget - List.length header) in
+    let categories = Category_all :: memory_fact_categories state in
+    let selected =
+      categories |> List.find_mapi (fun index category ->
+        if category = state.memory_facts_category then Some index else None)
+      |> Option.value ~default:0 in
+    let category_scroll = Masc_tui_scroll.ensure_visible ~cursor:selected ~height:(max 1 height) 0 in
+    let entries =
+      categories
+      |> List.filteri (fun index _ -> index >= category_scroll && index < category_scroll + height)
+      |> List.concat_map (fun category ->
+        let count = match count category with None -> "?" | Some count -> string_of_int count in
+        let suffix = " (" ^ count ^ ")" in
+        (* Category names are validated ASCII. Bound bytes before wrapping:
+           the selected label gets the rail height; other previews get one row.
+           Enter's fact detail retains the complete category value. *)
+        let rows = if category = state.memory_facts_category then max 1 height else 1 in
+        let room = max 1 (rows * (width - 2) - String.length suffix) in
+        let name = memory_category_filter_label category in
+        let name = if String.length name <= room then name
+          else String.sub name 0 (room - 1) ^ "…" in
+        Message_layout.wrap_words ~max_cells:(width - 2) (Terminal_text.single_line (name ^ suffix))
+        |> List.map (fun text -> category, text)) in
+    let selected_indices =
+      entries
+      |> List.mapi (fun index (category, _) -> index, category)
+      |> List.filter (fun (_, category) -> category = state.memory_facts_category)
+      |> List.map fst in
+    let start_row, end_row = match selected_indices with
+      | [] -> 0, 0
+      | first :: _ -> first, List.hd (List.rev selected_indices) in
+    let span = end_row - start_row + 1 in
+    let scroll =
+      if span <= height then
+        let s = Masc_tui_scroll.ensure_visible ~cursor:end_row ~height:(max 1 height) 0 in
+        Masc_tui_scroll.ensure_visible ~cursor:start_row ~height:(max 1 height) s
+      else
+        start_row
+    in
+    let rail = header @
+      (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
+       |> List.map (fun (category, text) ->
+           let text = fit_width ("  " ^ text) width in
+           let style = if category = state.memory_facts_category then Theme.selection else Theme.recede () in
+           Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
+    let facts = List.rev !facts in
+    let height = max (List.length facts) (min budget (List.length rail)) in
+    for index = 0 to height - 1 do
+      let row lines = Option.value (List.nth_opt lines index) ~default:"" in
+      push (fit_width (row rail) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
+        ^ fit_width (row facts) fact_cols)
+    done
+  end

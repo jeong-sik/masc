@@ -1,0 +1,459 @@
+{
+  "scope": "AST attribute bindings resolved by importing current split entry; capture bodies and PTYs not executed",
+  "consumers": [
+    {
+      "path": "docs/evidence/browser-bidi-live-20260913/corrected/capture-original.py",
+      "attributes": [
+        "GRAPHICS_SUPPORTED_REPLY",
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-bidi-live-20260913/corrected/capture.py",
+      "attributes": [
+        "GRAPHICS_SUPPORTED_REPLY",
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-bidi-live-20260913/metadata-assumptions/capture.py",
+      "attributes": [
+        "GRAPHICS_SUPPORTED_REPLY",
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-bidi-live-20260913/post-drag-scene-adapter-failure/capture.py",
+      "attributes": [
+        "GRAPHICS_SUPPORTED_REPLY",
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-context-recovery-20260913/scripts/capture-browser-context-action.py",
+      "attributes": [
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-continuity-20260913/after-viewport/gesture-capture.py",
+      "attributes": [
+        "GRAPHICS_SUPPORTED_REPLY",
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-current-native-20260913/capture-helper-after-run.py",
+      "attributes": [
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-delivery-20260913/native-history-fixture.py",
+      "attributes": [
+        "FULL_REDRAW",
+        "RequestHttpResponse",
+        "drain_until_quiet",
+        "keeper_runtime_http_fixtures",
+        "palette_go",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_text",
+        "send_and_wait",
+        "wait_for_fixture_event",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-delivery-20260913/scripts/capture-bundled-browser-history.py",
+      "attributes": [
+        "FRAME_END",
+        "FULL_REDRAW",
+        "configure_child_terminal",
+        "read_available",
+        "resize_and_wait",
+        "send_and_wait",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-delivery-20260913/scripts/capture-persistent-content-browser.py",
+      "attributes": [
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-handoff-20260912/raw-follow-c230/probe.py",
+      "attributes": [
+        "FRAME_END",
+        "FULL_REDRAW",
+        "RequestHttpResponse",
+        "overview_event_http_fixtures",
+        "palette_go",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_text",
+        "send_and_wait",
+        "wait_for_fixture_event",
+        "wait_for_output"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-history-20260913/capture-original.py",
+      "attributes": [
+        "FRAME_END",
+        "configure_child_terminal",
+        "read_available",
+        "send_and_wait",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-history-20260913/direct/capture-original.py",
+      "attributes": [
+        "FRAME_END",
+        "configure_child_terminal",
+        "read_available",
+        "send_and_wait",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-live-content-20260913/native-history-d441/fixture.py",
+      "attributes": [
+        "FULL_REDRAW",
+        "RequestHttpResponse",
+        "drain_until_quiet",
+        "keeper_runtime_http_fixtures",
+        "palette_go",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_text",
+        "send_and_wait",
+        "wait_for_fixture_event",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-live-content-20260913/scripts/capture-live-content-browser.py",
+      "attributes": [
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-live-viewport-20260913/gesture-capture.py",
+      "attributes": [
+        "GRAPHICS_SUPPORTED_REPLY",
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/browser-navigation-composition-20260912/composed/capture-tui.py",
+      "attributes": [
+        "configure_child_terminal",
+        "read_available",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-fixture-readable-wait-2026-09-26/reader-wait/scenario.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "__file__",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/oracle.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/whole.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/window.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-footer-parse-once-2026-09-27/profile-scenario.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-footer-pinned-key-rules-2026-09-26/profile-scenario.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile-scenario.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile-scenario.py",
+      "attributes": [
+        "CONNECTORS_PATH",
+        "CONNECTOR_NAMES_PATH",
+        "CSI_RE",
+        "FRAME_END",
+        "FULL_REDRAW",
+        "PathHttpResponse",
+        "WINDOW_TEXT_RE",
+        "drain_until_quiet",
+        "end_of_needle",
+        "find_needle",
+        "keeper_metadata",
+        "keeper_row_selected",
+        "keeper_runtime_http_fixtures",
+        "read_available",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_rows",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait",
+        "wait_for_fixture_state",
+        "wait_for_output",
+        "write_all"
+      ],
+      "missing": []
+    },
+    {
+      "path": "evidence/39827/capture.py",
+      "attributes": [
+        "COMPOSER_FOCUSED",
+        "FRAME_END",
+        "keeper_runtime_http_fixtures",
+        "resize_and_wait",
+        "run_terminal_scenario",
+        "screen_text",
+        "select_keeper_row",
+        "send_and_wait"
+      ],
+      "missing": []
+    }
+  ],
+  "consumer_count": 26,
+  "public_helper_count": 30
+}

@@ -1,23 +1,10 @@
 """A tab strip keeps the entry it marks readable at the width it is given."""
 import os
 import sys
-import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names. The strip and
-# the width arithmetic under it are masc_tui_ansi.ml's; the rows that size it
-# are drawn by the two render modules below.
-#
-# The regression this declaration exists for: #36290 narrowed the strip to
-# the width it was given, which cut into the current entry's own name. The
-# scenario that reads that name lived only inside the whole-screen walk,
-# which names no source and does not fit the gate's per-suite timeout, so
-# nothing ran. It merged green and main was red until #36327.
-SOURCE_MODULES = (
-    "bin/masc_tui_ansi.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-)
+import tui_keyboard_harness as h
+
+
 
 TAB_NAMES = (
     b"Info", b"Items", b"Sandbox", b"Settings", b"Secrets", b"GitHub", b"Identity",

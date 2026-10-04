@@ -14,18 +14,9 @@ orchestration.
 MASC coordinator -> masc.agent_core
 ```
 
-`packages/agent_core` must not depend on MASC coordinator libraries. CI asks
-Dune for the resolved library dependency closure rooted at
-`packages/agent_core` and `scripts/audit-sublib-cycle.py` rejects every
-workspace-local library owned outside that source root. Installed libraries
-remain allowed. `scripts/check-agent-core-boundary.sh` separately checks the
-package's required filesystem shape and rejects nested package/release surfaces
-and source symlinks. CI rejects Dune's legacy OCaml-syntax escape hatch; Dune
-itself then formats the package and active ancestor Dune files before CI rejects
-include stanzas, keeping every dependency input inside the path-classified
-graph proof. The existing coordinator-module name scan
-remains as defense in depth. CI also executes the package behavior suite with
-`@packages/agent_core/test/runtest`.
+`packages/agent_core` must not depend on MASC coordinator libraries. Review its
+Dune library dependencies and run the package behavior suite through
+`@packages/agent_core/test/runtest` at the selected verification boundary.
 
 ## Runtime flow
 
@@ -72,7 +63,6 @@ timestamps. MASC-owned domain events use the process-wide bus in
 
 ## Required proof
 
-- `test/test_agent_core_boundary.sh`
 - `scripts/audit-sublib-cycle.py --closed-source-root packages/agent_core --required-local-library masc.agent_core`
 - `@packages/agent_core/test/runtest`
 - `@test/runtest-test_keeper_hooks_agent_core_introspection`

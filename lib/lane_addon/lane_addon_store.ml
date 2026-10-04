@@ -372,7 +372,8 @@ let retain_sampling_inline ~sync_file ~sync_parent ~repair_corrupt t ~expected b
     | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
         Error "sampling outcome blob is not a regular file" in
   let canonical = blob_path hash and fallback = recovery_blob_path hash in
-  match Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root canonical) with
+  let* kind = canonical_blob_kind t hash in
+  match kind with
   | Fs_compat.Exact_kind Unix.S_REG -> retain canonical
   | Fs_compat.Exact_missing ->
       (match Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root fallback) with

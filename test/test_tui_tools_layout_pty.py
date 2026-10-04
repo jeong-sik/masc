@@ -3,7 +3,8 @@ import os
 import re
 import sys
 import unicodedata
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_tools as _keyboard_tools
 
 
 PATH = '.masc/skills/' + '한글-root-' * 35 + 'PATHEND'
@@ -24,7 +25,7 @@ def cell_width(text):
 
 
 def fixtures():
-    result = h.skills_usage_clarity_http_fixtures(unavailable=(UNAVAILABLE,))
+    result = _keyboard_tools.skills_usage_clarity_http_fixtures(unavailable=(UNAVAILABLE,))
     payload = result['/api/v1/skills'][1]
     snapshot = payload['snapshot']
     snapshot['config'] = {'kind': 'configured', 'revision': REVISION, 'resource_read_max_bytes': 65536}
@@ -46,13 +47,13 @@ def fixtures():
 
 
 def completed(output):
-    end = output.rfind(h.FRAME_END)
+    end = output.rfind(_keyboard_harness.FRAME_END)
     assert end >= 0, 'No completed redraw'
-    return bytes(output[:end + len(h.FRAME_END)])
+    return bytes(output[:end + len(_keyboard_harness.FRAME_END)])
 
 
 def window(output, columns):
-    rows = h.screen_rows(completed(output))
+    rows = _keyboard_harness.screen_rows(completed(output))
     counter_row, match = next((row, WINDOW.search(text.decode('utf-8')))
         for row, text in sorted(rows.items()) if WINDOW.search(text.decode('utf-8')))
     first, last, total = map(int, match.groups())
@@ -68,15 +69,15 @@ def window(output, columns):
 
 def run(binary, columns, no_color):
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b'MASC System')
-        h.send_and_wait(process, fd, output, b't', b'MASC System / Tools')
-        h.send_and_wait(process, fd, output, b'p' * 3, b'1 of 2 catalog Skills observed')
-        h.read_available(fd, output)
+        _keyboard_harness.tab_until(process, fd, output, b'MASC System')
+        _keyboard_harness.send_and_wait(process, fd, output, b't', b'MASC System / Tools')
+        _keyboard_harness.send_and_wait(process, fd, output, b'p' * 3, b'1 of 2 catalog Skills observed')
+        _keyboard_harness.read_available(fd, output)
         start = len(output)
-        h.resize_and_wait(process, fd, output, rows=18, columns=columns,
-                          needle=b'[rows 1-', controls=(h.FULL_REDRAW,))
-        h.wait_for_output(process, fd, output, h.FRAME_END,
-                          start=h.end_of_needle(output, b'[rows 1-', start), timeout=3)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=18, columns=columns,
+                          needle=b'[rows 1-', controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END,
+                          start=_keyboard_harness.end_of_needle(output, b'[rows 1-', start), timeout=3)
         collected = {}
         while True:
             first, last, total, body = window(output, columns)
@@ -85,21 +86,21 @@ def run(binary, columns, no_color):
                 break
             height = last - first + 1
             target = min(total - height + 1, first + max(1, height - 1))
-            h.send_and_wait(process, fd, output, b'\x1b[6~', f'[rows {target}-'.encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b'\x1b[6~', f'[rows {target}-'.encode())
         compact = ''.join(''.join(collected[i].split()) for i in sorted(collected))
         for value in (PATH, REVISION, REJECT_REVISION, REJECTION, NODE, TOOL, DEPENDENCY, UNAVAILABLE,
                       TIMESTAMP, 'unbatched-node', 'unbatched-tool', 'kind:data', 'batch:8'):
             assert ''.join(value.split()) in compact, (columns, no_color, value, compact)
-        h.send_and_wait(process, fd, output, b'\x1b[H', b'[rows 1-')
+        _keyboard_harness.send_and_wait(process, fd, output, b'\x1b[H', b'[rows 1-')
         first, last, total, _ = window(output, columns)
         height = last - first + 1
-        h.send_and_wait(process, fd, output, b'\x1b[F', f'[rows {max(1,total-height+1)}-'.encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b'\x1b[F', f'[rows {max(1,total-height+1)}-'.encode())
         assert window(output, columns)[1] == total
-        h.send_and_wait(process, fd, output, b'\x1b[H', b'[rows 1-')
+        _keyboard_harness.send_and_wait(process, fd, output, b'\x1b[H', b'[rows 1-')
         assert window(output, columns)[0] == 1
         print(f'TOOLS_LAYOUT_PTY width={columns} NO_COLOR={no_color}: full metadata/pages/edges PASS', flush=True)
         os.write(fd, b'q')
-    h.run_terminal_scenario(binary, description=f'Tools complete metadata {columns} NO_COLOR={no_color}',
+    _keyboard_harness.run_terminal_scenario(binary, description=f'Tools complete metadata {columns} NO_COLOR={no_color}',
         interact=interact, http_fixtures=fixtures(), extra_env={'NO_COLOR': '1'} if no_color else {})
 
 

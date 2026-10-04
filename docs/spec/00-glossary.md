@@ -80,14 +80,22 @@ status: reference
   붙어 그쪽 도구를 가져온다.
 
 **MCP Sampling (MCP 샘플링)**
-: MCP 서버가 연결된 MCP 클라이언트에 언어 모델 생성을 요청하는 프로토콜 기능
-  (`sampling/createMessage`). 클라이언트가 모델 접근·선택·권한을 통제하므로 서버
-  프로세스에는 provider 자격 증명이 필요하지 않다. MASC의 `Agent_core.Mcp.connect`는
-  선택적 `sampling_handler`가 설정된 연결에서만 이 capability를 알린다. 이 범용 연결
-  기능만으로 Lane Add-on의 모델 접근을 허가하거나 요청을 Fusion 계산에 연결하지는
-  않는다. MCP 스펙은 사람이 요청을 검토하고 거절할 수 있는 경로를 권고하므로 callback
-  존재만으로 그 상호작용이 구현됐다고 보지 않는다.
-  → [MCP Sampling specification](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling),
+: MCP 서버가 연결된 MCP 클라이언트에 언어 모델 생성을 요청하는 MCP 기능
+  (`sampling/createMessage`). 2025-06-18 사양은 클라이언트가 모델 접근·선택·권한을
+  통제하고 서버에 provider 자격 증명이 필요 없도록 정의했다.
+  **현재 사양 상태**: 2026-07-28 사양에서 deprecated로 표시됐다. 새 구현은 이를
+  채택하지 말아야 한다(SHOULD NOT). 기존 구현은 provider API 직접 호출로 옮겨야 한다(SHOULD).
+  해당 개정의 릴리스 후 최소 12개월간 사양에 남고 그 뒤에야 제거 대상이 될 수 있으므로,
+  deprecated 표시는 제거 완료를 뜻하지 않는다.
+  MASC의 `Agent_core.Mcp.connect`는 선택적 `sampling_handler`가 설정된 연결에서만
+  `sampling/createMessage`를 알리고 처리한다. 이 연결 primitive만으로 Lane Add-on의 모델
+  접근이나 Fusion 계산이 활성화되지는 않는다. 현재 Add-on 경로는 manifest의
+  `model_access = "host_sampling"` 선언과 설치 binding의 `model_route`를 확인하고, server
+  factory가 해당 worker에 callback을 제공해 연결한다. 선언만으로 route나 provider 자격
+  증명이 생기지는 않는다. 사양은 사람이 요청을 검토·거절할 수 있어야 한다고 권고하므로
+  callback 존재만으로 그 상호작용이 구현됐다고 보지 않는다.
+  → [MCP Sampling specification (2026-07-28)](https://modelcontextprotocol.io/specification/2026-07-28/client/sampling),
+  [MCP Sampling specification (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling),
   [Mcp.connect](../../packages/agent_core/lib/protocol/mcp.mli),
   [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
 
@@ -1658,6 +1666,10 @@ status: reference
   (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
   (`lib/masc_log/log.ml`).
 
+**Board audience**
+: 게시글 생성·수정 시 계산해 함께 저장하는 typed 수신 범위. 저장된 값이 없으면
+  수신자를 확인할 수 없는 상태다. 읽기에서 본문의 멘션을 다시 해석해 권한을 만들지 않는다.
+
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
@@ -1734,7 +1746,7 @@ status: reference
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
   - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다(`Candle_config.t`). 파일 부재는 `Off`(시작 장비 유지, 기록·지급·판매 없음),
-    필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor` 및 5개 등급 금액 `grades_milli` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
+    필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor`·`share_rounding`·`remainder_tie_break`·`deduction_rounding` 및 운영자가 정한 `grades_milli`·동일 id의 `grade_criteria` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
     빈 파일이나 `half_life`·`[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
@@ -1814,7 +1826,17 @@ status: reference
   검증을 통과한 `Validated_preset`만 게이트와 orchestrator로 흐른다. 패널 정체성은
   `panelist_id` — 라벨이 있으면 `label (model)`, 없으면 `model`이고, 같은 model이라도
   라벨이 다르면 다른 패널이다. JOJ(judge-of-judges)는 1차 심판 여럿과 meta 심판을 둔다.
+  여기서 Fusion은 MASC의 Board-backed 실행을 뜻하며, Lane Add-on의 조립형 계산과는 다르다.
   → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli)
+
+**Assembled Fusion Computation (조립형 Fusion 계산)**
+: `fusion-compute` Lane Add-on이 패널과 심판을 각각 격리 worker로 실행해 보존 입력과
+  이름 지정 Lane 출력을 계산한다. `fusion/computation` 출력을 내고 `fusion-report`가
+  이를 에이전트가 읽을 보고서로 렌더한다. MASC의 Board-backed Fusion 실행과는 다르다.
+  계산 완료는 보고서 전달·게시를 뜻하지 않는다. 보고서 읽기나 Broadcast에는 명시적
+  evidence action이 필요하다.
+  → [fusion-compute](../../addons/fusion-compute/README.md),
+  [model access boundary](../design/lane-addon-model-boundary.md)
 
 **Fusion Seat (자리)**
 : Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
@@ -2988,6 +3010,13 @@ status: reference
   지속된 시각이나 신뢰도·강도(strength) 신호가 아니다. 같은 내용(동일 바이트)으로
   다시 쓰인 Fact는 최초의 `first_seen`을 보존하고 `last_seen`만 전진한다(#38056).
   → [Keeper_memory_os_current.insert_or_reobserve](../../lib/keeper/keeper_memory_os_current.ml)
+
+**Memory Category (기억 분류)**
+: Memory Fact의 내용을 찾고 묶는 데 쓰는 이름(`category`). 기본 이름은 흔한 주제의
+  제안값이며 고정 열거형이 아니다. 새 주제 이름도 소문자 `snake_case`로 쓸 수 있다.
+  이 이름은 내용만 분류하며 기억의 보존·만료·승격·수정 권한을 바꾸지 않는다.
+  → [category_of_string](../../lib/keeper/keeper_memory_os_types.mli),
+  [Librarian Category](../../config/prompts/librarian.md)
 
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,

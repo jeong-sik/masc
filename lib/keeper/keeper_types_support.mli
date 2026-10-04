@@ -14,6 +14,10 @@ val session_base_dir_ : Workspace.config -> string
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 val keeper_metrics_store : Workspace.config -> string -> Dated_jsonl.t
 
+val append_keeper_metrics : Workspace.config -> string -> Yojson.Safe.t -> unit
+(** Canonical turn/heartbeat metric writer. Uses the same cached store as
+    [keeper_metrics_store], with [metrics.store_max_bytes] captured at open. *)
+
 (** Canonical base directory of {!keeper_metrics_store}. *)
 val keeper_metrics_dir : Workspace.config -> string -> string
 
@@ -79,9 +83,13 @@ val is_internal_history_source : string -> bool
 val keeper_decision_log_path : Workspace.config -> string -> string
 val keeper_feedback_log_path : Workspace.config -> string -> string
 
-(** Rotate [path] if it exceeds the configured size threshold.
+(** Rotate [path] when it reaches the configured size threshold.
     Keeps at most [Env_config.KeeperMetrics.max_rotated_files] numbered
-    backups (.1, .2, ...). *)
+    backups (.1, .2, ...). Zero retention discards the old current file and
+    backups. Decreasing retention prunes excess backups on the next rotation.
+    Only canonical positive decimal backup suffixes belong to this writer;
+    unrelated names are preserved. Directories are never recursively removed.
+    A nonpositive size threshold disables rotation and retention cleanup. *)
 val maybe_rotate_file : string -> unit
 
 (** Append [json] as a single UTF-8-repaired JSONL line to [path],

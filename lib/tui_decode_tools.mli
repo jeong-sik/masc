@@ -233,11 +233,11 @@ type effective_tool_surface =
       ets_unavailable_skill_names : configured_skill_name_unavailable list;
       ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
-      ets_tool_surface_bytes : int;
-      ets_skill_tool_surface_bytes : int;
+      ets_tool_surface_bytes : int option;
+      ets_skill_tool_surface_bytes : int option;
       ets_skill_discovery_bytes : int;
       ets_skill_eager_body_bytes : int;
-      ets_skill_body_bytes : int;
+      ets_skill_body_bytes : int option;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
     }

@@ -16,20 +16,29 @@ let session_base_dir_ (config : Workspace.config) = Keeper_fs.session_base_dir c
 
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
-let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
+let metrics_store_cache : (string, Keeper_metrics_storage.t) Hashtbl.t = Hashtbl.create 8
 let metrics_store_mu = Eio.Mutex.create ()
 
-let keeper_metrics_store config name : Dated_jsonl.t =
+let keeper_metrics_storage config name =
   let dir = Filename.concat (keeper_dir_ config) (name ^ "/metrics") in
   let lookup () =
     match Hashtbl.find_opt metrics_store_cache dir with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:dir () in
+      let store =
+        Keeper_metrics_storage.create ~base_dir:dir
+          ~max_bytes:(Env_config_keeper.KeeperMetrics.store_max_bytes ())
+      in
       Hashtbl.replace metrics_store_cache dir store;
       store
   in
   Eio_guard.with_mutex metrics_store_mu lookup
+
+let keeper_metrics_store config name : Dated_jsonl.t =
+  Keeper_metrics_storage.read_store (keeper_metrics_storage config name)
+
+let append_keeper_metrics config name json =
+  Keeper_metrics_storage.append (keeper_metrics_storage config name) json
 
 let keeper_metrics_dir config name =
   Dated_jsonl.base_dir (keeper_metrics_store config name)
@@ -190,26 +199,54 @@ let keeper_feedback_log_path config name =
        ~keeper_name:name
        Keeper_runtime_root_entry.Feedback_log)
 
-(** Rotate [path] if it exceeds the configured size threshold.
-    Keeps at most [max_rotated] numbered backups (.1, .2, ...). *)
+(** Parse exactly the numbered filenames this writer creates, not other
+    files sharing a prefix (e.g. .1.tmp, .01 or another keeper's log). *)
+let metrics_backup_number ~basename name =
+  let prefix = basename ^ "." in
+  if String.starts_with ~prefix name then
+    let suffix = String.sub name (String.length prefix)
+      (String.length name - String.length prefix) in
+    match int_of_string_opt suffix with
+    | Some number when number > 0 && String.equal suffix (string_of_int number) ->
+      Some number
+    | Some _ | None -> None
+  else None
+
+(** Enforce retention when rotating. Work follows existing backup entries,
+    rather than iterating through every possible configured backup slot. *)
 let maybe_rotate_file path =
-  let max_bytes = Env_config.KeeperMetrics.max_file_bytes in
-  let max_rotated = Env_config.KeeperMetrics.max_rotated_files in
+  let max_bytes = (Env_config.KeeperMetrics.max_file_bytes ()) in
+  let max_rotated = (Env_config.KeeperMetrics.max_rotated_files ()) in
   if max_bytes <= 0 then ()
   else
     match Fs_compat.file_size path with
     | None -> ()
     | Some size ->
         if size >= max_bytes then begin
-          for i = max_rotated downto 2 do
-            let src = Printf.sprintf "%s.%d" path (i - 1) in
-            let dst = Printf.sprintf "%s.%d" path i in
-            let _renamed = Fs_compat.rename_if_exists ~src ~dst in
-            ()
-          done;
-          let rotated = Printf.sprintf "%s.1" path in
-          let _renamed = Fs_compat.rename_if_exists ~src:path ~dst:rotated in
-          ()
+          let backups =
+            Fs_compat.read_dir (Filename.dirname path)
+            |> List.filter_map (metrics_backup_number ~basename:(Filename.basename path))
+            |> List.sort (fun a b -> Int.compare b a)
+          in
+          List.iter (fun number ->
+            let backup = Printf.sprintf "%s.%d" path number in
+            match Fs_compat.exact_path_kind ~follow:false backup with
+            | Fs_compat.Exact_kind Unix.S_DIR ->
+              raise (Sys_error ("metrics backup is a directory: " ^ backup))
+            | Fs_compat.Exact_unknown ->
+              raise (Sys_error ("could not inspect metrics backup: " ^ backup))
+            | Fs_compat.Exact_kind
+                (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
+            | Fs_compat.Exact_missing -> ()) backups;
+          List.iter (fun number ->
+            let src = Printf.sprintf "%s.%d" path number in
+            if number >= max_rotated then
+              ignore (Fs_compat.unlink_if_exists src)
+            else
+              ignore (Fs_compat.rename_if_exists ~src
+                ~dst:(Printf.sprintf "%s.%d" path (number + 1)))) backups;
+          if max_rotated = 0 then ignore (Fs_compat.unlink_if_exists path)
+          else ignore (Fs_compat.rename_if_exists ~src:path ~dst:(path ^ ".1"))
         end
 
 let append_jsonl_line path (json : Yojson.Safe.t) =

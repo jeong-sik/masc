@@ -25,12 +25,12 @@ let with_base_path f =
   Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
+let toml_path base_path =
+  Filename.concat (Filename.concat base_path ".masc/config")
+    Config_dir_resolver.runtime_toml_filename
+
 let write_toml base_path content =
-  let path =
-    Filename.concat
-      (Filename.concat base_path ".masc/config")
-      Config_dir_resolver.runtime_toml_filename
-  in
+  let path = toml_path base_path in
   let oc = open_out path in
   output_string oc content;
   close_out oc
@@ -750,7 +750,7 @@ let test_settings_projection_uses_typed_effective_values () =
   in
   let snapshot = find "MASC_KEEPER_SNAPSHOT_SEC" in
   check string "snapshot projection uses clamped runtime value"
-    (string_of_int Env_config_keeper.KeeperRuntime.snapshot_sec)
+    (string_of_int (Env_config_keeper.KeeperRuntime.snapshot_sec ()))
     (snapshot |> member "effective_value" |> to_string);
   check bool "snapshot projection has no normalization error" true
     (snapshot |> member "effective_error" = `Null);
@@ -1039,10 +1039,168 @@ let test_preview_precondition_matches_save () =
       (Result.is_error validate = Result.is_error save))
 ;;
 
+let test_supervisor_and_rotation_bounds_reach_boot () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  List.iter (fun toml ->
+    write_toml base_path toml;
+    match Keeper_runtime_config.load_and_apply ~base_path with
+    | Error {kind=Keeper_runtime_config.Validate;_} -> ()
+    | Error error -> fail (Keeper_runtime_config.load_failure_to_string error)
+    | Ok _ -> fail "out-of-range setting was accepted at boot")
+    ["[supervisor]\nsweep_sec = 0.0\n";
+     "[supervisor]\nsweep_sec = 121.0\n";
+     "[metrics]\nmax_rotated = -1\n"];
+  List.iter (fun (raw, expected) ->
+    with_env "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" (Some raw) @@ fun () ->
+    check (float 0.) "process default respects scheduler bounds" expected
+      (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec))
+    ["0", 10.; "121", 120.; "nan", 30.; "infinity", 30.];
+  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" (Some "0") @@ fun () ->
+  check int "environment zero requests no backups" 0
+    (Env_config_keeper.KeeperMetrics.max_rotated_files ())
+;;
+
+let test_strict_reader_validation_happens_at_boot () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_PARSE_WARN" (Some "true") @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  List.iter (fun key ->
+    with_env key (Some "malformed") @@ fun () ->
+    List.iter (fun has_toml ->
+      let path = toml_path base_path in
+      if has_toml then write_toml base_path "[metrics]\nmax_bytes = 17\n"
+      else if Sys.file_exists path then Sys.remove path;
+      match Keeper_runtime_config.load_and_apply ~base_path with
+      | Error {kind=Keeper_runtime_config.Validate;_} -> ()
+      | Error error -> fail (Keeper_runtime_config.load_failure_to_string error)
+      | Ok _ -> fail (key ^ " bypassed strict startup validation")) [false; true])
+    ["MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED";
+     "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"; "MASC_KEEPER_SNAPSHOT_SEC";
+     "MASC_KEEPER_WORK_AS_HEARTBEAT"; "MASC_KEEPER_SLEEP_CHUNK_SEC";
+     "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"; "MASC_KEEPER_DEBUG"]
+;;
+
+let test_boot_settings_reach_consumers_and_projection () =
+  let keys =
+    [ "MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED"
+    ; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"; "MASC_KEEPER_SNAPSHOT_SEC"
+    ; "MASC_KEEPER_WORK_AS_HEARTBEAT"; "MASC_KEEPER_SLEEP_CHUNK_SEC"
+    ; "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"; "MASC_KEEPER_DEBUG"; "MASC_CONFIG_DIR"
+    ] in
+  let rec without_env keys f = match keys with
+    | [] -> f ()
+    | key :: rest -> with_env key None (fun () -> without_env rest f) in
+  without_env keys @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let toml =
+    "[metrics]\nmax_bytes = 17\nmax_rotated = 2\n\
+     [heartbeat]\ninterval_sec = 23\nsnapshot_sec = 45\n\
+     work_as_heartbeat = false\nsleep_chunk_sec = 1.5\n\
+     [supervisor]\nsweep_sec = 11.0\n[debug]\nenabled = true\n" in
+  write_toml base_path toml;
+  (* The process has already initialized every module before boot reads TOML. *)
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "all eight TOML settings applied" 8 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let rows = Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail toml) in
+  let open Yojson.Safe.Util in
+  List.iter (fun (env, expected) ->
+    let row = rows |> to_list |> List.find (fun row -> row |> member "env" |> to_string = env) in
+    check string (env ^ " is applied") "applied" (row |> member "application_status" |> to_string);
+    check string (env ^ " effective value matches TOML") expected (row |> member "effective_value" |> to_string))
+    [ "MASC_KEEPER_METRICS_MAX_BYTES", "17"; "MASC_KEEPER_METRICS_MAX_ROTATED", "2"
+    ; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC", "23"; "MASC_KEEPER_SNAPSHOT_SEC", "45"
+    ; "MASC_KEEPER_WORK_AS_HEARTBEAT", "false"; "MASC_KEEPER_SLEEP_CHUNK_SEC", "1.5"
+    ; "MASC_KEEPER_SUPERVISOR_SWEEP_SEC", "11"; "MASC_KEEPER_DEBUG", "true" ];
+  check int "heartbeat runtime parameter reads the boot setting" 23
+    (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
+  check int "snapshot runtime parameter reads the boot setting" 45
+    (Runtime_params.get Runtime_settings.keeper_snapshot_sec);
+  check bool "work heartbeat runtime parameter reads the boot setting" false
+    (Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled);
+  check (float 0.) "supervisor runtime parameter reads the boot setting" 11.
+    (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec);
+  let path = Filename.concat base_path "metrics.jsonl" in
+  let write contents =
+    let out = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out out) (fun () -> output_string out contents) in
+  let first = String.make 18 'a' and second = String.make 18 'b' in
+  write first;
+  Keeper_types_support.maybe_rotate_file path;
+  check bool "17-byte TOML threshold rotates actual file" true (Sys.file_exists (path ^ ".1"));
+  write second;
+  Keeper_types_support.maybe_rotate_file path;
+  check string "second rotation retains first content in the configured second backup"
+    first (Fs_compat.load_file (path ^ ".2"));
+  with_env "MASC_KEEPER_METRICS_MAX_BYTES" (Some "100") @@ fun () ->
+  write first;
+  Keeper_types_support.maybe_rotate_file path;
+  check bool "process environment still overrides TOML for actual rotation" true (Sys.file_exists path)
+;;
+
+let test_zero_retention_toml_reaches_metrics_writer () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_BYTES" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let toml = "[metrics]\nmax_bytes = 17\nmax_rotated = 0\n" in
+  write_toml base_path toml;
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "both metrics overrides applied" 2 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let open Yojson.Safe.Util in
+  let row = Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail toml)
+    |> to_list |> List.find (fun row -> row |> member "env" |> to_string = "MASC_KEEPER_METRICS_MAX_ROTATED") in
+  check string "zero is applied" "applied" (row |> member "application_status" |> to_string);
+  check string "zero is the effective retention" "0" (row |> member "effective_value" |> to_string);
+  let path = Filename.concat base_path "metrics.jsonl" in
+  Fs_compat.save_file path (String.make 17 'x');
+  Fs_compat.save_file (path ^ ".1") "previous";
+  Keeper_types_support.append_jsonl_line path (`Null);
+  check bool "no backup survives the zero retention rotation" false (Sys.file_exists (path ^ ".1"));
+  check string "new metric survives" "null\n" (Fs_compat.load_file path)
+;;
+
+let test_dated_metrics_toml_reaches_shared_writer () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_STORE_MAX_BYTES" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let row i = `Assoc ["i", `Int i] in
+  let row_bytes = String.length (Yojson.Safe.to_string (row 1)) + 1 in
+  write_toml base_path (Printf.sprintf "[metrics]\nstore_max_bytes=%d\n" (2 * row_bytes));
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "dated-store override applied" 1 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let previous = Fs_compat.get_fs_opt () in
+  Fun.protect ~finally:(fun () ->
+    match previous with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+    (fun () -> Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace_core.default_config base_path in
+      List.iter (fun i -> Keeper_types_support.append_keeper_metrics config "metrics-toml" (row i))
+        [1; 2; 3; 4];
+      let store = Keeper_types_support.keeper_metrics_store config "metrics-toml" in
+      let values = Dated_jsonl.read_recent store 10
+        |> List.map (fun json -> Yojson.Safe.Util.(json |> member "i" |> to_int)) in
+      check (list int) "shared public reader sees retained metrics" [3; 4] values)
+;;
+
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
-      , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
+      , [ test_case "dated metrics TOML reaches the shared writer" `Quick
+            test_dated_metrics_toml_reaches_shared_writer
+        ; test_case "zero-retention TOML reaches the metrics writer" `Quick
+            test_zero_retention_toml_reaches_metrics_writer
+        ; test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies the whole wire_capture table" `Quick
@@ -1059,7 +1217,11 @@ let () =
             test_unrelated_runtime_namespaces_are_not_claimed
         ; test_case "provider binding under Keeper namespace remains separately owned" `Quick
             test_runtime_provider_binding_under_keeper_namespace_is_not_claimed
+        ; test_case "boot enforces supervisor and rotation bounds" `Quick test_supervisor_and_rotation_bounds_reach_boot
+        ; test_case "strict readers fail during boot with or without TOML" `Quick test_strict_reader_validation_happens_at_boot
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
+        ; test_case "boot settings reach consumers and projection" `Quick
+            test_boot_settings_reach_consumers_and_projection
         ; test_case "every failure kind has a label" `Quick
             test_every_failure_kind_has_a_label
         ; test_case "rendering keeps the verb prefix" `Quick

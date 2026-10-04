@@ -726,7 +726,8 @@ def connection_sources(binary, inventory):
                           choice=PROTOCOL_CHOICES.get(row['protocol']), endpoint=row.get('endpoint') or '',
                           command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
                           credential_kind=row.get('credential_kind', 'unknown'),
-                          credential_file=row.get('credential_file'), account_home=row.get('account_home'), provider_kind=row.get('provider_kind'),
+                          credential_file=row.get('credential_file'), provider_timeout_s=row.get('provider_timeout_s'),
+                          account_home=row.get('account_home'), provider_kind=row.get('provider_kind'),
                           request_path=row.get('request_path'),
                           rows=[])
             sources.append(source)
@@ -741,7 +742,8 @@ def connection_sources(binary, inventory):
                       endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
                       api_key_env=integration.get('api_key_env') or '',
                       credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
-                      credential_file=integration.get('credential_file'), account_home=integration.get('account_home'),
+                      credential_file=integration.get('credential_file'), provider_timeout_s=integration.get('provider_timeout_s'),
+                      account_home=integration.get('account_home'),
                       provider_kind=integration.get('provider_kind'), request_path=integration.get('request_path'),
                       origin=integration['origin'], setup_support=integration['setup_support'], rows=[])
         # A catalog-advertised new connection carries the provider's own name,
@@ -883,10 +885,21 @@ def prepare_antigravity_account(source, credentials):
         credential = receipt['credential_file']
         models = antigravity_catalog_rows(receipt['catalog'])
         credentials.register_account_reference(credential)
+        if selected == 'saved':
+            # Native discovery returns an isolated copy even for saved accounts.
+            # Keep that copy pending for cleanup; the configured connection
+            # still owns its original reference and timeout.
+            credential = source['credential_file']
+            credentials.register_account_reference(credential)
+            if not source.get('credential_replaced'):
+                credentials.retain([dict(credential_file=credential)])
     except (KeyError, TypeError, ValueError):
         raise SetupError('Antigravity account selection did not return a readable result')
-    source.update(credential_file=credential, credential_kind='file', credential_replaced=True,
-                  account_catalog=models, provider_timeout_s=receipt['provider_timeout_s'])
+    if selected != 'saved':
+        source['credential_replaced'] = True
+    timeout = (source.get('provider_timeout_s') if selected == 'saved' else None)
+    source.update(credential_file=credential, credential_kind='file', account_catalog=models,
+                  provider_timeout_s=receipt['provider_timeout_s'] if timeout is None else timeout)
     if receipt.get('catalog_error'):
         print(terminal_text(receipt['catalog_error']) + ' Choose Refresh model list to try again.', file=sys.stderr)
     return source

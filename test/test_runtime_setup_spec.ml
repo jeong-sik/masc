@@ -410,8 +410,32 @@ let test_existing_inline_selection () =
   let repeated=Runtime_setup_spec.for_existing_inline_provider (parse []) provider |> Option.get |> Runtime_setup_spec.render in
   Alcotest.(check string) "repeated explicit selection has stable runtime identity" rendered.runtime_id repeated.runtime_id
 
+let test_antigravity_inventory_keeps_declared_timeout () =
+  let config = Runtime_toml.parse_string {|
+[providers.saved]
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 824.5
+[providers.saved.credentials]
+type = "file"
+path = "/fixture/oauth"
+[models.existing]
+api-name = "existing"
+max-context = 8192
+[saved.existing]
+|} |> Result.get_ok in
+  let open Yojson.Safe.Util in
+  let inventory = Runtime_wizard_inventory.to_json ~include_credential_references:true config in
+  let provider = inventory |> member "integrations" |> to_list
+    |> List.find (fun row -> (row |> member "id") = `String "saved") in
+  let runtime = inventory |> member "runtimes" |> to_list |> List.hd in
+  List.iter (fun row -> Alcotest.(check (float 0.)) "declared transport timeout is projected" 824.5
+    (row |> member "provider_timeout_s" |> to_float)) [provider; runtime]
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "existing inline account selection is revalidated without exporting secrets" `Quick test_existing_inline_selection;
+  Alcotest.test_case "Antigravity inventory preserves declared timeout" `Quick test_antigravity_inventory_keeps_declared_timeout;
   Alcotest.test_case "CLI reuse follows actual execution eligibility" `Quick test_cli_reuse_requires_non_interactive;
   Alcotest.test_case "HTTP request surface survives setup" `Quick test_http_request_surface;
   Alcotest.test_case "existing and disabled account identity" `Quick test_configured_account_resolution;

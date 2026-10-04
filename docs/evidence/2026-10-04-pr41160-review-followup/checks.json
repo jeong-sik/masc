@@ -1,0 +1,16 @@
+{
+  "baseline": "20cc51141851e3c3da45e9d9905a46cbe0ae8a45",
+  "tests": 141,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "valid_red_read_cases": 2,
+  "valid_red_settings_cases": 1,
+  "files": {
+    "red.log": "4eccec57f0e2f35c381ce7d5a41a3e031612bc581b95ec2cf6e4c14a3124aaf1",
+    "tsc2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "settings-red.log": "5d66cf18d6a133e0418d56364327220ad97595bff0d892f364831c59946cc96c",
+    "README.md": "510d3efff8909b17e0bf408e923a550b1839eb54946cfe25beb0a569fd0177a8",
+    "green2.log": "b6f6487d710a7ebda7b423588a27fedd8b24fc3417f890e64eed71dcdda27a4b",
+    "eslint2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

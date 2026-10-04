@@ -106,7 +106,7 @@ let row_summary_in (snapshot : snapshot) (row : row) =
   match row.selection with
   | Exact target ->
       (match List.find_opt (fun (lane : Masc.Tui_decode.standalone_lane) ->
-           Masc.Standalone_lane.equal lane.sl_lane target) snapshot.exact_snapshot.sls_lanes with
+           Standalone_lane.equal lane.sl_lane target) snapshot.exact_snapshot.sls_lanes with
        | None -> admission
        | Some lane ->
            let observation = match lane.sl_status with

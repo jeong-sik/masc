@@ -33,6 +33,12 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+type config_commit_error =
+  | Config_commit_refused of string
+  | Config_commit_write_failed of Fs_compat.atomic_replace_failure
+(** A refusal happens before replacement; a write failure here also precedes
+    rename. A visible replacement returns a receipt, including uncertain durability. *)
+
 (** Where the exact-output registry's targets come from. *)
 type exact_output_target_source =
   | Runtime_binding_targets
@@ -419,6 +425,11 @@ module For_testing : sig
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
 
+  val with_config_lock_observed_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error -> runtime_config_path:string ->
+    (unit -> 'a) -> ('a config_lock_receipt, string) result
+  (** Real writer lock and journal admission, with an injected release result. *)
+
   val with_config_lock_with_journal_sync_parent :
     sync_parent:(string -> unit) -> runtime_config_path:string ->
     (unit -> unit) -> (unit, string) result
@@ -436,6 +447,13 @@ end
 
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
+
+val catalogue_revision : unit -> int
+(** Monotonic revision of the published runtime catalogue. *)
+
+val await_catalogue_change : after:int -> int
+(** Wait for a publication newer than [after], without polling. A publication
+    that precedes the wait is returned immediately. *)
 
 val get_default_and_runtimes : unit -> t option * t list
 (** The default runtime and the runtime list from one read of the loaded
@@ -584,26 +602,28 @@ val verifier_exact_lane_resolution : unit -> (verifier_exact_lane_slots, string)
     registry carries the ids verbatim because only this module holds the
     runtime table that answers admission. *)
 
-val verifier_exact_lane_slot_ids : unit -> (string list, string) result
-(** The slot ids this lane can judge through, catalog first then official
+val verifier_exact_lane_slots : unit -> ((string * Types_core.verifier_slot_kind) list, string) result
+(** Acquire slot ids with their immutable admission kind, catalog first then official
     clients, in declaration order — the single provider-selection SSOT for
     completion-authority judgement calls. [Error] names why the lane cannot
     judge (registry not published, lane unconfigured, or every declared slot
-    rejected); there is no fallback to another route. *)
+    rejected); there is no fallback to another route. New acquisitions remain
+    fenced during publication. The acquired kind survives later activity or
+    declaration changes; it does not freeze the runtime execution binding. *)
 
 val verifier_exact_lane_readiness : unit -> (verifier_slot_rejection list, string) result
 (** Whether the [verifier_exact] lane has a slot that can be dispatched now,
     for a caller that reports authority readiness rather than walking the lane.
     [Ok] carries the declared slots the lane cannot judge through, so a short
     lane says why it is short; [Error] names every rejection. This answers from
-    the same admission as {!verifier_exact_lane_slot_ids}: the two used to
+    the same admission as {!verifier_exact_lane_slots}: the two used to
     apply different predicates to catalog slots, and that disagreement let the
     authority start on a lane that refused every review (#37382). *)
 
-val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
+val verifier_exact_slot_admission : candidate_kind:Types_core.verifier_slot_kind -> runtime_id:string -> (unit, string) result
 (** Validate one configured direct slot. A declared CLI slot retains its
     execution-kind constraint, including when the lane is off. New implicit
-    reviews acquire the lane through [verifier_exact_lane_slot_ids] first; this
+    reviews acquire the lane through [verifier_exact_lane_slots] first; this
     candidate check does not revoke an already acquired review when activity
     changes. Explicit single-runtime overrides remain independent of lane activity. *)
 
@@ -833,6 +853,19 @@ val save_config_text_if_current :
     writing the file or changing runtime/registry state. A matching revision
     uses {!save_config_text}'s validation, durability and application contract.
     Invalid revisions and read/validation/write failures are [Config_edit_failed]. *)
+
+val commit_config_text_locked :
+  ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+  runtime_config_path:string ->
+  string ->
+  (config_commit_receipt, config_commit_error) result
+(** Validate and commit runtime.toml, then republish the live runtime
+    registry, for a caller that already holds the config write lock:
+    {!with_config_lock} took the durable lock and resolved the keeper
+    journal. Everything else is {!save_config_text}'s -- the same validation,
+    the same atomic replace, the same receipt. Callers outside the lock use
+    {!save_config_text}; replacing the file without this commit leaves the
+    published registry at its previous snapshot until the next restart. *)
 
 val edit_config_text :
   ?runtime_config_path:string ->
@@ -1101,6 +1134,13 @@ val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) resul
 (** Serialize an owner configuration activation with the existing file writers.
     Reject an unresolved configuration journal before invoking the action.
     The action must not recursively invoke a config writer. *)
+
+val with_config_lock_observed : runtime_config_path:string -> (unit -> 'a) ->
+  ('a config_lock_receipt, string) result
+(** The same writer admission, retaining completed action values and lock-release
+    warnings separately. The action must not recursively invoke a config writer. *)
+val attach_lock_warnings : config_lock_warning list -> config_commit_receipt -> config_commit_receipt
+(** Attach the owning lock's observed release warnings to its completed commit. *)
 
 val with_manifest_config_lock :
   runtime_config_path:string -> manifest_path:string ->

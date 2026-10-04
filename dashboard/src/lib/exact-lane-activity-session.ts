@@ -11,6 +11,7 @@ import { errorToString } from './format-string'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
 import { announceExactLaneObservationChanged } from './exact-lane-observation'
+import { announceRuntimeTomlCommitted } from './runtime-toml-session'
 
 type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
@@ -162,6 +163,7 @@ export class ExactLaneActivitySession {
       const controller = new AbortController(); this.resumeController = controller
       const resumed = await resumeSavedModelSetup({ signal: controller.signal })
       if (!this.owns(authority, version)) return false
+      announceRuntimeTomlCommitted(authority)
       announceExactLaneObservationChanged(authority)
       if (resumed.kind === 'failed') this.update({ followupError: '설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.' })
       try { await refreshRuntimeConfigConsumers() }

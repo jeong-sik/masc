@@ -18,3 +18,22 @@ No local Dune build, full TUI compile, full state/layout suite, PTY run, HTTP fi
 ## Remaining execution
 
 Run `test_tui_runtime_listing` and the affected scroll-geometry suites against this candidate, then the real TUI lane editor with applied/kept/unpublished receipts and a failed reread at narrow and ordinary terminal sizes. Preserve the same binary/source identity. These unexecuted scenarios are not claimed as passing evidence.
+
+## Current main integration and review repairs
+
+The isolated/parser evidence above belongs to the historical PR source. This
+integration merges main `6fc062feee7e33a271e09dc155d9feffee923704` and repairs review
+comments 4176228821 and 4176228824: a dismissed notice stays dismissed after a
+successful or failed late reread, while Keeper preempted/mixed application results
+and their environment-overridden keys produce an attention notice without a
+restart requirement. Independent stale-list state remains intact.
+
+The focused repo-local native build passed for the TUI, receipt decoder, runtime
+listing and two direct scroll-geometry consumers. Their complete executables
+passed 10, 55, 5 and 4 tests respectively (74 total). The actual replacement and
+promotion PTY passed with the retained application receipt. Ruff passed; Pyright
+reported the same 14 diagnostic signatures as exact main, with no new signatures.
+The integrated listing tests explicitly use main's required viewport height and
+include its wrapped selection-summary rows; their direct Yojson/Astring library
+dependencies are declared. No full suite, deployment or production proof is
+claimed. These results do not replace current-head independent review.

@@ -9,7 +9,7 @@ vi.mock('./core', () => ({
   post: postMock,
 }))
 
-import { clearRuntimeParam, setRuntimeParam } from './dashboard-runtime'
+import { clearRuntimeParam, setRuntimeParam, fetchRuntimeProviders } from './dashboard-runtime'
 
 // The server admits these bodies with Server_runtime_param_request, whose
 // field is `param_key` (Missing_param_key otherwise). The panel test mocks
@@ -37,4 +37,14 @@ describe('runtime param request bodies', () => {
       param_key: 'keeper.hitl.thinking_blocks',
     })
   })
+})
+
+it('retains declared usage-reader authority in the runtime catalog', async () => {
+  getMock.mockResolvedValue({ providers: [
+    { provider: 'reported.model', usage_read_configured: true },
+    { provider: 'ordinary.model', usage_read_configured: false },
+    { provider: 'unknown.model' },
+  ] })
+  const catalog = await fetchRuntimeProviders()
+  expect(catalog.providers.map(row => row.usage_read_configured)).toEqual([true, false, undefined])
 })

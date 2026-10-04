@@ -29,6 +29,11 @@ module KMS = Masc.Keeper_meta_store
 module Keeper_identity = Masc.Keeper_identity
 module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
 
+let compute_model_metrics ~base_path ~window_minutes =
+  match Model_inference_metrics.compute ~base_path ~window_minutes with
+  | Ok aggregate -> aggregate
+  | Error error -> failwith (Model_inference_metrics.read_error_to_string error)
+
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
 
@@ -1322,7 +1327,7 @@ max-concurrent = 1
         (Yojson.Safe.Util.member "degraded_retry_deferred" row
          = Masc.Keeper_execution_receipt.degraded_retry_json
              settlement.degraded_retry_deferred);
-      let aggregate = Model_inference_metrics.compute ~base_path:workspace_dir
+      let aggregate = compute_model_metrics ~base_path:workspace_dir
         ~window_minutes:60 in
       let total_calls = List.fold_left
         (fun total (stats : Model_inference_metrics.model_stats) ->
@@ -2981,7 +2986,7 @@ max-concurrent = 1
     (member_at answered "telemetry" "runtime_id" = `Null
      && member_at answered "telemetry" "executed_runtime_id" = `Null);
   let aggregate =
-    Model_inference_metrics.compute ~base_path:workspace_dir ~window_minutes:60
+    compute_model_metrics ~base_path:workspace_dir ~window_minutes:60
   in
   check "model metrics credit the observed success to the answerer, not the lane"
     (List.map
@@ -3001,7 +3006,7 @@ max-concurrent = 1
     (member_at failed "telemetry" "runtime_id" = `Null
      && member_at failed "telemetry" "executed_runtime_id" = `Null);
   let aggregate =
-    Model_inference_metrics.compute ~base_path:workspace_dir ~window_minutes:60
+    compute_model_metrics ~base_path:workspace_dir ~window_minutes:60
   in
   check "model metrics credit the failed row to the dispatched candidate"
     (List.exists

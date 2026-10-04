@@ -26,9 +26,13 @@ function isDeclarationFile(directory: string, sourcePath: string): boolean {
 
 function staleRemoval(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
   const owner = item.configuration
-  return owner !== null && configuration !== null && configuration.declarations.some(current =>
-    current.id === owner.id && current.source_path === owner.source_path
-    && current.desired_revision !== owner.revision)
+  if (owner === null) return false
+  if (configuration === null || !configuration.complete) return true
+  const matches = configuration.declarations.filter(current => current.id === owner.id)
+  const conflicts = configuration.issues.filter(issue => issue.id === owner.id)
+  if (conflicts.length > 0 || matches.length > 1) return true
+  if (matches.length === 1) return matches[0]!.desired_revision !== owner.revision
+  return configuration.issues.some(issue => issue.source_path === owner.source_path)
 }
 
 function hasCurrentDeclaration(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {

@@ -224,6 +224,35 @@ describe('optional Lane Add-on surface', () => {
     expect(api.attachLaneAddon).not.toHaveBeenCalled()
     expect(api.observeLaneAddon).not.toHaveBeenCalled()
   })
+  it.each([
+    ['partial inventory', false, [], []],
+    ['invalid owned file', true, [], [{ source_path: '/config/site.toml', id: null, message: 'invalid TOML' }]],
+    ['same ID issue elsewhere', true, [], [{ source_path: '/config/other.toml', id: 'website', message: 'duplicate ID' }]],
+    ['duplicate ID declarations', true, [
+      { id: 'website', source_path: '/config/site.toml', desired_revision: 'r1', applied_revision: 'r1', instance_id: 'instance-1' },
+      { id: 'website', source_path: '/config/other.toml', desired_revision: 'r1', applied_revision: null, instance_id: null },
+    ], []],
+  ] as const)('blocks removal for backend refusal: %s', async (_name, complete, declarations, issues) => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete, declarations, issues },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Resolve TOML before removal' })
+    expect((removal as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(removal)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+  })
+  it.each([false, true])('allows configured cleanup when its file is absent (unrelated issue=%s)', async unrelated => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete: true, declarations: [],
+        issues: unrelated ? [{ source_path: '/config/other.toml', id: null, message: 'invalid TOML' }] : [] },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Remove TOML + worker' })
+    expect((removal as HTMLButtonElement).disabled).toBe(false)
+  })
   it('keeps the previous instance visible while a changed declaration and parse errors remain unresolved', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
       configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true,

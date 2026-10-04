@@ -77,6 +77,31 @@ async function draft() {
 }
 
 describe('Machine activity operator flow', () => {
+  it('keeps a verified durable receipt certain when authority changes during follow-up', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    followup.refreshRuntimeConfigConsumers.mockReturnValueOnce(pending.promise)
+    const saving = session.save(authority)
+    await waitFor(() => expect(session.state.value.receipt?.commit.durability).toBe('durable'))
+    workspace('/fixture/B')
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.receipt?.commit.durability).toBe('durable')
+    pending.resolve(); await saving
+    expect(session.state.value.uncertain).toBe(false)
+  })
+  it('still marks an unresolved sent save unknown when authority changes', async () => {
+    const { authority, session } = await draft(), pending = deferred<ReturnType<typeof receipt>>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async (_text, _revision, options) => {
+      options?.beforeDispatch?.(); return pending.promise
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    workspace('/fixture/B')
+    expect(session.state.value.uncertain).toBe(true)
+    pending.resolve(receipt(off)); await saving
+    expect(session.state.value.uncertain).toBe(true)
+    expect(session.state.value.receipt).toBeNull()
+  })
   it('follows a fresh file when there is no unsaved activity change', async () => {
     const authority = executionWorkspaceAuthority.peek()!, session = machineLaneActivitySessionFor(authority, lane)
     await session.read(authority)

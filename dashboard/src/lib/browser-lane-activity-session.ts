@@ -15,7 +15,7 @@ import { announceRuntimeTomlCommitted } from './runtime-toml-session'
 type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
 type State = {
-  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving';
+  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving' | 'followup';
   error: string | null; notice: string | null; followupError: string | null;
   receipt: CommittedRuntimeTomlConfig | null; uncertain: boolean;
 }
@@ -156,7 +156,7 @@ export class BrowserLaneActivitySession {
       committed = true
       announceRuntimeTomlWritten()
       announceRuntimeTomlCommitted(authority)
-      this.update({ receipt, current: null, uncertain: receipt.commit.durability !== 'durable',
+      this.update({ phase: 'followup', receipt, current: null, uncertain: receipt.commit.durability !== 'durable',
         draft: receipt.commit.durability === 'durable' ? { ...draft, base: saved } : draft,
         notice: '파일 저장 응답을 받았습니다. 현재 설정과 적용 상태를 다시 확인합니다.' })
       // Browser activity is already published by the raw-save route. Model

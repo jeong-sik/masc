@@ -1,4 +1,5 @@
 import * as coreApi from '../api/core'
+import * as dashboardApi from '../api/dashboard'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -53,6 +54,8 @@ import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
 import { setStoredToken } from '../api/core'
 import type { RuntimeLaneEdit } from '../api/dashboard'
+import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import { resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 
 const apiMock = vi.hoisted(() => ({
@@ -1973,7 +1976,67 @@ describe('SettingsSurface', () => {
     expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })
 
+  it('refreshes mounted Settings after its editor unmounts during a save', async () => {
+    resetRuntimeTomlSessionsForTesting()
+    invalidateExecutionSnapshotGeneration('settings-late-save', 0)
+    hydrateExecutionSnapshot({ execution_publication_epoch: 'settings-late-save',
+      execution_publication_generation: 1, status: { project: 'test', workspace_root: '/settings-late-save' },
+    } as Parameters<typeof hydrateExecutionSnapshot>[0])
+    const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
+      { schema: 'masc.standalone_llm_lanes.v2', generatedAt: '2026-10-04T00:00:00Z',
+        observedAtUnix: 0, observationOnly: true, exactRunProjectionCount: 0,
+        exactRunSourceTotal: 0, exactRunProjectionTruncated: false, lanes: [] })
+    const resume = vi.spyOn(coreApi, 'postControlPlane').mockResolvedValue({ runtime_ready: true,
+      exact_output_authority_available: true, model_setup: { status: 'available' } })
+    const config = { ok: true, path: MOCK_RUNTIME_PATH, file_name: 'runtime.toml',
+      source_text: '[runtime]\ndefault = "rt-a"\n', source_revision: 'a'.repeat(64),
+      provider_protocols: runtimeProviderProtocols, reserved_provider_ids: [...runtimeReservedProviderIdsFixture] }
+    apiMock.fetchRuntimeTomlConfig.mockResolvedValue(config)
+    let finish!: (value: ReturnType<typeof committedRuntimeTomlConfigFixture>) => void
+    apiMock.saveRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    try {
+      render(html`<${SettingsSurface} />`, container)
+      await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtimes"]')!)
+      await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(config.source_text))
+      const draft = config.source_text + '# committed while hidden\n'
+      fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+      fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+      await waitFor(() => expect(apiMock.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+      await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]')!)
+      expect(container.querySelector('[data-testid="runtime-toml-editor"]')).toBeNull()
+      const counts = [apiMock.fetchRuntimeDefaults.mock.calls.length, apiMock.fetchRuntimeProviders.mock.calls.length,
+        apiMock.fetchRuntimeTomlConfig.mock.calls.length]
+      const resolved = makeRuntimeResolved()
+      apiMock.fetchRuntimeResolved.mockResolvedValue(makeRuntimeResolved({ default_runtime: {
+        ...resolved.default_runtime!, model: 'late-save-visible-model',
+      } }))
+      apiMock.fetchRuntimeTomlConfig.mockResolvedValue({ ...config, source_text: draft, source_revision: 'b'.repeat(64) })
+      finish(committedRuntimeTomlConfigFixture({ ...config, source_text: draft }))
+      await waitFor(() => expect(container.textContent).toContain('late-save-visible-model'))
+      expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreaterThan(counts[0]!)
+      expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGreaterThan(counts[1]!)
+      expect(apiMock.fetchRuntimeTomlConfig.mock.calls.length).toBeGreaterThan(counts[2]!)
+      expect(container.querySelector('[data-testid="runtime-toml-editor"]')).toBeNull()
+    } finally {
+      render(null, container)
+      resetRuntimeTomlSessionsForTesting()
+      resume.mockRestore()
+      lanes.mockRestore()
+      invalidateExecutionSnapshotGeneration('settings-late-save-finished', 0)
+    }
+  })
+
   it('opens the live runtime.toml editor from runtime management', async () => {
+    resetRuntimeTomlSessionsForTesting()
+    invalidateExecutionSnapshotGeneration('settings-open-editor', 0)
+    hydrateExecutionSnapshot({ execution_publication_epoch: 'settings-open-editor',
+      execution_publication_generation: 1, status: { project: 'test', workspace_root: '/settings-open-editor' },
+    } as Parameters<typeof hydrateExecutionSnapshot>[0])
+    const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
+      { schema: 'masc.standalone_llm_lanes.v2', generatedAt: '2026-10-04T00:00:00Z',
+        observedAtUnix: 0, observationOnly: true, exactRunProjectionCount: 0,
+        exactRunSourceTotal: 0, exactRunProjectionTruncated: false, lanes: [] })
+    try {
     const runtimeConfig = {
       ok: true,
       path: MOCK_RUNTIME_PATH,
@@ -1997,6 +2060,12 @@ describe('SettingsSurface', () => {
     })
 
     expect(apiMock.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    } finally {
+      render(null, container)
+      resetRuntimeTomlSessionsForTesting()
+      lanes.mockRestore()
+      invalidateExecutionSnapshotGeneration('settings-open-editor-finished', 0)
+    }
   })
 })
 

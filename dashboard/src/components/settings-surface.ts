@@ -41,6 +41,7 @@ import {
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
 import {
+  executionWorkspaceAuthority,
   refreshShell,
   shellAuthSummary,
   shellConfigResolution,
@@ -60,7 +61,8 @@ import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
 import { declaredRuntimeLaneCandidates, declaredRuntimeLanes } from '../lib/runtime-toml-config'
-import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
+import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
+import { runtimeTomlSessionFor } from '../lib/runtime-toml-session'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
@@ -1730,13 +1732,29 @@ export function SettingsSurface() {
     await refreshRuntimeConfigConsumers()
   }
 
-  async function handleRuntimeTomlSaved(): Promise<void> {
-    try {
-      await Promise.all([refreshRuntimeSettingsSnapshot(), reloadRuntimeTomlSourceSnapshot()])
-    } catch (err) {
-      console.warn('[Settings] runtime settings refresh failed after editor save:', err)
-    }
-  }
+  // The mounted parent owns refreshes even when navigation unmounts the editor.
+  const runtimeAuthority = executionWorkspaceAuthority.value
+  const runtimeCommit = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).committed.value : null
+  useEffect(() => {
+    if (!runtimeCommit || runtimeCommit.authority !== runtimeAuthority) return
+    let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+      && runtimeTomlSourceGeneration.peek() === runtimeCommit.generation
+    if (!current()) return
+    void Promise.all([fetchRuntimeDefaults(), fetchRuntimeResolved(), fetchRuntimeProviders(), fetchRuntimeTomlConfig()])
+      .then(([defaults, resolved, providers, config]) => {
+        if (!current()) return
+        setRuntimeDefaults(defaults)
+        setRuntimeResolved(resolved)
+        setRuntimeResolvedStatus('ready')
+        setRuntimeProviders(providers)
+        setRuntimeCatalogStatus('ready')
+        setRuntimeTomlSource({ status: 'ready', sourceText: config.source_text })
+      }).catch(err => {
+        if (current()) console.warn('[Settings] runtime settings refresh failed after editor save:', err)
+      })
+    return () => { active = false }
+  }, [runtimeAuthority, runtimeCommit])
 
   async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null): Promise<void> {
     if (runtimeWriteInFlight.current) return
@@ -2208,7 +2226,7 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <${RuntimeTomlEditor} onSaved=${handleRuntimeTomlSaved} />
+              <${RuntimeTomlEditor} />
             `}
 
             ${sec === 'prompts' && html`

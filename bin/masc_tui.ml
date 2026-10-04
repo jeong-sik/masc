@@ -5670,7 +5670,11 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
   (* The lane editor's line belongs to the view that drew it. *)
-  if destination <> state.view then Masc_tui_types.dismiss_runtime_lane_notice state;
+  if destination <> state.view then begin
+    Masc_tui_types.dismiss_runtime_lane_notice state;
+    state.slot_editor <- None;
+    state.runtime_lane_pick <- None
+  end;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
    | Clients -> launch_clients_load state ~mailbox
@@ -6695,12 +6699,15 @@ let handle_slot_edit state ~mailbox edit =
             Error "the slot editor built a write its target does not take")
 
 let launch_runtime_catalog_load state ~mailbox =
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  let generation = state.runtime_catalog_generation in
+  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Runtime_catalog_loaded result))
+      enqueue_async mailbox (Runtime_catalog_loaded (generation, result)))
     (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
 
 (* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
@@ -10184,7 +10191,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
   state.runtime_catalog <- [];
-  state.runtime_catalog_error <- None;
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_unread;
   state.runtime_assignments <- [];
   state.runtime_lanes <- [];
   state.keeper_yolo_names <- [];
@@ -15479,14 +15487,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 launch_runtime_surface_load state ~mailbox ~force:true
             | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
        | Error _ -> ())
-  | Runtime_catalog_loaded result -> (
+  | Runtime_catalog_loaded (generation, result) -> (
+      if generation = state.runtime_catalog_generation then
       match result with
       | Ok (runtimes, lanes, assignments) ->
           state.runtime_catalog <- runtimes;
           state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None
-      | Error detail -> state.runtime_catalog_error <- Some detail)
+          state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_read
+      | Error detail -> state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_failed detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
       | Ok write ->
@@ -21127,8 +21136,13 @@ and is loaded on demand through keeper_skill.
           one, J/K move it, and Esc closes. *)
        | Some "r"
          when (state.view = Lanes || state.view = Runtime)
-              && Option.is_some state.slot_editor
+              && (match state.slot_editor with
+                  | Some { se_target = Masc_tui_types.Exact_lane_slots _; _ } -> true
+                  | Some { se_target = Masc_tui_types.Media_failover_slots; _ } | None -> false)
               && Option.is_none state.runtime_lane_pick ->
+           if Masc_tui_types.runtime_lane_write_busy state then
+             state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+           else
            (match state.slot_editor, Masc_tui_types.slot_editor_cursor_row state with
             | Some { se_target = Masc_tui_types.Exact_lane_slots lane; _ }, Some row ->
                 let group = match row.Masc_tui_types.sr_kind with
@@ -21137,6 +21151,7 @@ and is loaded on demand through keeper_skill.
                   | Masc_tui_types.Media_route_slot -> Tui_decode.Exact_output_unsupported in
                 Masc_tui_types.open_runtime_lane_pick state
                   (Masc_tui_types.Pick_exact_lane_replacement (lane, row.sr_slot, group));
+                launch_runtime_catalog_load state ~mailbox:async_messages;
                 Masc_tui_types.dismiss_runtime_lane_notice state
             | _ -> ())
        | Some ("j" | "k" | "up" | "down" | "wheel-up" | "wheel-down" | "x" | "J" | "K" | "1" | "esc")

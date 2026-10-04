@@ -885,6 +885,20 @@ let test_exact_replacement_search_exposes_model_effort_and_same_group () =
     { selected with ro_id = "account.current" }];
   let pick = Pick_exact_lane_replacement
       (Standalone_lane.Librarian, "account.current", Tui_decode.Exact_cli_slots) in
+  List.iter (fun reading ->
+    state.runtime_catalog_reading <- reading;
+    open_runtime_lane_pick state pick;
+    let _, _, rows = runtime_picker_rows state pick in
+    Alcotest.(check int) "cached replacement choices cannot be submitted" 0 (List.length rows);
+    match state.runtime_lane_pick with
+    | Some (_, list) ->
+        (match Masc_tui_pick_list.apply ~page:runtime_picker_page
+           ~label:(runtime_picker_label_for pick) rows list Masc_tui_pick_list.Choose with
+         | Masc_tui_pick_list.Stay _ -> ()
+         | _ -> Alcotest.fail "Enter acted on an unconfirmed replacement catalogue")
+    | None -> Alcotest.fail "replacement picker is closed")
+    [Runtime_catalog_unread; Runtime_catalog_loading; Runtime_catalog_failed "offline"];
+  state.runtime_catalog_reading <- Runtime_catalog_read;
   open_runtime_lane_pick state pick;
   press state (List.init (String.length "luna medium")
     (fun index -> String.make 1 "luna medium".[index]));
@@ -893,6 +907,30 @@ let test_exact_replacement_search_exposes_model_effort_and_same_group () =
      Alcotest.(check (list string)) "search chooses a configured model with declared effort"
        ["account.luna-medium"] (List.map (fun runtime -> runtime.Tui_decode.ro_id) picker.rlp_choices)
    | None -> Alcotest.fail "replacement picker is closed");
+  open_runtime_lane_pick state pick;
+  press state (List.init (String.length "750k context")
+    (fun index -> String.make 1 "750k context".[index]));
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check (list string)) "search matches the visible formatted context"
+       ["account.luna-medium"] (List.map (fun runtime -> runtime.Tui_decode.ro_id) picker.rlp_choices)
+   | None -> Alcotest.fail "replacement picker is closed");
+  state.runtime_catalog <- [{ selected with ro_id = "account.current" }];
+  state.runtime_catalog_reading <- Runtime_catalog_read;
+  open_runtime_lane_pick state pick;
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check string) "loaded catalogue has no eligible replacement"
+       "  (no eligible replacement in this candidate group)" (runtime_picker_empty_note picker)
+   | None -> Alcotest.fail "replacement picker is closed");
+  List.iter (fun (reading, expected) ->
+    state.runtime_catalog_reading <- reading;
+    match runtime_picker_projection state with
+    | Some picker -> Alcotest.(check string) "cached rows do not imply a fresh read"
+        expected (runtime_picker_empty_note picker)
+    | None -> Alcotest.fail "replacement picker is closed")
+    [ Runtime_catalog_loading, "  (runtime catalogue loading)"
+    ; Runtime_catalog_failed "offline", "  (runtime catalogue read failed: offline)" ];
   Alcotest.(check string) "first means first within the declared group"
     "librarian_exact first in group account.current"
     (slot_plan_text (plan_slot_edit state First_slot));
@@ -1100,6 +1138,7 @@ let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
 
 let catalogue_state () =
   let state = state () in
+  state.runtime_catalog_reading <- Runtime_catalog_read;
   state.runtime_catalog <-
     [ runtime "anthropic.claude"; runtime "openai.gpt"; runtime "ollama.qwen";
       runtime "zai.glm"; runtime "kimi.k2" ];

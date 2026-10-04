@@ -4843,6 +4843,12 @@ type task_goal_links_reading =
   | Goal_links_read_failed of string
   | Goal_links_read of (string, string list) Hashtbl.t
 
+type runtime_catalog_reading =
+  | Runtime_catalog_unread
+  | Runtime_catalog_loading
+  | Runtime_catalog_read
+  | Runtime_catalog_failed of string
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5434,7 +5440,8 @@ type state = {
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
-  mutable runtime_catalog_error: string option;
+  mutable runtime_catalog_generation: int;
+  mutable runtime_catalog_reading: runtime_catalog_reading;
   (* Lazy loads for the two detail panes; the id names which row the answer
      belongs to so a stale load is discarded, not drawn under another item.
      [None] doubles as "in flight" right after entry resets it. *)
@@ -8254,7 +8261,8 @@ let create_state
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
-  runtime_catalog_error = None;
+  runtime_catalog_generation = 0;
+  runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = None;
   task_history = None;
   verification_evidence = None;
@@ -9945,8 +9953,8 @@ type runtime_picker_projection = {
   rlp_selected_row : int option;
       (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
   rlp_total : int;
-      (* The catalogue before the filter: zero is an unread catalogue, not an
-         empty match. *)
+      (* Eligible catalogue size before the text filter. *)
+  rlp_catalog_reading : runtime_catalog_reading;
   rlp_summary : string;
       (* The header's count and filter, from [Masc_tui_pick_list.summary]. *)
   rlp_filter : string option;
@@ -9960,13 +9968,20 @@ let runtime_picker_page = 3
 (* The text a runtime's picker row draws before its notes, made terminal
    safe here, and the text the typed filter matches: the operator filters by
    exactly what they read. *)
+let format_context_tokens tokens =
+  if tokens >= 1_000_000 then
+    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
+    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
+  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
+  else Printf.sprintf "%d" tokens
+
 let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
       runtime.Tui_decode.ro_declared_reasoning_effort in
   Masc.Tui_terminal_text.sanitize_terminal_text
-    (Printf.sprintf "%s %s · %s · %d ctx · %s"
+    (Printf.sprintf "%s %s · %s · %s context · %s"
        runtime.Tui_decode.ro_model effort runtime.Tui_decode.ro_provider_id
-       runtime.Tui_decode.ro_effective_max_context runtime.Tui_decode.ro_id)
+       (format_context_tokens runtime.Tui_decode.ro_effective_max_context) runtime.Tui_decode.ro_id)
 
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =
   Masc.Tui_terminal_text.sanitize_terminal_text
@@ -10110,9 +10125,12 @@ let runtime_picker_rows (state : state) pick =
     List.partition lands
       (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
   in
-  let rows = match pick with
-    | Pick_exact_lane_replacement _ -> landing |> List.filter (fun runtime ->
-        not (List.mem runtime.Tui_decode.ro_id already))
+  let rows = match pick, state.runtime_catalog_reading with
+    | Pick_exact_lane_replacement _, Runtime_catalog_read ->
+        landing |> List.filter (fun runtime ->
+          not (List.mem runtime.Tui_decode.ro_id already))
+    | Pick_exact_lane_replacement _,
+      (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _) -> []
     | _ -> landing @ refused in
   ( already, providers, rows )
 
@@ -10120,9 +10138,19 @@ let runtime_picker_rows (state : state) pick =
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
 let runtime_picker_empty_note picker =
-  if picker.rlp_total = 0 then "  (runtime catalogue unread)"
-  else
-    Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
+  match picker.rlp_catalog_reading with
+  | Runtime_catalog_unread -> "  (runtime catalogue unread)"
+  | Runtime_catalog_loading -> "  (runtime catalogue loading)"
+  | Runtime_catalog_failed detail ->
+      "  (runtime catalogue read failed: "
+      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
+  | Runtime_catalog_read ->
+      if picker.rlp_total = 0 then
+        match picker.rlp_pick with
+        | Pick_exact_lane_replacement _ -> "  (no eligible replacement in this candidate group)"
+        | _ -> "  (runtime catalogue is empty)"
+      else
+        Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
 
 (* The keys the picker's header names, around the verb its Enter carries.
    While the filter is typed, letters are the filter's, so the header names
@@ -10160,7 +10188,13 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
       rlp_providers = providers; rlp_choices = view.Masc_tui_pick_list.rows;
       rlp_selected_row = view.Masc_tui_pick_list.selected_row;
       rlp_total = view.Masc_tui_pick_list.total;
-      rlp_summary = Masc_tui_pick_list.summary view;
+      rlp_catalog_reading = state.runtime_catalog_reading;
+      rlp_summary = Masc_tui_pick_list.summary view ^
+        (match state.runtime_catalog_reading with
+         | Runtime_catalog_loading -> " · refreshing catalogue"
+         | Runtime_catalog_failed detail ->
+             " · catalogue read failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+         | Runtime_catalog_unread | Runtime_catalog_read -> "");
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
 
@@ -10655,13 +10689,6 @@ let runtime_pick_min_column_cells = 24
    because the width calculation below measures the same string the renderer
    draws; a format that changed in one place and not the other would put the
    row back over the frame. *)
-let format_context_tokens tokens =
-  if tokens >= 1_000_000 then
-    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
-    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
-  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
-  else Printf.sprintf "%d" tokens
-
 (* What the row says after the two columns. [rpf_warn] asks the renderer for
    the warning colour; the text is the same either way, and the width below
    counts it either way. *)
@@ -11051,7 +11078,10 @@ let runtime_surface_listing_chrome ~cols state =
        | Some { se_target = Media_failover_slots; _ } ->
          Some (List.length (slot_editor_rows state))
        | Some { se_target = Exact_lane_slots _; _ } | None -> None)
-    ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
+    ~picker_rows:(Option.map (fun picker ->
+      List.length picker.rlp_choices * (match picker.rlp_pick with
+        | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
+        | _ -> 1))
       (runtime_picker_projection state))
     ()
 

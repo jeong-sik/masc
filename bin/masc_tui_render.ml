@@ -3459,11 +3459,13 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")));
+            let prefix = "      Account " in
+            let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+            let account_width =
+              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
-              (Printf.sprintf "      Account %s · %s context"
-                (Masc_tui_message_layout.fit_middle (max 1 (cols - 32))
-                   (Terminal_text.single_line runtime.ro_provider_id))
-                (format_context_tokens runtime.ro_effective_max_context)));
+              (prefix ^ Masc_tui_message_layout.fit_middle account_width
+                 (Terminal_text.single_line runtime.ro_provider_id) ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
@@ -3476,6 +3478,18 @@ let render_exact_lane_provider_editor (state : state) editor =
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
    | None ->
+     let catalog = match state.runtime_catalog_reading with
+       | Runtime_catalog_read -> state.runtime_catalog
+       | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
+     (match state.runtime_catalog_reading with
+      | Runtime_catalog_read -> ()
+      | Runtime_catalog_unread ->
+          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue unread · showing slot IDs"
+      | Runtime_catalog_loading ->
+          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue loading · showing slot IDs"
+      | Runtime_catalog_failed detail ->
+          box_line_styled buf cols ~style:(Theme.warn ())
+            ("  runtime catalogue read failed: " ^ Terminal_text.single_line detail ^ " · showing slot IDs"));
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
@@ -3517,7 +3531,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                   (if Some index = selected_index then ">" else " ")
                   (index + 1) count kind
                   (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
-                     String.equal runtime.ro_id row.Masc_tui_types.sr_slot) state.runtime_catalog with
+                     String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog with
                    | Some runtime -> Masc_tui_types.runtime_model_picker_title runtime
                    | None -> Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
@@ -3534,13 +3548,15 @@ let render_exact_lane_provider_editor (state : state) editor =
       | Some row ->
         let identity = Terminal_text.single_line row.Masc_tui_types.sr_slot in
         (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
-           String.equal runtime.ro_id row.sr_slot) state.runtime_catalog with
+           String.equal runtime.ro_id row.sr_slot) catalog with
          | Some runtime ->
+           let prefix = "  Account " in
+           let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+           let account_width =
+             max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
-             (Printf.sprintf "  Account %s · %s context"
-                (Masc_tui_message_layout.fit_middle (max 1 (cols - 28))
-                   (Terminal_text.single_line runtime.ro_provider_id))
-                (format_context_tokens runtime.ro_effective_max_context))
+             (prefix ^ Masc_tui_message_layout.fit_middle account_width
+                (Terminal_text.single_line runtime.ro_provider_id) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
           ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16)) identity));
@@ -3736,9 +3752,14 @@ let render_lanes_overview (state : state) =
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
        in
+       let picker_rows =
+         match Masc_tui_types.runtime_picker_projection state with
+         | None -> 0
+         | Some picker -> 1 + max 1 (2 * List.length picker.rlp_choices)
+       in
        let available =
          max 0
-           (rows - count_frame_lines buf - action_error_rows - 3)
+           (rows - count_frame_lines buf - action_error_rows - picker_rows - 3)
        in
        if available > 0 then begin
          box_divider buf cols;
@@ -3820,16 +3841,19 @@ let render_lanes_overview (state : state) =
                 if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
               in
               let ctx =
-                Printf.sprintf " [%s ctx]"
+                Printf.sprintf " [%s context]"
                   (format_context_tokens runtime.ro_effective_max_context)
               in
               let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
                 (Printf.sprintf "  %s %s%s%s%s%s"
                    mark refusal_prefix
-                   (Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
+                   (Masc_tui_types.runtime_model_picker_title runtime)
                    ctx def
-                   (Ansi.dim ^ note ^ Ansi.reset)))
+                   (Ansi.dim ^ note ^ Ansi.reset));
+              box_line_styled buf cols ~style:(Theme.recede ())
+                ("      " ^ Terminal_text.single_line runtime.ro_provider_id
+                  ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
   for _ = 1 to max 0 (rows - used_rows - 2) do
@@ -9920,16 +9944,27 @@ let render_runtime (state : state) =
              else ""
            in
            let ctx =
-             Printf.sprintf " [%s ctx]"
+             Printf.sprintf " [%s %s]"
                (format_context_tokens runtime.ro_effective_max_context)
+               (match picker.rlp_pick with
+                | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
+                | _ -> "ctx")
            in
            let def = if runtime.ro_is_default then " [default]" else "" in
            c.push
              (Printf.sprintf "  %s %s%s%s%s"
                 (if picker.rlp_selected_row = Some offset then ">" else " ")
-                (Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
+                (match picker.rlp_pick with
+                 | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+                     Masc_tui_types.runtime_model_picker_title runtime
+                 | _ -> Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
                 ctx def
-                (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
+                (Ansi.dim ^ note ^ Ansi.reset));
+           (match picker.rlp_pick with
+            | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+                c.push ("      " ^ Terminal_text.single_line runtime.ro_provider_id
+                  ^ " · " ^ Terminal_text.single_line runtime.ro_id)
+            | _ -> ())) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
     let empty =
@@ -10973,10 +11008,10 @@ let render_runtime_pick (state : state) =
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())
         ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view);
-      (match state.runtime_catalog_error, Masc_tui_types.keeper_runtime_picker_empty_note view with
-       | Some err, _ -> c.push (data_unreliable_row ~cols err)
-       | None, Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
-       | None, None ->
+      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note view with
+       | Runtime_catalog_failed err, _ -> c.push (data_unreliable_row ~cols err)
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), None ->
            (* The first header cell spans badge and target, as the rows
               do. *)
            let header =

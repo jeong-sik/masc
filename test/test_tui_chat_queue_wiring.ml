@@ -1073,6 +1073,25 @@ let test_new_enter_can_bypass_an_explicitly_stopped_input () =
     (Option.is_some (Q.find state.msg_queued ~request_id:item.request.request_id))
 ;;
 
+let test_empty_composer_cannot_reverse_already_queued_input () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry, item = preflight_input () in
+  let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later queued Enter" () in
+  (match Q.push state.msg_queued ~submitted_at:2. later with
+   | Ok (queue, _) -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  Tui_types.retain_preflight_inputs state [entry];
+  check string "older input cannot move behind newer queue through the composer"
+    "" (Buffer.contents state.msg_input);
+  check bool "original input is retained ahead of newer input" true
+    (List.map (fun (held : Q.item) -> held.request.request_id) (Q.waiting state.msg_queued)
+      = [item.request.request_id; later.request_id]);
+  check bool "neither input can auto-dispatch after recovery" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
 let test_offscreen_preflight_recovery_retains_its_owner () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -4313,6 +4332,7 @@ let () =
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
         ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
+        ; test_case "empty composer preserves already queued input order" `Quick test_empty_composer_cannot_reverse_already_queued_input
         ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal

@@ -7356,6 +7356,8 @@ let retain_preflight_inputs (state : state) entries =
       let request = item.Masc_tui_keeper_chat_queue.request in
       if item.intent = Masc_tui_keeper_chat_queue.Next
          && state.msg_target_keeper_name = Some request.keeper_name
+         && Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+              ~keeper_name:request.keeper_name = []
          && Buffer.length state.msg_input = 0
          && state.msg_attachments = [] && state.msg_references = []
          && Option.is_none state.msg_recall_replaces

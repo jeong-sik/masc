@@ -623,23 +623,39 @@ let materialized_reload_boot_error ~name ~toml_path (err : boot_meta_error) =
    meta over that same file, which is how the 2026-08-29 schema cut zeroed
    nine keepers' counters with no copy left. Before re-materialising, move
    the unreadable file aside; parking failure never blocks recovery. *)
-let park_unreadable_meta_before_rematerialization config name =
+let park_unreadable_meta_before_rematerialization ?(now = Unix.time ()) config name =
   let path = Keeper_types_profile.keeper_meta_path config name in
   if Fs_compat.file_exists path
   then (
-    let parked = Printf.sprintf "%s.rejected-%d" path (int_of_float (Unix.time ())) in
-    match Sys.rename path parked with
-    | () ->
+    try
+      (* Reserve a fresh sibling atomically: rename may replace only our own
+         empty reservation, never an earlier recovery copy from this second. *)
+      let parked =
+        Filename.temp_file
+          ~temp_dir:(Filename.dirname path)
+          (Printf.sprintf "%s.rejected-%d-" (Filename.basename path) (int_of_float now))
+          ""
+      in
+      (match Sys.rename path parked with
+       | () -> ()
+       | exception (Sys_error _ as error) ->
+         (try Sys.remove parked with Sys_error _ -> ());
+         raise error);
       Log.Keeper.warn
         "parked unreadable keeper meta %s -> %s (counters preserved for operator recovery)"
         path
         parked
-    | exception e -> (* cancel-guard-ok: Sys.rename performs no Eio operation, so Cancelled cannot originate in this body. *)
-      Log.Keeper.warn
+    with Sys_error detail ->
+      Log.Keeper.error
         "could not park unreadable keeper meta %s before re-materialization: %s"
         path
-        (Printexc.to_string e))
+        detail)
 ;;
+
+module For_testing = struct
+  let park_unreadable_meta_before_rematerialization ~now config name =
+    park_unreadable_meta_before_rematerialization ~now config name
+end
 
 let load_or_materialize_boot_meta (ctx : _ context) name
     : (boot_meta_resolution, string) result =

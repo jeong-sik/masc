@@ -376,6 +376,7 @@ let install () =
           Unix.mkdir review_root 0o700;
           Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_root);
           Keeper_turn_driver_wrappers.run_named_with_masc_tools
+            ~raw_trace:None
             ~runtime_id:evaluator_runtime
             ~on_selected_runtime:(fun runtime_id -> selected_runtime_id := Some runtime_id)
             ~base_path:review_root

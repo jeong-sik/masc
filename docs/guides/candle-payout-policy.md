@@ -7,12 +7,13 @@ Candle은 설정 폴더의 `candle.toml`을 매번 읽는다. 파일이 없으�
 필수 구조:
 
 - 최상위 `half_life`: `"off"` 또는 양의 정수 시간
-- `[payout]`: `weight_max`, `deduction_rate`, `deduction_floor`
-- `[payout.grades_milli]`: `trivial`, `small`, `medium`, `large`, `epic`
+- `[payout]`: `weight_max`, `deduction_rate`, `deduction_floor`, `share_rounding`, `remainder_tie_break`, `deduction_rounding`
+- `[payout.grades_milli]`: 운영자가 정한 등급 id와 지급액. 비어 있으면 거절한다.
+- `[payout.grade_criteria]`: 같은 등급 id 각각의 비어 있지 않은 평가 기준
 
 반감기는 처음 운영할 때 `half_life = "off"`로 명시한다. 값을 생략하면 Disabled이며 자동 기본값은 없다. 감쇠를 켤 때는 양의 정수 시간을 지정한다. 0·음수·실수·알 수 없는 문자열은 거절한다.
 
-지급 금액과 가중치는 정수다. 금액은 `0..max_int` milli-Candle, 가중치 상한은 `1..max_int`다. `max_int`는 바이너리의 OCaml 정수 표현 범위다. 감액률과 바닥은 `0..1000` 천분율이다. 중간 합·곱은 Zarith로 정확하게 계산하고, 수령 지갑의 누적 결과가 표현 범위를 넘으면 지급 전체를 거절한다. 코드에는 경제 기본값이 없다. 알 수 없는 키와 누락된 등급은 거절한다.
+지급 금액과 가중치는 정수다. 금액은 `0..max_int` milli-Candle, 가중치 상한은 `1..max_int`다. `max_int`는 바이너리의 OCaml 정수 표현 범위다. 감액률과 바닥은 `0..1000` 천분율이다. 중간 합·곱은 Zarith로 정확하게 계산하고, 수령 지갑의 누적 결과가 표현 범위를 넘으면 지급 전체를 거절한다. 코드에는 경제 기본값이나 고정 등급 목록이 없다. 등급 id는 소문자 ASCII·숫자·`_`·`-`로 구성한다. 금액과 기준의 등급 목록이 다르거나 알 수 없는 정책 키가 있으면 거절한다.
 
 ## 장신구 가격과 구매
 
@@ -60,8 +61,46 @@ TUI에서는 Keepers에서 Keeper를 열고 `Items` 탭을 선택한다. `j`/`k`
 가격 변경도 반영한다. 새로 읽는 동안 이전 계정 정보는 숨긴다.
 두 화면에서 구매와 착용 결과를 확인할 수 있고, 변경은 Keeper 도구로 수행한다.
 
-등급은 운영자가 확정한 Trivial, Small, Medium, Large, Epic이다. 설정이 유효하다는
+등급 id·금액·기준은 운영자가 설정한다. 등급 판정 요청에는 설정의 id와 기준이 전달되며, 응답 스키마는 그 요청에 담긴 id만 허용한다. Task 관련성과 상대 기여의 평가 지침은 `candle_appraiser_relation.md`·`candle_appraiser_weights.md` 프롬프트로 관리한다. 모델 판단은 비결정적이며 정책 설정으로 그 변동성이 사라지지는 않는다. 설정이 유효하다는
 사실만으로 모델 평가나 실제 지급이 실행되지는 않는다. 지급·구매·착용 기록의
 동작은 해당 경로의 실행 증거와 함께 확인한다.
 
 설정 키를 읽는 바이너리를 먼저 배포한 뒤 값을 설정한다. 테스트의 금액은 테스트 입력이며 운영 금액 권고가 아니다.
+
+## 배분 정책
+
+모든 선택값을 명시해야 한다. 생략되거나 지원하지 않는 값이면 Disabled다.
+
+| 키 | 선택값 | 의미 |
+|---|---|---|
+| `share_rounding` | `largest_remainder` / `down` | 가중치별 몫을 정수로 내린 뒤, 잔여 milli를 최대 나머지 순으로 지급하거나 미발행으로 남긴다. |
+| `remainder_tie_break` | `name_ascending` / `name_descending` | 나머지가 같은 수령자의 정확한 이름 오름차순 또는 내림차순으로 잔여액을 배분한다. |
+| `deduction_rounding` | `down` / `up` | 지연 감액을 적용한 수령액을 내리거나 올린다. |
+
+Paid 영수증에는 선택한 배분 정책과 `unallocated_milli`가 함께 기록된다.
+`down`에서 미발행 잔여액은 누구의 지갑에도 들어가지 않는다. 지급 몫의 합과
+미발행 잔여액의 합은 설정 총액과 같다. 기록을 읽을 때는 당시 금액을 재생하며,
+현재 등급 목록이나 반올림 정책으로 과거 영수증을 다시 계산하지 않는다.
+
+아래는 형식을 보여 주는 완전한 예시다. 금액 0을 포함해 각 값은 예시 입력이며
+운영 권고나 자동 기본값이 아니다. 실제 활성화 전 운영 정책과 appraiser lane을
+설정하고 검증 통과·사람 확정·지급·구매 경로를 별도 실행으로 확인한다.
+
+```toml
+half_life = "off"
+[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grades_milli]
+outcome = 0
+[payout.grade_criteria]
+outcome = "Goal의 명시된 성공 조건을 충족하는 완료 결과"
+```
+
+통화의 milli 단위, 천분율 표현, 지연 시간의 완전한 시간 단위 계산과
+감쇠 정수 근사 알고리즘은 산술 계약이다. 이 설정은 지급 등급·평가 기준과
+배분·감액 반올림 정책을 관리하며 계산 엔진 자체를 임의 수식으로 교체하지 않는다.

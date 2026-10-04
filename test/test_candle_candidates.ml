@@ -59,6 +59,15 @@ let enable base_path =
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 2000

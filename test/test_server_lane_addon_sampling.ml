@@ -51,7 +51,49 @@ let test_image_only_completion_is_sampling_content () =
   check bool "empty completion remains an error" true
     (Result.is_error (project (response [])))
 
-let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
+let test_captured_binding_survives_same_id_reload () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock @@ fun () ->
+  let root = Filename.temp_dir "sampling-snapshot-" "" in
+  let original = Runtime.For_testing.snapshot () in
+  Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore original; Fs_compat.remove_tree root);
+  let requests = ref [] in
+  let callback _connection request body =
+    let json = Eio.Buf_read.(of_flow ~max_size:65536 body |> take_all) |> Yojson.Safe.from_string in
+    requests := (Cohttp.Request.resource request, json) :: !requests;
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"id":"snapshot-response","model":"snapshot-model","choices":[{"index":0,"message":{"role":"assistant","content":"captured binding answer"},"finish_reason":"stop"}]}|} () in
+  let socket = Eio.Net.listen env#net ~sw ~backlog:4 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
+  let port = match Eio.Net.listening_addr socket with `Tcp (_,port) -> port | _ -> fail "TCP listener missing" in
+  Eio.Fiber.fork_daemon ~sw (fun () -> Cohttp_eio.Server.run socket
+    (Cohttp_eio.Server.make ~callback ()) ~on_error:raise);
+  let path = Filename.concat root "runtime.toml" in
+  let load endpoint temperature =
+    write path (Printf.sprintf {|[providers.snapshot]
+protocol="openai-compatible-http"
+endpoint="http://127.0.0.1:%d/%s"
+[models.sample]
+api-name="snapshot-model"
+max-context=4096
+temperature=%g
+[ snapshot.sample ]
+[runtime]
+default="snapshot.sample"
+|} port endpoint temperature);
+    require (Runtime.init_default ~config_path:path) in
+  load "before" 0.25;
+  let captured = match Runtime.get_runtime_by_id "snapshot.sample" with Some value -> value | None -> fail "runtime missing" in
+  load "after" 0.75;
+  let text_params = {params with messages=[{S.role=S.User;content=S.Text {type_="text";text="test snapshot"}}]} in
+  ignore (require (Server_lane_addon_sampling.For_testing.attempt_captured ~sw ~net:env#net captured text_params));
+  match !requests with
+  | [path, body] ->
+    check string "dispatch uses the captured endpoint" "/before/chat/completions" path;
+    check (float 0.) "dispatch uses the captured fixed temperature" 0.25
+      Yojson.Safe.Util.(body |> member "temperature" |> to_float)
+  | _ -> fail "expected one captured binding request"
+
+let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(primary_images=true) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -117,7 +159,7 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?i
   Eio.Fiber.fork_daemon ~sw (fun () -> Cohttp_eio.Server.run socket server ~on_error:raise);
   let catalog_path = Filename.concat root "models.toml" in
   write catalog_path (String.concat "\n" (List.map (fun provider -> Printf.sprintf
-    "[[models]]\nid_prefix=\"sampling-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_multimodal_inputs=true\nsupports_image_input=true\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n" provider)
+    "[[models]]\nid_prefix=\"sampling-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_multimodal_inputs=true\nsupports_image_input=%b\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n" provider (primary_images || provider <> "primary"))
     ["primary";"secondary"]));
   let catalog = require (Llm_provider.Model_catalog.load_file catalog_path) in
   Llm_provider.Model_catalog.set_global catalog;
@@ -196,7 +238,8 @@ max_reply_bytes=4194304
   check (option string) "provider stop reason maps to MCP vocabulary" (Some "endTurn") answer.stop_reason;
   let sent_requests = List.rev !requests in
   let expected_paths = match initial_pressure with
-    | None -> ["/primary/chat/completions";"/secondary/chat/completions"]
+    | None when primary_images -> ["/primary/chat/completions";"/secondary/chat/completions"]
+    | None -> ["/secondary/chat/completions"]
     | Some _ -> ["/secondary/chat/completions"] in
   check (list string) "shared backpressure orders only the declared route"
     expected_paths (List.map fst sent_requests);
@@ -224,14 +267,12 @@ max_reply_bytes=4194304
     (read "outcome" |> member "response" |> text "model");
   check string "outcome preserves the original request reference"
     (member "request" refs |> text "uri") (read "outcome" |> member "request" |> text "uri");
-  check bool "provider metadata is absent from the package response" true
-    (member "masc.lane_provider" metadata = `Null);
-  check bool "host metadata is absent from the package response" true
-    (member "masc.lane_host" metadata = `Null);
-  let host_metadata = read "outcome" |> member "response" |> member "_meta" in
-  check string "provider stop reason survives host metadata merging" "end_turn"
-    (member "masc.lane_provider" host_metadata |> text "stop_reason");
-  let host = member "masc.lane_host" host_metadata in
+  check (list string) "package response exposes only sampling references" ["masc.lane_sampling"]
+    (Yojson.Safe.Util.to_assoc metadata |> List.map fst);
+  let retained_metadata = read "outcome" |> member "response" |> member "_meta" in
+  check string "provider stop reason survives in private retained metadata" "end_turn"
+    (member "masc.lane_provider" retained_metadata |> text "stop_reason");
+  let host = member "masc.lane_host" retained_metadata in
   check string "selected concrete runtime is retained" "secondary.sample" (text "runtime_id" host);
   let failed = member "failed_attempts" host |> Yojson.Safe.Util.to_list in
   check int "only actually attempted failures are retained" (if Option.is_none initial_pressure then 1 else 0)
@@ -399,10 +440,14 @@ max_reply_bytes=4194304
 let () = run "Server Lane sampling HTTP composition" ["host boundary",[
   test_case "sampling route preflight stays stable and recovers after runtime update" `Quick
     test_invalid_sampling_route_is_stable_until_runtime_update;
+  test_case "captured binding survives same-ID reload" `Quick
+    test_captured_binding_survives_same_id_reload;
   test_case "image-only completion preserves MCP content" `Quick
     test_image_only_completion_is_sampling_content;
   test_case "installed route, serialized request, fallback and durable outcome" `Quick
     (fun () -> test_actual_http_route_and_durable_sampling ());
+  test_case "image-incapable primary is skipped before HTTP dispatch" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_images:false);
   test_case "missing model identity walks the secondary" `Quick
     (test_actual_http_route_and_durable_sampling ~primary_reply:`Missing_model);
   test_case "blank model identity walks the secondary" `Quick

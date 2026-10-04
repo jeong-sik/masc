@@ -573,8 +573,23 @@ describe('MemoryInspector pure projections', () => {
     expect(latestEntryWithInputComponents([content, refused])).toBe(refused)
   })
 
-  it('covers the closed category contract and preserves snapshot order', () => {
-    const tags: MemoryOsFact['category']['tag'][] = [
+  it('renders dynamic names and keeps their filters distinct', () => {
+    const first: MemoryOsFact = {
+      memory_id: memoryId('a'), claim: 'Design choice',
+      category: { tag: 'custom', name: 'architecture_decision' },
+      first_seen: 1, current: true, basis: { kind: 'observed', board: null },
+    }
+    const other: MemoryOsFact = {
+      ...first, memory_id: memoryId('b'),
+      category: { tag: 'custom', name: 'deployment_recovery' },
+    }
+    expect(factCategoryMeta(first.category).lbl).toBe('architecture_decision')
+    expect(storeRowMatches({ fact: first, delta: null }, { kind: 'category', tag: 'architecture_decision' })).toBe(true)
+    expect(storeRowMatches({ fact: other, delta: null }, { kind: 'category', tag: 'architecture_decision' })).toBe(false)
+  })
+
+  it('covers familiar categories and preserves snapshot order', () => {
+    const tags: Exclude<MemoryOsFact['category']['tag'], 'custom'>[] = [
       'code_change',
       'fact',
       'preference',
@@ -603,7 +618,7 @@ describe('MemoryInspector pure projections', () => {
   it('places every store row in the latest revision delta and filters on it', () => {
     const typed = (
       memory_id: string,
-      tag: MemoryOsFact['category']['tag'],
+      tag: Exclude<MemoryOsFact['category']['tag'], 'custom'>,
       current: boolean,
     ): MemoryOsFact => ({
       memory_id,

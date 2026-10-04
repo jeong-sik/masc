@@ -25,11 +25,15 @@ val no_report_mark : string
 (** What a day without a report draws. Never a zero-height bar: a missing
     report is not an idle day. *)
 
+val empty_report_mark : string
+(** A successful complete report with no windows, distinct from zero usage or no report. *)
+
 val of_history :
   share:(Masc.Tui_decode_usage.provider_usage_utilization -> float option) ->
   Masc.Tui_decode_usage.provider_usage_history ->
   t
 (** [share] reads a reported value as a part of its full window. An uncapped
-    monetary report has no share and draws [$], distinct from no report. A point
-    outside the answered window keeps its row and draws no day. When one day
+    monetary report has no share and draws [$], distinct from no report. A report
+    without windows draws [empty_report_mark] and counts as a reported day.
+    A point outside the answered window keeps its row and draws no day. When one day
     holds several points for a row, the last one in the answer is drawn. *)

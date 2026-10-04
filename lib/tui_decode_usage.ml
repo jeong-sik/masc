@@ -177,11 +177,17 @@ type provider_usage_history_point = {
   puhp_observed_at : float;
 }
 
+type provider_usage_empty_report = {
+  puhe_scope_id : string;
+  puhe_observed_at : float;
+}
+
 type provider_usage_history = {
   puh_days : int;
   puh_generated_at : float;
   puh_unreadable_reports : int;
   puh_points : provider_usage_history_point list;
+  puh_reported_no_windows : provider_usage_empty_report list;
 }
 
 let decode_provider_usage_history_point json =
@@ -221,7 +227,12 @@ let decode_provider_usage_history json =
       let* puh_points =
         decode_list "points" decode_provider_usage_history_point points
       in
-      Ok { puh_days; puh_generated_at; puh_unreadable_reports; puh_points }
+      let* empty_reports = required_list_field json "reported_no_windows" in
+      let* puh_reported_no_windows = decode_list "reported_no_windows" (fun json ->
+        let* puhe_scope_id = required_string_field json "scope_id" in
+        let* puhe_observed_at = required_number_field json "observed_at" in
+        Ok { puhe_scope_id; puhe_observed_at }) empty_reports in
+      Ok { puh_days; puh_generated_at; puh_unreadable_reports; puh_points; puh_reported_no_windows }
 
 type keeper_usage_coverage =
   | Keeper_usage_complete

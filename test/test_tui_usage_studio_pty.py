@@ -60,7 +60,7 @@ def fixtures():
     for days in (1, 7, 14):
         result[f"/api/v1/dashboard/provider-usage-history?days={days}"] = (200, {
             "days": days, "generated_at": now,
-            "sampling": "latest_provider_report_per_utc_day", "unreadable_reports": 0,
+            "sampling": "latest_provider_report_per_utc_day", "unreadable_reports": 0, "reported_no_windows": [],
             "points": [{"scope_id": scope["scope_id"], "kind": "five_hour",
                         "limit_id": None, "unit": "fraction", "value": 0.4,
                         "observed_at": now, "source": "fixture", "resets_at": None}

@@ -44,6 +44,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Iterator
 
@@ -232,36 +233,75 @@ def ttyd_session(
         "--refresh",
         "60",
     ]
-    process = subprocess.Popen(
-        command,
-        cwd=WORKTREE,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    context = None
-    try:
-        wait_port(web_port, process)
-        # Character cell is about 8.4 x 17 at Menlo 14; pad so ttyd fits the grid.
-        context = browser.new_context(
-            viewport={"width": int(cols * 8.5) + 24, "height": int(rows * 17) + 24},
-            device_scale_factor=2,
+    # Keep output writable throughout startup and capture; no reader owns a pipe.
+    with tempfile.TemporaryFile() as log:
+        process = subprocess.Popen(
+            command,
+            cwd=WORKTREE,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
-        page = context.new_page()
-        page.goto(f"http://127.0.0.1:{web_port}", wait_until="domcontentloaded")
-        page.wait_for_selector(".xterm-helper-textarea", timeout=15_000)
-        page.wait_for_function("window.term && window.term.rows > 0", timeout=15_000)
-        page.wait_for_timeout(4_000)
-        yield page
-    finally:
-        if context is not None:
-            context.close()
-        process.terminate()
+        context = None
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                wait_port(web_port, process)
+            except (RuntimeError, TimeoutError) as error:
+                # pread does not move the file offset shared with ttyd's writer.
+                size = os.fstat(log.fileno()).st_size
+                private_fields = {
+                    value.encode("utf-8")
+                    for value in (
+                        env.get("MASC_TOKEN", ""), str(executable), str(base),
+                        workspace, str(WORKTREE), str(TTYD),
+                    )
+                    if value
+                }
+                # Read and crop in bytes. Same-width masking keeps the original
+                # tail boundary intact even when many private fields occur.
+                read_size = 4096 + max(map(len, private_fields), default=0)
+                detail_bytes = os.pread(log.fileno(), read_size, max(0, size - read_size))
+                masked = bytearray(detail_bytes)
+                # Search the original bytes so overlapping private values are
+                # all masked, even if an earlier match covers a later prefix.
+                for value in private_fields:
+                    offset = detail_bytes.find(value)
+                    while offset >= 0:
+                        masked[offset:offset + len(value)] = b"*" * len(value)
+                        offset = detail_bytes.find(value, offset + 1)
+                    # A live writer or an interrupted process may leave a
+                    # private value incomplete at the observed EOF.
+                    for length in range(min(len(value) - 1, len(detail_bytes)), 0, -1):
+                        if detail_bytes.endswith(value[:length]):
+                            masked[-length:] = b"*" * length
+                            break
+                detail = bytes(masked[-4096:]).decode("utf-8", errors="replace")
+                raise type(error)(
+                    f"{error}\nttyd startup log (bounded tail):\n{detail}"
+                ) from None
+            # Character cell is about 8.4 x 17 at Menlo 14; pad so ttyd fits the grid.
+            context = browser.new_context(
+                viewport={"width": int(cols * 8.5) + 24, "height": int(rows * 17) + 24},
+                device_scale_factor=2,
+            )
+            page = context.new_page()
+            page.goto(f"http://127.0.0.1:{web_port}", wait_until="domcontentloaded")
+            page.wait_for_selector(".xterm-helper-textarea", timeout=15_000)
+            page.wait_for_function("window.term && window.term.rows > 0", timeout=15_000)
+            page.wait_for_timeout(4_000)
+            yield page
+        finally:
+            try:
+                if context is not None:
+                    context.close()
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
 
 
 def screen_text(page: Page) -> str:

@@ -84,7 +84,7 @@ def run(binary: str) -> None:
             raise AssertionError(f"the first removal carried the wrong body: {removals!r}")
 
         # Enter over what the file says now removes it.
-        h.send_and_wait(process, fd, output, b"\r", "codex_two 계정을 지웠습니다".encode())
+        h.send_and_wait(process, fd, output, b"\r", "codex_two 연결 (codex_two)을 설정에서 지웠습니다".encode())
         if removals[1:] != [{"integration_id": "codex_two", "revision": "rev-2"}]:
             raise AssertionError(f"the second removal did not carry the new revision: {removals!r}")
         screen = h.screen_text(bytes(output))

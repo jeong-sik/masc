@@ -5,8 +5,9 @@
 val scope_id : Runtime_quota_window.scope -> string
 (** The opaque identity of a quota scope, as both this store and the
     [provider_usage_windows] rows of [/api/v1/runtime/resolved] name it. One
-    digest, taken here, so a history point and the current window row it
-    belongs to always agree; readers compare it and never recompute it. *)
+    digest from [Runtime_quota_window.scope_id], so history, current windows
+    and Setup groups agree; readers compare it and never recompute it.
+    A credential-location scope is not an authenticated provider account ID. *)
 
 val install : Workspace.config -> unit
 (** Register the server-side sink before runtimes begin reporting. *)
@@ -22,7 +23,12 @@ val days_of_window : window -> int
 val read :
   Workspace.config -> now:float -> window:window -> (Yojson.Safe.t, string) result
 (** Return the latest report on each UTC day, per scope and reported window.
-    Missing days have no point. A stored line that cannot be read is logged,
+    Complete reports remove omitted windows from that day's sample; sparse
+    updates retain unstated windows. Earlier days retain their own readings.
+    A successful complete empty scope/day appears in [reported_no_windows]
+    with its opaque [scope_id] and [observed_at], unless another source retains
+    windows for that scope/day. Missing days have neither a point nor an empty
+    report. A stored line that cannot be read is logged,
     skipped, and counted in [unreadable_reports]; the rest are still read. A
     store that cannot be read at all, or a report that failed to persist in
     the window, fails the read. *)

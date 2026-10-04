@@ -116,6 +116,9 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
+  ; retryable_runtimes : string list
+        (** Actual candidates that reported a typed retryable error, in attempt
+            order. The final diagnostic runtime does not own their retry time. *)
   ; evaluator_error_retryable : bool option
   }
 
@@ -550,6 +553,7 @@ let run
       ; generator_runtime
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
+      ; retryable_runtimes = []
       ; evaluator_error_retryable = None
       }
   | Ok [] ->
@@ -566,6 +570,7 @@ let run
       ; generator_runtime
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
+      ; retryable_runtimes = []
       ; evaluator_error_retryable = None
       }
   | Ok (first_slot :: rest_slots) ->
@@ -584,6 +589,7 @@ let run
          ; generator_runtime
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
+         ; retryable_runtimes = []
          ; evaluator_error_retryable = None
          }
      | Ok prompt ->
@@ -615,7 +621,8 @@ let run
           remains the operator-facing reason. A single-slot lane still reports
           exactly what the pre-lane path reported. *)
        let run_attempt slot =
-         let nested_retryable_error_seen = ref false in
+         let retryable_runtimes = ref [] in
+         let attempt_observed = ref false in
          try
            let result =
              (Atomic.get run_llm_reviewer_fn)
@@ -628,12 +635,14 @@ let run
                ~lookup
                ~on_tool_result
                ~on_runtime_attempt_error:
-                 (fun ~runtime_id:_ ~attempt:_ ~dispatch:_ error ->
+                 (fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
+                    attempt_observed := true;
                     if Agent_core.Error.is_retryable error
-                    then nested_retryable_error_seen := true)
+                       && not (List.mem runtime_id !retryable_runtimes)
+                    then retryable_runtimes := !retryable_runtimes @ [runtime_id])
                ()
            in
-           result, !nested_retryable_error_seen
+           result, !retryable_runtimes, !attempt_observed
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
@@ -642,11 +651,14 @@ let run
                   (Printf.sprintf
                      "review evaluator raised unexpectedly: %s"
                      (Printexc.to_string exn)))
-           , !nested_retryable_error_seen )
+           , !retryable_runtimes, !attempt_observed )
        in
-       let rec attempt ~retryable_error_seen slot remaining =
+       let append_unique left right =
+         List.fold_left (fun ids id -> if List.mem id ids then ids else ids @ [id]) left right
+       in
+       let rec attempt ~retryable_runtimes slot remaining =
          match run_attempt slot with
-         | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_error_seen ->
+         | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_runtimes, _ ->
            (match verdict with
             | Approve reason ->
               task_info
@@ -664,9 +676,11 @@ let run
              ; generator_runtime
              ; gate = Structured_tool
              ; fallback_reason = None
-             ; evaluator_error_retryable = None
+             ; retryable_runtimes = []
+         ; evaluator_error_retryable = None
              }
-         | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_error_seen ->
+         | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_runtimes, _ ->
+           let retryable_runtimes = append_unique retryable_runtimes nested_retryable_runtimes in
            let detail =
              "evaluator did not call report_review_verdict exactly once"
            in
@@ -680,7 +694,7 @@ let run
                 detail
                 slot
                 next;
-              attempt ~retryable_error_seen next rest
+              attempt ~retryable_runtimes next rest
             | [] ->
               task_warn "%s" detail;
               emit
@@ -689,17 +703,20 @@ let run
                 ; generator_runtime
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
+                ; retryable_runtimes
                 ; evaluator_error_retryable =
-                    (if retryable_error_seen || nested_retryable_error_seen
+                    (if retryable_runtimes <> []
                      then Some true
                      else None)
                 })
-         | Error error, nested_retryable_error_seen ->
+         | Error error, nested_retryable_runtimes, attempt_observed ->
            let detail = Agent_core.Error.to_string error in
-           let retryable =
-             nested_retryable_error_seen
-             || Agent_core.Error.is_retryable error
+           let candidate_retries =
+             append_unique nested_retryable_runtimes
+               (if not attempt_observed && Agent_core.Error.is_retryable error then [slot] else [])
            in
+           let retryable = candidate_retries <> [] in
+           let retryable_runtimes = append_unique retryable_runtimes candidate_retries in
            (Atomic.get outcome_observer_fn)
              ~outcome:"unavailable"
              ~runtime:slot;
@@ -712,11 +729,11 @@ let run
                 next
                 detail;
               attempt
-                ~retryable_error_seen:(retryable_error_seen || retryable)
+                ~retryable_runtimes
                 next
                 rest
             | [] ->
-              let exhausted_retryable = retryable_error_seen || retryable in
+              let exhausted_retryable = retryable_runtimes <> [] in
               task_warn
                 "evaluator unavailable runtime=%s retryable=%b; no verdict committed: %s"
                 slot
@@ -728,11 +745,12 @@ let run
                 ; generator_runtime
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
+                ; retryable_runtimes
                 ; evaluator_error_retryable =
                     Some exhausted_retryable
                 })
        in
-       attempt ~retryable_error_seen:false first_slot rest_slots)
+       attempt ~retryable_runtimes:[] first_slot rest_slots)
 ;;
 
 (* The Task lane: its own prompt variables, its own log subject. Everything

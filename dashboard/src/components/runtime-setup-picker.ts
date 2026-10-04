@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import type { Inventory } from '../api/onboarding'
+import type { Inventory, RuntimeRow } from '../api/onboarding'
+import type { Integration } from '../api/runtime-setup'
 import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source, type SaveOutcome } from '../api/runtime-setup'
 import { SetupAccountLogin } from './setup-account-login'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
@@ -46,7 +47,32 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     return () => onBusyChange?.(false)
   }, [busy, loginBusy, onBusyChange])
   const integrations = inventory.integrations ?? []
-  const integration = integrations.find(row => row.id === provider)
+  const selectable = (row: Integration) => row.enabled !== false && row.setup_support !== 'unsupported'
+  const groupFor = (id: string) => inventory.account_groups?.find(group => group.integration_ids.includes(id))
+  const visibleIntegrations = integrations.filter(row => {
+    const group = groupFor(row.id)
+    if (!group) return true
+    const members = integrations.filter(member => group.integration_ids.includes(member.id))
+    const representative = members.find(member => member.id === provider && selectable(member))
+      ?? members.find(selectable) ?? members[0]
+    return row.id === representative?.id
+  })
+  const accountLabel = (id: string, fallback: string, protocol: string | null) => {
+    const group = groupFor(id)
+    if (!group) return fallback
+    const client = protocol === 'codex-app-server' ? 'Codex' : protocol === 'claude-code' ? 'Claude Code'
+      : protocol === 'muse-serve' ? 'Muse Code' : protocol === 'antigravity-cli' ? 'Antigravity' : fallback
+    const members = integrations.filter(row => group.integration_ids.includes(row.id))
+    const emails = [...new Set((inventory.account_emails ?? []).flatMap(row =>
+      group.integration_ids.includes(row.integration_id) && row.state === 'read' && row.email.trim()
+        ? [row.email] : []))]
+    const labels = [...new Set(members.map(row => row.display_name))]
+    const identity = emails.length ? emails.join(' / ')
+      : `${labels.length ? labels.join(' / ') : fallback} · 이메일 미확인 · 연결 ${group.integration_ids.join(', ')}`
+    return `${identity} · ${client} · ${group.id.slice(0, 8)} · 모델 설정 ${group.runtime_ids.length}개`
+  }
+  const runtimeLabel = (row: RuntimeRow) => `${accountLabel(row.provider_id, row.display_name, row.protocol)} · 연결 ${row.id} · ${row.model}${row.max_context == null ? '' : ` · ${row.max_context.toLocaleString()} context`}`
+  const integration = integrations.find(row => row.id === provider && selectable(row))
   const officialClient = integration && ['codex-app-server', 'claude-code', 'muse-serve', 'antigravity-cli'].includes(integration.protocol ?? '')
   const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http'].includes(integration.protocol ?? '')
   const documentedContext = integration?.protocol === 'codex-app-server' || integration?.protocol === 'claude-code'
@@ -88,9 +114,10 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   }
   function replaceAccountChoices() {
     invalidateDiscovery(); setSelectedAccount(null); setNotice('')
+    const members = groupFor(provider)?.integration_ids ?? [provider]
     setChoices(current => current.filter(choice => choice.kind === 'new'
-      ? choice.source.integration_id !== provider
-      : !inventory.runtimes.some(row => row.id === choice.id && row.provider_id === provider)))
+      ? !members.includes(choice.source.integration_id)
+      : !inventory.runtimes.some(row => row.id === choice.id && members.includes(row.provider_id))))
   }
   async function loggedIn(selected: Source) {
     if (!alive.current || activeRequest.current) return
@@ -151,6 +178,8 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     // A save that left selected runtimes uncalled says so too: they were kept
     // as they were, not verified again.
     const caveats = [
+      ...outcome.durability === 'durable' ? [] : ['설정은 현재 적용됐지만 디스크 저장 내구성을 확인하지 못했습니다. 재저장하지 말고 저장소 상태를 확인하세요.'],
+      ...outcome.lockReleaseUnconfirmed ? ['설정은 저장됐지만 설정 잠금 해제를 확인하지 못했습니다. 재저장하지 말고 서버의 잠금 상태를 확인하세요.'] : [],
       ...outcome.notRechecked.length === 0 ? [] : [`기존 연결은 이번에 다시 확인하지 않았습니다: ${outcome.notRechecked.join(', ')}.`],
       ...outcome.unverified.length === 0 ? [] : [`사용 한도에 걸려 응답·도구 검증은 못 했습니다: ${outcome.unverified.map(row => `${row.runtime_id} (${row.code})`).join(', ')}.`],
     ]
@@ -171,9 +200,9 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   return html`<section class="runtime-setup-picker" aria-label="모델 연결 선택">
     <h4>모델 연결 선택</h4><p class="set-hint">여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.</p>
     <fieldset disabled=${disabled || busy || loginBusy}><legend>기존 연결</legend>${inventory.runtimes.map(row => html`<label key=${row.id} class="v2-mobile-operator-target"><input type="checkbox"
-      checked=${choices.some(choice => choice.kind === 'existing' && choice.id === row.id)} onChange=${() => toggleExisting(row.id, `${row.display_name} · ${row.model}`)} />${row.display_name} · ${row.model}</label>`)}</fieldset>
-    <fieldset disabled=${disabled || busy || loginBusy}><legend>새 모델 추가</legend><label>공급자 <select value=${provider} onChange=${(event: Event) => chooseProvider((event.currentTarget as HTMLSelectElement).value)}>
-      <option value="">공급자 선택</option>${integrations.map(row => html`<option key=${row.id} value=${row.id} disabled=${row.setup_support === 'unsupported'}>${row.display_name}${row.setup_support === 'unsupported' ? ' · 준비 중' : ''}</option>`)}</select></label>
+      checked=${choices.some(choice => choice.kind === 'existing' && choice.id === row.id)} onChange=${() => toggleExisting(row.id, runtimeLabel(row))} />${runtimeLabel(row)}</label>`)}</fieldset>
+    <fieldset disabled=${disabled || busy || loginBusy}><legend>새 모델 추가</legend><label>공급자 <select value=${integration && visibleIntegrations.some(row => row.id === provider) ? provider : ''} onChange=${(event: Event) => chooseProvider((event.currentTarget as HTMLSelectElement).value)}>
+      <option value="">공급자 선택</option>${visibleIntegrations.map(row => html`<option key=${row.id} value=${row.id} disabled=${!selectable(row)}>${accountLabel(row.id, row.display_name, row.protocol)}${row.enabled === false ? ' · 비활성' : row.setup_support === 'unsupported' ? ' · 준비 중' : ''}</option>`)}</select></label>
       ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => editEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
         <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => editKey((event.currentTarget as HTMLInputElement).value)} /></label>
         <p class="set-hint">기존 인증을 사용하려면 키를 비워 두세요.</p><button type="button" class="btn" onClick=${discover} disabled=${!integration?.endpoint && !endpoint}>모델 목록 확인</button>`

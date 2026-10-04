@@ -365,12 +365,45 @@ describe('refreshBoardFlairs', () => {
   })
 })
 
-// task-1758/#39356 completion criterion 4: loadPostDetail hand-picks fields
-// off the fetched post into detailPost -- closed was missing from that list,
-// so the detail view showed an open post even though the list badge (and
-// the wire JSON) already said closed. This is the gap context-reviewer
-// found that no other layer's test would have caught.
 describe('loadPostDetail', () => {
+  it('keeps detail-only evidence and viewer state through the real API decoder', async () => {
+    const actual = await vi.importActual<typeof import('../../api/board')>('../../api/board')
+    vi.mocked(fetchBoardPost).mockImplementationOnce(actual.fetchBoardPost)
+    const response = {
+      post: {
+        id: 'detail-evidence', author: 'thread-owner', title: 'Evidence',
+        body: 'Read the original trace', votes: 1, comment_count: 0,
+        created_at: '2026-10-03T00:00:00Z', updated_at: '2026-10-03T00:00:00Z',
+        meta: { attachments: [{ kind: 'external_link', url: 'https://example.test/trace' }] },
+        origin: { turn_ref: 'trace-board#5', source: 'dashboard', fusion_run_id: null },
+        current_vote: 'up', has_voted: true,
+        reactions: [{ emoji: '👍', count: 2, reacted: true, recent_user_ids: ['viewer'] }],
+        supported_reaction_emojis: ['👍'],
+      },
+      comments: [], comment_page: { offset: 0, total: 0 },
+    }
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(response), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    try {
+      await loadPostDetail('detail-evidence')
+
+      expect(detailPost.value?.origin).toEqual({ turn_ref: 'trace-board#5', source: 'dashboard' })
+      expect(detailPost.value?.attachments).toEqual([{ ok: true, attachment: {
+        kind: 'external_link', source: { kind: 'url', url: 'https://example.test/trace' },
+      } }])
+      expect(detailPost.value?.current_vote).toBe('up')
+      expect(detailPost.value?.has_voted).toBe(true)
+      expect(detailPost.value?.reactions).toEqual(response.post.reactions)
+      expect(detailPost.value?.supported_reaction_emojis).toEqual(['👍'])
+      expect(detailPost.value).not.toHaveProperty('comments')
+      expect(detailPost.value).not.toHaveProperty('commentPage')
+      expect(detailComments.value).toEqual([])
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
   it('carries the closed state through to detailPost', async () => {
     vi.mocked(fetchBoardPost).mockResolvedValue({
       id: 'post-closed',

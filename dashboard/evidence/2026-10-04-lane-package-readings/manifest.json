@@ -1,0 +1,42 @@
+{
+  "base": "293520d7e3117128e845fbdb03c8f10af21685f5",
+  "state": "B5 isolated worktree; will stack after B2",
+  "source_sha256": {
+    "dashboard/src/api/lane-addons.ts": "c975ea9bb3549134e48936e7be374d7a9ec59c049e44c077fddf4c087fdbb251",
+    "dashboard/src/components/lane-addon-readings.ts": "8e43d1d4caccfeaa4c7bc3fe356b299de2611a4145491009199a5fb492ce7ad1",
+    "dashboard/src/components/lane-addons-panel.ts": "f842601292d0e79e0e2bfc77fa33482009b274ac38c651790a759a45f0d13650",
+    "dashboard/src/components/lane-addons-panel.test.ts": "f3e27349061f6645be4dd48159a3d75fb6a5528e8dff24abe2f7b7dbb1eb285c",
+    "docs/guides/lane-addon-interface.md": "960130d6cc6aab8a9ef11f2fd2087b15873ea95e785e54eca66f8d9531f60a1f"
+  },
+  "vitest": {
+    "passed": 26,
+    "command": "pnpm --dir dashboard test src/components/lane-addons-panel.test.ts --reporter verbose",
+    "scope": "actual decoder and component with mocked transport"
+  },
+  "browser": {
+    "passed": true,
+    "browser": "149.0.7827.55",
+    "scope": "Actual component and decoder, synthetic HTTP; no native/backend/worker execution",
+    "assertions": [
+      "declared order and label",
+      "number unit including zero",
+      "boolean false remains false",
+      "multiline HTML escaped",
+      "JSON preserved",
+      "absent and wrong type unavailable",
+      "other instance cannot supply labels",
+      "original fields/evidence accessible",
+      "selected detail renders same contract",
+      "display starts no writes"
+    ],
+    "errors": [],
+    "unhandled": [],
+    "writes": []
+  },
+  "limits": [
+    "No native/server/worker execution or deployment.",
+    "Browser is actual Chromium using synthetic intercepted HTTP.",
+    "Initial TypeScript fixture indexing error fixed; final tsc and ESLint individual exit codes are zero.",
+    "Future stack rebase/integration requires changed-source readback."
+  ]
+}

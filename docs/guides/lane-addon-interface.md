@@ -23,6 +23,14 @@ are `text`, `number`, `boolean`, and `json`. Missing or wrongly typed values are
 shown as unavailable, never zero or success. Original fields and evidence remain
 available in technical detail. Display metadata grants no action authority.
 
+The Dashboard renders declared readings in the observation list and selected
+observation detail, scoped to the exact owning instance. Package descriptions
+appear beside the installation, and the package input/display contracts remain
+inspectable in a separate detail. A number `0` and boolean `false` are real
+readings; missing or incorrectly typed values are explicitly unavailable.
+Multiline text is escaped as text, while original fields and evidence stay in
+the observation details.
+
 The common package JSON includes both contracts. A display-only package can omit
 `binding_schema`; a package without display metadata uses the generic row view.
 The shipped `dos-world`, `value-difference` and `output-statistics` packages

@@ -23,12 +23,13 @@ const row = {
   evidence: [{ uri: 'artifact://source/1', sha256: null }], related_ids: ['receipt-3'],
 }
 const coverage = [{ source_id: 'opaque-input', incarnation: 'run-2', cursor: '7', complete: false, detail: 'Source gap' }]
+const packageContract = { binding_schema: null, presentation: { description: null, readings: [] }, outputs: { frames: { lanes: ['msx/frame'] }, statistics: { all_lanes: true } } }
 const snapshot = {
   configuration: null,
   instances: [{ instance_id: 'instance-1', run_id: 'run-2', addon_id: 'unregistered-package',
     title: 'User supplied layer', revision: 'digest-1', phase: { kind: 'observing' },
     configuration: null, incarnation: 'incarnation-1', action_schema: null,
-    package: { outputs: { frames: { lanes: ['msx/frame'] }, statistics: { all_lanes: true } } },
+    package: packageContract,
     observation_seq: 1, rows_count: 1 }], rows: [row], coverage,
 }
 const actionSnapshot = {
@@ -49,6 +50,73 @@ const actionReceipt = {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
+  it('renders the owning package display contract in order while retaining raw fields and binding schema', async () => {
+    const bindingSchema = { type: 'object', properties: { sources: { type: 'array' } }, required: ['sources'] }
+    const readings = [
+      { lane_id: 'quality', path: ['missing'], label: 'Missing records', unit: 'records', format: 'number' },
+      { lane_id: 'quality', path: ['ready'], label: 'Ready', unit: null, format: 'boolean' },
+      { lane_id: 'quality', path: ['note'], label: 'Operator note', unit: null, format: 'text' },
+      { lane_id: 'quality', path: ['details'], label: 'Details', unit: null, format: 'json' },
+    ]
+    const owned = { ...row, lane_id: 'instance-1/quality', fields: {
+      missing: 0, ready: false, note: '<img src=x onerror=alert(1)>\nsecond line', details: { count: 7 },
+    } }
+    const decoded = parseLaneAddonSnapshot({ ...snapshot, rows: [owned], instances: [
+      { ...snapshot.instances[0], package: { ...packageContract, binding_schema: bindingSchema,
+        presentation: { description: 'Declared quality observations', readings } } },
+      { ...snapshot.instances[0], instance_id: 'instance-2', package: { ...packageContract,
+        presentation: { description: null, readings: [{ ...readings[0], label: 'Other instance reading' }] } } },
+    ] })
+    expect(decoded.instances[0]?.package.binding_schema).toEqual(bindingSchema)
+    expect(decoded.instances[0]?.package.presentation.readings).toEqual(readings)
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    // Inspect the actual displayed contract, including false and zero values.
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dt')].map(node => node.textContent))
+      .toEqual(['Missing records', 'Ready', 'Operator note', 'Details'])
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent))
+      .toEqual(['0 records', 'false', '<img src=x onerror=alert(1)>\nsecond line', '{"count":7}'])
+    expect(group.querySelector('img')).toBeNull()
+    expect(group.textContent).not.toContain('Other instance reading')
+    expect(screen.getByText('Declared quality observations')).toBeTruthy()
+    expect(screen.getByText(`Fields and original evidence · ${row.id}`)).toBeTruthy()
+    expect(screen.getAllByText(/artifact:\/\/source\/1/).length).toBeGreaterThan(0)
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+  })
+  it('shows unavailable for absent or incorrectly typed readings without inventing successful values', async () => {
+    const fields = { wrongNumber: '0', wrongBoolean: 'false', scalar: 1, nullValue: null }
+    const readings = [
+      { path: ['absent'], label: 'Missing' },
+      { path: ['wrongNumber'], label: 'Wrong number' },
+      { path: ['scalar', 'nested'], label: 'Invalid path' },
+      { path: ['__proto__'], label: 'Inherited property' },
+    ].map(item => ({ ...item, lane_id: 'quality', format: 'number', unit: 'records' }))
+    const decoded = parseLaneAddonSnapshot({ ...snapshot, rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract, presentation: {
+        description: null, readings: [...readings,
+          { lane_id: 'quality', path: ['wrongBoolean'], label: 'Wrong boolean', format: 'boolean', unit: null },
+          { lane_id: 'quality', path: ['nullValue'], label: 'Null JSON', format: 'json', unit: null }],
+      } } }] })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · field unavailable', 'Unavailable · field does not match declared display format',
+      'Unavailable · field path does not address an object', 'Unavailable · field unavailable',
+      'Unavailable · field does not match declared display format', 'null',
+    ])
+    expect(group.textContent).not.toContain('0 records')
+  })
+  it('rejects malformed package display contracts instead of discarding them', () => {
+    const reading = { lane_id: 'quality', path: ['count'], label: 'Count', unit: null, format: 'number' }
+    for (const invalid of [{ ...reading, path: [] }, { ...reading, format: 'status' }, { ...reading, unit: 7 }]) {
+      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0],
+        package: { ...packageContract, presentation: { description: null, readings: [invalid] } },
+      }] })).toThrow()
+    }
+  })
+
   it('opens original evidence from horizontal lanes without filtering and includes empty workers', async () => {
     const owned = { ...row, lane_id: 'instance-1/msx/frame' }
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [owned],
@@ -303,7 +371,7 @@ describe('optional Lane Add-on surface', () => {
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], incarnation: undefined }] })).toThrow()
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], action_schema: undefined }] })).toThrow()
     for (const outputs of [{ bad: { lanes: [] } }, { bad: { all_lanes: false } }, { bad: { all_lanes: true, lanes: ['frame'] } }]) {
-      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], package: { outputs } }] })).toThrow()
+      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], package: { ...packageContract, outputs } }] })).toThrow()
     }
   })
   it('submits an advertised package action with an exact binding while slice and other controls remain usable', async () => {

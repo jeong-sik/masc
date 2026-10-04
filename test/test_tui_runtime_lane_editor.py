@@ -86,6 +86,12 @@ def in_use_refusal(lane_id: str, keepers: list[str]) -> str:
     return f'lane "{lane_id}" is in use by {sites}'
 
 
+def typed_lane_ids(lane: dict[str, object]) -> list[str]:
+    ids = lane["runtime_ids"]
+    assert isinstance(ids, list)
+    return [runtime_id for runtime_id in ids if isinstance(runtime_id, str)]
+
+
 class LaneStore:
     """A stand-in for the routing API's writer, Runtime's lane functions over
     runtime.toml. It applies a post to the lanes the next /resolved read
@@ -110,14 +116,34 @@ class LaneStore:
 
     def __init__(self) -> None:
         _status, body = _keyboard_runtime.runtime_resolved_response()
-        self.body = body
-        self.lanes = [dict(lane) for lane in body["lanes"]]
+        runtimes = body["runtimes"]
+        assignments = body["assignments"]
+        lanes = body["lanes"]
+        assert isinstance(runtimes, list)
+        assert isinstance(assignments, list)
+        assert isinstance(lanes, list)
+        # Typed views over the served body. The narrowings hold for every
+        # row these fixtures build; the asserts fail loudly the day a
+        # producer adds a non-dict row instead of letting Pyright go blind.
+        self.runtimes: list[dict[str, object]] = [
+            row for row in runtimes if isinstance(row, dict)
+        ]
+        self.assignments: list[dict[str, object]] = [
+            row for row in assignments if isinstance(row, dict)
+        ]
+        self.lanes: list[dict[str, object]] = [
+            dict(lane) for lane in lanes if isinstance(lane, dict)
+        ]
+        body["runtimes"] = self.runtimes
+        body["assignments"] = self.assignments
+        self.body: dict[str, object] = body
         self.revision = 1
         self.lock = threading.Lock()
         self.held: tuple[threading.Event, threading.Event] | None = None
         self.fail_next_resolved = False
         _status, standalone = _keyboard_keepers.standalone_lanes_response()
-        self.standalone = standalone
+        assert isinstance(standalone, dict)
+        self.standalone: dict[str, object] = standalone
         self.standalone_held: tuple[threading.Event, threading.Event] | None = None
         exact = self.exact_lane(EXACT_LANE)
         exact["dropped_slots"] = [DROPPED_SLOT]
@@ -127,8 +153,15 @@ class LaneStore:
         # lists; the fixture serves the one it tracks.
         exact["declared_slots"] = list(self.exact_declared[EXACT_LANE])
 
+    def standalone_lane_rows(self) -> list[dict[str, object]]:
+        """Typed view over the standalone body's lanes; rows are references,
+        so a mutation through this view is served with the next response."""
+        lanes = self.standalone["lanes"]
+        assert isinstance(lanes, list)
+        return [lane for lane in lanes if isinstance(lane, dict)]
+
     def exact_lane(self, name: str) -> dict:
-        return next(lane for lane in self.standalone["lanes"] if lane["lane_id"] == name)
+        return next(lane for lane in self.standalone_lane_rows() if lane["lane_id"] == name)
 
     def resolved(self) -> _keyboard_harness.HttpResponse:
         with self.lock:
@@ -138,7 +171,7 @@ class LaneStore:
             lanes = [
                 {
                     "id": lane["id"],
-                    "runtime_ids": list(lane["runtime_ids"]),
+                    "runtime_ids": list(typed_lane_ids(lane)),
                     # Every lane this fixture serves is one its file declares;
                     # the assignment-made singleton has no row here.
                     "declared": True,
@@ -197,7 +230,7 @@ class LaneStore:
     def lane_candidates(self, lane_id: str) -> list[str]:
         with self.lock:
             lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
-            return list(lane["runtime_ids"])
+            return list(typed_lane_ids(lane))
 
     def route(self, raw: bytes) -> _keyboard_harness.HttpResponse:
         with self.lock:
@@ -226,7 +259,7 @@ class LaneStore:
                     if slot in declared or slot in declared_cli:
                         return 400, {"error": f"{slot} is already a slot of {name}"}
                     runtime = next(
-                        (row for row in self.body["runtimes"] if row["id"] == slot), None
+                        (row for row in self.runtimes if row["id"] == slot), None
                     )
                     if runtime is not None and runtime["exact_slot_group"] == "cli_slots":
                         declared_cli.append(slot)
@@ -270,9 +303,11 @@ class LaneStore:
                 declared[0]["runtime_ids"] = list(request["runtime_ids"])
             elif action == "remove":
                 assigned = [
-                    assignment["keeper"]
-                    for assignment in self.body["assignments"]
+                    keeper
+                    for assignment in self.assignments
                     if assignment["resolved"] == {"kind": "lane", "id": lane_id}
+                       and isinstance(assignment["keeper"], str)
+                    for keeper in [assignment["keeper"]]
                 ]
                 if assigned or lane_id in FUSION_SEATS:
                     return 400, {"error": in_use_refusal(lane_id, assigned)}
@@ -321,9 +356,9 @@ def run(executable: str) -> None:
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
-    recorded_at = datetime.fromisoformat(
-        store.body["generated_at_iso"].replace("Z", "+00:00")
-    )
+    generated_at = store.body["generated_at_iso"]
+    assert isinstance(generated_at, str)
+    recorded_at = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
     reading_time = f"reading {recorded_at.astimezone().strftime('%H:%M:%S')}".encode()
 
     def interact(process, fd, _slave, output, _base):
@@ -480,7 +515,8 @@ def run(executable: str) -> None:
             if len(posted) >= len(expected) or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        if without_checked_revision(posted) != expected:
+        typed_posts = [post for post in posted if isinstance(post, dict)]
+        if without_checked_revision(typed_posts) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         primary = store.lane_candidates("primary")
         if primary != ["runtime-b"]:
@@ -579,7 +615,7 @@ def run_exact(executable: str) -> None:
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-a"},
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-b"},
         ]
-        if without_checked_revision(posted) != expected:
+        if without_checked_revision([p for p in posted if isinstance(p, dict)]) != expected:
             raise AssertionError(f"exact posts: {posted!r}, expected {expected!r}")
         declared = store.exact_declared[EXACT_LANE]
         if declared != [DROPPED_SLOT, "glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]:
@@ -600,7 +636,7 @@ def run_cli_editor(executable: str) -> None:
     """The Librarian editor reaches both arrays and explains their boundary."""
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
@@ -701,7 +737,7 @@ def run_empty_cli_group(executable: str) -> None:
     and j then reaches it."""
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
@@ -759,11 +795,11 @@ def run_curator_takes_cli(executable: str) -> None:
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
     schema_less = "aaa_muse.fixture"
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(schema_less, "Schema-less client", "model"),
         "exact_slot_group": None,
     })
@@ -828,7 +864,10 @@ def run_curator_takes_cli(executable: str) -> None:
 
 def model_settings_config(*, cli_context=272000):
     status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
-    return status, {**config, "source_text": config["source_text"] + '\n'.join([
+    assert isinstance(config, dict)
+    source_text = config["source_text"]
+    assert isinstance(source_text, str)
+    return status, {**config, "source_text": source_text + '\n'.join([
         "", '[providers."glm-coding"] # request window',
         'protocol = "openai-compatible-http"', 'kind = "openai_compat"',
         'endpoint = "https://usage.invalid/v1"', 'exact-body-timeout-s = 1200',
@@ -856,7 +895,7 @@ def run_provider_jump(executable: str) -> None:
     The picker retains focus until closed; cancelling the form writes nothing."""
     store = LaneStore()
     slot = "glm-coding.glm-5-turbo"
-    store.body["runtimes"].append(
+    store.runtimes.append(
         _keyboard_runtime.runtime_resolved_runtime(slot, "GLM Coding", "glm-5-turbo",
                                    provider_id="glm-coding")
     )
@@ -1187,7 +1226,7 @@ def run_filter(executable: str) -> None:
             if len(posted) >= len(expected) or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        if without_checked_revision(posted) != expected:
+        if without_checked_revision([p for p in posted if isinstance(p, dict)]) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         # [e] opens the picker for the lane under the list's cursor: still
         # primary, so no wheel notch moved it while the picker was open.

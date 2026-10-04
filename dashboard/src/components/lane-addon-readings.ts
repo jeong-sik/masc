@@ -6,6 +6,19 @@ type ReadingValue =
   | { kind: 'value'; text: string }
   | { kind: 'unavailable'; reason: 'missing' | 'not_object' | 'wrong_type' | 'unsafe_integer' }
 
+function jsonNumberError(value: unknown): 'unsafe_integer' | 'wrong_type' | null {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 'wrong_type'
+    return Number.isInteger(value) && !Number.isSafeInteger(value) ? 'unsafe_integer' : null
+  }
+  const children = Array.isArray(value) ? value : isRecord(value) ? Object.values(value) : []
+  for (const child of children) {
+    const reason = jsonNumberError(child)
+    if (reason !== null) return reason
+  }
+  return null
+}
+
 function readingValue(reading: LaneAddonReading, fields: LaneAddonRow['fields']): ReadingValue {
   let value: unknown = fields
   for (const key of reading.path) {
@@ -29,6 +42,8 @@ function readingValue(reading: LaneAddonReading, fields: LaneAddonRow['fields'])
       if (typeof value === 'boolean') return { kind: 'value', text: String(value) }
       break
     case 'json': {
+      const reason = jsonNumberError(value)
+      if (reason !== null) return { kind: 'unavailable', reason }
       const text = JSON.stringify(value)
       if (text !== undefined) return { kind: 'value', text }
       break

@@ -122,3 +122,5 @@ TOML 관리 설치의 제거 요청은 일치하는 선언 파일도 디스크�
 선언 파일 없이 해당 worker를 정리한다. 해당 설치가 소유한 자원만 정리하며,
 이전 관측과 선택한 근거를 삭제하는 기능은 아니다.
 이 편집 경로는 Keeper의 기존 도구 권한이나 다른 활동의 필수 절차를 추가하지 않는다.
+
+A retained draft needs a fresh file read after workspace authority changes. Reading a comparison leaves the draft unchanged; choose **Use current file revision** or **Replace draft with current file** before saving it.

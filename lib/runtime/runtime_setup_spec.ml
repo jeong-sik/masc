@@ -7,7 +7,8 @@ type transport =
   | Client of {command:string; oauth:string option; timeout:float option; account_home:string option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   supports_image_input:bool option;
-  transport:transport; canonical_spec:string; declared_provider_id:string option; requested_provider_id:string option}
+  transport:transport; canonical_spec:string; declared_provider_id:string option; requested_provider_id:string option;
+  existing_inline : (string * string) option}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
 let ( let* ) = Result.bind
@@ -98,7 +99,8 @@ let[@warning "+9"] transport_json transport =
 
 let[@warning "+9"] canonical_spec_of
       ({ choice; model; context; tools; streaming; supports_image_input; transport;
-         canonical_spec = _; declared_provider_id = _; requested_provider_id = _ } : t)
+         canonical_spec = _; declared_provider_id = _; requested_provider_id = _;
+         existing_inline = _ } : t)
   =
   Yojson.Safe.to_string (`Assoc ([
     "choice",`String (choice_name choice); "model",`String model;
@@ -183,7 +185,7 @@ let of_json ?home_dir = function
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout;account_home})) in
     let parsed = {choice;model;context;tools;streaming;supports_image_input;transport;
-      canonical_spec="";declared_provider_id=None;requested_provider_id} in
+      canonical_spec="";declared_provider_id=None;requested_provider_id;existing_inline=None} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
@@ -232,10 +234,12 @@ let account_home_matches choice left right =
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Muse -> Fun.id in
   effective left = effective right
 let connection_matches spec (provider : Runtime_schema.provider) =
-  let credential_matches expected = match expected, provider.credentials with
-    | None, None -> true
-    | Some (Env_reference name), Some (Runtime_schema.Env configured) -> name=configured
-    | Some (File_reference path), Some (Runtime_schema.File configured) -> path=configured
+  let credential_matches expected = match spec.existing_inline, expected, provider.credentials with
+    | Some (id, original), None, Some (Runtime_schema.Inline configured) ->
+        id=provider.id && original=configured
+    | None, None, None -> true
+    | None, Some (Env_reference name), Some (Runtime_schema.Env configured) -> name=configured
+    | None, Some (File_reference path), Some (Runtime_schema.File configured) -> path=configured
     | _ -> false in
   let connection_matches = match spec.transport, provider.transport with
     | Client client, Runtime_schema.Cli command ->
@@ -267,6 +271,14 @@ let reuse_refusal = function
 let for_provider spec (provider : Runtime_schema.provider) =
   if reuse_eligibility provider = Eligible && connection_matches spec provider
   then Some {spec with declared_provider_id=Some provider.id} else None
+let for_existing_inline_provider spec (provider : Runtime_schema.provider) =
+  match spec.transport, spec.existing_inline, provider.credentials with
+  | Http {credential=None; _}, None, Some (Runtime_schema.Inline original)
+    when (match spec.requested_provider_id with None -> true | Some id -> id=provider.id) ->
+      (* Provenance belongs to this parsed configured provider, not to a
+         temporary file or a JSON assertion. The locked resolver rechecks it. *)
+      for_provider {spec with existing_inline=Some (provider.id, original)} provider
+  | _ -> None
 let resolve_provider spec providers =
   let selected = match spec.declared_provider_id with
     | Some _ as selected -> selected | None -> spec.requested_provider_id in
@@ -329,7 +341,7 @@ let render ?(include_provider=true) ?(wizard_default=true) spec =
     | Some (File_reference path) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "file";"path",`String path]
     | Some (Env_reference name) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "env";"key",`String name]
     | None -> "") in
-  let runtime = (if include_provider then runtime else "")
+  let runtime = (if include_provider && Option.is_none spec.existing_inline then runtime else "")
     ^ table [Runtime_toml_namespace.(key Models);model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
     "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming])
     (* Setup declares model capabilities explicitly, including on connections

@@ -131,6 +131,53 @@ let test_existing_http_context_variant () = fixture (fun base runtime binary _ne
     (Some 2048) added.max_context;
   Alcotest.check Alcotest.bool "both context variants remain available" true
     (initial_id<>added_id && List.exists (fun binding -> Runtime_schema.binding_key binding=initial_id) after.bindings))
+let test_existing_inline_http_account () = fixture (fun base runtime binary _net ->
+  let inline_provider = {|
+[providers.operator_account]
+display-name = "Operator account"
+protocol = "openai-compatible-http"
+kind = "openai_compat"
+endpoint = "http://127.0.0.1:19001/v1"
+request-path = "/responses"
+connect-timeout-s = 37.0
+exact-body-timeout-s = 89.0
+[providers.operator_account.credentials]
+type = "inline"
+value = "fixture-inline-secret"
+|} in
+  Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel -> output_string channel inline_provider);
+  let original=Runtime_toml.parse_file runtime |> Result.get_ok in
+  let original_provider=List.find (fun (p:Runtime_schema.provider) -> p.id="operator_account") original.providers in
+  let selected=`Assoc ["integration_id",`String original_provider.id] in
+  let add context = get (Actions.save ~binary ~base_path:base (request ~context base selected)) in
+  let first=add 2048 in
+  let repeated=add 2048 in
+  let second=add 4096 in
+  let open Yojson.Safe.Util in
+  let id receipt=receipt |> member "runtime_id" |> to_string in
+  Alcotest.check Alcotest.string "same inline model/context saves are idempotent" (id first) (id repeated);
+  let after=Runtime_toml.parse_file runtime |> Result.get_ok in
+  Alcotest.check Alcotest.int "inline variants add no providers" (List.length original.providers) (List.length after.providers);
+  Alcotest.check Alcotest.bool "original credential, request surface and operator timeouts stay intact" true
+    (List.find (fun (p:Runtime_schema.provider) -> p.id=original_provider.id) after.providers=original_provider);
+  List.iter (fun receipt ->
+    let binding=List.find (fun binding -> Runtime_schema.binding_key binding=id receipt) after.bindings in
+    Alcotest.check Alcotest.string "inline variants retain the chosen account" original_provider.id binding.provider_id;
+    Alcotest.check Alcotest.bool "receipt never exposes inline secret" false
+      (String_util.contains_substring (Yojson.Safe.to_string receipt) "fixture-inline-secret")) [first;second];
+  Alcotest.check Alcotest.int "existing-inline save adds no file credential providers" 0
+    (List.length (List.filter_map (fun (p:Runtime_schema.provider) -> match p.credentials with Some (Runtime_schema.File p) -> Some p | _ -> None) after.providers));
+  let replacement=get (Actions.save ~binary ~base_path:base (request ~context:8192 base
+    (`Assoc ["integration_id",`String original_provider.id;"api_key",`String "new-account-key"]))) in
+  let changed=Runtime_toml.parse_file runtime |> Result.get_ok in
+  let new_binding=List.find (fun binding -> Runtime_schema.binding_key binding=id replacement) changed.bindings in
+  Alcotest.check Alcotest.bool "explicit replacement key selects a separate account" true (new_binding.provider_id<>original_provider.id);
+  Alcotest.check Alcotest.bool "new key does not replace original inline account settings" true
+    (List.find (fun (p:Runtime_schema.provider) -> p.id=original_provider.id) changed.providers=original_provider);
+  let new_provider=List.find (fun (p:Runtime_schema.provider) -> p.id=new_binding.provider_id) changed.providers in
+  match new_provider.credentials with
+  | Some (Runtime_schema.File path) -> Alcotest.check Alcotest.string "new account owns its new key" "new-account-key" (In_channel.with_open_bin path In_channel.input_all)
+  | _ -> Alcotest.fail "new key must keep its separate private file")
 let test_native_client_metadata () = fixture (fun base _runtime binary net ->
   Eio.Switch.run (fun sw ->
     let json=get (Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String "codex"])) in
@@ -625,6 +672,7 @@ let test_status_of_error () =
   check "wrong discovery connection is 400" `Bad_request
     (Actions.Discovery_failed Runtime_model_discovery.Invalid_connection)
 let () = Alcotest.run "web setup actions" ["request boundary",[
+  Alcotest.test_case "inline account variants preserve the provider while replacement keys stay separate" `Quick test_existing_inline_http_account;
   Alcotest.test_case "product alias reuses the configured account" `Quick test_alias_reuses_operator_account;
   Alcotest.test_case "disabled provider is preserved and refused" `Quick test_disabled_provider_refused;
   Alcotest.test_case "catalog Responses paths survive account setup and reuse" `Quick test_catalog_responses_save;

@@ -16,11 +16,7 @@ open Model_inference_metrics_parser
 
 (* ── Read decisions.jsonl files ─────────────────────────── *)
 
-type decision_read =
-  | Decisions_read
-  | Decision_directory_unavailable
-  | Decision_files_unreadable of int
-  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+type decision_read = (unit, decision_read_error) result
 
 let decision_files directory =
   let log exn = Log.Model_inference_metrics.error
@@ -74,7 +70,7 @@ let read_all_decisions ~base_path ~since_unix =
     Common.keepers_runtime_dir_of_base ~base_path
   in
   match decision_files keeper_dir with
-  | Error () -> [], Decision_directory_unavailable
+  | Error () -> [], Error Decision_directory_unavailable
   | Ok files ->
     let unreadable = ref 0 in
     let malformed_rows = ref 0 in
@@ -82,7 +78,10 @@ let read_all_decisions ~base_path ~since_unix =
     let files =
       files
       |> List.filter (fun f ->
-        String.length f > 16 && Filename.check_suffix f ".decisions.jsonl")
+        Keeper_runtime_root_entry.classify_basename f
+        |> List.exists (function
+          | Keeper_runtime_root_entry.Keeper { artifact = Decision_log; _ } -> true
+          | Keeper_runtime_root_entry.Keeper { artifact = Metadata | Feedback_log | Tla_trace_log; _ } -> false))
       |> List.sort String.compare
     in
     let entries = List.concat_map
@@ -119,11 +118,11 @@ let read_all_decisions ~base_path ~since_unix =
            [])
       files in
     let reading =
-      if !unreadable > 0 then Decision_files_unreadable !unreadable
+      if !unreadable > 0 then Error (Decision_files_unreadable !unreadable)
       else if !malformed_rows > 0 || !schema_violation_rows > 0 then
-        Decision_rows_invalid { malformed_rows = !malformed_rows;
-          schema_violation_rows = !schema_violation_rows }
-      else Decisions_read in
+        Error (Decision_rows_invalid { malformed_rows = !malformed_rows;
+          schema_violation_rows = !schema_violation_rows })
+      else Ok () in
     entries, reading
 ;;
 
@@ -320,6 +319,11 @@ let read_all_entries ~base_path ~since_unix =
       (Dated_jsonl.read_error_to_string error);
     decisions, Error error, decision_read
 ;;
+
+let read_complete_entries ~base_path ~since_unix =
+  let entries, cost_read, decisions = read_all_entries ~base_path ~since_unix in
+  Result.map_error (fun error -> Decisions_unavailable error) decisions
+  |> Result.map (fun () -> entries, cost_read)
 
 (* ── Coverage helpers (used by aggregate stage) ───────────── *)
 

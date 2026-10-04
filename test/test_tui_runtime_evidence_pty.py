@@ -51,12 +51,12 @@ def scenario(binary):
         h.send_and_wait(process, fd, output, b"9", b"1/2 runtime-a")
         h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-a")
         collect(process, fd, output, [b"Catalog context: 272000", b"binding 100000 tokens",
-            b"2 recorded / 1 successful / 1 errors", b"Cache hit: 0.0%", b"1/1 successful samples",
-            b"Last success: 2023-12-31 23:58:20", b"Recorded cost: not reported"])
+            b"2 recorded / 1 non-error / 1 errors", b"Cache hit: 0.0%", b"1/1 non-error samples",
+            b"Last non-error turn: 2023-12-31 23:58:20", b"Recorded cost: not reported"])
         h.send_and_wait(process, fd, output, b"\x1b", b"CANDIDATE")
         h.send_and_wait(process, fd, output, b"j\r", b"Runtime ID: runtime-b")
         seen = collect(process, fd, output, [b"none attributed in this window", b"Cache hit: not reported"])
-        assert b"2 recorded / 1 successful" not in seen, "same API model borrowed the other account's history"
+        assert b"2 recorded / 1 non-error" not in seen, "same API model borrowed the other account's history"
         h.send_and_wait(process, fd, output, b"\x1b", b"CANDIDATE")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC System")
         os.write(fd, b"q")

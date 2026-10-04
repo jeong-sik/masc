@@ -316,12 +316,14 @@ let latency_histogram (entries : raw_entry list) : latency_bucket list =
 
 (* ── Public compute functions ───────────────────────────── *)
 
-let compute ~base_path ~window_minutes : aggregate =
+let ( let* ) = Result.bind
+
+let compute ~base_path ~window_minutes =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries, cost_read, _decision_read = read_all_entries ~base_path ~since_unix in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let total_error_entries = count_if (fun e -> e.is_error) entries in
-  { window_minutes
+  Ok { window_minutes
   ; bucket_minutes = 0
   ; models
   ; total_entries = List.length entries
@@ -331,10 +333,10 @@ let compute ~base_path ~window_minutes : aggregate =
   }
 ;;
 
-let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate =
+let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes =
   let bucket_minutes = max 1 bucket_minutes in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries, cost_read, _decision_read = read_all_entries ~base_path ~since_unix in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let bucket_sec = bucket_minutes * 60 in
   let by_model_map : raw_entry list StringMap.t =
@@ -355,7 +357,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
       models
   in
   let total_error_entries = count_if (fun e -> e.is_error) entries in
-  { window_minutes
+  Ok { window_minutes
   ; bucket_minutes
   ; models = models_with_buckets
   ; total_entries = List.length entries
@@ -367,7 +369,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
 
 let aggregate_buckets ~base_path ~window_min ~bucket_min =
   let since_unix = Time_compat.now () -. (Float.of_int window_min *. 60.0) in
-  let entries, cost_read, _decision_read = read_all_entries ~base_path ~since_unix in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let bucket_sec = if bucket_min <= 0 then 60 else bucket_min * 60 in
   let by_model = group_entries_by_model entries in
   Result.map
@@ -380,7 +382,7 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min =
            by_model
          |> List.sort (fun a b -> compare a.mb_model_id b.mb_model_id)
        , diagnostics ))
-    cost_read
+    (Result.map_error (fun error -> Costs_unavailable error) cost_read)
 ;;
 
 (* ── Runtime-lane rollup ────────────────────────────────────

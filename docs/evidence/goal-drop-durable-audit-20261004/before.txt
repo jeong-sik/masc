@@ -30,7 +30,7 @@ This run has ID `3VM485GU'.
             Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
             Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
             Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
-            
+
 Logs saved to `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-drop-zlt839cm/_build/_tests/Goal cancellation delivery/durability.000.output'.
  ──────────────────────────────────────────────────────────────────────────────
 

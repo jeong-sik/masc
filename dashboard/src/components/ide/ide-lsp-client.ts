@@ -103,11 +103,18 @@ export interface LspCodeLens {
   }
 }
 
+type LspInlayTooltip = string | { kind: 'plaintext' | 'markdown'; value: string }
+
+interface LspInlayLabelPart {
+  value: string
+  tooltip?: LspInlayTooltip
+}
+
 export interface LspInlayHint {
   position: { line: number; character: number }
-  label: string | { value: string }
-  kind?: number
-  tooltip?: string
+  label: string | LspInlayLabelPart[]
+  kind?: 1 | 2
+  tooltip?: LspInlayTooltip
 }
 
 export interface LspDiagnostic {
@@ -314,20 +321,30 @@ const hoverTooltipTheme = EditorView.theme({
 
 class InlayHintWidget extends WidgetType {
   constructor(
-    private readonly label: string,
-    private readonly tooltip: string | undefined,
+    private readonly parts: readonly LspInlayLabelPart[],
+    private readonly tooltip: LspInlayTooltip | undefined,
   ) { super() }
 
   toDOM() {
     const span = document.createElement('span')
     span.className = 'cm-inlayHint'
-    span.textContent = this.label
-    if (this.tooltip) span.title = this.tooltip
+    for (const part of this.parts) {
+      const label = document.createElement('span')
+      label.textContent = part.value
+      const tooltip = inlayTooltipText(part.tooltip)
+      if (tooltip !== undefined) label.title = tooltip
+      span.appendChild(label)
+    }
+    const tooltip = inlayTooltipText(this.tooltip)
+    if (tooltip !== undefined) span.title = tooltip
     return span
   }
 
   eq(other: InlayHintWidget): boolean {
-    return this.label === other.label && this.tooltip === other.tooltip
+    return inlayTooltipText(this.tooltip) === inlayTooltipText(other.tooltip)
+      && this.parts.length === other.parts.length
+      && this.parts.every((part, index) => part.value === other.parts[index]!.value
+        && inlayTooltipText(part.tooltip) === inlayTooltipText(other.parts[index]!.tooltip))
   }
 
   ignoreEvent(): boolean { return false }
@@ -351,20 +368,24 @@ const inlayHintDecorator = ViewPlugin.fromClass(
     private build(view: EditorView): DecorationSet {
       const hints = view.state.field(inlayHintField)
       const builder = new RangeSetBuilder<Decoration>()
+      const visitedLines = new Set<number>()
       for (const { from, to } of view.visibleRanges) {
         let pos = from
         while (pos <= to) {
           const line = view.state.doc.lineAt(pos)
           const lineHints = hints.get(line.number)
-          if (lineHints && lineHints.length > 0) {
-            const charOffset = lineHints[0]?.position?.character ?? 0
-            const insertPos = Math.min(line.from + charOffset, line.to)
-            for (const hint of lineHints) {
-              const labelText = typeof hint.label === 'string' ? hint.label : hint.label.value
+          if (lineHints && !visitedLines.has(line.number)) {
+            visitedLines.add(line.number)
+            // RangeSetBuilder requires position order; stable sorting preserves
+            // the protocol's response order for hints at the same position.
+            for (const hint of [...lineHints].sort((a, b) =>
+              Math.min(a.position.character, line.length) - Math.min(b.position.character, line.length))) {
+              const insertPos = Math.min(line.from + hint.position.character, line.to)
+              const parts = typeof hint.label === 'string' ? [{ value: hint.label }] : hint.label
               builder.add(
                 insertPos, insertPos,
                 Decoration.widget({
-                  widget: new InlayHintWidget(labelText, hint.tooltip),
+                  widget: new InlayHintWidget(parts, hint.tooltip),
                   side: 1,
                 }),
               )
@@ -797,8 +818,10 @@ export class LspConnection {
       const result = await this.sendRequest('textDocument/inlayHint', {
         textDocument: { uri },
         range,
-      }) as LspInlayHint[] | null
-      return indexByLine(result ?? [], (h) => (h.position?.line ?? 0) + 1)
+      })
+      if (result === null) return new Map()
+      if (!Array.isArray(result) || !result.every(isInlayHint)) return new Map()
+      return indexByLine(result, (hint) => hint.position.line + 1)
     } catch {
       return new Map()
     }
@@ -953,18 +976,38 @@ function decodeUriPath(rawPath: string): string {
   }
 }
 
+function isLspPosition(value: unknown): value is LspInlayHint['position'] {
+  return isRecord(value) && Number.isSafeInteger(value.line) && Number(value.line) >= 0
+    && Number.isSafeInteger(value.character) && Number(value.character) >= 0
+}
+
+function isInlayTooltip(value: unknown): value is LspInlayTooltip | undefined {
+  return value === undefined || typeof value === 'string'
+    || (isRecord(value) && (value.kind === 'plaintext' || value.kind === 'markdown')
+      && typeof value.value === 'string')
+}
+
+function inlayTooltipText(value: LspInlayTooltip | undefined): string | undefined {
+  // Native title tooltips are plain text, including Markdown source. Never
+  // interpret server-provided tooltip or label bytes as HTML.
+  return typeof value === 'string' ? value : value?.value
+}
+
+function isInlayHint(value: unknown): value is LspInlayHint {
+  if (!isRecord(value) || !isLspPosition(value.position) || !isInlayTooltip(value.tooltip)
+    || (value.kind !== undefined && value.kind !== 1 && value.kind !== 2)) return false
+  if (typeof value.label === 'string') return value.label.length > 0
+  return Array.isArray(value.label) && value.label.length > 0
+    && value.label.every(part => isRecord(part) && typeof part.value === 'string'
+      && part.value.length > 0 && isInlayTooltip(part.tooltip))
+}
+
 function parseDiagnostics(value: unknown): LspDiagnostic[] | null {
   if (!Array.isArray(value)) return null
-  const validPosition = (position: unknown): boolean => {
-    if (typeof position !== 'object' || position === null) return false
-    const { line, character } = position as { line?: unknown; character?: unknown }
-    return Number.isSafeInteger(line) && Number(line) >= 0
-      && Number.isSafeInteger(character) && Number(character) >= 0
-  }
   for (const item of value) {
     if (typeof item !== 'object' || item === null || typeof item.message !== 'string'
       || typeof item.range !== 'object' || item.range === null
-      || !validPosition(item.range.start) || !validPosition(item.range.end)) return null
+      || !isLspPosition(item.range.start) || !isLspPosition(item.range.end)) return null
   }
   return value as LspDiagnostic[]
 }

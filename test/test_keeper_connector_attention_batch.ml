@@ -490,7 +490,7 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
     [ 1; 2 ]
 ;;
 
-let test_missing_prefix_does_not_starve_readable_connector () =
+let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation () =
   Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
   @@ fun () ->
   with_ctx "connector-missing-prefix" (fun ~base_path ~keeper_name ~meta ~ctx ->
@@ -502,11 +502,14 @@ let test_missing_prefix_does_not_starve_readable_connector () =
     let original = Fs_compat.load_file path in
     Fs_compat.save_file path "";
     let readable = connector_attention_stimulus ~base_path ~keeper_name
-      ~channel_id:"same-channel" ~message_id:"readable" ~arrived_at:4.
+      ~channel_id:(if cross_conversation then "other-channel" else "same-channel") ~message_id:"readable" ~arrived_at:4.
       ~content:"readable after missing prefix" in
+    let later = connector_attention_stimulus ~base_path ~keeper_name
+      ~channel_id:"later-channel" ~message_id:"later" ~arrived_at:6.
+      ~content:"separate conversation" in
     let bootstrap : Q.stimulus =
       { post_id="independent-work"; urgency=Q.Low; arrived_at=5.; payload=Q.Bootstrap } in
-    List.iter (enqueue_exn ~base_path keeper_name) (messages @ [readable; bootstrap]);
+    List.iter (enqueue_exn ~base_path keeper_name) (messages @ [readable; bootstrap; later]);
     let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
       ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
     let pending_ids () =
@@ -526,7 +529,12 @@ let test_missing_prefix_does_not_starve_readable_connector () =
           | Error detail -> fail detail)
           (Keeper_heartbeat_source_batch.selections batch)
       | _ -> fail "completed turn did not use normal batch settlement" in
+    let cursor = match Log.Ring.recent ~limit:1 () with
+      | entry :: _ -> entry.Log.Ring.seq | [] -> -1 in
     let mixed = intake () in
+    let warnings = Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
+      |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn) in
+    check int "missing backlog produces one aggregate warning" 1 (List.length warnings);
     check (list string) "readable connector and independent work pass a missing prefix"
       [readable.post_id; bootstrap.post_id]
       (Keeper_heartbeat_source_batch.stimuli mixed.source_batch
@@ -537,7 +545,7 @@ let test_missing_prefix_does_not_starve_readable_connector () =
          mixed.pending_board_events);
     complete mixed.source_batch;
     check (list string) "unrelated completion retains all missing pointers"
-      (List.map (fun (source : Q.stimulus) -> source.post_id) messages) (pending_ids ());
+      (List.map (fun (source : Q.stimulus) -> source.post_id) (messages @ [later])) (pending_ids ());
     Fs_compat.save_file path (original ^ Fs_compat.load_file path);
     let first = intake () in
     check (list string) "restored prefix delivers within the admission bound"
@@ -551,6 +559,14 @@ let test_missing_prefix_does_not_starve_readable_connector () =
       (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
          last.pending_board_events);
     complete last.source_batch;
+    check (list string) "another conversation was not mixed with restored messages"
+      [later.post_id] (pending_ids ());
+    let separate = intake () in
+    check (list string) "later conversation gets its own delivery"
+      ["separate conversation"]
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+         separate.pending_board_events);
+    complete separate.source_batch;
     check (list string) "restored successful deliveries ACK the remaining sources" [] (pending_ids ()))
 ;;
 
@@ -1598,7 +1614,9 @@ let () =
         ; test_case "missing connector rows survive other completion and restoration" `Quick
             (test_unread_connector_sources_survive_other_completed_work ~failure:`Missing_rows)
         ; test_case "missing prefix does not starve a readable connector" `Quick
-            test_missing_prefix_does_not_starve_readable_connector
+            (test_missing_prefix_does_not_starve_readable_connector ~cross_conversation:false)
+        ; test_case "missing conversation does not starve another readable conversation" `Quick
+            (test_missing_prefix_does_not_starve_readable_connector ~cross_conversation:true)
         ; test_case "shared connector read failure skips backlog and admits independent work" `Quick
             test_failed_connector_batch_skips_shared_store_without_starving_other_work
         ; test_case "torn connector store survives other completed work and restoration" `Quick

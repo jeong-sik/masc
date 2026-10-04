@@ -307,7 +307,7 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
       | Ok (Some (_, handle)) -> Unix.closedir handle
       | Ok None | Error _ -> () in
     Fun.protect ~finally:(fun () -> close journal; close primary) (fun () ->
-    let scan opened ~skip =
+    let scan opened ~repair_primary ~skip =
       match opened with
       | Error detail -> Error detail
       | Ok None -> Ok ()
@@ -362,6 +362,24 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
                                    Error "sampling outcome blob is not a regular file")
                         | _ -> Ok ())
                     | _ -> Ok () in
+                  (* The independent outcome journal remains authoritative
+                     when primary publication failed. Once that directory is
+                     available again, restore its terminal row before visiting
+                     the request. A still-unavailable primary cannot hide the
+                     durable outcome. Only its exact stored identity can choose
+                     the repair path. *)
+                  let* () = if not repair_primary then Ok () else
+                    match json with
+                    | `Assoc fields ->
+                        (match List.assoc_opt "instance_id" fields,
+                               List.assoc_opt "request_id" fields,
+                               List.assoc_opt "state" fields with
+                         | Some (`String owner), Some (`String request_id), Some (`String "finished")
+                           when owner = instance_id && name = digest request_id ^ ".json" ->
+                             ignore (save_sampling_request t ~instance_id ~request_id json);
+                             Ok ()
+                         | _ -> Error "sampling terminal journal identity is invalid")
+                    | _ -> Error "sampling terminal journal is not an object" in
                   let* () = f json in
                   next ()
               | _ -> next ()
@@ -372,14 +390,14 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
         Error (journal_error ^ "; " ^ primary_error)
     | Error detail, Ok None | Ok None, Error detail -> Error detail
     | Error journal_error, Ok (Some _) ->
-        let* () = scan primary ~skip:(fun _ -> false) in
+        let* () = scan primary ~repair_primary:false ~skip:(fun _ -> false) in
         Error journal_error
     | Ok (Some _), Error primary_error ->
-        let* () = scan journal ~skip:(fun _ -> false) in
+        let* () = scan journal ~repair_primary:true ~skip:(fun _ -> false) in
         Error primary_error
     | Ok _, Ok _ ->
-      let* () = scan journal ~skip:(fun _ -> false) in
-      scan primary ~skip:(fun name ->
+      let* () = scan journal ~repair_primary:true ~skip:(fun _ -> false) in
+      scan primary ~repair_primary:false ~skip:(fun name ->
         Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing)))
 let iter_sampling_requests = iter_sampling_requests_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)

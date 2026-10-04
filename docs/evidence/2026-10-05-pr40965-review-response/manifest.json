@@ -1,0 +1,27 @@
+{
+  "recorded_at": "2026-10-04T15:19:03.257713+00:00",
+  "source_head_before_response": "9edfd3f9727e467d05327457a67f428ff642f8c3",
+  "sandbox_alias_exit": 1,
+  "declared_fixture_exit": 0,
+  "source_and_binary_sha256": {
+    "bin/masc_tui_render.ml": "14ab9968ce3b7ae2a89d72304db0ddc545aefb4343da5f4b87059e1f488f74e2",
+    "test/stanzas/test_tui_surface_studio_pty.inc": "4da60d862fa1965c9c66c74546a28ba5c6cbf0aaa960ee6306a13b7dd46dd3b5",
+    "test/test_tui_surface_studio_pty.py": "a1c07634c24e1b56bd2e4a439b90856e686d7a290a8aa5fe36b506feae0f8f2f",
+    "test/tui_keyboard_harness.py": "5022291719f33b140d363a785f0c5f0cda6a2306e93f1b34d9b424b9ab001840",
+    "test/tui_keyboard_chat.py": "6fd5fba7058eaacfb7dc3b315195570d83e513986133970f9752c67422c22448",
+    "test/tui_keyboard_observer.py": "1e4a827822ac1d4e4c00bce470541b50e9762572a2fdd6ae970f7d75bd50986e",
+    "test/tui_keyboard_tools.py": "a0fe3793c608ecf030b148ac21e07b46b0701adb273e6a3da4ed22ae4c6d5a31",
+    "test/tui_keyboard_repositories.py": "f3208c2055970d679c41dd6353dd967fd1be330a8b77b714351d7ebcc29f9bc9",
+    "test/tui_keyboard_workspace.py": "ebdbbb822809cbd42be887dd7fbceb403b221e8fc95af34777d3bbec61ccfe04",
+    "_build/default/bin/masc_tui.exe": "4b55b1b6f6281ca9a0264eedc9341740cbc9e531709143970479ac2fb46e9841"
+  },
+  "files": {
+    "README.md": "57fbb9f7be2d14a3cb762516cd8968a49fe4faa8c979b92cac5ae2c22eaaec42",
+    "declared-fixture.txt": "6b7f4f599ca693967bab830fdfb2a8c98df0bd2a967ec93d6bc39ad9917c1c85",
+    "prior-40x16-pty.txt": "0c5ae9d0c10651f76cd4ceb3095dcab3af68efe81716d39ca67d5ac7d8a89812",
+    "priority-red.txt": "9416aea3cceebe7acb6c3f15a7f288d22250f96a60bdb76c2e202803cd04430b",
+    "pyright.json": "e024760c86662b219f6cbcf2184329fbf7022827654711d4f982e53ca5739a56",
+    "sandbox-alias-failed.txt": "93396035792043ab5d9d401245c89e8d0852f347c5c4e5ebeb74e7379aaac904",
+    "warm-build.txt": "e3fd84642835f663b29eeb159ebead5e89b985b89db7d652a49b1f37e5f413ad"
+  }
+}

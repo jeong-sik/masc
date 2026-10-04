@@ -1,5 +1,10 @@
 # Narrow Work summary evidence
 
+This record and its browser/snapshot captures describe the 2026-10-03 candidate.
+The later 40×16 execution and subsequent summary-priority repair are recorded
+separately in [the PR40965 response](../2026-10-05-pr40965-review-response/README.md),
+including its native dependency failure and retained-binary fixture limits.
+
 ## 공통 헤더
 
 - 날짜(ISO8601): 2026-10-03T06:55:47.485567+00:00

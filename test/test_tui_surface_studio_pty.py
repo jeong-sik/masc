@@ -217,10 +217,48 @@ def run(executable, no_color=False):
         interact=interact,http_fixtures=fixtures,workspace="Surface fixture",
         extra_env={"NO_COLOR":"1"} if no_color else None)
 
+def run_summary_priority(executable, no_color=False):
+    fixtures = _keyboard_harness.planning_selection_http_fixtures()
+    response = fixtures[_keyboard_harness.PLANNING_PATH]
+    assert isinstance(response, tuple) and isinstance(response[1], dict)
+    planning = response[1]
+    planning["goal_history"] = {"unlisted": []}
+    # Valid large counters wrap beyond the optional trend; neither may be
+    # clipped merely to make the block fit. The existing scenario keeps small
+    # counters and retained-history coverage.
+    planning["task_backlog"] = {"todo": 111111111111111, "claimed": 222222222222222, "in_progress": 333333333333333,
+        "awaiting_verification": 444444444444444, "done": 555555555555555, "cancelled": 666666666666666}
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.send_and_wait(process, fd, output, b":go Work\r", b"plan-alpha-29424")
+        for columns in (44, 45, 46):
+            frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=19, columns=columns,
+                needle=b"goal-a-29424", controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            rows = _keyboard_harness.screen_rows(frame)
+            visible = b"\n".join(rows.get(row, b"") for row in range(1, 20))
+            print("SUMMARY_PRIORITY=" + json.dumps({"columns": columns, "no_color": no_color,
+                "screen": visible.decode(errors="replace")}), flush=True)
+            if b"Backlog:" not in visible and (b"Net change" in visible or b"Trend:" in visible):
+                raise AssertionError("Work displayed optional trend while the current backlog did not fit")
+            for needle in (b"goal-a-29424", b"Right / Enter:detail"):
+                if needle not in visible:
+                    raise AssertionError(f"{columns}x19 Work hid {needle!r}")
+            if not any(b"> " in row and b"plan-alpha" in row for row in rows.values()):
+                raise AssertionError("summary priority hid selected goal row")
+        _keyboard_harness.send_and_wait(process, fd, output, b":go Dashboard\r", b"MASC Dashboard")
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(executable, description="Work summary priority",
+        interact=interact, http_fixtures=fixtures,
+        extra_env={"NO_COLOR": "1"} if no_color else None)
+
+
 if __name__ == "__main__":
     executable=os.path.abspath(sys.argv[1])
     with open(executable,"rb") as binary:
         print("STUDIO_BINARY_SHA256="+hashlib.sha256(binary.read()).hexdigest(),flush=True)
+    run_summary_priority(executable)
+    run_summary_priority(executable,True)
     run(executable)
     run(executable,True)
     print("tui surface studio PTY: PASS",flush=True)

@@ -108,7 +108,7 @@ def main(executable: str, captures: Path | None) -> None:
         help_output = key(b"?", b"Lane Add-ons keys")
         help_screen = screen(help_output, b"Lane Add-ons keys")
         for needle in (b"Esc:close", b"j/k select", b"Enter open", b"1 Results",
-                       b"4 Records", b"E edit", b"e export marked rows", b"A command"):
+                       b"4 Records", b"E edit", b"e export marked rows", b"A opens Add-on commands"):
             if needle not in help_screen:
                 raise AssertionError(f"Lane help omitted {needle!r}")
         key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")

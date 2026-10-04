@@ -8,7 +8,7 @@
     "docs/guides/lane-declaration-editor.md": "5131a62225164be1c5d4fef8774365e99fb53913df3294cc58397eaaa507fa05",
     "docs/guides/tui-lane-addons.md": "24ecaf89bf4b6647d64493d964f659c575bcb2cf00cb70ed66983f7ef5a1ea2c",
     "test/test_tui_lane_addons.ml": "dceab02c18d6afa5bfe784b79e9a97b401cd96e34cde0adfdfb42a81793c94b5",
-    "test/test_tui_lane_visual_pty.py": "94a6e7893f2533d405857a54122889401cf100b417e9255224847cf3d5d16ec3"
+    "test/test_tui_lane_visual_pty.py": "76bde7a958866de20c19ee9b0f347115560c29205f7051eb8dad8f523c1a25be"
   },
   "ocaml_parser_version": "5.5.1",
   "ocaml_parser_files": 2,

@@ -8,4 +8,4 @@ Web distinguishes Remove TOML + worker from Remove worker and names the disk del
 
 Source hashes: checks.json. Browser fixture/result/log/screenshot are adjacent. It uses the prior package-readings fixture entry point only to mount the same real component/styles. No real TOML deletion, Docker cleanup, backend, CI, merge or deployment was exercised. Source review is separate from GitHub approval.
 
-Independent review found two stale expectations in test_tui_lane_visual_pty.py (failed-worker removal label and literal-colon advanced prompt). Both now follow the new displayed controls/prompt; Python AST passed. PTY remains unrun. The initial source pass missed these direct consumers and was superseded by this correction.
+Independent review found three stale expectations in test_tui_lane_visual_pty.py (failed-worker removal label, advanced-command help and literal-colon prompt). All now follow the new displayed controls/prompt; Python AST passed. PTY remains unrun. The initial source pass missed these direct consumers and was superseded by this correction.

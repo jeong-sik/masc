@@ -149,7 +149,7 @@ export class BrowserLaneActivitySession {
       if (!this.owns(authority, version)) return false
       if (!preview.ok || !preview.can_save) throw new Error('설정 검증에서 저장을 거절했습니다. Runtime 설정에서 원문과 오류를 확인하세요.')
       sent = true
-      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, options)
+      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, { ...options, expectedSourcePath: draft.base.source_path })
       if (!this.owns(authority, version)) return false
       const saved = document(receipt)
       if (saved.source_path !== draft.base.source_path || saved.source_text !== source || receipt.commit.source_revision !== saved.source_revision)

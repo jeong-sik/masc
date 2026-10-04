@@ -68,5 +68,8 @@
     "pr41205-pyright-current.json": "abb69a5f369f2d990d190984b0f3dc1d80e5ba1ae7028eb2d09c2936447416f4",
     "pr41205-pyright-final.json": "b8a19095d7ad2040bd53001d3f95cf8b198e8593300fac82397e1aa8f0367dc0",
     "pr41205-pyright-final2.json": "91da2a94573a3b128d529b966ec946c024a2059d8e39e38632a75aa48ea40b41"
-  }
+  },
+  "final_parent": "1f7f032f20804cacf98e7a7a99cd1e0504c1749c",
+  "qualified_checkpoint": "c66cc8f2ef855481ca10cb1538e1b55fd8abfffd",
+  "native_closure_unchanged_after_parent_merge": true
 }

@@ -176,8 +176,9 @@ def run_compact_quit(binary):
         assert server.previews == 0 and not server.saves, 'compact quit dispatched a write'
         h.resize_and_wait(process, fd, output, rows=12, columns=120,
                           needle=b'terminal too small')
+        exit_start = len(output)
         os.write(fd, b'q')
-        assert process.wait(timeout=3) == 0, 'second compact q did not finish the visible quit flow'
+        h.wait_for_output(process, fd, output, b'Goodbye!', start=exit_start, timeout=3.0)
 
     h.run_terminal_scenario(binary, description='Compact overlay owns Machine quit',
         interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=32)
@@ -186,4 +187,5 @@ def run_compact_quit(binary):
 
 if __name__ == '__main__':
     run(os.path.abspath(sys.argv[1]))
+    run_compact_quit(os.path.abspath(sys.argv[1]))
     print('tui machine activity: PASS')

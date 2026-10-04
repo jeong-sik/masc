@@ -8,7 +8,14 @@ import subprocess
 
 root = Path.cwd()
 out = root / "docs/evidence/2026-10-04-curator-activity-resume"
-compiler = Path(os.environ.get("CURATOR_OCAML_BIN", str(Path(shutil.which("ocamlc")).parent))) / "ocamlc"
+configured_bin = os.environ.get("CURATOR_OCAML_BIN")
+if configured_bin:
+    compiler = Path(configured_bin) / "ocamlc"
+else:
+    found = shutil.which("ocamlc")
+    if found is None:
+        raise RuntimeError("Set CURATOR_OCAML_BIN to an OCaml 5.5.1 bin directory")
+    compiler = Path(found)
 version = subprocess.check_output([str(compiler), "-version"], text=True).strip()
 if version != "5.5.1":
     raise RuntimeError("Expected OCaml 5.5.1, got " + version)

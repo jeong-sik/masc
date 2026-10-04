@@ -1,0 +1,20 @@
+Testing `browser surface'.
+This run has ID `J5MAM6M1'.
+
+  [OK]          behavior          0   input correction resumes on the same co...
+  [OK]          behavior          1   scoped scene acknowledgement.
+  [OK]          behavior          2   read any website by active or explicit ...
+  [OK]          behavior          3   empty browser has no page.
+  [OK]          behavior          4   no active tab is not guessed.
+  [OK]          behavior          5   scene node requires sourceContext.
+  [OK]          behavior          6   invalid input is refused.
+  [OK]          behavior          7   backend failure is visible.
+  [OK]          behavior          8   an absent lane names its own setup.
+  [OK]          behavior          9   capture target and image identity.
+  [OK]          behavior         10   Keeper discovers ambiguous clients with...
+  [OK]          behavior         11   off precedes live client guidance.
+  [OK]          behavior         12   Keeper hears why no browser is connected.
+  [OK]          behavior         13   live read pins client across both hops.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-admission-20261005/_build/_tests/browser surface'.
+Test Successful in 0.036s. 14 tests run.

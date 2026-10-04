@@ -5051,20 +5051,21 @@ let launch_machine_activity_read state ~mailbox owner =
        let host = server_peer_host and port = state.port in
        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
          ~deliver:(fun result -> Machine_activity_read (request,result)) (fun () ->
-           Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
-             let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
-               (fun snapshot ->
-                 match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
-                   row.selection = Machine owner.Masc_tui_machine_activity.machine) snapshot.rows with
-                 | Some {state=Machine_state (activity,_);_} ->
-                     Ok (match activity with
-                       | Machine_enabled -> Machine_configuration.Enabled
-                       | Machine_disabled -> Machine_configuration.Disabled
-                       | Machine_unobserved -> Machine_configuration.Unobserved)
-                 | None | Some _ -> Error "The selected machine is absent from the server reading.") in
-             {Masc_tui_machine_activity.document={Masc_tui_runtime_config_edit.path=reading.path;
-               source_text=reading.source_text;source_revision=reading.metadata.source_revision};activity})
-             (Masc_tui_loader.load_runtime_config_view ~host ~port)))
+           let document = Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
+             {Masc_tui_runtime_config_edit.path=reading.path;
+              source_text=reading.source_text;source_revision=reading.metadata.source_revision})
+             (Masc_tui_loader.load_runtime_config_view ~host ~port) in
+           let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
+             (fun snapshot ->
+               match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
+                 row.selection = Machine owner.Masc_tui_machine_activity.machine) snapshot.rows with
+               | Some {state=Machine_state (activity,_);_} ->
+                   Ok (match activity with
+                     | Machine_enabled -> Machine_configuration.Enabled
+                     | Machine_disabled -> Machine_configuration.Disabled
+                     | Machine_unobserved -> Machine_configuration.Unobserved)
+               | None | Some _ -> Error "The selected machine is absent from the server reading.") in
+           Ok Masc_tui_machine_activity.{document;activity}))
 
 let launch_machine_activity_save state ~mailbox session =
   let module Activity = Masc_tui_machine_activity in

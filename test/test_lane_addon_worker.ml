@@ -990,7 +990,12 @@ let test_sampling_wire_frame_envelope () =
       let store = Store.create ~root:(Filename.concat dir "wire-evidence") in
       let calls = ref 0 in
       let broker = match Sampling.create ~store ~package:p ~instance_id:"wire" ~route:"r"
-        ~invoke:(fun ~route:_ ~request:_ _ -> incr calls; Ok answer) () with
+        ~invoke:(fun ~route:_ ~request _ ->
+          let retained = match Store.read_blob store request with
+            | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+          check string "accepted request is durable before model invocation" "model_request"
+            Yojson.Safe.Util.(member "kind" retained |> to_string);
+          incr calls; Ok answer) () with
         | Ok broker -> broker | Error detail -> fail detail in
       let handler = match Sampling.for_worker broker ~package:p ~instance_id:"wire" with
         | Ok handler -> handler | Error detail -> fail detail in
@@ -1031,10 +1036,13 @@ for line in sys.stdin:
         let summary = ref `Null in
         let observed = Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
           ~on_error:Fun.id (fun () ->
+            let rec request remaining =
             match Agent_core.Mcp.call_tool_full client ~name:"sample" ~arguments:(`Assoc []) with
             | Error error -> Error (Agent_core.Error.to_string error)
             | Ok result -> summary := Option.get result.structured_content;
-                Ok {Types.rows=[];coverage=[]}) in
+                if remaining > 1 then request (remaining - 1)
+                else Ok {Types.rows=[];coverage=[]} in
+            request (if boundary = `Too_small then 3 else 1)) in
         check bool "actual sampling wire exchange completes" true (Result.is_ok observed);
         let open Yojson.Safe.Util in
         check bool "complete frame including newline stays in envelope" true
@@ -1057,7 +1065,14 @@ for line in sys.stdin:
               | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
             check string "wire refusal agrees with durable terminal" "invalid_response"
               (member "status" retained |> to_string)
-        | `Too_small -> check int "unrepresentable failure frame never invokes host" 0 !calls)))
+        | `Too_small ->
+            check int "unrepresentable failure frame never invokes host" 0 !calls;
+            let evidence = Filename.concat (Store.root store) "evidence" in
+            let retained = if Sys.file_exists evidence then Array.to_list (Sys.readdir evidence) else [] in
+            check int "repeated preflight refusals retain no unreachable request blobs" 0 (List.length retained);
+            let indexes = match sampling_requests store ~instance_id:"wire" with
+              | Ok rows -> rows | Error detail -> fail detail in
+            check int "preflight refusals create no request journal" 0 (List.length indexes))))
       [`Exact;`Overflow;`Failure_exact;`Too_small])
     [Mcp_protocol.Jsonrpc.String (String.make 64 '"' ^ "한글");Mcp_protocol.Jsonrpc.Int max_int]
 

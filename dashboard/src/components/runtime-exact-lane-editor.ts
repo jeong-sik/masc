@@ -22,6 +22,7 @@ export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisab
   const [newSlot, setNewSlot] = useState<Record<string, string>>({})
   const selectedRef = useRef<HTMLElement>(null), focusedLane = useRef<string | undefined>(undefined)
   useEffect(() => {
+    if (!selectedLane) focusedLane.current = undefined
     if (selectedLane && selectedLane !== focusedLane.current && selectedRef.current) {
       selectedRef.current.focus(); focusedLane.current = selectedLane
     }

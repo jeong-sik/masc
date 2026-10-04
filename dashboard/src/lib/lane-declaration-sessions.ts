@@ -71,14 +71,16 @@ export class LaneDeclarationSession {
     const draft = this.state.peek().drafts[key]
     return draft?.document?.source_path ?? draft?.sourcePath ?? this.pathFor(draft?.fileName ?? '')
   }
-  open(sourcePath: string | null, authority: ExecutionWorkspaceAuthority) {
-    if (!this.admits(authority)) return
+  open(sourcePath: string | null, authority: ExecutionWorkspaceAuthority, readCurrent = false): Promise<LaneDeclarationDocument | null> {
+    if (!this.admits(authority)) return Promise.resolve(null)
     const state = this.state.peek(), key = sourcePath ?? state.newEditorKey
     this.state.value = { ...state, target: { key, sourcePath }, drafts: state.drafts[key] ? state.drafts : {
       ...state.drafts, [key]: { fileName: '', sourcePath, text: sourcePath === null ? template : '', document: null,
         current: null, phase: 'idle', error: null, notice: null, needsRead: false, retainedCreateDrafts: [] },
     } }
-    if (!state.drafts[key] && sourcePath !== null) void this.read(key, sourcePath, authority, true)
+    if (sourcePath !== null && (!state.drafts[key] || readCurrent))
+      return this.read(key, sourcePath, authority, state.drafts[key]?.document == null)
+    return Promise.resolve(null)
   }
   close() { this.state.value = { ...this.state.peek(), target: null } }
 
@@ -109,22 +111,27 @@ export class LaneDeclarationSession {
     if (draft) this.state.value = { ...state, target: { key, sourcePath: draft.document?.source_path ?? draft.sourcePath } }
   }
 
-  async read(key: string, sourcePath: string, authority: ExecutionWorkspaceAuthority, initial = false) {
+  async read(key: string, sourcePath: string, authority: ExecutionWorkspaceAuthority, initial = false): Promise<LaneDeclarationDocument | null> {
     const draft = this.state.peek().drafts[key]
-    if (!this.admits(authority) || draft === undefined || draft.phase !== 'idle') return
+    if (!this.admits(authority) || draft === undefined || draft.phase !== 'idle') return null
     const controller = new AbortController()
     this.update(key, value => ({ ...value, phase: initial ? 'loading' : 'reading', error: null }))
     try {
       const document = await fetchLaneDeclaration(sourcePath, controller.signal)
-      if (!this.admits(authority)) { this.changedAuthority(key); return }
+      if (!this.admits(authority)) { this.changedAuthority(key); return null }
       this.update(key, value => initial
         ? { ...value, fileName: document.file_name, text: document.source_text, document, phase: 'idle', needsRead: false }
+        : document.source_path === value.document?.source_path && document.source_revision === value.document.source_revision
+        ? { ...value, current: null, phase: 'idle', needsRead: false,
+          notice: 'Current file still matches your saved revision. Your draft is unchanged.' }
         : { ...value, current: document, phase: 'idle', notice: 'Current file read. Your draft is unchanged. Select its revision before saving.' })
+      return document
     } catch (error) {
-      if (!this.admits(authority)) { this.changedAuthority(key); return }
+      if (!this.admits(authority)) { this.changedAuthority(key); return null }
       this.update(key, value => ({ ...value, phase: 'idle', error: message(error),
         needsRead: value.document === null && value.sourcePath === null
           && error instanceof LaneDeclarationError && error.failure.code === 'not_found' ? false : value.needsRead }))
+      return null
     }
   }
 

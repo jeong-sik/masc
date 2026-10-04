@@ -870,7 +870,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
             </div>
 
             <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
-              ${navigationTarget?.kind === 'exact' && html`<p role="status">Selected Lane: ${navigationTarget.lane}. Existing drafts are retained; navigation does not save.</p>`}
+              ${navigationTarget?.kind === 'exact' && html`<p role="status">Selected Lane: ${navigationTarget.lane}</p>`}
               ${navigationTarget?.kind === 'exact' && exactLanes && !exactLanes.some(lane => lane.laneId === navigationTarget.lane)
                 && html`<p role="alert">The selected Lane is absent from the current runtime reading.</p>`}
               ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}

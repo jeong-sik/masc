@@ -79,7 +79,34 @@ it('retries the selected declaration file after its installation identity is res
   fireEvent.click(screen.getByRole('button', { name: 'Read target again' }))
   await waitFor(() => expect(addons.fetchLaneAddons).toHaveBeenCalledTimes(2))
   await waitFor(() => expect(files.fetchLaneDeclaration.mock.calls.length).toBeGreaterThan(previousReads))
+  await screen.findByRole('region', { name: 'Lane TOML editor' })
+  // Reading a restored identity does not silently adopt its new save basis.
+  await screen.findByRole('region', { name: 'Current file comparison' })
+  expect((screen.getByLabelText('TOML source') as HTMLTextAreaElement).value).toBe('id = "replacement"\n')
+  expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(true)
   expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
+
+it('does not read a target from another workspace or a malformed direct link', async () => {
+  replaceRoute('monitoring', laneTargetParams({ kind: 'declaration', workspace: '/fixture/other',
+    path: '/fixture/other/.masc/config/lane-addons/pkg.toml', installation: 'pkg' }))
+  render(html`<${LaneAddonsPanel} />`)
+  await screen.findByText(/This Lane link belongs to another workspace/)
+  expect(addons.fetchLaneAddons).not.toHaveBeenCalled(); expect(files.fetchLaneDeclaration).not.toHaveBeenCalled()
+  replaceRoute('monitoring', { section: 'lane-addons', lane_target: '{broken' })
+  await screen.findByText('The Lane link has an invalid or incomplete target.')
+  expect(addons.fetchLaneAddons).not.toHaveBeenCalled(); expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
+
+it('does not open a file when the fresh inventory assigns it to another installation', async () => {
+  const directory = '/fixture/navigation/.masc/config/lane-addons', path = `${directory}/pkg.toml`
+  addons.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ configuration: { directory, complete: true,
+    issues: [], declarations: [{ id: 'replacement', source_path: path, enabled: true, desired_revision: 'semantic',
+      applied_revision: null, instance_id: null }] }, instances: [], rows: [], coverage: [] }))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'declaration', workspace: '/fixture/navigation', path, installation: 'pkg' }))
+  render(html`<${LaneAddonsPanel} />`)
+  await screen.findByText('The selected file now belongs to a different installation. Its replacement was not opened.')
+  expect(files.fetchLaneDeclaration).not.toHaveBeenCalled(); expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
 })
 
 it('keeps the chosen filter when leaving a selected Lane through the real router', async () => {

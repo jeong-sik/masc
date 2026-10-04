@@ -94,11 +94,23 @@ does not read or retain visible rows; Verify workspace refreshes execution
 authority before reading its inventory. Late replies from another workspace are
 ignored.
 
-Exact detail links to the existing run diagnostics and runtime configuration
-screens. Package detail links to the existing declaration/observation manager.
-These are owner-screen links, not an automatic selection or mutation in those
-screens. Browser and machine detail report the actual observed owner state and
-point to their TUI/operator tools; this change adds no Web management controls
-for those families. Inventory row count is not a running-worker count. Executor
+Detail links preserve the workspace and selected target. Exact configuration
+opens and focuses that Lane's candidate controls; diagnostics focuses its matrix
+row and filters the retained run list. Browser and machine configuration selects
+the corresponding TOML node in the existing raw draft. A missing node is reported
+without inserting configuration. Selecting another diagnostic filter releases the
+Lane target and keeps the chosen filter.
+
+Package links open the declaration path and verify its known installation ID
+against the inventory and a fresh file read. Manual worker links select both the
+instance ID and incarnation. A changed workspace, missing target, replaced worker
+or mismatched file is reported instead of selecting a replacement. Read target
+again rereads the inventory and declaration; an existing draft and its save basis
+are retained. If the file revision changed, adopting that revision remains an
+explicit editor action. URLs can be reopened directly; drafts survive internal
+screen navigation, not a browser restart.
+
+Navigation never saves configuration or starts/stops workers. Inventory row
+count is not a running-worker count. Executor
 registration is not proof of an active browser session; retained package state
 is not proof of a live process.

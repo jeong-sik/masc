@@ -343,55 +343,80 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const configuration = snapshot?.configuration ?? null
   const session = authority !== null && snapshot !== null && configuration !== null
     ? laneDeclarationSessionFor(authority, configuration.directory) : null
-  const handledNavigation = useRef<{ authority: ExecutionWorkspaceAuthority; target: typeof navigationTarget } | null>(null)
+  const [navigationAttempt, setNavigationAttempt] = useState(0)
+  type NavigationReading = { authority: ExecutionWorkspaceAuthority; target: typeof navigationTarget; attempt: number }
+  const handledNavigation = useRef<NavigationReading | null>(null)
+  const focusedNavigation = useRef<NavigationReading | null>(null)
+  const currentNavigation = useRef({ authority, target: navigationTarget, attempt: navigationAttempt })
+  currentNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt }
+  const [fileCheck, setFileCheck] = useState<(NavigationReading & { error: string | null }) | null>(null)
+  const fileChecked = fileCheck?.authority === authority && fileCheck?.target === navigationTarget && fileCheck?.attempt === navigationAttempt
+  const targetDraft = navigationTarget?.kind === 'declaration' ? session?.state.value.drafts[navigationTarget.path] : undefined
   const declarationFocus = useRef<HTMLDivElement>(null), instanceFocus = useRef<HTMLTableRowElement>(null)
-  let targetError: string | null = null
+  let snapshotTargetError: string | null = null
   if (navigationTarget && snapshot) {
     if (navigationTarget.kind === 'instance') {
-      if (navigationInstanceMissing) targetError = 'The selected worker is absent or its incarnation changed. No replacement worker was selected.'
+      if (navigationInstanceMissing) snapshotTargetError = 'The selected worker is absent or its incarnation changed. No replacement worker was selected.'
     } else {
       const declaration = configuration?.declarations.find(item => item.source_path === navigationTarget.path)
       const issue = configuration?.issues.find(item => item.source_path === navigationTarget.path)
-      if (!configuration || !isDeclarationFile(configuration.directory, navigationTarget.path)) targetError = 'The selected file is outside the current declaration directory.'
+      if (!configuration || !isDeclarationFile(configuration.directory, navigationTarget.path)) snapshotTargetError = 'The selected file is outside the current declaration directory.'
       else if (declaration && navigationTarget.installation !== null && declaration.id !== navigationTarget.installation)
-        targetError = 'The selected file now belongs to a different installation. Its replacement was not opened.'
+        snapshotTargetError = 'The selected file now belongs to a different installation. Its replacement was not opened.'
       else if (!declaration && (!issue || navigationTarget.installation !== null && issue.id !== navigationTarget.installation))
-        targetError = configuration.complete ? 'The selected declaration is absent from this reading.' : 'The declaration reading is incomplete; the selected target is not confirmed.'
-      const loaded = session?.state.value.drafts[navigationTarget.path]?.document
-      if (!targetError && navigationTarget.installation !== null && loaded) {
-        try {
-          if (declarationIdentity(loaded.source_text) !== navigationTarget.installation)
-            targetError = 'The file read belongs to a different installation. The replacement was not opened.'
-        } catch { targetError = 'The file read cannot confirm the selected installation ID. Open the file explicitly from the current workspace to repair it.' }
-      }
+        snapshotTargetError = configuration.complete ? 'The selected declaration is absent from this reading.' : 'The declaration reading is incomplete; the selected target is not confirmed.'
     }
   }
   useEffect(() => {
-    if (!navigationTarget || !authority || !snapshot || targetError || handledNavigation.current?.target === navigationTarget && handledNavigation.current.authority === authority) return
+    if (!navigationTarget || !authority || !snapshot || snapshotTargetError) return
+    const previous = handledNavigation.current
+    if (previous?.target === navigationTarget && previous.authority === authority && previous.attempt === navigationAttempt) return
     if (navigationTarget.kind === 'declaration') {
-      if (!session) return
-      session.open(navigationTarget.path, authority)
-      const declaration = configuration?.declarations.find(item => item.source_path === navigationTarget.path)
-      if (declaration) session.openActivity(declaration.source_path, declaration.id, authority)
-      else session.closeActivity(authority)
-      declarationFocus.current?.focus()
+      // Wait for an existing read/save to settle, then read the selected file.
+      // The session retains the draft and its original CAS basis separately.
+      if (!session || targetDraft && targetDraft.phase !== 'idle') return
+      const reading = { authority, target: navigationTarget, attempt: navigationAttempt }
+      handledNavigation.current = reading
+      session.closeActivity(authority)
+      void session.open(navigationTarget.path, authority, true).then(document => {
+        const current = currentNavigation.current
+        if (!mounted.current || current.authority !== authority || current.target !== navigationTarget || current.attempt !== navigationAttempt) return
+        setFileCheck({ ...reading, error: document ? null
+          : session.state.peek().drafts[navigationTarget.path]?.error ?? 'The selected file could not be read. Retry to confirm it.' })
+      })
     } else {
       setInstance(navigationTarget.instance); setSelected([])
       session?.close(); session?.closeActivity(authority)
-      instanceFocus.current?.focus()
+      handledNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt }
     }
-    handledNavigation.current = { authority, target: navigationTarget }
-  }, [navigationTarget, authority, snapshot, session, targetError])
+  }, [navigationTarget, authority, snapshot, session, snapshotTargetError, navigationAttempt, targetDraft?.phase])
+  let targetError = snapshotTargetError ?? (fileChecked ? fileCheck?.error ?? null : null)
+  const loaded = targetDraft?.current ?? targetDraft?.document
+  if (!targetError && fileChecked && navigationTarget?.kind === 'declaration' && navigationTarget.installation !== null && loaded) {
+    try {
+      if (declarationIdentity(loaded.source_text) !== navigationTarget.installation)
+        targetError = 'The file read belongs to a different installation. The replacement was not opened.'
+    } catch { targetError = 'The file read cannot confirm the selected installation ID. Open the file explicitly from the current workspace to repair it.' }
+  }
+  const targetPending = navigationTarget?.kind === 'declaration' && !fileChecked
+  useEffect(() => {
+    if (!navigationTarget || !authority || !snapshot || targetError || targetPending) return
+    const previous = focusedNavigation.current
+    if (previous?.target === navigationTarget && previous.authority === authority && previous.attempt === navigationAttempt) return
+    const element = navigationTarget.kind === 'declaration' ? declarationFocus.current : instanceFocus.current
+    if (element) { element.focus(); focusedNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt } }
+  }, [navigationTarget, authority, snapshot, targetError, targetPending, navigationAttempt])
+  function retryTarget() { setNavigationAttempt(value => value + 1); void refresh() }
   const rows = slice?.rows ?? snapshot?.rows ?? []
   const selectionOwned = instance !== '' && selected.length > 0 && selected.every(id =>
     rows.some(row => row.id === id && row.lane_id.startsWith(`${instance}/`)))
   const focused = rows.find(row => row.id === focusedRow)
   const coverage = slice?.coverage ?? snapshot?.coverage ?? []
-  if (navigationTarget && targetError) return html`<${LaneNavigationNotice} message=${targetError} onRetry=${refresh} />`
-  if (navigationTarget && !snapshot) return html`<${LaneNavigationNotice}
-    message=${error ?? 'Reading the selected Lane target in the current workspace…'} onRetry=${reading ? undefined : refresh} />`
+  if (navigationTarget && targetError) return html`<${LaneNavigationNotice} message=${targetError} onRetry=${retryTarget} />`
+  if (navigationTarget && (!snapshot || targetPending)) return html`<${LaneNavigationNotice}
+    message=${error ?? 'Reading the selected Lane target in the current workspace…'} onRetry=${reading || targetPending ? undefined : retryTarget} />`
   return html`<section class="space-y-4 p-4" aria-label="Lane Add-ons">
-    ${navigationTarget && html`<p role="status" class="break-all">Selected target: ${laneTargetLabel(navigationTarget)}. Navigation reads and selects only; existing drafts are retained.</p>`}
+    ${navigationTarget && html`<p role="status" class="break-all">Selected: ${laneTargetLabel(navigationTarget)}</p>`}
     <header class="flex items-center justify-between gap-4">
       <div><h2 class="text-lg font-semibold">Lane Add-ons</h2>
         <p>Optional observations and relationships. Keeper work continues independently.</p></div>

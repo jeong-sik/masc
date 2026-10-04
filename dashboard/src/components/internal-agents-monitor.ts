@@ -674,7 +674,7 @@ export function InternalAgentsMonitor() {
     message=${navigation.error ?? 'Verify the workspace before reading this Lane target.'} pending=${navigation.pending} />`
   const target = navigation.target?.kind === 'exact' ? navigation.target : undefined
   return html`<${InternalAgentsMonitorContent} target=${target}
-    key=${target && navigation.authority ? JSON.stringify([navigation.authority.workspaceRoot, navigation.authority.epoch]) : undefined} />`
+    key=${navigation.authority ? JSON.stringify([navigation.authority.workspaceRoot, navigation.authority.epoch]) : undefined} />`
 }
 
 function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigationTarget, { kind: 'exact' }> }) {

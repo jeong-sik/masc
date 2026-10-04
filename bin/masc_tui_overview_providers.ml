@@ -40,7 +40,7 @@ let meter ~cells share =
   let cells = max 0 cells in
   let valid_share = Float.is_finite share && share >= 0.0 && share <= 1.0 in
   let share =
-    if Float.is_nan share then 0.0 else Float.min 1.0 (Float.max 0.0 share)
+    if not (Float.is_finite share) then 0.0 else Float.min 1.0 (Float.max 0.0 share)
   in
   (* Floor, so only a share at or past full fills the last eighth; a share
      above zero that floors to nothing still draws the thinnest glyph. *)
@@ -83,7 +83,7 @@ let share_of_full = function
 
 (* The full value of the unit the provider reported in, not a threshold. *)
 let at_or_past_full = function
-  | Masc.Tui_decode_usage.Utilization_fraction value -> value >= 1.0
+  | Masc.Tui_decode_usage.Utilization_fraction value -> Float.is_finite value && value >= 1.0
   | Masc.Tui_decode_usage.Utilization_percent value -> value >= percent_of_full
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } -> used >= limit
   | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> false
@@ -573,6 +573,7 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
         [ Printf.sprintf "Accounts %d · Reporting %d · At limit (reported) %d · Blocked (observed) %s"
             (List.length ordered) reporting full_reports blocked
         ; "█ used · ░ remaining at last report · 0 zero · · no daily report"
+        ; "○ reported no windows · $ uncapped USD use · ↓ below zero · ↑ above limit"
         ; "Login does not reset quota" ^ trend_as_of ^ " · v:Trend graphs" ]
         |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in

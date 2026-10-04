@@ -31,6 +31,7 @@ let utc_day at = int_of_float (floor (at /. seconds_per_day))
 let top_level = 7
 
 let mark share =
+  if share < 0.0 then "↓" else if share > 1.0 then "↑" else
   if share = 0.0 then "0" else
   let clamped = Float.min 1.0 (Float.max 0.0 share) in
   Masc_tui_chart.sparkline ~min:0 ~max:top_level

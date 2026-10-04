@@ -1,4 +1,4 @@
-Evidence directory: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz
+Evidence directory: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-2z9pfi2z
 compile workspace_request_id
 compile workspace_broadcast
 compile goal_phase
@@ -13,10 +13,11 @@ consumer typecheck dashboard_goals_types_accessor
 consumer typecheck dashboard_goals_types_health
 consumer typecheck dashboard_goals_types_timeline
 consumer typecheck masc__Keeper_turn_task_context
+consumer typecheck masc__Tui_decode_usage
 consumer typecheck masc__Tui_decode
 test_goal_suspension 218 cached/direct dependency objects
 Testing `Goal suspension'.
-This run has ID `T9Q4U7AH'.
+This run has ID `YQT8T9YP'.
 
   [OK]          contract          0   restore every live state across both su...
   [OK]          contract          1   terminal refusal and Drop/Reopen escape.
@@ -26,12 +27,12 @@ This run has ID `T9Q4U7AH'.
   [OK]          contract          5   Candle failure retains pending proof an...
   [OK]          contract          6   strict codec, distinct counts and filters.
 
-Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/Goal suspension'.
-Test Successful in 0.293s. 7 tests run.
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-2z9pfi2z/_build/_tests/Goal suspension'.
+Test Successful in 0.295s. 7 tests run.
 
 test_goal_phase_all 1 cached/direct dependency objects
 Testing `goal_phase_all'.
-This run has ID `HJ49CDQ4'.
+This run has ID `7FVCBDQW'.
 
   [OK]          phase                      0   round-trip.
   [OK]          phase                      1   set and order.
@@ -44,12 +45,12 @@ This run has ID `HJ49CDQ4'.
   [OK]          transition matrix          3   agrees with the Task FSM on re...
   [OK]          transition matrix          4   moves_goal lights only the key...
 
-Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/goal_phase_all'.
-Test Successful in 0.001s. 10 tests run.
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-2z9pfi2z/_build/_tests/goal_phase_all'.
+Test Successful in 0.002s. 10 tests run.
 
 test_goal_drop_delivery 218 cached/direct dependency objects
 Testing `Goal cancellation delivery'.
-This run has ID `G4AZMJKO'.
+This run has ID `EHL931EP'.
 
   [OK]          durability          0   repeat repairs committed audit exactl...
   [OK]          durability          1   fresh process drains audit after Goal...
@@ -57,16 +58,16 @@ This run has ID `G4AZMJKO'.
   [OK]          durability          3   unavailable primary remains unchanged.
   [OK]          durability          4   missing Goal remains missing.
 
-Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/Goal cancellation delivery'.
-Test Successful in 0.042s. 5 tests run.
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-2z9pfi2z/_build/_tests/Goal cancellation delivery'.
+Test Successful in 0.053s. 5 tests run.
 
 test_goal_suspension_projection 428 cached/direct dependency objects
 Testing `Goal suspension projection'.
-This run has ID `PK3GEVOL'.
+This run has ID `RPA1U5KC'.
 
   [OK]          dashboard          0   public actions from FSM.
   [OK]          dashboard          1   audit restoration state.
 
-Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-d15k4tcz/_build/_tests/Goal suspension projection'.
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-suspension-2z9pfi2z/_build/_tests/Goal suspension projection'.
 Test Successful in 0.000s. 2 tests run.
 

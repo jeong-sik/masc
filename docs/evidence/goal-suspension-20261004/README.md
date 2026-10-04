@@ -14,7 +14,7 @@ It links unchanged dependencies from an existing OCaml 5.5.1 cache; this is not 
 full product build. Reused public interfaces are admitted only when their source
 matches the candidate. `--typecheck-consumers` additionally compiles the complete
 candidate dashboard accessor/health/timeline, Keeper task-context codec and TUI
-decoder. Three required Keeper/verifier interfaces are refreshed without claiming
+decoder (including its current usage dependency). Three required Keeper/verifier interfaces are refreshed without claiming
 their implementations were compiled. See `native-manifest.json` for source hashes.
 
 ```sh
@@ -60,3 +60,9 @@ changed transitive Goal interfaces; they are not counted as passes. The actual
 core modules and listed consumer modules have narrower successful evidence.
 Independent agent review was unavailable because the existing review agents had
 exhausted their quota. This is author self-review, not independent approval.
+
+After #41134/#41136 merged, the branch was rebased onto main
+`61e0d3ad9e000ac0788dd1d5e3a826217bdc50ef`. The 24 native cases, listed
+consumer typechecks, 113 dashboard cases and whole dashboard TypeScript check
+were rerun successfully on that base. The browser-tested Goal source files were
+unchanged; its retained screenshots remain source-fixture evidence.

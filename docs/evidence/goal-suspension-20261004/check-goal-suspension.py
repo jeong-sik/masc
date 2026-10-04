@@ -51,6 +51,7 @@ if args.typecheck_consumers or 'test_goal_suspension_projection' in (args.suite 
   ('lib/dashboard/dashboard_goals_types_health','dashboard_goals_types_health'),
   ('lib/dashboard/dashboard_goals_types_timeline','dashboard_goals_types_timeline'),
   ('lib/keeper/keeper_turn_task_context','masc__Keeper_turn_task_context'),
+  ('lib/tui_decode_usage','masc__Tui_decode_usage'),
   ('lib/tui_decode','masc__Tui_decode'),
  ]:
   print('consumer typecheck',unit,flush=True);compile_unit(path,unit)

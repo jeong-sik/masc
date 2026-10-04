@@ -14,7 +14,8 @@ let () =
 ;;
 
 let request =
-  A.Grade { title = "Ship the ledger"; metric = Some "tests"; target_value = Some "10" }
+  A.Grade {goal={title="Ship the ledger";metric=Some "tests";target_value=Some "10"};
+    grades=[Option.get (Candle_grade.of_string "medium"), "Connected feature"]}
 ;;
 
 let identity : A.identity =
@@ -555,7 +556,7 @@ let test_invalid_http_then_valid_successor_keeps_both_slots () =
       bool
       "successor grade is accepted"
       true
-      (answer.decision = A.Grade_decided Candle_grade.Medium);
+      (answer.decision = A.Grade_decided (Option.get (Candle_grade.of_string "medium")));
     check string "answer identifies its actual HTTP slot" good_slot answer.trace.slot_id;
     check int "rejected predecessor dispatched once" 1 (F.post_count bad);
     check int "valid successor dispatched once" 1 (F.post_count good);

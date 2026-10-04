@@ -278,6 +278,21 @@ codex = "sol"
 |}
     ]
 
+let test_provider_request_path_survives_unknown_key_validation () =
+  let config field = shared_model ^ Printf.sprintf {|[providers.first]
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid"
+%s = "/v1/messages"
+[first.sol]
+|} field in
+  let valid = parse_config (config "request-path") in
+  Alcotest.(check (option string)) "valid provider request path reaches its decoder"
+    (Some "/v1/messages") (List.hd valid.providers).Runtime_schema.request_path;
+  match Runtime_toml.parse_string (config "request_path") with
+  | Ok _ -> Alcotest.fail "misspelled provider request path was silently accepted"
+  | Error errors -> Alcotest.(check bool) "request path typo identifies its provider field"
+      true (refused_at "providers.first.request_path" errors)
+
 let test_provider_typos_do_not_hide_behind_explicit_bindings () =
   let config field = shared_model ^ Printf.sprintf {|[providers.first]
 protocol = "codex-app-server"
@@ -307,7 +322,9 @@ enabled = true
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
-      , [ Alcotest.test_case "provider typos cannot hide behind explicit bindings" `Quick
+      , [ Alcotest.test_case "provider request path retains its decoder" `Quick
+            test_provider_request_path_survives_unknown_key_validation
+        ; Alcotest.test_case "provider typos cannot hide behind explicit bindings" `Quick
             test_provider_typos_do_not_hide_behind_explicit_bindings
         ; Alcotest.test_case "no provider takes a table another reader owns" `Quick
             test_no_provider_takes_a_table_another_reader_owns

@@ -76,6 +76,15 @@ val edit_table_bool : string -> path:string -> key:string -> value:bool -> strin
     [true]/[false], not a quoted string: a reader that expects a boolean
     refuses ["true"]. *)
 
+type nested_edit_error = Invalid_document | Unreachable_table
+val edit_nested_bool :
+  string -> path:string list -> key:string -> value:bool ->
+  (string, nested_edit_error) result
+(** Set a boolean on a standard, inline, dotted, or absent table. Only its
+    existing inline assignment is reprinted when necessary; every other
+    declaration stays in place. Read back the complete document to verify
+    that precisely the requested typed value changed. *)
+
 val edit_table_float : string -> path:string -> key:string -> value:float -> string
 (** Set a typed float while retaining unrelated lines and comments. The value
     always carries a decimal point or exponent, so a reader that expects a

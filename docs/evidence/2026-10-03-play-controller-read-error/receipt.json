@@ -1,0 +1,9 @@
+{
+  "observed_at": "2026-10-03T04:58:06.085516+00:00",
+  "scope": "source-extracted Play HTML, real Chromium, fixture HTTP responses; not compiled server or production",
+  "source_commit": "6cabdff02973d9575bbcaa003f17ba1d4325323e",
+  "source_sha256": "e91f062474730846fff5e2f6e2bd6d8ac672aebf5e395904e717727b8ea0d201",
+  "unavailable_controls_disabled": true,
+  "recovered_controls_enabled": true,
+  "recovered_input_posts": 1
+}

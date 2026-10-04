@@ -16,3 +16,20 @@ Both typo paths are rejected, valid model-set generates two bindings, and all
 nine shipped provider tables are accepted. restacked-candidate.txt and
 restacked-sources.json record this combined focused scope. No provider startup
 or complete suite execution is implied.
+
+## Current main integration
+
+Historical parser receipts above remain pinned to their original candidates.
+Integration against main `6fc062feee7e33a271e09dc155d9feffee923704` exposed a new
+consumed provider field, `request-path`, missing from the strict allowed-key
+contract. The direct valid-path regression failed before repair with
+`providers.first.request-path: unknown key`. The allowed-key list now includes
+that field; its original typed HTTP-path decoder remains unchanged, and the
+`request_path` typo is still rejected at its exact provider path.
+
+Local focused OCaml 5.5.1 build passed. Namespace 13/13, account declaration
+13/13 and runtime validity 144/144 tests passed (170 total). Account declaration
+used its declared `MASC_TEST_RUNTIME_SEED=config/runtime.toml` fixture; an initial
+manual invocation omitted that variable and failed the seed prerequisite, then
+the correctly configured run passed. These results do not prove provider
+activation, installed runtime, deployment or full regression qualification.

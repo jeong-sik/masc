@@ -6,7 +6,7 @@ import sys
 import threading
 
 import test_tui_keyboard_input as h
-from tui_keyboard_harness import HttpFixtures
+from tui_keyboard_harness import HttpFixtures, HttpResponse
 
 
 TASK = "task-" + "segment-" * 11 + "END"
@@ -25,7 +25,7 @@ def prepare(base):
 
 def fixtures(gate_response_ready: threading.Event) -> HttpFixtures:
     served = h.keeper_runtime_http_fixtures()
-    def gate_settings():
+    def gate_settings() -> HttpResponse:
         gate_response_ready.set()
         return 503, {"error": "설정 읽기 실패 " * 20 + " GATE-END 한글끝"}
     served["/api/v1/dashboard/gate/keeper-settings"] = gate_settings
@@ -55,6 +55,7 @@ def scan(process, fd, output, expected):
     h.drain_until_quiet(process, fd, output)
     seen = set()
     previous = None
+    current = h.screen_text(bytes(output))
     for _ in range(80):
         current = h.screen_text(bytes(output))
         for token in expected:

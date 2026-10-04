@@ -1166,14 +1166,14 @@ let start
     | None -> ()
     | Some not_before ->
       schedule_cooling_retry_wake
-        ~delay:(Float.min Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
+        ~delay:(Float.min (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
           (Float.max 0.0 (not_before -. t.now ())))
   in
   let retry_cooling_observation () =
     (* The cached deadline may already have passed, or a failed projection
        may have lost it. A failed observation retains a positive retry wake
        without interpreting either condition as dispatch permission. *)
-    schedule_cooling_retry_wake ~delay:Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
+    schedule_cooling_retry_wake ~delay:(Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
   in
   (* A transient (non-throttle) failure defers with no cooling time: the
      continuation is immediately claimable again, but the Owner never polls

@@ -1,19 +1,14 @@
 """A real TUI session attaches output accounting to its slow Present samples."""
 import math
 import os
-from pathlib import Path
 import re
 import sys
 import tempfile
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_frame_timing.ml",
-    "bin/masc_tui_frame_timing.mli",
-    "bin/masc_tui_frame_presenter.ml",
-)
+
 
 
 def run(executable: str) -> None:

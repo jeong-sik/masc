@@ -1,13 +1,16 @@
 # Candle Grade 검토 초안 — ASSISTANT PROPOSAL
 
 아래 등급은 **코딩 assistant의 해석 제안**이다. 사람이 매긴 기준 등급,
-모델 측정 결과, 채택된 운영 규칙이 아니다. 기존 20개 사례와 빈
-`human-grades.csv`는 수정하지 않는다. 이 문서는 그 표를 채우라는 요청도 아니다.
+모델 측정 결과, 채택된 운영 규칙이 아니다. 커밋된 20개 사례를 해석한 기록이다.
+측정 당시에는 사람 등급이 입력되지 않았지만, 현재 트리의 별도 사람 기준 파일에는
+결과 공개 뒤 운영자가 지정한 사례 19의 `epic` 등급 한 건이 있다. 아래 표 전체를
+사람 기준으로 채웠다는 뜻은 아니다.
 RFC의 사람 기준 눈금 검증과 합격선 결정은 여전히 미완료다.
 
 ## 먼저 볼 다섯 가지 예
 
-현재 후보 프롬프트의 다섯 등급을 아래처럼 읽자는 제안이다. 예제 수가
+아래 표는 측정 당시 동결한 후보 프롬프트의 다섯 등급을 해석한 기록이다.
+이후 수정한 미측정 후보에는 이 등급 표를 그대로 적용하지 않는다. 예제 수가
 다섯이라는 뜻이며, 다섯 등급 사이의 인접 경계는 네 개다.
 
 | 사례 | 제안 | 약속한 결과와 판정 이유 | 바로 옆 등급과의 경계 |
@@ -92,13 +95,19 @@ RFC의 사람 기준 눈금 검증과 합격선 결정은 여전히 미완료다
 
 ## 출처와 보존 경계
 
-- 해석 대상 프롬프트: [candle_appraiser_grade.md](../../config/prompts/candle_appraiser_grade.md),
-  후보 소스 `0ee4d40910ab0433cc8020c194a104873f7b6f82`.
-  이 초안 작성 시 Grade branch HEAD는 `e3c91e105246addf5fac514226eeb2aaa479e478`다.
-- 읽은 원본: eval 작업트리의
-  `docs/testing/candle-appraiser-calibration-proposal/cases.json` 20개 행.
+- 이 표가 해석한 [측정 당시 동결 Grade 프롬프트](../evidence/2026-09-30-candle-grade-scope-survey/prompts/candle_appraiser_grade.md).
+  SHA-256: `ea0085dc4b0de14f1cd3a61e9edb9ec216c973bb23ca8eb6d9866736c9482a85`.
+  후보 소스는 `0ee4d40910ab0433cc8020c194a104873f7b6f82`이며 당시 branch HEAD는
+  `e3c91e105246addf5fac514226eeb2aaa479e478`다.
+- [커밋된 원본 20개 사례](../evidence/2026-09-30-candle-grade-scope-survey/cases.json).
   SHA-256: `a67cf6aa002cd87032bceee3c6d6a4a5a3aaddf787e721883e18d12445ba1ef2`.
-- 원래 `human-grades.csv`, `README.md`, `proposal.json`, `cases.json`과
-  이미 링크된 위치는 보존한다. `human_grade`, reviewer, 검토 시각은 채우지 않는다.
-- 이 문서의 제안 등급·해설은 모델 입력 corpus와 분리하며, 사람 기준 파일로
-  불러들이지 않는다. 프롬프트·합격선·가격·지급 규칙을 바꾸지 않는다.
+- [수정된 미측정 후보](candle-grade-explicit-outcome-candidate/candle_appraiser_grade.md)는
+  단일 기능의 내재 난도와 정확성·연속성 약속도 등급 근거로 허용한다.
+  위 표와 옛 실행 결과는 이 수정 후보의 측정·검증 결과가 아니다.
+- 현재 트리의 [사람 기준 기록](candle-appraiser-calibration-proposal/human-grades.csv)은
+  `human-reference-19`에 `epic`, 검토자 `operator`, 시각 `2026-09-30T00:00:52Z`를
+  기록한다. 400회 분포를 공개한 뒤 받은 기준점이며 눈가림 평가 라벨은 아니다.
+  나머지 19개 행은 미평가 상태다. 측정 당시 사람 라벨이 없었다는 사실과
+  현재 커밋에 이 기준점이 존재한다는 사실을 구별한다.
+- 이 문서의 제안은 모델 입력 corpus와 분리한다. runtime 프롬프트, 합격선,
+  가격과 지급 규칙을 변경하거나 사람 기준 정확도를 주장하지 않는다.

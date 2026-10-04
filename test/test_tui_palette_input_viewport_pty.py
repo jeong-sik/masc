@@ -1,9 +1,9 @@
 """Long palette filters retain the edited tail and caret across resize."""
 import os
 import sys
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml",)
+
 
 
 def run(executable, no_color=False):

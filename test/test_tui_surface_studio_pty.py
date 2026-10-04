@@ -5,17 +5,17 @@ import json
 import os
 import re
 import sys
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_repositories as _keyboard_repositories
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_render_schedule.ml",
-                  "bin/masc_tui_render_schedule.mli", "bin/masc_tui.ml")
+
 
 def run(executable, no_color=False):
-    fixtures = h.planning_selection_http_fixtures()
-    planning = fixtures[h.PLANNING_PATH][1]
+    fixtures = _keyboard_harness.planning_selection_http_fixtures()
+    planning = fixtures[_keyboard_harness.PLANNING_PATH][1]
     planning["task_backlog"] = {"todo": 11, "claimed": 12, "in_progress": 13,
         "awaiting_verification": 14, "done": 15, "cancelled": 16}
-    _, repositories = h.repositories_fixture()
+    _, repositories = _keyboard_repositories.repositories_fixture()
     repositories["repositories"][0]["status"] = "wire\n\x1b[9D"
     repositories["repositories"].append({**repositories["repositories"][0],
         "id":"next-repo", "name":"next-repo", "local_path":"workspace/next-repo",
@@ -38,7 +38,7 @@ def run(executable, no_color=False):
         "Recover using surface-refresh-recovery-token")
     def read_repositories():
         return (503, {"error": refresh_error}) if refresh_failed else (200, repositories)
-    fixtures[h.REPOSITORIES_PATH] = read_repositories
+    fixtures[_keyboard_repositories.REPOSITORIES_PATH] = read_repositories
     fixtures["/api/v1/runtime/params"] = (200, {"parameters": [
         {"key": "studio.enabled", "current": True, "default": False,
          "has_override": True, "meta": {"description": "Enable the observed feature",
@@ -50,22 +50,22 @@ def run(executable, no_color=False):
     def interact(process, fd, _slave, output, _base):
         nonlocal refresh_failed
         def key(value, needle):
-            return h.send_and_wait(process, fd, output, value, needle)
+            return _keyboard_harness.send_and_wait(process, fd, output, value, needle)
         def capture(name, rows, columns, needle, selected_name=None, *, raw=False):
-            h.resize_and_wait(process, fd, output, rows=rows, columns=columns+1,
-                needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
-                needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=rows, columns=columns+1,
+                needle=needle, controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=rows, columns=columns,
+                needle=needle, controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             if b"wire\n" in frame or b"\x1b[9D" in frame:
                 raise AssertionError("repository status injected a newline or terminal cursor control")
-            if selected_name is not None and not h.keeper_row_selected(selected_name).search(frame):
+            if selected_name is not None and not _keyboard_harness.keeper_row_selected(selected_name).search(frame):
                 raise AssertionError(f"selected repository {selected_name!r} vanished from its table")
             print("STUDIO_CAPTURE="+json.dumps({"suite":"test_tui_surface_studio_pty", "name":name+("-no-color" if no_color else ""),
                 "rows":rows,"columns":columns,"provenance":"CI fixture PTY",
                 "frame_b64":base64.b64encode(frame).decode(),
-                "screen":b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
-            return frame if raw else h.screen_text(frame)
-        h.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
+                "screen":b"\n".join(_keyboard_harness.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
+            return frame if raw else _keyboard_harness.screen_text(frame)
+        _keyboard_harness.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
         key(b":go Work\r",b"plan-alpha-29424")
         wide=capture("work-wide",36,160,b"Goals")
         for needle in ("Goals · measured outcomes".encode(),"Tasks · Backlog:".encode(),
@@ -136,7 +136,7 @@ def run(executable, no_color=False):
             # Check reachability through its advertised extent, then restore it.
             seen = set()
             while True:
-                screen = h.screen_text(bytes(output))
+                screen = _keyboard_harness.screen_text(bytes(output))
                 joined = re.sub(rb"\s+", b"", screen.replace("│".encode(), b""))
                 seen.update(value for value in expected if value in joined)
                 position = re.search(rb"\b(\d+)-(\d+)/(\d+)\b", screen)
@@ -145,15 +145,15 @@ def run(executable, no_color=False):
                 first, last, total = map(int, position.groups())
                 if last >= total:
                     break
-                h.press_and_settle(process, fd, output, b"\x1b[6~")
+                _keyboard_harness.press_and_settle(process, fd, output, b"\x1b[6~")
                 next_position = re.search(rb"\b(\d+)-(\d+)/(\d+)\b",
-                    h.screen_text(bytes(output)))
+                    _keyboard_harness.screen_text(bytes(output)))
                 if next_position is None or int(next_position.group(1)) <= first:
                     raise AssertionError("System selected document stopped before its end")
             if seen != set(expected):
                 raise AssertionError(f"System omitted selected content {set(expected) - seen!r}")
-            h.write_all(fd, output, b"\x1b[H")
-            h.drain_until_quiet(process, fd, output)
+            _keyboard_harness.write_all(fd, output, b"\x1b[H")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
 
         read_selected((b"Currenttrue", b"Defaultfalse", b"Enabletheobservedfeature", b"override"))
         capture("system-short",16,80,b"studio.enabled")
@@ -167,7 +167,7 @@ def run(executable, no_color=False):
                        b'Default"mention_or_thread"', b"override"))
         key(b":go Dashboard\r",b"MASC Dashboard")
         os.write(fd,b"q")
-    h.run_terminal_scenario(executable,description="surface studio"+(" no color" if no_color else ""),
+    _keyboard_harness.run_terminal_scenario(executable,description="surface studio"+(" no color" if no_color else ""),
         interact=interact,http_fixtures=fixtures,workspace="Surface fixture",
         extra_env={"NO_COLOR":"1"} if no_color else None)
 

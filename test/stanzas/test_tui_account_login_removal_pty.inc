@@ -4,8 +4,11 @@
  (deps
   test_tui_account_login_removal_pty.py
   test_tui_account_login_pty.py
-  test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_chat.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_account_login_removal_pty.py} %{dep:../bin/masc_tui.exe})))
 

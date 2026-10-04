@@ -8,12 +8,12 @@
     deployed, because an older build refuses the key it does not know. *)
 
 type payout_policy = private {
-  trivial_milli : int; small_milli : int; medium_milli : int;
-  large_milli : int; epic_milli : int;
+  grades : (Candle_grade.t * int * string) list;
+  distribution : Candle_math.distribution;
   weight_max : int; deduction_rate : int; deduction_floor : int;
 }
 
-val grade_amount_milli : payout_policy -> Candle_grade.t -> int
+val grade_amount_milli : payout_policy -> Candle_grade.t -> int option
 
 type policy = private
   { payout : payout_policy
@@ -36,7 +36,8 @@ type t =
 val of_toml_string : string -> t
 (** [half_life] must be explicitly ["off"] or a positive integer number of
     hours. Missing, unknown or malformed values disable Candle; no default.
-    All payout fields and all five grade amounts are required. The optional
+    All payout fields, a nonempty grade amount table, matching nonblank grade
+    criteria and explicit distribution policies are required. The optional
     [shop.prices_milli] table accepts only canonical catalog ids and
     nonnegative integers. Grade amounts accept [0..max_int], independent of
     the weight range: payout intermediates are exact, while each allocation

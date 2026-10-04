@@ -26,8 +26,8 @@ val package_response : Mcp_protocol.Sampling.create_message_result ->
   Mcp_protocol.Sampling.create_message_result
 (** Remove all callback metadata before exposing a response to a package.
     The original response remains unchanged in host-retained evidence. *)
-(** Reject a reply envelope smaller than two bytes, the encoded size of the
-    smallest JSON error string. This also applies to directly supplied packages. *)
+(** Require the shared [Lane_addon_types.minimum_sampling_reply_bytes] bound
+    for a complete nonempty refusal, including directly supplied packages. *)
 val create :
   store:Lane_addon_store.t -> package:Lane_addon_types.package ->
   instance_id:string -> route:string ->

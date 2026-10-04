@@ -37,6 +37,10 @@ type resources = {
       output separately. A worker reply that fits may still be refused when
       host identity prefixes exceed the same observation envelope. *)
 }
+val sampling_refusal : string
+(** Complete nonempty fallback when a sampling diagnostic exceeds its envelope. *)
+val minimum_sampling_reply_bytes : int
+(** JSON-encoded byte length of [sampling_refusal], shared by manifest and broker admission. *)
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type package = {

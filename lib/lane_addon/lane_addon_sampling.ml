@@ -106,11 +106,8 @@ let bound_refusal ~max_bytes message =
     let refusal = "sampling failed; outcome retained" in
     if json_len refusal <= max_bytes then refusal
     else
-      let compact = "refused" in
-      if json_len compact <= max_bytes then compact
-      else
-        let max_content = max 0 (max_bytes - 2) in
-        String.sub compact 0 (min (String.length compact) max_content)
+      (* Admission guarantees room for this complete fixed refusal. *)
+      Types.sampling_refusal
 
 let validate_response ~max_bytes answer =
   let* bytes = encode_bounded ~max_bytes (S.create_message_result_to_yojson answer) in
@@ -124,8 +121,9 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
   let* () = match package.model_access with
     | Types.Host_sampling -> Ok ()
     | Types.Model_disabled -> Error "package does not declare host sampling" in
-  let* () = if package.resources.max_reply_bytes >= 2 then Ok ()
-    else Error "host sampling requires at least two reply bytes to encode a JSON error string" in
+  let* () = if package.resources.max_reply_bytes >= Types.minimum_sampling_reply_bytes then Ok ()
+    else Error (Printf.sprintf "host sampling requires at least %d reply bytes to encode a nonempty refusal"
+      Types.minimum_sampling_reply_bytes) in
   let* () = if String.trim instance_id<>"" && String.trim route<>"" then Ok ()
     else Error "sampling requires an exact instance and nonblank host route" in
   let retain fields = Eio_unix.run_in_systhread (fun () ->

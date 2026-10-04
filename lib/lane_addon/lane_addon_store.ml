@@ -296,13 +296,22 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
   if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
   else protect (fun () ->
     let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
-    let scan relative ~skip =
+    let open_directory relative = protect (fun () ->
       let path = Filename.concat t.root relative in
       match Fs_compat.exact_path_kind path with
-      | Fs_compat.Exact_missing -> Ok ()
-      | _ ->
-          let handle = Unix.opendir path in
-          Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
+      | Fs_compat.Exact_missing -> Ok None
+      | _ -> Ok (Some (path, Unix.opendir path))) in
+    let journal = open_directory (sampling_outcome_directory instance_id) in
+    let primary = open_directory (sampling_directory instance_id) in
+    let close = function
+      | Ok (Some (_, handle)) -> Unix.closedir handle
+      | Ok None | Error _ -> () in
+    Fun.protect ~finally:(fun () -> close journal; close primary) (fun () ->
+    let scan opened ~skip =
+      match opened with
+      | Error detail -> Error detail
+      | Ok None -> Ok ()
+      | Ok (Some (path, handle)) ->
             let rec next () = match Unix.readdir handle with
               | name when Filename.check_suffix name ".json" && not (skip name) ->
                   let pending_root =
@@ -357,10 +366,21 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
                   next ()
               | _ -> next ()
               | exception End_of_file -> Ok () in
-            next ()) in
-    let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
-    scan (sampling_directory instance_id) ~skip:(fun name ->
-      Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
+            next () in
+    match journal, primary with
+    | Error journal_error, Error primary_error ->
+        Error (journal_error ^ "; " ^ primary_error)
+    | Error detail, Ok None | Ok None, Error detail -> Error detail
+    | Error journal_error, Ok (Some _) ->
+        let* () = scan primary ~skip:(fun _ -> false) in
+        Error journal_error
+    | Ok (Some _), Error primary_error ->
+        let* () = scan journal ~skip:(fun _ -> false) in
+        Error primary_error
+    | Ok _, Ok _ ->
+      let* () = scan journal ~skip:(fun _ -> false) in
+      scan primary ~skip:(fun name ->
+        Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing)))
 let iter_sampling_requests = iter_sampling_requests_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable

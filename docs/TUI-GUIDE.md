@@ -2319,3 +2319,11 @@ includes scope, observed usage,
 reset times and freshness; scrolling reaches rows below the viewport. `p`
 opens the separate Telemetry reading, as do `/metrics` and `/telemetry`.
 A missing report is not a zero balance.
+
+Standalone Lane model settings use the same form as Config → Models. In the
+Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's
+context, output and sampling fields. `J/K` changes order within HTTP or CLI;
+`1` moves to the first position in its group. Runtime detail's `e` opens the
+same form. These settings entries reread the saved source and resolve the full
+runtime ID, including the account. Saving refreshes Runtime, Lane and model
+inventories. `o` in Config → Models still opens the source reading.

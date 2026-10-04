@@ -281,10 +281,23 @@ let test_invalid_is_error () =
   match T.parse ["[models.broken"] with
   | Error _ -> () | Ok _ -> Alcotest.fail "bad source was presented as an empty model list"
 
+let test_exact_runtime_lookup () =
+  let row = row_named (parse sample) "alpha" in
+  let rows = [{row with provider = "account-one"; model = "model.6"};
+              {row with provider = "account-two"; model = "model.6"}] in
+  let selected = T.find_runtime ~runtime_id:"account-two.model.6" rows in
+  check (Alcotest.option int) "exact account and dotted model" (Some 1)
+    (Option.map fst selected);
+  check bool "no prefix guess" true
+    (Option.is_none (T.find_runtime ~runtime_id:"account-two.model" rows));
+  check bool "missing binding stays missing" true
+    (Option.is_none (T.find_runtime ~runtime_id:"account-three.model.6" rows))
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
-    [ ( "accounts", [ Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
+    [ ( "accounts", [ Alcotest.test_case "settings target exact account" `Quick test_exact_runtime_lookup;
+       Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
        Alcotest.test_case "invalid source is visible" `Quick test_invalid_is_error ])
     ; ( "parse"
       , [ Alcotest.test_case "reads both tables" `Quick test_reads_both_tables

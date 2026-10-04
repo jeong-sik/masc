@@ -1186,7 +1186,8 @@ let patch_review_bindings =
   ]
 
 let runtime_detail_bindings =
-  [ b Navigate "j/k" "scroll"
+  [ b Act "e" "model settings"
+  ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
   ; b Navigate "Home/End" "edges"
   ; b Act "Left / Esc" "list"

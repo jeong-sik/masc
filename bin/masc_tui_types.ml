@@ -5234,6 +5234,7 @@ type state = {
      of a provider the file already declares. It holds the text it was opened
      on; the save goes through the pane's preview like [e]. *)
   mutable runtime_model_form: Masc_tui_model_form.t option;
+  mutable runtime_model_jump: string option;
   mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
@@ -5247,10 +5248,7 @@ type state = {
      needed thousands of presses to come back. *)
   mutable config_models_rows: Masc_tui_model_runtime_table.row list;
   mutable config_models_error: string option;
-  (* Which row [e] acts on. The pane cannot write a value itself -- the two
-     columns come from two tables and a writer would have to know which --
-     so [e] hands the file to $EDITOR the way the runtime.toml pane does,
-     positioned at this row's [models.NAME]. *)
+  (* Which exact account/model binding the structured [e] form edits. *)
   mutable config_models_cursor: int;
   mutable runtime_config_view_error: string option;
   (* Absolute source row selected in runtime.toml. The viewport remains
@@ -8206,6 +8204,7 @@ let create_state
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   runtime_model_form = None;
+  runtime_model_jump = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_error = None;

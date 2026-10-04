@@ -101,6 +101,17 @@ def run(binary):
         h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
         h.send_and_wait(process, fd, output, b'?', b'reapply activity')
         h.send_and_wait(process, fd, output, b'\x1b', b'MASC Exact activity')
+        for dismiss in (b'?', b'\x1b'):
+            h.send_and_wait(process, fd, output, b'?', b'reapply activity')
+            h.resize_and_wait(process, fd, output, rows=12, columns=120,
+                              needle=b'terminal too small')
+            os.write(fd, dismiss)
+            h.drain_until_quiet(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=32, columns=120,
+                              needle=b'Current file: On')
+            visible = h.screen_text(bytes(output))
+            assert b'Activity draft: Off' in visible, 'help dismissal closed the activity draft'
+            assert server.previews == 0 and not server.saves, 'compact help dispatched a write'
         h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
         h.send_and_wait(process, fd, output, b' ', b'Current file: On')
         h.drain_until_quiet(process, fd, output)

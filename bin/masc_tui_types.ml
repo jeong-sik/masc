@@ -4706,6 +4706,11 @@ type local_intervention =
   | Retained_after_stop
   | Retained_before_dispatch
 
+type suspended_keeper_input =
+  { ski_queue : Masc_tui_keeper_chat_queue.t
+  ; ski_waiting : (string * string * local_intervention) list
+  }
+
 (* What the slot editor edits: an exact-output lane's declared [slots], or
    [\[runtime\].media_failover]. Both are an ordered list of runtime ids that
    something walks in turn, and neither is a conversation lane. *)
@@ -5066,7 +5071,7 @@ type state = {
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
-  mutable suspended_keeper_inputs: (workspace_input_identity option * Masc_tui_keeper_chat_queue.t) list;
+  mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
@@ -7373,6 +7378,23 @@ let retain_preflight_inputs (state : state) entries =
       end) entries
 ;;
 
+(* Suspension changes workspace ownership, not a prior server stop receipt.
+   Keep real stop reasons; other unsent input needs only explicit local resume. *)
+let suspend_keeper_input state =
+  let waiting = Masc_tui_keeper_chat_queue.waiting state.msg_queued
+    |> List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+      let name = item.request.keeper_name and id = item.request.request_id in
+      let reason = match List.find_opt (fun (held_name, held_id, _) ->
+        held_name = name && held_id = id) state.keeper_interactive_waiting with
+        | Some (_, _, Retained_after_stop) -> Retained_after_stop
+        | Some (_, _, (Awaiting_control _ | Retained_before_dispatch)) | None -> Retained_before_dispatch in
+      name, id, reason) in
+  { ski_queue = state.msg_queued; ski_waiting = waiting }
+
+let restore_suspended_keeper_input state held =
+  state.msg_queued <- held.ski_queue;
+  state.keeper_interactive_waiting <- held.ski_waiting
+
 (* Authority withdrawal drops local request owners, not submitted server work. *)
 let withdraw_keeper_chat_requests (state : state) =
   state.keeper_interactive_waiting <- [];
@@ -7391,19 +7413,6 @@ let withdraw_keeper_chat_requests (state : state) =
 
 let keeper_chat_control_generation state keeper_name =
   Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
-
-(* The first local item owns dispatch order even while it is retained. *)
-let next_authorized_keeper_input state keeper_name =
-  match Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name with
-  | [] -> None
-  | item :: _ ->
-    match List.find_opt (fun (name, id, _) ->
-      name = keeper_name && id = item.request.request_id) state.keeper_interactive_waiting with
-    | Some (_, _, Awaiting_control held)
-      when held.generation = keeper_chat_control_generation state keeper_name ->
-        Some (item, held.target)
-    | Some (_, _, (Awaiting_control _ | Retained_after_stop | Retained_before_dispatch)) -> None
-    | None -> Some (item, None)
 
 (* These messages never paused the server. Explicit local resume authorizes
    their first POST; an actual stop still needs the server's resume receipt. *)
@@ -7932,6 +7941,24 @@ let composing_for_keeper (state : state) keeper_name =
   && composer_is_live state
   && Buffer.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
+
+(* The first local item owns dispatch order even while it is retained. *)
+let next_authorized_keeper_input state keeper_name =
+  match Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name with
+  | [] -> None
+  | item :: _ ->
+    match List.find_opt (fun (name, id, _) ->
+      name = keeper_name && id = item.request.request_id) state.keeper_interactive_waiting with
+    | Some (_, _, Awaiting_control held)
+      when held.generation = keeper_chat_control_generation state keeper_name ->
+        Some (item, held.target)
+    | Some (_, _, (Awaiting_control _ | Retained_after_stop | Retained_before_dispatch)) -> None
+    | None ->
+      let being_recalled = Option.exists (fun editing ->
+        String.equal editing.Masc_tui_keeper_chat_queue.request.keeper_name keeper_name)
+        state.msg_recall_replaces in
+      if composing_for_keeper state keeper_name || being_recalled then None
+      else Some (item, None)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that

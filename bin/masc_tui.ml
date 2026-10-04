@@ -10138,7 +10138,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   (* Submitted server work is not undone here. Unsent admissions and automatic
      continuations lose authorization at this boundary. *)
   if not (Chat_queue.is_empty state.msg_queued) then begin
-    state.suspended_keeper_inputs <- (previous, state.msg_queued) ::
+    state.suspended_keeper_inputs <- (previous, suspend_keeper_input state) ::
       List.remove_assoc previous state.suspended_keeper_inputs;
     report_action state "system"
       "Workspace changed: unsent Keeper inputs retained for their original workspace; resume there to send"
@@ -10444,16 +10444,13 @@ let apply_server_identity_reading state reading =
     let input_workspace = workspace_input_identity_of_server state.server_identity in
     (match List.assoc_opt input_workspace state.suspended_keeper_inputs with
      | None -> ()
-     | Some queue ->
+     | Some held ->
        state.suspended_keeper_inputs <- List.remove_assoc input_workspace
          state.suspended_keeper_inputs;
-       state.msg_queued <- queue;
+       restore_suspended_keeper_input state held;
        List.iter (fun (item : Chat_queue.item) ->
          append_user_history_once ~submitted_at:item.submitted_at state item.request)
-         (Chat_queue.waiting queue);
-       state.keeper_interactive_waiting <- List.map (fun (item : Chat_queue.item) ->
-         item.request.keeper_name, item.request.request_id, Retained_before_dispatch)
-         (Chat_queue.waiting queue);
+         (Chat_queue.waiting state.msg_queued);
        report_action state "system"
          "Retained inputs restored for this workspace; resume a Keeper to send them")
   | Masc_tui_types.Workspace_identity_unread ->

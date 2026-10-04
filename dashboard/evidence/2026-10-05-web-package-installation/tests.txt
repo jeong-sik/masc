@@ -3,10 +3,9 @@
 
 
  Test Files  5 passed (5)
-      Tests  101 passed (101)
-   Start at  05:23:44
-   Duration  5.92s (tests 36%, import 31%, environment 12%, transform 11%, setup 9%)
+      Tests  102 passed (102)
+   Start at  05:39:55
+   Duration  6.49s (tests 37%, import 31%, environment 12%, transform 11%, setup 9%)
 
-    Isolate  5 workers spawned · ~225ms startup each (spawn + environment, per file)
-             at least ~901ms faster with isolate: false — reuses workers across files instead of one per file
-
+    Isolate  5 workers spawned · ~243ms startup each (spawn + environment, per file)
+             at least ~971ms faster with isolate: false — reuses workers across files instead of one per file

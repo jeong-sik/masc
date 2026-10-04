@@ -66,6 +66,25 @@ function fill(screen: Screen) {
   fireEvent.change(screen.getByLabelText(/^binding.enabled \*$/), { target: { value: 'false' } })
 }
 describe('Web package discovery to explicit declaration save', () => {
+  it('retains unsubmitted folder and manifest paths across remount and workspace return', async () => {
+    let screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Install package' }))
+    await screen.findByRole('button', { name: 'Choose Listed package' })
+    input(screen, 'Workspace folder', '/workspace/unfinished folder')
+    input(screen, 'Package manifest path', '/workspace/unfinished/lane.toml')
+    screen.unmount(); screen = render(html`<${LaneAddonsPanel} />`)
+    expect((await screen.findByLabelText('Workspace folder') as HTMLInputElement).value).toBe('/workspace/unfinished folder')
+    expect((screen.getByLabelText('Package manifest path') as HTMLInputElement).value).toBe('/workspace/unfinished/lane.toml')
+    await act(() => workspace('/workspace-b'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Install package' }))
+    expect((await screen.findByLabelText('Workspace folder') as HTMLInputElement).value).toBe('')
+    input(screen, 'Workspace folder', '/workspace-b/separate')
+    await act(() => workspace('/workspace'))
+    expect((await screen.findByLabelText('Workspace folder') as HTMLInputElement).value).toBe('/workspace/unfinished folder')
+    expect((screen.getByLabelText('Package manifest path') as HTMLInputElement).value).toBe('/workspace/unfinished/lane.toml')
+    expect(api.fetchLanePackagePreview).not.toHaveBeenCalled()
+    expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+  })
   it('keeps a failed recheck visible and does not prepare from the known stale preview', async () => {
     const screen = render(html`<${LaneAddonsPanel} />`); await choose(screen); fill(screen)
     api.fetchLanePackagePreview.mockRejectedValueOnce(new Error('manifest missing'))

@@ -5,7 +5,7 @@
   "checks": [
     "folder navigation, catalog metadata/issues and fresh preview through actual API decoders",
     "nested source selection; incomplete numeric text refuses drafting with no write",
-    "input owner survives actual component unmount/remount",
+    "binding and unsubmitted path inputs survive actual component unmount/remount",
     "workspace return preserves inputs but requires fresh preview before drafting",
     "actual styled nested form at mobile width without horizontal overflow",
     "prepared TOML preserves false/zero/named output and independent pre-existing raw draft",

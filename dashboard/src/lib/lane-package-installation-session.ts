@@ -7,7 +7,7 @@ import type { LaneDeclarationSession } from './lane-declaration-sessions'
 
 export type PackageDraft = { preview: LanePackagePreview; schema: BindingSchema; input: BindingInput;
   id: string; runId: string; dirty: boolean; previewAuthority: ExecutionWorkspaceAuthority | null }
-type State = { visible: boolean; catalog: LanePackageCatalog | null; folder: string | null;
+type State = { visible: boolean; catalog: LanePackageCatalog | null; folder: string | null; folderInput: string; manifestInput: string;
   drafts: Map<string, PackageDraft>; selected: string | null;
   phase: 'idle' | 'catalog' | 'preview'; error: string | null }
 const sessions = new Map<string, LanePackageInstallationSession>()
@@ -22,7 +22,7 @@ function syncGuard() {
   else window.removeEventListener('beforeunload', warnUnload)
 }
 export class LanePackageInstallationSession {
-  readonly state = signal<State>({ visible: false, catalog: null, folder: null, drafts: new Map(), selected: null, phase: 'idle', error: null })
+  readonly state = signal<State>({ visible: false, catalog: null, folder: null, folderInput: '', manifestInput: '', drafts: new Map(), selected: null, phase: 'idle', error: null })
   private authority: ExecutionWorkspaceAuthority | null = null
   private request: AbortController | null = null
   private generation = 0
@@ -61,6 +61,9 @@ export class LanePackageInstallationSession {
   browse(directory: string | null, authority: ExecutionWorkspaceAuthority) {
     return this.read('catalog', authority, signal => fetchLanePackageCatalog(directory, signal),
       (catalog, state) => ({ ...state, catalog, folder: catalog.directory }))
+  }
+  editPath(field: 'folderInput' | 'manifestInput', text: string, authority: ExecutionWorkspaceAuthority) {
+    if (this.admits(authority)) this.state.value = { ...this.state.peek(), [field]: text }
   }
   preview(path: string, authority: ExecutionWorkspaceAuthority) {
     if (!this.admits(authority)) return Promise.resolve()

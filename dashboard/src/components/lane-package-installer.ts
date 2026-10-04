@@ -1,5 +1,4 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
 import { TextInput } from './common/input'
 import { ActionButton } from './common/button'
 import { LaneBindingField } from './lane-binding-form'
@@ -14,8 +13,7 @@ export function LanePackageInstaller({ authority, documents, snapshot }: {
 }) {
   const owner = lanePackageInstallationFor(authority, documents.directory)
   const state = owner.state.value
-  const [directory, setDirectory] = useState('')
-  const [manifest, setManifest] = useState('')
+  const { folderInput: directory, manifestInput: manifest } = state
   if (!state.visible) return html`<${ActionButton} onClick=${() => owner.open(authority)}>Install package</${ActionButton}>`
   const busy = state.phase !== 'idle'
   const selectedKey = state.selected
@@ -27,7 +25,7 @@ export function LanePackageInstaller({ authority, documents, snapshot }: {
     ${state.error && html`<p role="alert" class="whitespace-pre-wrap break-words">${state.error}</p>`}
     ${busy && html`<p role="status">${state.phase === 'catalog' ? 'Reading local packages…' : 'Reading package and image state…'}</p>`}
     <div class="flex flex-wrap items-end gap-2"><label class="min-w-0 flex-1">Workspace folder
-      <${TextInput} class="w-full" value=${directory} placeholder=${state.folder ?? 'Workspace root'} onInput=${(event: Event) => setDirectory((event.target as HTMLInputElement).value)} /></label>
+      <${TextInput} class="w-full" value=${directory} placeholder=${state.folder ?? 'Workspace root'} onInput=${(event: Event) => owner.editPath('folderInput', (event.target as HTMLInputElement).value, authority)} /></label>
       <${ActionButton} disabled=${busy} onClick=${() => owner.browse(directory === '' ? null : directory, authority)}>Open folder</${ActionButton}>
       <${ActionButton} disabled=${busy} onClick=${() => owner.browse(state.folder, authority)}>Refresh packages</${ActionButton}>
       ${state.catalog && state.catalog.parent !== null && html`<${ActionButton} disabled=${busy} onClick=${() => owner.browse(state.catalog!.parent, authority)}>Parent folder</${ActionButton}>`}
@@ -45,7 +43,7 @@ export function LanePackageInstaller({ authority, documents, snapshot }: {
           </div>`}
       </li>`)}</ul></div>`}
     <details><summary>Enter a manifest path directly</summary><label class="block">Package manifest path
-      <${TextInput} class="w-full" value=${manifest} onInput=${(event: Event) => setManifest((event.target as HTMLInputElement).value)} /></label>
+      <${TextInput} class="w-full" value=${manifest} onInput=${(event: Event) => owner.editPath('manifestInput', (event.target as HTMLInputElement).value, authority)} /></label>
       <${ActionButton} disabled=${busy || !manifest.trim()} onClick=${() => owner.preview(manifest, authority)}>Read package preview</${ActionButton}></details>
     ${(state.drafts.size > 1 || state.drafts.size > 0 && selectedKey === null) && html`<label class="block">Retained package inputs<select aria-label="Retained package inputs" class="block w-full rounded border p-2 bg-[var(--bg)]"
       value=${selectedKey ?? ''} onChange=${(event: Event) => owner.select((event.target as HTMLSelectElement).value, authority)}>

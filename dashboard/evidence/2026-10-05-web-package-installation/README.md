@@ -16,11 +16,16 @@ claiming raw JSON is a nested field editor.
 
 ## Executed evidence
 
-- `tests.txt`: 101 tests in 5 focused files, including the actual 9 shipped
+- `tests.txt`: 102 tests in 5 focused files, including the actual 9 shipped
   binding schemas, preservation of zero/false/absence, oneOf branch editing,
-  prototype-like keys, stale/failed previews, workspace changes, independent
+  prototype-like keys, stale/failed previews, unsubmitted paths, workspace changes, independent
   raw drafts and explicit save. Existing Add-ons/editor regressions are included.
 - `typecheck.txt`, `lint.txt`: TypeScript and scoped ESLint.
+- `checks.json` records actual command exit codes. Text logs only trim trailing
+  whitespace at EOF; `.txt.gz` files retain the exact raw output bytes.
+- `path-input-before.json/txt`: the new regression failed before fixing two
+  unsubmitted path fields that were lost on remount. The identical test now
+  passes, including workspace isolation, with no preview/save dispatch.
 - `browser-result.json`: actual styled components/session/API in Chromium with
   synthetic HTTP. Seven scenarios, nine recorded Lane API reads and one explicit
   declaration create. Bootstrap dev-token is supplied separately. Zero page

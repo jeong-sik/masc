@@ -3391,7 +3391,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
     start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
   | Remove {provider; revision; login_store} ->
-    view.phase<-Login.Saving; view.notice<-"계정을 지우고 있습니다.";
+    view.phase<-Login.Saving; view.notice<-"선택한 공급자 연결을 지우고 있습니다.";
     let body=`Assoc ["integration_id",`String provider.id;"revision",`String revision] |> Yojson.Safe.to_string in
     start_job (fun () ->
       let outcome=Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/setup/accounts/remove" ~body in

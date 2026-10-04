@@ -5,7 +5,7 @@ import { modelSetupResumeState } from '../lib/model-setup-resume'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { fireEvent, waitFor } from '@testing-library/preact'
+import { act, fireEvent, waitFor } from '@testing-library/preact'
 import { Effect } from 'effect'
 import {
   SettingsSurface,
@@ -37,6 +37,7 @@ import {
   runtimeReservedProviderIdsFixture,
 } from '../lib/runtime-config-receipt.test-fixture'
 
+let settingsSnapshotEpoch = 0
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 const runtimeProviderProtocols = [
   {
@@ -54,8 +55,8 @@ import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
 import { setStoredToken } from '../api/core'
 import type { RuntimeLaneEdit } from '../api/dashboard'
-import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
-import { resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
+import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import { resetRuntimeTomlSessionsForTesting, runtimeTomlSessionFor } from '../lib/runtime-toml-session'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 
 const apiMock = vi.hoisted(() => ({
@@ -480,6 +481,11 @@ describe('SettingsSurface', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    const epoch = `settings-snapshot-${++settingsSnapshotEpoch}`
+    invalidateExecutionSnapshotGeneration(epoch, 0)
+    hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+      status: { project: 'fixture', workspace_root: '/settings/fixture' },
+    } as Parameters<typeof hydrateExecutionSnapshot>[0])
     modelSetupResumeState.value = { kind: 'idle' }
     vi.spyOn(coreApi, 'post').mockResolvedValue({ runtime_ready: true,
       exact_output_authority_available: true, model_setup: { status: 'available' } })
@@ -1974,6 +1980,65 @@ describe('SettingsSurface', () => {
     expect((container.querySelector('[data-testid="fusion-preset-name"]') as HTMLInputElement).value).toBe('trio')
     expect(container.textContent).not.toContain('per_hour_budget')
     expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
+  })
+
+  it('restarts all current Settings readings after authority changes during a post-commit refresh', async () => {
+    function held<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
+    function accept(name: string) {
+      const epoch = `settings-refresh-${name}`
+      invalidateExecutionSnapshotGeneration(epoch, 0)
+      hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+        status: { project: name, workspace_root: `/settings/${name}` },
+      } as Parameters<typeof hydrateExecutionSnapshot>[0])
+    }
+    resetRuntimeTomlSessionsForTesting(); accept('A')
+    const oldDefaults = held<RuntimeDefaultsResponse>(), oldResolved = held<RuntimeResolvedResponse>()
+    const oldProviders = held<DashboardRuntimeProvidersResponse>(), oldSource = held<Awaited<ReturnType<typeof apiMock.fetchRuntimeTomlConfig>>>()
+    const resume = vi.spyOn(coreApi, 'postControlPlane').mockResolvedValue({ runtime_ready: true,
+      exact_output_authority_available: true, model_setup: { status: 'available' } })
+    const config = committedRuntimeTomlConfigFixture({ ok: true, path: MOCK_RUNTIME_PATH, file_name: 'runtime.toml', source_text: '[runtime]\ndefault="rt-a"\n' })
+    apiMock.fetchRuntimeTomlConfig.mockResolvedValue(config)
+    const authority = executionWorkspaceAuthority.peek()!, editor = runtimeTomlSessionFor(authority)
+    await editor.ensure(authority)
+    try {
+      render(html`<${SettingsSurface} />`, container)
+      await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]')!)
+      const select = () => container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement
+      await waitFor(() => expect(select()?.disabled).toBe(false))
+      apiMock.fetchRuntimeDefaults.mockReturnValueOnce(oldDefaults.promise)
+      apiMock.fetchRuntimeResolved.mockReturnValueOnce(oldResolved.promise)
+      apiMock.fetchRuntimeProviders.mockReturnValueOnce(oldProviders.promise)
+      apiMock.fetchRuntimeTomlConfig.mockReturnValueOnce(oldSource.promise)
+      const committed = config.source_text + '# committed\n'
+      await act(async () => { await editor.write(authority, async () => committedRuntimeTomlConfigFixture({ ...config, source_text: committed }), committed) })
+      await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(2))
+      const fresh = makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c', model: 'workspace-B-runtime' },
+        lanes: [{ id: 'only_b', declared: true, runtime_ids: ['rt-c'] }] })
+      apiMock.fetchRuntimeDefaults.mockResolvedValue(makeRuntimeDefaults({ default_runtime_id: 'rt-c' }))
+      apiMock.fetchRuntimeResolved.mockResolvedValue(fresh)
+      apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders())
+      apiMock.fetchRuntimeTomlConfig.mockResolvedValue(committedRuntimeTomlConfigFixture({ ok: true, path: MOCK_RUNTIME_PATH,
+        file_name: 'runtime.toml', source_text: '[runtime.lanes.only_b]\ncandidates=["rt-c"]\n' }))
+      await act(async () => accept('B'))
+      await waitFor(() => { expect(select().disabled).toBe(false); expect(select().value).toBe('rt-c') })
+      await waitFor(() => expect(container.querySelector('[data-testid="runtime-lane-only_b"]')).not.toBeNull())
+      expect(container.querySelector('[data-testid="runtime-lane-only_b-read-only"]')).toBeNull()
+      await act(async () => {
+        oldDefaults.resolve(makeRuntimeDefaults()); oldResolved.resolve(makeRuntimeResolved())
+        oldProviders.resolve(makeRuntimeProviders())
+        oldSource.resolve(committedRuntimeTomlConfigFixture({ ok: true, path: MOCK_RUNTIME_PATH, file_name: 'runtime.toml', source_text: '# retired A' }))
+      })
+      expect(select().value).toBe('rt-c')
+      expect(container.querySelector('[data-testid="runtime-lane-only_b-read-only"]')).toBeNull()
+      await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]')!)
+      await waitFor(() => expect(container.textContent).toContain('workspace-B-runtime'))
+      expect(container.querySelector('[data-testid="runtime-catalog-loading"]')).toBeNull()
+      expect(apiMock.patchRuntimeRouting).not.toHaveBeenCalled()
+    } finally {
+      oldDefaults.resolve(makeRuntimeDefaults()); oldResolved.resolve(makeRuntimeResolved()); oldProviders.resolve(makeRuntimeProviders())
+      oldSource.resolve(committedRuntimeTomlConfigFixture({ ok: true, path: MOCK_RUNTIME_PATH, file_name: 'runtime.toml', source_text: '# retired A' }))
+      render(null, container); resetRuntimeTomlSessionsForTesting(); resume.mockRestore()
+    }
   })
 
   it.each([false, true])('refreshes mounted Settings after its editor unmounts during a save, provider failure=%s', async providerFailure => {

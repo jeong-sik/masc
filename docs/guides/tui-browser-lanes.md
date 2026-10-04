@@ -103,8 +103,8 @@ TOML editing and path migration limits.
 The Web activity editor reads decoded Browser TOML paths directly. Unrelated
 provider names are preserved as data, including names such as `__proto__`.
 Unknown Browser backend/field names and non-boolean activity values are shown
-as errors. Full path and backend-installation validation remains part of the
-server preview before saving.
+as errors. Absolute-path and required-path-pair validation remains part of the
+server preview before saving; it does not check whether an executor is installed.
 
 ## Verification
 

@@ -10,7 +10,7 @@
     "lib/browser_configuration/browser_configuration.ml": "4c971d4ec539fb8ec66ae0fce46c70bd3fa489d348b8508e637a2ae29e6450cd",
     "dashboard/src/api/dashboard-runtime.ts": "32501b022e54a826281bcc4c36b480950178ab3df3884228ae18035a697875f3",
     "dashboard/src/components/lane-inventory-panel.ts": "cb6ed92e9abc95c969d12b175c4f3153938c1a16d74560ff0c3e01b20337b29a",
-    "docs/guides/tui-browser-lanes.md": "cdf560510f094919c3e6e8f0d98ccc07de63297d1f318061a1a287b8d0431199",
+    "docs/guides/tui-browser-lanes.md": "26ab98a750fde9ddcabd85b799f043df30533acc67291fd637012186dc648ac8",
     "dashboard/evidence/2026-10-05-web-browser-activity/fixture.ts": "7fae550945acc26e2e9c14909ba37aac9a381fd62618f523ed1220288410bcf1",
     "dashboard/evidence/2026-10-05-browser-toml-reader/browser-fixture.mjs": "0365d62c5fd277aad00191dbf3cd172b0b285045477b5f97954ca67710a6d55d",
     "dashboard/evidence/2026-10-05-browser-toml-reader/fixture.html": "30c635e07dcf20310c1fb57e88dfeade3937eed3b2beb4916338a1fe1ffec921"

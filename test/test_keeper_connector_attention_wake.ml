@@ -284,6 +284,81 @@ let test_distinct_connector_events_are_not_collapsed () =
       check (list string) "each producer event has one durable row"
         [ "event-1"; "event-2" ] event_ids)
 
+(* #41157: a retained Connector pointer whose attention row is unreadable
+   was classified missing by the heartbeat intake but stayed pending, and
+   the yield paths treated every pending Connector as actionable -- so the
+   same unreadable pointer re-yielded at each tool boundary and the source
+   never completed. The yield paths now drop pointers the attention store
+   does not know, asking the same batched question the intake asks. A
+   pointer whose row exists still preempts; a store that cannot be read
+   keeps every pointer rather than silencing newly arrived readable
+   messages. *)
+let test_missing_connector_pointer_does_not_preempt () =
+  let base_path = Filename.temp_dir "connector-attention-missing" "" in
+  let keeper_name = "conn-keeper" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let item =
+        { (external_attention_item ()) with
+          A.event_id = "evt-present"
+        ; keeper_name
+        }
+      in
+      (match A.record ~base_path item with
+      | `Recorded -> ()
+      | `Duplicate _ -> Alcotest.fail "fixture attention row duplicated"
+      | `Error detail -> Alcotest.failf "fixture attention row failed: %s" detail);
+      let enqueue stimuli keeper =
+        List.iter
+          (fun stimulus ->
+             match
+               Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+                 ~base_path keeper stimulus
+             with
+             | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
+             | other ->
+               Alcotest.failf "durable Connector delivery failed: %s"
+                 (match other with
+                  | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
+                    detail
+                  | _ -> "unexpected result"))
+          stimuli
+      in
+      (* A keeper whose only pending pointer is unreadable: no preemption. *)
+      enqueue [ connector_stimulus ~event_id:"evt-missing" ~arrived_at:1.0 ]
+        "conn-missing-only";
+      check bool
+        "a missing pointer alone does not preempt the source"
+        true
+        (Option.is_none
+           (Masc.Keeper_unified_turn.connector_attention_waiting
+              ~base_path ~keeper_name:"conn-missing-only"
+            |> Result.get_ok));
+      (* The readable pointer's queue lives under the recorded row's keeper. *)
+      enqueue
+        [ connector_stimulus ~event_id:"evt-missing" ~arrived_at:1.0
+        ; connector_stimulus ~event_id:"evt-present" ~arrived_at:2.0
+        ]
+        keeper_name;
+      (match
+         Masc.Keeper_unified_turn.connector_attention_waiting
+           ~base_path ~keeper_name
+         |> Result.get_ok
+       with
+      | Some
+          { Masc.Keeper_agent_run.reason =
+              Masc.Keeper_agent_run.Durable_stimulus_waiting summary } ->
+        (match summary.head with
+         | Some selected ->
+           check string "the readable pointer preempts" "evt-present"
+             selected.Keeper_event_queue.post_id
+         | None -> Alcotest.fail "readable connector lost its preemption head")
+      | Some { Masc.Keeper_agent_run.reason = Masc.Keeper_agent_run.Operation_queued } ->
+        Alcotest.fail "connector preemption was mislabeled as chat"
+      | None -> Alcotest.fail "readable connector did not preempt"));
+;;
+
 let test_external_attention_projects_to_prompt_event () =
   let meta = make_meta "conn-keeper" in
   let item = external_attention_item () in
@@ -346,6 +421,8 @@ let () =
             test_connector_attention_codec_roundtrips
         ; test_case "distinct events are durable without channel debounce" `Quick
             test_distinct_connector_events_are_not_collapsed
+        ; test_case "missing pointer does not preempt; readable still does"
+            `Quick test_missing_connector_pointer_does_not_preempt
         ] )
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick

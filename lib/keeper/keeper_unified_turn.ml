@@ -146,6 +146,47 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
+(* #41157: the heartbeat intake classifies a retained Connector selection
+   whose attention row is unreadable as missing and leaves it pending. The
+   yield paths used to treat every pending Connector as actionable, so the
+   same unreadable pointer re-yielded at each tool boundary and the source
+   never completed. Ask the attention store the same batched question the
+   intake asks -- one scan per probe, never a read per pointer -- and drop
+   the pointers it does not know. A read failure keeps the previous
+   always-ready behavior: the row may still be readable inside the turn,
+   and an unreadable store must not silence newly arrived readable
+   messages. *)
+let drop_missing_connector_pointers ~base_path ~keeper_name (pending : Keeper_event_queue.t) =
+  let event_ids =
+    Keeper_event_queue.to_list pending
+    |> List.filter_map (fun (s : Keeper_event_queue.stimulus) ->
+           match s.Keeper_event_queue.payload with
+           | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
+           | _ -> None)
+  in
+  match event_ids with
+  | [] -> pending
+  | event_ids ->
+    (match
+       Keeper_external_attention.recorded_items_by_event_ids
+         ~base_path ~keeper_name ~event_ids
+     with
+     | Error _ -> pending
+     | Ok recorded ->
+       let known event_id =
+         List.exists
+           (fun (recorded_id, _) -> String.equal recorded_id event_id)
+           recorded
+       in
+       Keeper_event_queue.to_list pending
+       |> List.filter (fun (s : Keeper_event_queue.stimulus) ->
+              match s.Keeper_event_queue.payload with
+              | Keeper_event_queue.Connector_attention { event_id; _ } ->
+                known event_id
+              | _ -> true)
+       |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty)
+;;
+
 let autonomous_yield_request ~base_path ~keeper_name =
   match Keeper_chat_yield_request.request
           ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
@@ -155,6 +196,9 @@ let autonomous_yield_request ~base_path ~keeper_name =
     (match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
      | Error _ as error -> error
      | Ok pending ->
+       let pending =
+         drop_missing_connector_pointers ~base_path ~keeper_name pending
+       in
        let ready =
          Keeper_event_queue.to_list pending
          |> List.filter
@@ -330,6 +374,9 @@ let connector_attention_waiting ~base_path ~keeper_name =
   match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
   | Error _ as error -> error
   | Ok pending ->
+    let pending =
+      drop_missing_connector_pointers ~base_path ~keeper_name pending
+    in
     let request =
       connector_attention_preemption_request ~now:(Time_compat.now ()) pending
     in

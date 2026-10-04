@@ -2,12 +2,7 @@ open Alcotest
 module Mark = Masc_tui_memory_mark
 module Types = Masc_tui_types
 
-(* The ST column on the Memory roster. Five of the six mark modules had a
-   suite named after them and this one did not, so scripts/ci/run-edited-tests
-   selected nothing for an edit here: a changed glyph or a dropped legend row
-   reached main with no scenario run. The sheet case in test_tui_keys reads
-   this module, but it is selected by an edit to the key table, not by an edit
-   to the marks. *)
+
 
 let states =
   [ Types.Memory_ordinary

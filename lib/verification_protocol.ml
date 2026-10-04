@@ -488,14 +488,12 @@ type stalled_subject =
       ; verification_id : string
       ; disposition : stall_disposition
       }
-  | Goal_review of { goal_id : string; request_id : string }
+  | Goal_review of { goal_id : string; request_id : string; disposition : stall_disposition }
 
-(* The disposition the post reports. Only a Task review can have a retry
-   armed; the Goal verifier arms none, so a Goal review carries no
-   disposition and is always [No_retry_armed]. *)
+(* The scheduling owner reports whether this exact review has a retry. *)
 let subject_disposition = function
   | Task_review { disposition; _ } -> disposition
-  | Goal_review _ -> No_retry_armed
+  | Goal_review { disposition; _ } -> disposition
 
 (* The subject's identity as metadata fields. The same list is what a post
    writes and what the repeat check compares, so a post and its lookup
@@ -503,7 +501,7 @@ let subject_disposition = function
 let subject_identity_fields = function
   | Task_review { task_id; verification_id; disposition = _ } ->
     [ ("task_id", task_id); ("verification_id", verification_id) ]
-  | Goal_review { goal_id; request_id } ->
+  | Goal_review { goal_id; request_id; disposition = _ } ->
     [ ("goal_id", goal_id); ("request_id", request_id) ]
 
 let subject_kind = function
@@ -515,12 +513,6 @@ let subject_owner_id = function
   | Task_review { task_id; _ } -> task_id
   | Goal_review { goal_id; _ } -> goal_id
 
-(* The sentence is rendered from the disposition the scheduling owner
-   reported after it acted, so the post cannot say one thing while the lane
-   armed another. A Goal review has no retry to report and names the
-   forward path a Goal has: a Keeper asking again with request_complete.
-   Without new evidence that call keeps the same request, so a review that
-   stops again for the same reason is not posted twice. *)
 (* The gate as the post names it. A reviewed stop knows which evaluator
    runtime it ended on: the last slot the lane tried, because a stop is only
    reached once every slot has failed. A reader deciding whether to wait or
@@ -557,7 +549,11 @@ let stalled_board_content_with_runtime ~subject ~gate ~detail ~evaluator_runtime
       verification_id
       gate
       detail
-  | Goal_review { goal_id; request_id } ->
+  | Goal_review { goal_id; request_id; disposition = Retry_scheduled { delay } } ->
+    Printf.sprintf
+      "Stalled goal %s (request:%s) — %s. gate=%s: %s. The authority retries this unchanged proof request; no resubmission is needed."
+      goal_id request_id (retry_delay_sentence ~now delay) gate detail
+  | Goal_review { goal_id; request_id; disposition = No_retry_armed } ->
     Printf.sprintf
       "Stalled goal %s (request:%s) — no retry armed. gate=%s: %s. The Goal \
        stays verifying. Forward path: a Keeper calls request_complete on \

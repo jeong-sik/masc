@@ -19,6 +19,7 @@ type runtime_route_body =
   | Runtime_route_lane_renamed of string * string
   | Runtime_route_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_route_exact_slot_dropped of Runtime.exact_lane * string
+  | Runtime_route_exact_slot_replaced of Runtime.exact_lane * string * string
   | Runtime_route_exact_slot_moved of
       Runtime.exact_lane * string * Runtime.exact_slot_move
 

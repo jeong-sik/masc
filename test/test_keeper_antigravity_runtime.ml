@@ -445,7 +445,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                              reading :: !input_window_observations)
                       ~hooks
                       ~context:(Agent_core.Context.create ())
-                      ~raw_trace
+                      ~raw_trace:(Some raw_trace)
                       ~on_event:(fun event -> stream_events := event :: !stream_events)
                       ~on_official_client_native_action:
                         (fun ~runtime_id ~official_turn ~identity ~tool_name ->
@@ -574,7 +574,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                                reading :: !input_window_observations)
                         ~hooks
                         ~context:(Agent_core.Context.create ())
-                        ~raw_trace
+                        ~raw_trace:(Some raw_trace)
                         ~sw
                         ~net:(Eio.Stdenv.net env)
                         ()
@@ -606,7 +606,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         | Ok _ | Error _ -> fail "resumed session did not settle" in
                       let prompt_before_gate = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
-                      (match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                      (match Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal:"Resume the approved call"
                           ~official_client_continuation:gate_checkpoint
@@ -626,7 +626,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          increments on later resumes. Fresh starts reset to 1.
                          The final control is a first resume, settled at 73. *)
                       let run_context ?official_client_composed_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
-                        match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                        match Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal ?official_client_composed_context
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
@@ -713,7 +713,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       let before_blank = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
                       let blank_hooks = composed_hooks "   " in
-                      (match Keeper_turn_driver.run_named
+                      (match Keeper_turn_driver.run_named ~raw_trace:None
                           ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal:"A blank effective prompt must not run"
@@ -960,7 +960,7 @@ let test_blank_success_requires_fresh_conversation () =
                 (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
                   let run () =
-                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                    Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path

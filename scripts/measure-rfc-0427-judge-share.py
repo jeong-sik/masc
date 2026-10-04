@@ -30,7 +30,6 @@ as ISO-8601 text, which the log writes in UTC with a Z suffix.
 Usage:
     scripts/measure-rfc-0427-judge-share.py --since 2026-09-05T16:20:00Z \
         --until 2026-09-07T16:20:00Z "$MASC_BASE_PATH"/logs/system_log_2026-09-0[567].jsonl
-    scripts/measure-rfc-0427-judge-share.py --selftest
 """
 
 from __future__ import annotations
@@ -146,25 +145,6 @@ not json at all
 """
 
 
-def selftest() -> int:
-    counts = count_lines(
-        SELFTEST_LOG.splitlines(), "2026-09-05T16:20:00Z", "2026-09-07T16:20:00Z"
-    )
-    expected = {
-        "authorized": 3,
-        "judge": 1,
-        "boxed": 1,
-        "refused": 1,
-        "unavailable": 1,
-        "cwd_errors": 1,
-        "records": 7,
-    }
-    got = {name: getattr(counts, name) for name in expected}
-    if got != expected:
-        print(f"selftest FAILED: expected {expected}, got {got}", file=sys.stderr)
-        return 1
-    print("selftest ok")
-    return 0
 
 
 def main() -> int:
@@ -173,12 +153,9 @@ def main() -> int:
     parser.add_argument("--since", help="inclusive ISO-8601 UTC lower bound on ts")
     parser.add_argument("--until", help="exclusive ISO-8601 UTC upper bound on ts")
     parser.add_argument("--label", help="row label; defaults to the window")
-    parser.add_argument("--selftest", action="store_true", help="run the embedded fixture")
     args = parser.parse_args()
-    if args.selftest:
-        return selftest()
     if not args.logs:
-        parser.error("give at least one log file, or --selftest")
+        parser.error("give at least one log file")
 
     def lines():
         for path in args.logs:

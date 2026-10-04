@@ -2,7 +2,8 @@ type client = Codex | Claude | Antigravity | Muse
 type origin = Configured | Catalog
 (** [Configured]: an account the runtime configuration declares.
     [Catalog]: the client's own entry for adding a new account. *)
-type provider = { id : string; label : string; client : client; origin : origin }
+type provider = { id : string; label : string; client : client; origin : origin;
+  enabled : bool; setup_supported : bool }
 type model = { id : string; label : string; context : int option; tools : bool option }
 
 (** What removing an account changes, as the setup API's removal preview
@@ -19,6 +20,11 @@ type removal =
   | Unremovable of string  (** Why the server will not remove it. *)
 type unverified = { runtime_id : string; code : string }
 type saved =
+  | Saved_durability_unconfirmed of saved
+      (** The configuration is visible; its storage durability is uncertain.
+          Refresh preserves this warning and does not resubmit the save. *)
+  | Saved_lock_release_unconfirmed of saved
+      (** The commit completed, but the writer's lock release was not confirmed. *)
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }
@@ -28,11 +34,15 @@ type saved =
     means the server left selected runtimes it did not call again:
     [not_rechecked] names them and [unverified] lists any that were called and
     declined for usage. Neither is reported as verified. *)
-type list_view = Clients | Accounts of client
+type account_group = { group_id : string; provider_ids : string list; runtime_ids : string list }
+type list_view = Clients | Accounts of client | Account_providers of client * string list
 (** The list opens on [Clients]; choosing one shows [Accounts] of that client:
     a row that adds a new account, then its configured accounts. *)
-type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
-  | Finished of { saved : saved; refresh_failed : bool }
+type activation = Activating | Activation_failed of string
+  | Active of { exact_output_available : bool }
+  (** Saving and owner activation are separate receipts. *)
+type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving | Removing
+  | Finished of { saved : saved; activation : activation; refresh_failed : bool }
       (** [refresh_failed]: the list read after the save did not arrive. *)
   | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
@@ -51,16 +61,20 @@ type t = {
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
   mutable saved_scroll_max : int;
+  mutable saved_runtime_ids : string list;
+  (** Runtime IDs introduced by the saved selection, excluding previously
+      selected routes. Inventory joins these IDs to the configured account. *)
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
   mutable account_emails : account_emails;
+  mutable account_groups : account_group list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry
+type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry
   | Select_existing of provider
       (** Open a configured account's models, including labelled existing connections, without logging in again. *)
   | Start of { provider : provider; existing : bool }
@@ -105,17 +119,37 @@ val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t ->
     cannot be removed. [Error] when the answer is for another provider or does
     not read. *)
 val removed_notice : provider -> string option -> string
-(** What the list says once [provider] is removed, with the login store left
+(** What the list says once the selected provider connection is removed, with the login store left
     on disk. *)
 val save_failed : t -> string -> unit
 val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
 (** Refresh configuration revision and selection after an unsuccessful save,
     retaining the account and selected models for an explicit retry. *)
 val saved : t -> Yojson.Safe.t -> (saved, string) result
-(** Read a save's receipt into [Finished]. A receipt that is neither verified
-    nor a readable usage-limited list of runtimes it selected is an error. *)
+(** Read a save's verification, durability and lock warnings into [Finished].
+    Missing or unknown receipt metadata and unreadable verification lists are errors. *)
+val activating : t -> saved -> unit
+(** Preserve the saved receipt while owner activation is pending. *)
+val activated : t -> saved -> (Yojson.Safe.t, string) result -> bool
+(** Record the owner activation receipt; [true] only when runtime readiness and
+    setup availability are confirmed. Failure keeps an activation-only retry. *)
+val activation_incomplete : t -> bool
+(** A model save whose receipt is pending, a failed save awaiting reconciliation,
+    or a saved receipt whose activation is pending/unconfirmed. Closing retains
+    the view and any request already in flight. Account deletion is separate. *)
+val reopen_saved : requested:string -> t -> t option
+(** Reuse a detached saving or saved view for a matching account/client request. The
+    same object retains its in-flight generation and full saved receipt;
+    [None] means it does not belong to this request or has no save to recover. *)
+val retain_activation : t -> t list -> t list
+(** Retain an incomplete save/activation view without replacing another account's
+    receipt. Repeated closure of the same view keeps one entry. *)
+val take_saved : requested:string -> t list -> t option * t list
+(** Take one matching saved view to reopen, preserving every other receipt. *)
 val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
-(** Re-read the list after a save, keeping what the save published on screen. *)
+(** Re-read the list after a save, keeping what the save published on screen.
+    Reconcile introduced runtime IDs with their explicit inventory provider IDs
+    so account-specific recovery uses the generated configured account. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit
 val models : t -> Yojson.Safe.t -> (unit, string) result
 val selected_account : t -> provider -> Yojson.Safe.t -> (unit, string) result

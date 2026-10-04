@@ -776,10 +776,23 @@ let test_a_refused_walk_is_named_not_walked () =
     Alcotest.(check bool) "and walks nothing" false (says "Walks " rows || says "Lane " rows)
   | Ok _ -> Alcotest.fail "a refused walk reads as a refusal with no candidates"
 
+let test_runtime_configuration_attaches_by_exact_id () =
+  let observed = ref [] in
+  let rows = Band.lines ~prose:(fun x -> [x]) ~fact:(fun x -> [x]) ~safe:Fun.id
+    ~scale:Masc_tui_token_scale.fleet
+    ~runtime_details:(fun id -> observed := id :: !observed;
+      ["Account codex1 · configured context 500000 tokens"])
+    (Ok measured) in
+  Alcotest.(check (list string)) "lookup uses the candidate identity"
+    ["ollama_cloud.deepseek-v4-1-flash"] !observed;
+  Alcotest.(check bool) "account/window is visible" true (says "Account codex1" rows);
+  Alcotest.(check bool) "execution order remains explicit" true (says "Walks first" rows)
+
 let () =
   Alcotest.run "tui_next_request_band"
     [ ( "render"
-      , [ Alcotest.test_case "the band separates settings from the range" `Quick
+      , [ Alcotest.test_case "current account configuration follows exact runtime" `Quick test_runtime_configuration_attaches_by_exact_id
+        ; Alcotest.test_case "the band separates settings from the range" `Quick
             test_the_band_separates_settings_from_the_range
         ; Alcotest.test_case "a pinned figure from another lane names it" `Quick
             test_a_pinned_figure_from_another_lane_names_it

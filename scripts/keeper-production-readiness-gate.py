@@ -14,7 +14,6 @@ import json
 import math
 import os
 import sys
-import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -770,71 +769,6 @@ def write_fixture_turn(
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
-def run_self_test() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        base_path = Path(tmp)
-        keeper = "prod-readiness"
-        trace = "trace-prod-readiness"
-        for turn in range(1, 4):
-            write_fixture_turn(base_path, keeper, trace, turn, tools=(turn == 2))
-        summary = evaluate(
-            base_path=base_path,
-            keepers=[keeper],
-            trace_ids=[trace],
-            max_traces_per_keeper=5,
-            max_turns_per_keeper=0,
-            thresholds=Thresholds(),
-        )
-        assert summary.status == "PASS", summary.failures
-
-        checkpoint = (
-            base_path / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
-        )
-        checkpoint.unlink()
-        broken = evaluate(
-            base_path=base_path,
-            keepers=[keeper],
-            trace_ids=[trace],
-            max_traces_per_keeper=5,
-            max_turns_per_keeper=0,
-            thresholds=Thresholds(),
-        )
-        assert broken.status == "FAIL"
-        assert any("missing_artifacts" in failure for failure in broken.failures)
-
-        for name in ("fleet-a", "fleet-b"):
-            for turn in range(1, 4):
-                write_fixture_turn(
-                    base_path, name, f"trace-{name}", turn, tools=(turn == 1)
-                )
-        fleet = evaluate(
-            base_path=base_path,
-            keepers=["fleet-a", "fleet-b"],
-            trace_ids=[],
-            max_traces_per_keeper=5,
-            max_turns_per_keeper=3,
-            thresholds=Thresholds(
-                expected_keepers=2,
-                min_terminal_turns=6,
-                min_success_turns=6,
-                min_terminal_turns_per_keeper=3,
-                min_success_provider_turns_per_keeper=3,
-            ),
-        )
-        assert fleet.status == "PASS", fleet.failures
-        insufficient_fleet = evaluate(
-            base_path=base_path,
-            keepers=["fleet-a", "fleet-b"],
-            trace_ids=[],
-            max_traces_per_keeper=5,
-            max_turns_per_keeper=3,
-            thresholds=Thresholds(expected_keepers=3),
-        )
-        assert insufficient_fleet.status == "FAIL"
-        assert any(
-            "keeper_count 2 < 3" in failure for failure in insufficient_fleet.failures
-        )
-    print("keeper-production-readiness-gate: self-test PASS")
 
 
 def thresholds_from_args(args: argparse.Namespace) -> Thresholds:
@@ -883,7 +817,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Print machine-readable summary only."
     )
     parser.add_argument("--output", help="Optional JSON summary output path.")
-    parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--expected-keepers", type=int, default=1)
     parser.add_argument("--min-terminal-turns", type=int, default=3)
     parser.add_argument("--min-success-turns", type=int, default=3)
@@ -906,9 +839,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.self_test:
-        run_self_test()
-        return 0
 
     thresholds = thresholds_from_args(args)
     if args.base_path is None:

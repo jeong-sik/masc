@@ -41,7 +41,7 @@ broadcast:{label:'Broadcast',desc:'여러 수신자에게 알림',input:['report
 agent:{label:'에이전트',desc:'결과를 읽고 작업에 사용',input:['insights','report','review','notice'],output:null,port:null,limit:'이 블록은 예시 수신자입니다. 실제 Keeper identity·구독 및 read/ack를 연결해야 합니다.'}
 };
 const $=id=>document.getElementById(id);
-let graph,selected=null,connecting=null,history=[],nextId=1;
+let graph,selected=null,connecting=null,history=[],nextId=1,graphReadGeneration=0;
 const emptySettings=()=>({run_id:'',analysis_id:'',compute_manifest:'',report_manifest:'',prompt:''});
 const copy=value=>JSON.parse(JSON.stringify(value));
 const nodeById=id=>graph.nodes.find(n=>n.id===id);
@@ -50,7 +50,7 @@ const outgoing=id=>graph.edges.filter(e=>e.from===id);
 function message(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
 function remember(){history.push(copy(graph));$('undo').disabled=false;}
 function invalidateDeclarations(){$('declarations').hidden=true;$('declaration-files').replaceChildren();}
-function changed(){connecting=null;$('preview').hidden=true;invalidateDeclarations();render();}
+function changed(){graphReadGeneration++;connecting=null;$('preview').hidden=true;invalidateDeclarations();render();}
 function makeNode(kind,name){let id;do{id='block-'+nextId++;}while(graph?.nodes.some(n=>n.id===id));return {id,kind,name,available:true,...(kind==='source'?{snapshot_path:'',snapshot_source_id:''}:{}),...(['panel','judge','report'].includes(kind)?{installation:{id,model_route:'',instructions:'',max_tokens:null}}:{}),...(kind==='fusion'?{fusion:{topology:'simple',panels:['패널 A','패널 B','패널 C'],judge:'종합 심판'}}:{})};}
 function template(name){return {...templateGraph(name),installation_settings:emptySettings()};}
 function templateGraph(name){
@@ -256,7 +256,16 @@ $('load-template').addEventListener('click',()=>{remember();graph=template($('te
 $('undo').addEventListener('click',()=>{if(!history.length)return;graph=history.pop();selected=null;changed();$('undo').disabled=!history.length;message('이전 조립안으로 되돌렸습니다.');});
 $('export').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(graph,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='masc-lane-composition.json';a.click();URL.revokeObjectURL(url);message('조립안 JSON을 저장했습니다. MASC 설치 TOML이나 실행 결과는 아닙니다.');});
 $('import').addEventListener('click',()=>$('import-file').click());
-$('import-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;try{const result=validate(JSON.parse(await file.text()));remember();graph=result;selected=null;changed();message('조립안 JSON을 불러왔습니다.');}catch(error){message('불러오기 실패: '+error.message,true);}event.target.value='';});
+// Protect edits as soon as typing starts, including fields committed on blur.
+for(const id of ['inspector','install-settings'])$(id).addEventListener('input',()=>{graphReadGeneration++;});
+$('import-file').addEventListener('change',async event=>{
+ const file=event.target.files[0];if(!file)return;
+ const generation=++graphReadGeneration;event.target.value='';
+ let result;
+ try{const text=await file.text();if(generation!==graphReadGeneration)return;result=validate(JSON.parse(text));}
+ catch(error){if(generation===graphReadGeneration)message('불러오기 실패: '+error.message,true);return;}
+ remember();graph=result;selected=null;changed();message('조립안 JSON을 불러왔습니다.');
+});
 $('open-reports').addEventListener('click',()=>$('reports-file').click());
 $('reports-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;const generation=++reportReadGeneration;try{const rows=parseReceivedReports(JSON.parse(await file.text()));if(generation!==reportReadGeneration)return;receivedReports={fileName:file.name,rows};renderReceivedReports();message('보고서 파일을 읽었습니다. 서버 실행·공유·읽음 기록은 만들지 않았습니다.');}catch(error){if(generation===reportReadGeneration)message('보고서 불러오기 실패: '+error.message+(receivedReports?' · 이전 파일의 보고서는 유지됩니다.':''),true);}finally{event.target.value='';}});
 $('clear-reports').addEventListener('click',()=>{reportReadGeneration++;receivedReports=null;renderReceivedReports();message('보고서 파일 보기를 닫았습니다.');});

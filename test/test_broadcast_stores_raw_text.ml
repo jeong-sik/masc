@@ -97,10 +97,37 @@ let test_a_quoted_phrase_keeps_its_quotes () =
       check Alcotest.string "the phrase is intact" content
         delivery.Workspace_broadcast.content)
 
+let test_deferred_passive_notification_preserves_literal_mentions () =
+  with_workspace (fun config ->
+    let request_id = "wmsg-" ^ String.make 32 'd' in
+    let content = "Proof evidence cites @beta literally" in
+    let calls = ref 0 in
+    let previous = Workspace_broadcast.For_testing.replace_on_broadcast_mention
+      (fun _ -> incr calls; Workspace_broadcast.Accepted) in
+    Fun.protect ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous) (fun () ->
+      let publish mode id = Workspace_broadcast.broadcast_once ~fleet_delivery:mode
+        ~request_id:id config ~from_agent:"verifier_exact" ~content in
+      let accept = function Ok value -> value | Error error -> Alcotest.fail (Workspace_broadcast.broadcast_error_to_string error) in
+      let first = accept (publish Workspace_broadcast.Deferred_passive_fleet request_id) in
+      let again = accept (publish Workspace_broadcast.Deferred_passive_fleet request_id) in
+      check Alcotest.int "same authoritative row on replay" first.seq again.seq;
+      check (Alcotest.option Alcotest.string) "literal mention is not a command target" None first.mention;
+      check Alcotest.bool "receipt remains passive" true (again.mention_delivery=Workspace_broadcast.Passive);
+      check Alcotest.int "no synchronous mention/fanout handler" 0 !calls;
+      check Alcotest.string "exact original text persists" content (stored_content config ~delivery:first);
+      check Alcotest.bool "ordinary Deferred mode still rejects mention-bearing text" true
+        (Result.is_error (publish Workspace_broadcast.Deferred_fleet ("wmsg-" ^ String.make 32 'e')));
+      let active_id = "wmsg-" ^ String.make 32 'f' in
+      ignore (accept (publish Workspace_broadcast.Immediate_fleet active_id));
+      check Alcotest.bool "active mention row cannot be replayed as a passive notification" true
+        (Result.is_error (publish Workspace_broadcast.Deferred_passive_fleet active_id))))
+
 let () =
   Alcotest.run "broadcast-stores-raw-text"
     [ ( "raw text"
-      , [ Alcotest.test_case "the delivery carries what was written" `Quick
+      , [ Alcotest.test_case "durable passive notifications preserve literal mentions" `Quick
+            test_deferred_passive_notification_preserves_literal_mentions
+        ; Alcotest.test_case "the delivery carries what was written" `Quick
             test_delivery_carries_what_was_written
         ; Alcotest.test_case "the durable row carries what was written" `Quick
             test_durable_row_carries_what_was_written

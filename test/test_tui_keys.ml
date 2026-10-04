@@ -403,7 +403,7 @@ let test_lanes_footer_opens_standalone_runs () =
        One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
        and "A:add-ons" as separate items reading as separate destinations,
        and the dispatch had always been one arm. *)
-    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:providers  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:models  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -3038,10 +3038,10 @@ let test_code_search_count_tracks_fetched_source () =
   load "large.ml" (Array.init 20_000 (fun index ->
     [((if index mod 2 = 0 then "needle" else "other"), "")]));
   Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
-  let first_reading = !code_search_count_memo in
+  let first_reading = !Masc_tui_surface_search.code_search_count_memo in
   Alcotest.(check (option int)) "repaint keeps the count" (Some 10_000) (count "needle");
   Alcotest.(check bool) "repaint reuses the settled reading" true
-    (first_reading == !code_search_count_memo);
+    (first_reading == !Masc_tui_surface_search.code_search_count_memo);
   Alcotest.(check (option int)) "query change recounts" (Some 0) (count "absent");
   load "large.ml" [|[("needle", "")]|];
   Alcotest.(check (option int)) "same-path replacement recounts" (Some 1) (count "needle");

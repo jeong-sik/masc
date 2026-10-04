@@ -136,13 +136,13 @@ let tool_help_description dispatch ctx name =
 let () = test "keeper_tool_help_uses_descriptor_projection" (fun () ->
   let ctx = make_test_ctx () in
   let public_description =
-    tool_help_description Tool_misc.dispatch ctx "masc_board_post"
+    tool_help_description (Tool_misc.dispatch ~lane_access:Lane_addon_sources.Unauthenticated) ctx "masc_board_post"
   in
   let keeper_ctx =
     { ctx with help_schemas = Keeper_tool_descriptor.model_visible_schemas () }
   in
   let keeper_description =
-    tool_help_description Tool_misc.dispatch keeper_ctx "masc_board_post"
+    tool_help_description (Tool_misc.dispatch ~lane_access:Lane_addon_sources.Unauthenticated) keeper_ctx "masc_board_post"
   in
   assert (str_contains public_description "MASC internal board");
   assert (String.equal keeper_description "Create a new board post.");

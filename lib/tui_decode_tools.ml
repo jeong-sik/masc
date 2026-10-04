@@ -113,11 +113,11 @@ type effective_tool_surface =
       ets_unavailable_skill_names : configured_skill_name_unavailable list;
       ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
-      ets_tool_surface_bytes : int;
-      ets_skill_tool_surface_bytes : int;
+      ets_tool_surface_bytes : int option;
+      ets_skill_tool_surface_bytes : int option;
       ets_skill_discovery_bytes : int;
       ets_skill_eager_body_bytes : int;
-      ets_skill_body_bytes : int;
+      ets_skill_body_bytes : int option;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
     }
@@ -363,13 +363,11 @@ let decode_effective_tool_surface json =
           decode_effective_skill_profile
           skill_profiles_json
       in
-      let* tool_surface_bytes = optional_int_field json "tool_surface_bytes" in
-      let ets_tool_surface_bytes = Option.value ~default:0 tool_surface_bytes in
+      let* ets_tool_surface_bytes =
+        optional_int_field json "tool_surface_bytes"
+      in
       let* ets_skill_tool_surface_bytes =
         optional_int_field json "skill_tool_surface_bytes"
-      in
-      let ets_skill_tool_surface_bytes =
-        Option.value ~default:0 ets_skill_tool_surface_bytes
       in
       let* ets_skill_discovery_bytes =
         required_int_field json "skill_discovery_bytes"
@@ -377,8 +375,9 @@ let decode_effective_tool_surface json =
       let* ets_skill_eager_body_bytes =
         required_int_field json "skill_eager_body_bytes"
       in
-      let* skill_body_bytes = optional_int_field json "skill_body_bytes" in
-      let ets_skill_body_bytes = Option.value ~default:0 skill_body_bytes in
+      let* ets_skill_body_bytes =
+        optional_int_field json "skill_body_bytes"
+      in
       let* tools_json = required_list_field json "tools" in
       let* ets_tools =
         decode_list "effective_keeper_surface.tools" decode_effective_tool

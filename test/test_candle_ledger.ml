@@ -120,11 +120,11 @@ let append_raw base_path text =
    current producer floors deductions and gives equal remainders to the first
    name, but that must not rewrite or make these stored facts unreadable. *)
 let stored_rounded_payment =
-  {|{"kind":"paid","at":"2026-09-29T06:00:00Z","goal_id":"past-rounded","request_id":"request-rounded","verification_run_id":"verified-rounded","grade":"small","total_milli":2001,"grade_trace":{"run_id":"grade-rounded","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-rounded","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":30,"coefficient":700,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":2001,"amount_milli":1401}]}|}
+  {|{"kind":"paid","distribution":{"share_rounding":"largest_remainder","remainder_tie_break":"name_ascending","deduction_rounding":"down"},"unallocated_milli":0,"at":"2026-09-29T06:00:00Z","goal_id":"past-rounded","request_id":"request-rounded","verification_run_id":"verified-rounded","grade":"small","total_milli":2001,"grade_trace":{"run_id":"grade-rounded","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-rounded","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":30,"coefficient":700,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":2001,"amount_milli":1401}]}|}
 ;;
 
 let stored_tied_payment =
-  {|{"kind":"paid","at":"2026-09-29T06:00:00Z","goal_id":"past-tied","request_id":"request-tied","verification_run_id":"verified-tied","grade":"trivial","total_milli":1000,"grade_trace":{"run_id":"grade-tied","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}},{"task_id":"task-b","relation":"related","trace":{"run_id":"relation-b","slot_id":"slot-relation"}},{"task_id":"task-c","relation":"related","trace":{"run_id":"relation-c","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-tied","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":0,"coefficient":1000,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-b","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-c","weight":1,"share_milli":334,"amount_milli":334}]}|}
+  {|{"kind":"paid","distribution":{"share_rounding":"largest_remainder","remainder_tie_break":"name_ascending","deduction_rounding":"down"},"unallocated_milli":0,"at":"2026-09-29T06:00:00Z","goal_id":"past-tied","request_id":"request-tied","verification_run_id":"verified-tied","grade":"trivial","total_milli":1000,"grade_trace":{"run_id":"grade-tied","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}},{"task_id":"task-b","relation":"related","trace":{"run_id":"relation-b","slot_id":"slot-relation"}},{"task_id":"task-c","relation":"related","trace":{"run_id":"relation-c","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-tied","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":0,"coefficient":1000,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-b","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-c","weight":1,"share_milli":334,"amount_milli":334}]}|}
 ;;
 
 let payment_of_event (row : E.t) =
@@ -211,7 +211,7 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
     receipts;
   let rounded = payment_of_event (List.hd receipts) in
   let current =
-    Candle_payment.make
+    Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
       ~identity:{ rounded.identity with goal_id = "new-current" }
       ~grade:rounded.grade ~total_milli:rounded.total_milli
       ~grade_trace:rounded.grade_trace ~relations:rounded.relations
@@ -521,11 +521,82 @@ let test_a_lock_taken_between_the_read_and_the_append_is_reported () =
   Alcotest.(check string) "the file is untouched" before (file_text base_path)
 ;;
 
+(* The exact Item HTTP seed must replay through the production ledger and
+   wallet, not merely decode as JSON. It represents synthetic spending credit. *)
+let test_item_http_seed_replays_current_contract () =
+  with_base_path @@ fun base_path ->
+  let fixture name = In_channel.with_open_bin
+      (Filename.concat "fixtures/item-http" name) In_channel.input_all in
+  let policy = match Candle_config.of_toml_string (fixture "candle.toml") with
+    | Candle_config.Enabled policy -> policy
+    | Candle_config.Off -> Alcotest.fail "Item fixture policy is absent"
+    | Candle_config.Disabled {reason} -> Alcotest.fail reason in
+  let bytes = fixture "restart-credit.jsonl" ^ fixture "paid-credit.jsonl" in
+  append_raw base_path bytes;
+  let view = read_ok base_path in
+  let events = Candle_ledger.events view in
+  let balance = balance_of_view view in
+  Alcotest.(check int) "free-purchase fixture retains 100 milli" 100
+    (Candle_balance.balance balance ~keeper:"item-runtime-probe");
+  Alcotest.(check int) "paid-purchase fixture retains 700 milli" 700
+    (Candle_balance.balance balance ~keeper:"item-paid-probe");
+  List.iter (fun (event : E.t) -> match event.body with
+    | E.Paid payment ->
+      Alcotest.(check int) "synthetic payout amount matches fixture policy"
+        (Option.get (Candle_config.grade_amount_milli policy.payout payment.grade)) payment.total_milli
+    | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
+    | E.Unattributed _ | E.Payout_failed _ | E.Purchased _ | E.Equipped _ -> ()) events;
+  (match Candle_ledger.recover_at_start ~base_path with
+   | Ok recovered -> Alcotest.(check bool) "restart retains synthetic provenance"
+       true (Candle_ledger.events recovered = events)
+   | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error));
+  Alcotest.(check string) "replay leaves seed byte-identical" bytes (file_text base_path)
+;;
+
+let test_item_acceptance_seed_contract () =
+  with_base_path @@ fun base_path ->
+  let fixture name = In_channel.with_open_bin
+      (Filename.concat "fixtures/item-http" name) In_channel.input_all in
+  let policy = match Candle_config.of_toml_string (fixture "candle.toml") with
+    | Candle_config.Enabled policy -> policy
+    | Candle_config.Off -> Alcotest.fail "Item fixture must enable Candle"
+    | Candle_config.Disabled {reason} -> Alcotest.fail reason in
+  Alcotest.(check bool) "fixture balances do not decay" true
+    (policy.half_life = Candle_decay.Off);
+  let seed = fixture "restart-credit.jsonl" in
+  append_raw base_path seed;
+  let events = Candle_ledger.events (read_ok base_path) in
+  let balance = Candle_balance.of_events ~at:(at "2026-10-01T00:00:00Z") events
+      |> Result.map_error Candle_balance.error_to_string |> ok_or_fail in
+  Alcotest.(check int) "free-purchase Keeper seed" 100
+    (Candle_balance.balance balance ~keeper:"item-runtime-probe");
+  List.iter (fun (event : E.t) -> match event.body with
+    | E.Paid payment ->
+        Alcotest.(check int) "synthetic payout matches the fixture policy"
+          (Option.get (Candle_config.grade_amount_milli policy.payout payment.grade))
+          payment.total_milli
+    | _ -> ()) events;
+  (* Seed receipts alone must not bypass the same production admission rules. *)
+  let incomplete_base = Filename.concat base_path "incomplete" in
+  Unix.mkdir incomplete_base 0o700;
+  let payments = String.split_on_char '\n' seed |> List.filter (fun line ->
+      line <> "" && Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "kind") = `String "paid") in
+  append_raw incomplete_base (String.concat "\n" payments ^ "\n");
+  match Candle_ledger.read ~base_path:incomplete_base with
+  | Error (Candle_ledger.Row_rejected _) -> ()
+  | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error)
+  | Ok _ -> Alcotest.fail "synthetic Paid rows were accepted without payout provenance"
+;;
+
 let () =
   Alcotest.run
     "candle_ledger"
     [ ( "read"
-      , [ Alcotest.test_case "a missing file is an empty ledger" `Quick
+      , [ Alcotest.test_case "Item HTTP seed replays current payout and policy contract" `Quick
+            test_item_http_seed_replays_current_contract
+        ; Alcotest.test_case "Item acceptance seeds satisfy current Candle contract" `Quick
+            test_item_acceptance_seed_contract
+        ; Alcotest.test_case "a missing file is an empty ledger" `Quick
             test_a_missing_file_is_an_empty_ledger
         ; Alcotest.test_case "stored credits survive changed rounding; new appends validate" `Quick
             test_stored_payments_replay_but_new_appends_require_current_arithmetic

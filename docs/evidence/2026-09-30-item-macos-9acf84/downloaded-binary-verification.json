@@ -1,0 +1,25 @@
+{
+  "source_sha": "9acf84d67685af7e958fa08903c6ac722feae228",
+  "platform": "macos-arm64",
+  "artifact_id": 11081241355,
+  "sha256": {
+    "deployment_preflight_helper.exe": "deadd030f0e0e662f661c1e2a12c1463193186c54ecfb689ef6ed1e10dfa952d",
+    "main_eio.exe": "0f59a743e43833730e90aeab6d1c7443ea1f78fae0908fabd6c9135bfa7a6758",
+    "masc_browser_host.exe": "3ac10a7874964ba3df68300ee041cffa821b4a7ee4d10c9454b2434c2447ace9",
+    "masc_tui.exe": "19ad663ddb3f657958795e099a38305b1ebff9d44d629b4cac5c0e91b56d31c8"
+  },
+  "identity_commands": {
+    "main_eio.exe": {
+      "argument": "build-commit",
+      "exit_code": 0,
+      "stdout": "9acf84d67685af7e958fa08903c6ac722feae228"
+    },
+    "masc_tui.exe": {
+      "argument": "--build-commit",
+      "exit_code": 0,
+      "stdout": "9acf84d67685af7e958fa08903c6ac722feae228"
+    }
+  },
+  "scope": "Downloaded CI bytes verified on operator Mac; identity commands only, no server startup, TUI screen, installation or rollout",
+  "passed": true
+}

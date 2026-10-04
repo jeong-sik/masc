@@ -156,6 +156,21 @@ let workspace_identity_of_refresh ~local_base_path reading =
     else Workspace_identity_mismatch { local_base_path; server_base_path }
 ;;
 
+(* A Broadcast retry belongs to the verified workspace store, not to the
+   TCP port that happened to serve it. Include the server's resolved MASC
+   root because two stores under one base path cannot share a request ID. *)
+let broadcast_workspace_scope ~local_base_path identity =
+  match identity with
+  | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
+    let local = canonical_path local_base_path in
+    let server = canonical_path reading.sid_base_path in
+    let root = canonical_path reading.sid_masc_root in
+    if local <> "" && String.equal local server && root <> ""
+    then Some (Yojson.Safe.to_string (`List [`String server; `String root]))
+    else None
+  | Some _ | None -> None
+;;
+
 (* Retained input belongs to the complete observed server workspace. Local
    match/mismatch is a permission classification, not a durable input key. *)
 let workspace_input_identity_of_server = function
@@ -1719,6 +1734,7 @@ type runtime_mode =
 type runtime_lane_pick =
   | Pick_conversation_lane of string
   | Pick_exact_lane of Standalone_lane.t
+  | Pick_exact_lane_replacement of Standalone_lane.t * string * Tui_decode.exact_slot_group
   | Pick_new_lane of string
   | Pick_media_failover
       (* Appends to [\[runtime\].media_failover]. The route takes its whole
@@ -1730,7 +1746,7 @@ type runtime_lane_pick =
 
 let runtime_lane_pick_name = function
   | Pick_conversation_lane lane | Pick_new_lane lane -> lane
-  | Pick_exact_lane lane -> Standalone_lane.to_id lane
+  | Pick_exact_lane lane | Pick_exact_lane_replacement (lane, _, _) -> Standalone_lane.to_id lane
   | Pick_media_failover -> "[runtime].media_failover"
   | Pick_route_default -> "[runtime].default"
 ;;
@@ -1787,10 +1803,12 @@ type runtime_lane_notice =
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
+  | Lane_write_confirmed
       (* A key that would write, pressed while the previous write is out. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
+  | Lane_write_confirmed -> "Saved · current candidate order reloaded"
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
@@ -2518,6 +2536,18 @@ type identity_login_request = {
   ilr_keeper: string;
   ilr_provider: string;
   ilr_generation: int;
+}
+
+(* Login-completion expectation, held across a transient authority loss.
+   Where [identity_login_started] is the consent the pane presents, this is
+   only what the tick polls on: the workspace that admitted the login and
+   which Keeper/provider is still waiting. No URL is carried, so an old
+   consent is never resurrected, and the expectation alone cannot attach
+   anyone to anything. *)
+type identity_login_expectation = {
+  ile_origin: Tui_decode.server_identity;
+  ile_keeper: string;
+  ile_provider: string;
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -3358,28 +3388,48 @@ type memory_state =
   | Memory_read_error
 
 let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let librarian_failed =
+    match k.mkh_librarian.mlh_state with
+    | Some (Masc.Tui_decode_memory_health.Pass_stopped _
+           | Masc.Tui_decode_memory_health.Pass_raised _) -> true
+    | Some (Masc.Tui_decode_memory_health.Pass_off
+           | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
+           | Masc.Tui_decode_memory_health.Pass_drained
+           | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+           | Masc.Tui_decode_memory_health.Pass_not_committed)
+    | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
-    && k.mkh_librarian_failures > 0
+    && librarian_failed
     && not k.mkh_source_snapshot_present
   then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
   then Memory_source_only
   else if not k.mkh_snapshot_present
   then Memory_no_current
-  else if k.mkh_librarian_failures > 0
+  else if librarian_failed
   then Memory_degraded
   else if
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.Masc.Tui_decode_memory_health.ma_code
+        then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
   then Memory_warning
   else Memory_ordinary
+
+let current_memory_starving_count (snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot) =
+  if snapshot.mhs_refused_keepers <> [] then None
+  else Some (List.fold_left (fun count keeper ->
+    match memory_state keeper with
+    | Memory_starving -> count + 1
+    | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
+    | Memory_source_only | Memory_read_error -> count) 0 snapshot.mhs_keepers)
 
 let memory_state_label = function
   | Memory_ordinary -> "ok"
@@ -4793,6 +4843,12 @@ type task_goal_links_reading =
   | Goal_links_read_failed of string
   | Goal_links_read of (string, string list) Hashtbl.t
 
+type runtime_catalog_reading =
+  | Runtime_catalog_unread
+  | Runtime_catalog_loading
+  | Runtime_catalog_read
+  | Runtime_catalog_failed of string
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5201,11 +5257,18 @@ type state = {
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
+  (* Opaque workspace epoch shared by non-ticket detail loaders. *)
+  mutable detail_read_authority: unit ref;
+  (* Navigation intent only: never a retained Keeper row or read authority. *)
+  mutable detail_focus_recovery: (Tui_decode.server_identity * string * keeper_detail_tab) option;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
+  (* A visible first log read must resume even before it has any result. *)
+  mutable keeper_sandbox_logs_requested: string option;
+  mutable keeper_sandbox_logs_origin: Tui_decode.server_identity option;
   (* The container-log read, which is its own read: the operator opens the
      Sandbox tab, waits for its status, and presses o/l later. Its start lives
      with the request rather than beside it, so an in-flight log read cannot
@@ -5238,6 +5301,7 @@ type state = {
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
+  mutable identity_login_expectations: identity_login_expectation list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -5376,7 +5440,8 @@ type state = {
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
-  mutable runtime_catalog_error: string option;
+  mutable runtime_catalog_generation: int;
+  mutable runtime_catalog_reading: runtime_catalog_reading;
   (* Lazy loads for the two detail panes; the id names which row the answer
      belongs to so a stale load is discarded, not drawn under another item.
      [None] doubles as "in flight" right after entry resets it. *)
@@ -5711,6 +5776,7 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
+  mutable connector_unbind_offer_origin: Tui_decode.server_identity option;
   (* The offer after a pause or shutdown, while it waits for its one key.
      Separate from the unbind-all arm: that arm answers [U], and on the
      Keeper list [U] is the runtime picker. *)
@@ -5747,6 +5813,8 @@ type state = {
      Held until the write settles, so a refused write leaves the cursor on the
      row the operator pressed. *)
   mutable runtime_lane_cursor_after_write: int option;
+  mutable runtime_lane_replacement_selection:
+    (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
@@ -6202,10 +6270,115 @@ type state = {
   refresh_interval: float;
 }
 
+(* Pending reads and post-action offers belong to the workspace that admitted
+   them. A successful health response with missing paths is still unread;
+   only comparable paths can confirm that an origin has been replaced. *)
+let server_authority_ready state =
+  match state.server_identity with
+  | Some identity ->
+      identity.Tui_decode.sid_state_ready <> Some false
+      && not (String.equal identity.sid_base_path "")
+      && not (String.equal identity.sid_masc_root "")
+  | None -> false
+
+(* The one definition of "same workspace" used to admit a held expectation
+   back into the poll after authority is restored. Same answer as the screen
+   itself uses, so the pane never polls across a workspace change it would
+   refuse to display. *)
+let identity_expectation_workspace_matches ~(origin : Tui_decode.server_identity) state =
+  match state.server_identity with
+  | None -> false
+  | Some current ->
+      String.equal (canonical_path origin.sid_base_path)
+        (canonical_path current.sid_base_path)
+      && String.equal (canonical_path origin.sid_masc_root)
+           (canonical_path current.sid_masc_root)
+
+let identity_expectations_for_keeper (state : state) keeper_name =
+  List.filter
+    (fun expectation -> String.equal expectation.ile_keeper keeper_name)
+    state.identity_login_expectations
+
+let remember_identity_login_expectation (state : state) expectation =
+  (* One expectation per (Keeper, provider). Replaying the same login keeps
+     the newest one; everything else stays held. *)
+  state.identity_login_expectations <-
+    List.filter
+      (fun held ->
+        not
+          (String.equal held.ile_keeper expectation.ile_keeper
+          && String.equal held.ile_provider expectation.ile_provider))
+      state.identity_login_expectations;
+  state.identity_login_expectations <-
+    expectation :: state.identity_login_expectations
+
+let reconcile_detail_intent_origins (state : state) reading =
+  match reading with
+  | Error _ -> ()
+  | Ok (current : Tui_decode.server_identity) ->
+      if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
+        let belongs (candidate : Tui_decode.server_identity) =
+          String.equal (canonical_path candidate.sid_base_path)
+            (canonical_path current.sid_base_path)
+          && String.equal (canonical_path candidate.sid_masc_root)
+               (canonical_path current.sid_masc_root)
+        in
+        (* Expectations survive a workspace change only if they belong to the
+           workspace the read just confirmed. Compared against [current]
+           directly — [state.server_identity] is still the previous identity
+           here, and leaning on that update order would invert the filter. *)
+        state.identity_login_expectations <-
+          List.filter
+            (fun expectation ->
+              belongs expectation.ile_origin)
+            state.identity_login_expectations;
+        let foreign = function
+          | None -> false
+          | Some (origin : Tui_decode.server_identity) ->
+              not (String.equal (canonical_path origin.sid_base_path)
+                     (canonical_path current.sid_base_path)
+                   && String.equal (canonical_path origin.sid_masc_root)
+                        (canonical_path current.sid_masc_root))
+        in
+        (match state.detail_focus_recovery with
+         | Some (origin, _, _) when foreign (Some origin) -> state.detail_focus_recovery <- None
+         | Some _ | None -> ());
+        if foreign state.connector_unbind_offer_origin then begin
+          state.connector_unbind_offer_pending <- [];
+          state.connector_unbind_offer_origin <- None
+        end;
+        if foreign state.keeper_sandbox_logs_origin then begin
+          state.keeper_sandbox_logs_requested <- None;
+          state.keeper_sandbox_logs_origin <- None
+        end
+      end
+
+
+(* Keeper/provider keys do not include a workspace. Authority withdrawal must
+   retire both queued responses and consent already presented by that origin. *)
+let withdraw_identity_readings (state : state) =
+  state.identity_login_requests <- [];
+  state.identity_logins <- [];
+  state.identity_view <- None;
+  state.identity_view_error <- None;
+  state.identity_attempt_error <- None;
+  state.identity_app_form <- None;
+  state.github_identity_view <- None;
+  state.github_identity_view_error <- None
+
 let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)
     state.identity_logins
+
+(* A recovered provider read may still be pending browser consent. Continue
+   the existing cadence without resurrecting the withdrawn consent URL. *)
+let identity_login_pending_for_keeper (state : state) keeper_name =
+  server_authority_ready state
+  && List.exists (fun expectation ->
+       String.equal expectation.ile_keeper keeper_name
+       && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
+       state.identity_login_expectations
 
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
@@ -6238,6 +6411,16 @@ let finish_identity_login_request (state : state) request =
   else false
 
 let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  (* An operator-initiated stop (restart, forget) ends the login for good, so
+     its completion expectation is retired too. A transient authority loss
+     never routes through here -- that is exactly the case the expectation
+     exists to survive. *)
+  state.identity_login_expectations <-
+    List.filter
+      (fun expectation ->
+        not (String.equal expectation.ile_keeper keeper_name
+             && String.equal expectation.ile_provider provider_id))
+      state.identity_login_expectations;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6248,15 +6431,32 @@ let forget_identity_login (state : state) ~keeper_name ~provider_id =
 let remember_identity_login (state : state) login =
   forget_identity_login state ~keeper_name:login.ils_keeper
     ~provider_id:login.ils_provider;
-  state.identity_logins <- state.identity_logins @ [login]
+  state.identity_logins <- state.identity_logins @ [login];
+  (match state.server_identity with
+   | Some origin when server_authority_ready state ->
+       remember_identity_login_expectation state
+         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider }
+   | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_login_expectations <- List.filter
+    (fun expectation ->
+      not (String.equal expectation.ile_keeper keeper_name
+           && identity_provider_attached ~providers ~provider_id:expectation.ile_provider))
+    state.identity_login_expectations;
   state.identity_logins <-
     List.filter
       (fun login ->
         not (String.equal login.ils_keeper keeper_name
              && identity_login_landed ~providers ~login))
       state.identity_logins
+
+(* A workspace rework rerun keeps the workspace but ends every login it had
+   admitted, so every expectation retires with it. Nothing here runs for a
+   transient authority loss — that path must keep the expectations so the
+   recovery tick can reopen the poll for logins still being completed. *)
+let retire_identity_login_expectations (state : state) =
+  state.identity_login_expectations <- []
 
 let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
@@ -7362,6 +7562,13 @@ let pending_detail_read (state : state) ~tab ~keeper =
     (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
     state.detail_reads
 
+(* The tick may reopen a provider read only after the old response settles and
+   the same workspace confirms the waiting Keeper's login. The expectation
+   carries no consent URL or authorization; it only keeps the read alive. *)
+let identity_login_recovery_poll_ready (state : state) keeper_name =
+  identity_login_pending_for_keeper state keeper_name
+  && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
+
 let detail_read_started state ~tab ~keeper =
   Option.map (fun request -> request.drr_started_ns)
     (pending_detail_read state ~tab ~keeper)
@@ -7409,6 +7616,39 @@ let detail_read_waiting state ~tab ~keeper =
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
+
+let remember_keeper_detail_focus state =
+  match state.detail_focus_recovery, state.view, state.workspace_identity,
+        state.server_identity, selected_keeper state with
+  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
+    when state.detail_tab <> Detail_items ->
+      state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
+  | _ -> ()
+
+let restore_keeper_detail_focus state =
+  match state.detail_focus_recovery with
+  | None -> false
+  | Some _ when state.view <> Keepers Keeper_detail && state.view <> Keepers Keeper_list ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (_, _, tab) when state.detail_tab <> tab ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (origin, name, tab)
+    when state.workspace_identity = Workspace_identity_match
+      && state.local_workspace = Local_workspace_read
+      && Option.is_none state.keepers_error
+      && server_workspace_matches ~expected:(Some origin)
+           (match state.server_identity with Some value -> Ok value | None -> Error "unread") ->
+      state.detail_focus_recovery <- None;
+      (match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name name) state.keepers with
+       | None -> false
+       | Some cursor ->
+           state.keeper_cursor <- cursor;
+           state.detail_tab <- tab;
+           state.view <- Keepers Keeper_detail;
+           true)
+  | Some _ -> false
 
 let keeper_detail_target_matches state keeper_name =
   match selected_keeper state with
@@ -7942,11 +8182,15 @@ let create_state
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
+  detail_read_authority = ref ();
+  detail_focus_recovery = None;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_requested = None;
+  keeper_sandbox_logs_origin = None;
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
@@ -7959,6 +8203,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_logins = [];
+  identity_login_expectations = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;
@@ -8016,7 +8261,8 @@ let create_state
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
-  runtime_catalog_error = None;
+  runtime_catalog_generation = 0;
+  runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = None;
   task_history = None;
   verification_evidence = None;
@@ -8203,6 +8449,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
+  connector_unbind_offer_origin = None;
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;
@@ -8217,6 +8464,7 @@ let create_state
   runtime_lane_name_draft = None;
   runtime_lane_remove_armed = None;
   runtime_lane_cursor_after_write = None;
+  runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
@@ -9705,8 +9953,8 @@ type runtime_picker_projection = {
   rlp_selected_row : int option;
       (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
   rlp_total : int;
-      (* The catalogue before the filter: zero is an unread catalogue, not an
-         empty match. *)
+      (* Eligible catalogue size before the text filter. *)
+  rlp_catalog_reading : runtime_catalog_reading;
   rlp_summary : string;
       (* The header's count and filter, from [Masc_tui_pick_list.summary]. *)
   rlp_filter : string option;
@@ -9720,15 +9968,38 @@ let runtime_picker_page = 3
 (* The text a runtime's picker row draws before its notes, made terminal
    safe here, and the text the typed filter matches: the operator filters by
    exactly what they read. *)
+let format_context_tokens tokens =
+  if tokens >= 1_000_000 then
+    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
+    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
+  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
+  else Printf.sprintf "%d" tokens
+
+let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
+  let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
+      runtime.Tui_decode.ro_declared_reasoning_effort in
+  Masc.Tui_terminal_text.sanitize_terminal_text
+    (Printf.sprintf "%s %s · %s · %s context · %s"
+       runtime.Tui_decode.ro_model effort runtime.Tui_decode.ro_provider_id
+       (format_context_tokens runtime.Tui_decode.ro_effective_max_context) runtime.Tui_decode.ro_id)
+
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =
   Masc.Tui_terminal_text.sanitize_terminal_text
     (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
        runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
 
-(* The picker opens on the first row with no filter, and closing it drops
-   both. *)
+let runtime_picker_label_for = function
+  | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> runtime_model_picker_label
+  | _ -> runtime_picker_label
+
+(* The picker opens on the first row. Exact lanes start typing a filter
+   immediately; the other pickers wait for [/]. Closing drops both. *)
 let open_runtime_lane_pick (state : state) pick =
-  state.runtime_lane_pick <- Some (pick, Masc_tui_pick_list.closed)
+  let list = match pick with
+    | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
+      Masc_tui_pick_list.type_text Masc_tui_pick_list.closed ""
+    | _ -> Masc_tui_pick_list.closed in
+  state.runtime_lane_pick <- Some (pick, list)
 
 (* A conversation lane's candidates as the runtime surface last resolved
    them. *)
@@ -9759,7 +10030,7 @@ let swap_candidates order i j =
    is an append the server applies to the declared order, never a write of
    this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
-  | Pick_exact_lane lane ->
+  | Pick_exact_lane lane | Pick_exact_lane_replacement (lane, _, _) ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
@@ -9796,6 +10067,7 @@ let lane_picker_existing_slots (state : state) = function
    front of its row, and Enter on it sends nothing. *)
 type runtime_pick_refusal =
   | No_output_schema_channel
+  | Wrong_candidate_group
 
 type runtime_pick_availability =
   | Pick_available
@@ -9803,9 +10075,11 @@ type runtime_pick_availability =
 
 let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
   match pick, runtime.Tui_decode.ro_exact_slot_group with
-  | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
+  | Pick_exact_lane_replacement (_, _, group), actual when group <> actual ->
+    Pick_refused Wrong_candidate_group
+  | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Tui_decode.Exact_output_unsupported ->
     Pick_refused No_output_schema_channel
-  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
+  | (Pick_exact_lane _ | Pick_exact_lane_replacement _), (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
     , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
@@ -9816,12 +10090,15 @@ let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
    any other until Enter refused it. *)
 let runtime_pick_refusal_tag = function
   | No_output_schema_channel -> "no output schema"
+  | Wrong_candidate_group -> "different candidate group"
 
 (* The sentence Enter on a refused row draws. *)
 let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   match refusal with
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+  | Wrong_candidate_group ->
+    "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
 
 (* The picker's whole list, ordered so the candidate a lane actually needs is
    at the top, with the ids it already holds. Computed in both the key handler
@@ -9842,21 +10119,38 @@ let runtime_picker_rows (state : state) pick =
   let lands runtime =
     match runtime_pick_availability pick runtime with
     | Pick_available -> true
-    | Pick_refused No_output_schema_channel -> false
+    | Pick_refused _ -> false
   in
   let landing, refused =
     List.partition lands
       (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
   in
-  ( already, providers, landing @ refused )
+  let rows = match pick, state.runtime_catalog_reading with
+    | Pick_exact_lane_replacement _, Runtime_catalog_read ->
+        landing |> List.filter (fun runtime ->
+          not (List.mem runtime.Tui_decode.ro_id already))
+    | Pick_exact_lane_replacement _,
+      (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _) -> []
+    | _ -> landing @ refused in
+  ( already, providers, rows )
 
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
 let runtime_picker_empty_note picker =
-  if picker.rlp_total = 0 then "  (runtime catalogue unread)"
-  else
-    Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
+  match picker.rlp_catalog_reading with
+  | Runtime_catalog_unread -> "  (runtime catalogue unread)"
+  | Runtime_catalog_loading -> "  (runtime catalogue loading)"
+  | Runtime_catalog_failed detail ->
+      "  (runtime catalogue read failed: "
+      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
+  | Runtime_catalog_read ->
+      if picker.rlp_total = 0 then
+        match picker.rlp_pick with
+        | Pick_exact_lane_replacement _ -> "  (no eligible replacement in this candidate group)"
+        | _ -> "  (runtime catalogue is empty)"
+      else
+        Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
 
 (* The keys the picker's header names, around the verb its Enter carries.
    While the filter is typed, letters are the filter's, so the header names
@@ -9864,19 +10158,43 @@ let runtime_picker_empty_note picker =
 let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
-let runtime_picker_projection (state : state) =
+let runtime_exact_picker_page (state : state) ~terminal_rows =
+  match state.view, state.slot_editor with
+  | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
+    let extra =
+      (if Option.is_some state.lanes_action_error then 1 else 0)
+      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + List.length (runtime_lane_stale_lines state)
+      + (match state.runtime_lane_write with Lane_write_idle -> 0 | _ -> 1) in
+    (* Two lines per model, after the frame, search, selected ID and keys. *)
+    max 1 ((surface_body_rows state ~terminal_rows - 10 - extra) / 2)
+  | _ -> runtime_picker_page
+
+let runtime_model_picker_title (runtime : Tui_decode.runtime_option) =
+  let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
+      runtime.Tui_decode.ro_declared_reasoning_effort in
+  Masc.Tui_terminal_text.sanitize_terminal_text
+    (Printf.sprintf "%s %s" runtime.Tui_decode.ro_model effort)
+
+let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
   Option.map (fun (pick, list) ->
     let already, providers, catalog = runtime_picker_rows state pick in
     let view =
-      Masc_tui_pick_list.view ~page:runtime_picker_page
-        ~window:Masc_tui_pick_list.Opens_at_cursor ~label:runtime_picker_label
+      Masc_tui_pick_list.view ~page
+        ~window:Masc_tui_pick_list.Opens_at_cursor ~label:(runtime_picker_label_for pick)
         catalog list
     in
     { rlp_lane = runtime_lane_pick_name pick; rlp_pick = pick; rlp_already = already;
       rlp_providers = providers; rlp_choices = view.Masc_tui_pick_list.rows;
       rlp_selected_row = view.Masc_tui_pick_list.selected_row;
       rlp_total = view.Masc_tui_pick_list.total;
-      rlp_summary = Masc_tui_pick_list.summary view;
+      rlp_catalog_reading = state.runtime_catalog_reading;
+      rlp_summary = Masc_tui_pick_list.summary view ^
+        (match state.runtime_catalog_reading with
+         | Runtime_catalog_loading -> " · refreshing catalogue"
+         | Runtime_catalog_failed detail ->
+             " · catalogue read failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+         | Runtime_catalog_unread | Runtime_catalog_read -> "");
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
 
@@ -9918,7 +10236,7 @@ let runtime_lane_write_busy (state : state) =
    later has to say which side it is on. *)
 let runtime_lane_pick_sends_whole_order = function
   | Pick_conversation_lane _ | Pick_media_failover -> true
-  | Pick_exact_lane _ | Pick_new_lane _ | Pick_route_default -> false
+  | Pick_exact_lane _ | Pick_exact_lane_replacement _ | Pick_new_lane _ | Pick_route_default -> false
 
 let runtime_lane_candidate_write_refusal (state : state) =
   if runtime_lane_write_busy state
@@ -9967,10 +10285,10 @@ let runtime_lane_list_reread (state : state) ~list ~generation result =
     state.runtime_lane_write <- Lane_write_idle;
     (match result with
      | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
-     | Ok () -> ());
+     | Ok () -> state.runtime_lane_notice <- Some Lane_write_confirmed);
     (match state.runtime_lane_notice with
      | Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Some (Lane_write_refused _) | None -> ())
+     | Some (Lane_write_refused _ | Lane_write_confirmed) | None -> ())
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
@@ -10048,11 +10366,13 @@ let plan_runtime_lane_edit (state : state) = function
                   "%s is a runtime, not a declared lane; there is no table to remove"
                   lane))
         | Rename_lane, _ ->
-          (* The name is the routing key, so the writer changes the table and
-             every reference in one write. Nothing to check here beyond having
-             a lane under the cursor: the file decides whether the lane is
-             declared as its own table and whether the new name is free. *)
-          Open_lane_rename_field lane
+          if runtime_lane_write_busy state then
+            Refuse_lane_edit Lane_write_pending
+          else
+            (* The name is the routing key, so the writer changes the table and
+               every reference in one write. The file decides whether the lane
+               is declared as its own table and whether the new name is free. *)
+            Open_lane_rename_field lane
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->
@@ -10176,10 +10496,12 @@ let navigate_slot_editor state move =
 
 type slot_edit =
   | Drop_slot
+  | First_slot
   | Move_slot of runtime_lane_move
 
 let slot_edit_of_key = function
   | "x" -> Some Drop_slot
+  | "1" -> Some First_slot
   | "J" -> Some (Move_slot Move_down)
   | "K" -> Some (Move_slot Move_up)
   | _ -> None
@@ -10192,6 +10514,7 @@ let slot_edit_of_key = function
    between would be overwritten by an order built from it. *)
 type slot_write_request =
   | Drop_declared_slot
+  | First_declared_slot
   | Move_declared_slot of runtime_lane_move
   | Write_route_order of string list
       (* [\[runtime\].media_failover] has no per-entry action on the routing
@@ -10233,6 +10556,11 @@ let plan_slot_edit (state : state) edit =
            Refuse_slot_edit notice
          | true, None | false, (Some _ | None) ->
          match target, edit with
+         | Exact_lane_slots _, First_slot ->
+           Send_slot_write { target; slot; request = First_declared_slot }
+         | Media_failover_slots, First_slot ->
+           Send_slot_write { target; slot;
+             request = Write_route_order (slot :: List.filteri (fun index _ -> index <> cursor) order) }
          | Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip
               for edits that can land. *)
@@ -10361,13 +10689,6 @@ let runtime_pick_min_column_cells = 24
    because the width calculation below measures the same string the renderer
    draws; a format that changed in one place and not the other would put the
    row back over the frame. *)
-let format_context_tokens tokens =
-  if tokens >= 1_000_000 then
-    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
-    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
-  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
-  else Printf.sprintf "%d" tokens
-
 (* What the row says after the two columns. [rpf_warn] asks the renderer for
    the warning colour; the text is the same either way, and the width below
    counts it either way. *)
@@ -10757,7 +11078,10 @@ let runtime_surface_listing_chrome ~cols state =
        | Some { se_target = Media_failover_slots; _ } ->
          Some (List.length (slot_editor_rows state))
        | Some { se_target = Exact_lane_slots _; _ } | None -> None)
-    ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
+    ~picker_rows:(Option.map (fun picker ->
+      List.length picker.rlp_choices * (match picker.rlp_pick with
+        | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
+        | _ -> 1))
       (runtime_picker_projection state))
     ()
 

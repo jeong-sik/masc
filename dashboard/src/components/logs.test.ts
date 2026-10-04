@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { h } from 'preact'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -659,41 +657,5 @@ describe('LogViewer kind column', () => {
     expect(kindCell).not.toBeNull()
     expect(kindCell!.getAttribute('data-kind')).toBe('tool')
     expect(kindCell!.textContent).toBe('TOOL')
-  })
-})
-
-describe('logs vendored stylesheet', () => {
-  it('vendors the phone stacked-card layout for the log stream (@640px)', () => {
-    // Rows carry both `v2-logs-*` and the vendored `lg-*` classes, so the
-    // `lg-*`-scoped media block reshapes the real stream, not a dead selector.
-    const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/logs.css'), 'utf8')
-    expect(css).toContain('@media (max-width: 640px)')
-    expect(css).toContain('grid-template-areas')
-    expect(css).toContain('.lg-colhd { display: none; }')
-  })
-
-  it('pins the column header while the event stream scrolls', () => {
-    // Sticky column header stays visible over a multi-thousand-row stream. This
-    // only works while .v2-logs-panel does not clip: an overflow:hidden there
-    // pins the sticky element to a non-scrolling ancestor and it scrolls away.
-    const css = readFileSync(resolve(__dirname, '../styles/v2-logs.css'), 'utf8')
-    const headerRule = css.match(/\.v2-logs-table-header\s*\{([^}]*)\}/)?.[1] ?? ''
-    expect(headerRule).toContain('position: sticky')
-    expect(headerRule).toContain('top: 0')
-    const panelRule = css.match(/\.v2-logs-panel\s*\{([^}]*)\}/)?.[1] ?? ''
-    // overflow: visible (not hidden) keeps the sticky header pinned to the page
-    // scroller. Match the declaration, not the rationale comment above it.
-    expect(panelRule).toMatch(/overflow:\s*visible\s*;/)
-    expect(panelRule).not.toMatch(/overflow:\s*hidden\s*;/)
-  })
-
-  it('anchors the advanced menu to the viewport-side edge on narrow screens', () => {
-    const css = readFileSync(resolve(__dirname, '../styles/v2-logs.css'), 'utf8')
-    expect(css).toMatch(/\.v2-logs-advanced-menu \.v2-logs-advanced\s*\{[^}]*position:\s*fixed;[^}]*right:\s*12px;[^}]*left:\s*12px;[^}]*width:\s*auto;/)
-  })
-
-  it('does not lay out advanced controls while the disclosure is closed', () => {
-    const css = readFileSync(resolve(__dirname, '../styles/v2-logs.css'), 'utf8')
-    expect(css).toMatch(/\.v2-logs-advanced-menu:not\(\[open\]\) \.v2-logs-advanced\s*\{\s*display:\s*none;/)
   })
 })

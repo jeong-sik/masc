@@ -30,6 +30,7 @@ import {
   type MemoryOsFact,
   type MemoryOsFactCategory,
   type MemoryOsFactCategoryTag,
+  memoryOsFactCategoryToken,
   type TurnBlock,
   type TurnInputComponent,
   type TurnInputComponentId,
@@ -220,9 +221,7 @@ export interface FactCategoryMeta {
   readonly glyph: string
   readonly color: string
 }
-// Exhaustive switch over MemoryOsFactCategory. A new arm added to the OCaml
-// `category` sum (and its TS mirror) forces a compile error here via the
-// `never` guard — no `_ -> default` swallow, no silent miscolour.
+// Familiar categories have dedicated styles; dynamic names are shown verbatim.
 export function factCategoryMeta(category: MemoryOsFactCategory): FactCategoryMeta {
   const tag = category.tag
   switch (tag) {
@@ -242,6 +241,8 @@ export function factCategoryMeta(category: MemoryOsFactCategory): FactCategoryMe
       return { lbl: '검증된 접근', glyph: '✓', color: 'var(--status-ok)' }
     case 'lesson':
       return { lbl: '교훈', glyph: '★', color: 'var(--volt-strong)' }
+    case 'custom':
+      return { lbl: category.name, glyph: '◇', color: 'var(--text-dim)' }
   }
   const _exhaustive: never = tag
   return _exhaustive
@@ -295,7 +296,7 @@ export function storeRowMatches(row: StoreRow, filter: StoreFilter): boolean {
     case 'delta':
       return row.delta !== null
     case 'category':
-      return row.fact.category.tag === filter.tag
+      return memoryOsFactCategoryToken(row.fact.category) === filter.tag
   }
   const _exhaustive: never = filter
   return _exhaustive
@@ -623,7 +624,7 @@ function StoreFilters({
       ${cats.length > 1
         ? cats.map(c => {
           const meta = factCategoryMeta(c)
-          const tag = c.tag
+          const tag = memoryOsFactCategoryToken(c)
           const on = active.kind === 'category' && active.tag === tag
           return html`<button key=${tag} class=${`mem-filter ${on ? 'on' : ''}`} onClick=${() => onPick({ kind: 'category', tag })}>${meta.glyph} ${meta.lbl}</button>`
         })
@@ -635,7 +636,7 @@ function StoreFilters({
 }
 
 function factTag(fact: MemoryOsFact): string {
-  return fact.category.tag
+  return memoryOsFactCategoryToken(fact.category)
 }
 
 function OneKeeperMemoryReal({
@@ -654,7 +655,7 @@ function OneKeeperMemoryReal({
   const seen = new Set<MemoryOsFactCategoryTag>()
   const cats: MemoryOsFactCategory[] = []
   for (const row of storeRows) {
-    const tag = row.fact.category.tag
+    const tag = memoryOsFactCategoryToken(row.fact.category)
     if (!seen.has(tag)) {
       seen.add(tag)
       cats.push(row.fact.category)
@@ -750,7 +751,7 @@ interface AggregateMemoryRow {
   readonly recentFacts: readonly MemoryOsFact[]
 }
 
-// Tally facts by the closed typed category tag.
+// Tally facts by their category name, including dynamic topics.
 function tallyFactCategories(facts: readonly MemoryOsFact[]): readonly AggregateCategoryCount[] {
   const byTag = new Map<string, AggregateCategoryCount>()
   for (const fact of facts) {
@@ -771,7 +772,7 @@ function mergeAggregateCategoryCounts(
   const byTag = new Map<string, AggregateCategoryCount>()
   for (const row of rows) {
     for (const entry of row.categoryCounts) {
-      const tag = entry.category.tag
+      const tag = memoryOsFactCategoryToken(entry.category)
       const existing = byTag.get(tag)
       byTag.set(tag, existing
         ? { category: existing.category, count: existing.count + entry.count }
@@ -953,7 +954,7 @@ function AggregateMemoryReal({
             <div class="mem-kinds-dist">
               ${categoryTotals.map(entry => {
                 const meta = factCategoryMeta(entry.category)
-                const tag = entry.category.tag
+                const tag = memoryOsFactCategoryToken(entry.category)
                 return html`
                   <div key=${tag} class="mem-kd-row">
                     <span class="mem-kind" style=${{ color: meta.color, borderColor: meta.color }}>${meta.glyph} ${meta.lbl}</span>

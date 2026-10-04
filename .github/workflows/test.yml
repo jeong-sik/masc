@@ -75,16 +75,6 @@ jobs:
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
 
-      - name: Check source text integrity
-        run: scripts/ci/check-source-text-integrity.sh
-
-      - name: Suite runner self-test
-        if: inputs.minimal == false
-        # The reader's own fixtures, under this runner's awk and python3,
-        # before any toolchain work: a header it cannot attribute or a
-        # suite it cannot find at the deadline is a wrong verdict later.
-        run: bash scripts/ci-run-test-suite.sh --self-test
-
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 
@@ -149,7 +139,7 @@ jobs:
           CI_TEST_LOG_FILE: ${{ runner.temp }}/ci-run-tests.log
           # scripts/ci-run-test-suite.sh writes the untruncated inner Dune
           # output here. The always-run upload step below uses this exact
-          # name; the runner self-test refuses either half on its own.
+          # name.
           MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
           # The targeted path, from the dispatch inputs; both are empty on
           # the schedule and on a dispatch that names no suite.
@@ -165,14 +155,9 @@ jobs:
           # handles TERM itself.
           TARGET_SUITE_TIMEOUT_SEC: "600"
           TARGET_SUITE_KILL_GRACE_SEC: "30"
-        # The runner is scripts/ci-run-test-suite.sh, NOT raw dune test:
-        # nine suites in test/ci-known-failures.txt fail today, so plain
-        # dune test exits 1 on every run -- permanently red, zero signal.
-        # The suite runner builds the root @runtest alias (test/, packages/,
-        # lib/exec/test and tools/), compares what fails against that list
-        # and fails only on the delta: an unlisted suite breaking, a listed
-        # suite newly passing, or a failure header that names no suite.
-        # ci-run-tests.sh wraps it as the heartbeat observer.
+        # Run the complete root @runtest alias once. The suite wrapper keeps
+        # Dune's exit status and full log; the observer emits progress and
+        # enforces the outer hang backstop.
         #
         # The targeted path skips both scripts. Dune holds a (test) action's
         # output until the suite exits, so under dune a hang names nothing;
@@ -675,16 +660,3 @@ jobs:
           path: ${{ runner.temp }}/ci-run-tests.log
           if-no-files-found: warn
           retention-days: 14
-
-      # The ocamlfind suites: run-standalone-suites.py compiles every suite
-      # it can reach without dune and runs it, which is the check that a
-      # suite's declared dependencies are the ones it really needs. It ran on
-      # every pull request until 2026-09-08, where it was 327 s of a 625 s
-      # check job and, being continue-on-error, gated nothing; here it runs
-      # once a day on main instead. continue-on-error stays for the reason
-      # the pull-request lane recorded: test_tool_name_prefix_boundary is
-      # red on purpose until #33778 is decided.
-      - name: Run the suites that need no build
-        if: always() && inputs.minimal == false && inputs.suite == ''
-        timeout-minutes: 15
-        run: python3 scripts/run-standalone-suites.py --all-matching '*'

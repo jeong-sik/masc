@@ -43,8 +43,6 @@ usage, error, checkpoint, or tool-schema facade chains.
 
 ## Enforcement
 
-- `scripts/check-agent-core-boundary.sh` rejects reverse package dependencies.
-- `test/test_agent_core_boundary.sh` proves that boundary check fails closed.
 - CI runs `@packages/agent_core/test/runtest` for the embedded core.
 - `test_keeper_hooks_agent_core_introspection`, `test_keeper_execution_join`,
   and `test_hitl_summary_worker` check the typed projections consumed by MASC.

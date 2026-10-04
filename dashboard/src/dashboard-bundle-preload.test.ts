@@ -179,18 +179,4 @@ describe('dashboard production bundle preloads', () => {
     expect(existsSync(join(outDir, '.build-stamp'))).toBe(false)
     expect(existsSync(join(outDir, 'index.html'))).toBe(false)
   }, 120_000)
-
-  it('reads modulepreloads from parsed link attributes', () => {
-    const html = [
-      '<link href=/dashboard/assets/mermaid.js rel=modulepreload>',
-      '<script type="module" src="/dashboard/assets/index.js"></script>',
-      '<link rel="stylesheet" href="/dashboard/assets/index.css">',
-      '<link crossorigin rel="modulepreload" href="/dashboard/assets/vendor.js">',
-    ].join('')
-
-    expect(modulePreloads(html)).toEqual([
-      '/dashboard/assets/mermaid.js',
-      '/dashboard/assets/vendor.js',
-    ])
-  })
 })

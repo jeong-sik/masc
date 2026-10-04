@@ -1,0 +1,15 @@
+{
+  "started_at": "2026-09-30T11:44:27.370058+00:00",
+  "command": [
+    "_build/default/test/test_dashboard_cache_cancellation.exe"
+  ],
+  "source_sha256": {
+    "lib/core/executor_pool_ref.ml": "385cef4be600688de00009f728b4801d72d8a55e1d8e12be027141d16d20d03e",
+    "test/test_dashboard_cache_cancellation.ml": "6f0c2d0456d50d4da6195110e0ae1ef03e12e2100407afa87461daabe554adbf",
+    "test/dune": "25b75f21765233634c79305a35e2e6957fc1dd5fda19212225b15e7c048b0d90"
+  },
+  "limitation": "Focused local validation; installed dependency pins differ. Dependency guard skipped; no shared switch changes.",
+  "exit_code": 2,
+  "finished_at": "2026-09-30T11:44:29.501634+00:00",
+  "log_sha256": "e15e9b073b3ad826ad2f941ae23e3af29af70a75af8027962f3ab2bee7166e4d"
+}

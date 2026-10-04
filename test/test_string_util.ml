@@ -272,6 +272,31 @@ let test_contains_contiguous_token_sequence () =
        ~haystack:long_haystack
        ~needle:[ "needle"; "tok19999" ])
 
+let test_short_query_terms_use_boundaries () =
+  List.iter (fun text ->
+    check bool ("RC excludes " ^ text) false (SU.contains_query_term_ci text "RC"))
+    ["source"; "archive"; "SRC"; "RC1"];
+  List.iter (fun text ->
+    check bool ("RC finds " ^ text) true (SU.contains_query_term_ci text "RC"))
+    ["RC"; "(rc)"; "RC-12"; "release/RC"; "RC passed"];
+  check bool "short acronym retains Korean suffix" true
+    (SU.contains_query_term_ci "RC가 성공했다" "RC");
+  check bool "phrase endpoint does not admit longer acronym" false
+    (SU.contains_query_term_ci "SRC policy" "RC policy");
+  check bool "later valid occurrence is not hidden by earlier false hit" true
+    (SU.contains_query_term_ci "source then RC" "RC");
+  check bool "CI does not select city" false (SU.contains_query_term_ci "city" "CI");
+  check bool "short digit does not select longer identifier" false
+    (SU.contains_query_term_ci "task-123" "12");
+  check bool "Korean suffix remains searchable" true
+    (SU.contains_query_term_ci "소주를" "소주");
+  check bool "long term retains substring search" true
+    (SU.contains_query_term_ci "release-candidate" "release");
+  check bool "AND fallback cannot restore short-term noise" false
+    (SU.contains_all_query_terms_ci "source policy" "RC policy");
+  check bool "AND fallback finds genuine short term" true
+    (SU.contains_all_query_terms_ci "RC current policy" "RC policy")
+
 let test_contains_all_tokens_ci_order_independent () =
   check bool "tokens match in any order with gaps" true
     (SU.contains_all_tokens_ci memory_note "소주 갑오징어");
@@ -542,6 +567,8 @@ let () =
             test_contains_contiguous_token_sequence;
           test_case "order-independent token AND" `Quick
             test_contains_all_tokens_ci_order_independent;
+          test_case "short free-text terms use boundaries" `Quick
+            test_short_query_terms_use_boundaries;
           test_case "ASCII ci and empty query" `Quick
             test_contains_all_tokens_ci_ascii_ci_and_empty ] );
       ( "starts_with_ci",

@@ -1,0 +1,13 @@
+{
+  "source_sha": "9acf84d67685af7e958fa08903c6ac722feae228",
+  "run_id": 36678975675,
+  "job_id": 109770063340,
+  "platform": "macos-arm64",
+  "http_artifact_id": 11081521004,
+  "http_archive_sha256": "75358edaaeb371e7d708b7e8ecdffe0f5453cd00da11212d1decdcc569859b33",
+  "runtime_artifact_id": 11081241355,
+  "runtime_archive_sha256": "1611331de0269363807953ee0e42502f03bf79b1aeb223b08aaf2bcf23c29ec2",
+  "workflow_conclusion": "success",
+  "installed_runtime_verified": false,
+  "synthetic_credit": true
+}

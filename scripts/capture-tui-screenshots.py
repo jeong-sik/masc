@@ -25,6 +25,7 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Iterator
 
@@ -281,13 +282,19 @@ def ttyd_session(
         "-T", "xterm-256color", str(EXECUTABLE), "--base-path", str(base),
         "--workspace", workspace, "--port", str(api_port), "--refresh", "60",
     ]
+    launch_log = tempfile.TemporaryFile(mode="w+b")
     process = subprocess.Popen(
         command, cwd=WORKTREE, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+        stdout=launch_log, stderr=subprocess.STDOUT, start_new_session=True,
     )
     context = None
     try:
-        wait_port(web_port, process)
+        try:
+            wait_port(web_port, process)
+        except (TimeoutError, RuntimeError):
+            launch_log.seek(0)
+            print(launch_log.read().decode("utf-8", errors="replace"), file=sys.stderr)
+            raise
         # Character cell is about 8.4 x 17 at Menlo 14; pad so ttyd fits the grid.
         context = browser.new_context(
             viewport={"width": int(cols * 8.5) + 24, "height": int(rows * 17) + 24},
@@ -307,6 +314,8 @@ def ttyd_session(
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
+            process.wait(timeout=5)
+        launch_log.close()
 
 
 def screen_text(page: Page) -> str:

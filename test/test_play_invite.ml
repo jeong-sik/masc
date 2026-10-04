@@ -172,7 +172,12 @@ let test_revoke_rejects_forged_uuid_binding () =
   with_workspace (fun base_path ->
     ready base_path;
     let create who role = match Auth.create_token base_path ~agent_name:who ~role with
-      | Ok value -> value
+      | Ok (token, credential) ->
+        let credential =
+          { credential with id = Some (Masc_domain.Credential_id.generate ()) }
+        in
+        Auth.save_credential base_path credential;
+        token, credential
       | Error error -> fail (Masc_domain.masc_error_to_string error) in
     let _invite_token, invite = create "minsu" Masc_domain.Player in
     let other_token, other = create "other" Masc_domain.Worker in

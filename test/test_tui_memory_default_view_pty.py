@@ -10,7 +10,8 @@ before, so nothing the ledger said is lost, only folded.
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_memory as _keyboard_memory
 
 
 
@@ -23,7 +24,7 @@ STATUS = b"Memory saved"
 
 
 def run(executable: str) -> None:
-    fixtures = h.memory_facts_http_fixtures()
+    fixtures = _keyboard_memory.memory_facts_http_fixtures()
     _status, health = fixtures["/api/v1/dashboard/keeper-memory-health"]
     health["keepers"][0]["context_cycle"]["saved"] = {
         "trace_id": "trace-alpha-1",
@@ -32,14 +33,14 @@ def run(executable: str) -> None:
     }
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
-        h.wait_for_output(process, fd, output, STATUS, start=0, timeout=10)
-        h.resize_and_wait(
+        _keyboard_harness.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
+        _keyboard_harness.wait_for_output(process, fd, output, STATUS, start=0, timeout=10)
+        _keyboard_harness.resize_and_wait(
             process, fd, output, rows=40, columns=160,
-            needle=STATUS, controls=(h.FULL_REDRAW,),
+            needle=STATUS, controls=(_keyboard_harness.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
-        folded = h.screen_text(bytes(output))
+        folded = _keyboard_harness.screen_text(bytes(output))
         status_rows = [
             row for row in folded.splitlines()
             if b"alpha \xc2\xb7 " in row and STATUS in row
@@ -55,10 +56,10 @@ def run(executable: str) -> None:
                 )
         start = len(output)
         os.write(fd, b"d")
-        h.wait_for_output(
+        _keyboard_harness.wait_for_output(
             process, fd, output, b"Request prepared", start=start, timeout=10
         )
-        detailed = h.screen_text(bytes(output))
+        detailed = _keyboard_harness.screen_text(bytes(output))
         for needle in LEDGER:
             if needle not in detailed:
                 raise AssertionError(
@@ -66,7 +67,7 @@ def run(executable: str) -> None:
                 )
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Memory folds the ledger until d asks for it",
         interact=interact,

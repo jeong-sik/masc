@@ -9,10 +9,10 @@ import argparse
 import copy
 import json
 import os
-import tomllib
 from pathlib import Path
 
-import test_tui_keyboard_input as terminal
+import tomllib
+import tui_keyboard_harness as terminal
 from test_tui_lane_visual_pty import snapshot
 
 

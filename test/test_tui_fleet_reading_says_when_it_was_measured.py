@@ -2,7 +2,7 @@
 import os
 import sys
 import time
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
 
 
 
@@ -21,11 +21,11 @@ MAX_SCROLL_STEPS = 40
 
 
 def screen_text(output: bytearray) -> bytes:
-    rows = h.screen_rows(bytes(output))
+    rows = _keyboard_harness.screen_rows(bytes(output))
     return b"\n".join(rows[row] for row in sorted(rows))
 
 
-def with_snapshot(fixtures: h.HttpFixtures, snapshot: dict[str, object]) -> None:
+def with_snapshot(fixtures: _keyboard_harness.HttpFixtures, snapshot: dict[str, object]) -> None:
     # In place, and on the merged body, so the paths block the harness filled
     # in stays: only how current the reading is changes.
     existing = fixtures[FLEET_PATH]
@@ -38,33 +38,33 @@ def with_snapshot(fixtures: h.HttpFixtures, snapshot: dict[str, object]) -> None
 
 
 def run(executable: str) -> None:
-    fixtures: h.HttpFixtures = {FLEET_PATH: h.fleet_safety_fixture()}
+    fixtures: _keyboard_harness.HttpFixtures = {FLEET_PATH: _keyboard_harness.fleet_safety_fixture()}
 
     def refresh_until(process, fd, output, needle: bytes) -> None:
         start = len(output)
         os.write(fd, b"r")
-        h.wait_for_output(process, fd, output, needle, start=start, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, needle, start=start, timeout=10)
 
     # The readiness rows close the Work section, below a thirty-row frame. A
     # [j] at the end of the section draws nothing, so no new frame means the
     # whole section has been on screen without the needle.
     def scroll_until(process, fd, output, needle: bytes) -> None:
         for _ in range(MAX_SCROLL_STEPS):
-            h.read_available(fd, output)
+            _keyboard_harness.read_available(fd, output)
             if needle in screen_text(output):
                 return
             start = len(output)
             os.write(fd, b"j")
-            if not h.poll_for_output(
-                process, fd, output, h.FRAME_END, start=start, timeout=3
+            if not _keyboard_harness.poll_for_output(
+                process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3
             ):
                 break
         raise AssertionError(f"the Work section never showed {needle!r}")
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-        h.wait_for_output(process, fd, output, FLEET_LINE, start=0, timeout=10)
-        h.read_available(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.wait_for_output(process, fd, output, FLEET_LINE, start=0, timeout=10)
+        _keyboard_harness.read_available(fd, output)
         if b"fleet reading:" in screen_text(output):
             raise AssertionError("a reading the latest refresh measured drew a stale tag")
 
@@ -74,7 +74,7 @@ def run(executable: str) -> None:
             "stale_reason": "last_good_refresh_timeout",
         })
         refresh_until(process, fd, output, STALE_TAG)
-        h.read_available(fd, output)
+        _keyboard_harness.read_available(fd, output)
         keepers = screen_text(output)
         if REASON not in keepers:
             raise AssertionError("the stale tag does not carry the server's reason")
@@ -83,21 +83,21 @@ def run(executable: str) -> None:
         if FLEET_LINE not in keepers:
             raise AssertionError("the stale tag pushed the fleet counts off the header")
 
-        h.palette_go(process, fd, output, b"go Usage", b"MASC Usage")
-        h.send_and_wait(process, fd, output, b"p", b"MASC Usage / Telemetry")
-        h.send_and_wait(process, fd, output, b"2", b"Retained task outcomes")
+        _keyboard_harness.palette_go(process, fd, output, b"go Usage", b"MASC Usage")
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"MASC Usage / Telemetry")
+        _keyboard_harness.send_and_wait(process, fd, output, b"2", b"Retained task outcomes")
         scroll_until(process, fd, output, b"stale \xc2\xb7 measured 4m")
 
         # A read that failed is not a read that has not happened yet.
         fixtures[FLEET_PATH] = (503, {"error": "fleet fixture unavailable"})
         refresh_until(process, fd, output, b"Execution readiness: ")
-        h.read_available(fd, output)
+        _keyboard_harness.read_available(fd, output)
         metrics = screen_text(output)
         if b"Execution readiness not observed" in metrics:
             raise AssertionError("a failed fleet read drew as one never made")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Fleet reading says when it was measured",
         interact=interact,

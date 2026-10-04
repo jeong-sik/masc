@@ -64,6 +64,15 @@ let with_workspace f =
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 2000
@@ -135,7 +144,7 @@ let make_runner ?(relation = fun _ -> A.Related) ?(weight = fun name -> if name=
   let step = List.length !calls + 1 in
   calls := !calls @ [identity, request];
   let decision = match request with
-    | A.Grade _ -> A.Grade_decided Candle_grade.Medium
+    | A.Grade _ -> A.Grade_decided (Option.get (Candle_grade.of_string "medium"))
     | A.Relation r -> A.Relation_decided (relation r.task_title)
     | A.Weights w -> A.Weights_decided (List.map (fun name -> name, weight name) w.keepers) in
   Ok {A.decision;trace=trace ~slot:("fixture." ^ A.stage request) (identity.goal_id ^ ":" ^ string_of_int step)}
@@ -174,7 +183,7 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
   (match List.map snd !calls with
    | A.Grade goal :: A.Relation first :: A.Relation second :: A.Relation third :: [A.Weights weights] ->
      let keys json = Yojson.Safe.Util.to_assoc json |> List.map fst |> List.sort String.compare in
-     check (list string) "grade sees no Task, identity, cost or priority" ["goal"] (keys (A.input (A.Grade goal)));
+     check (list string) "grade sees no Task, identity, cost or priority" ["goal";"grades"] (keys (A.input (A.Grade goal)));
      check (list string) "relation sees only one title and the Goal"
        ["goal";"task_title"] (keys (A.input (A.Relation first)));
      check (list string) "only completion-window tasks are judged"
@@ -202,10 +211,10 @@ let test_allowed_large_weights_settle_with_exact_money_and_evidence () =
     with_workspace @@ fun _env config ->
     let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
     Fs_compat.save_file path (Printf.sprintf
-      "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = 0\nsmall = 0\nmedium = %d\nlarge = 0\nepic = 0\n"
+      "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\nshare_rounding = \"largest_remainder\"\nremainder_tie_break = \"name_ascending\"\ndeduction_rounding = \"down\"\n[payout.grade_criteria]\ntrivial = \"Minor adjustment\"\nsmall = \"Bounded change\"\nmedium = \"Connected feature\"\nlarge = \"Cross-feature work\"\nepic = \"System outcome\"\n[payout.grades_milli]\ntrivial = 0\nsmall = 0\nmedium = %d\nlarge = 0\nepic = 0\n"
       weight_max amount);
     (match Candle_status.current ~base_path:config.base_path with
-     | Candle_config.Enabled policy -> check int "policy admits this exact amount" amount policy.payout.medium_milli
+     | Candle_config.Enabled policy -> check int "policy admits this exact amount" amount (Option.get (Candle_config.grade_amount_milli policy.payout (Option.get (Candle_grade.of_string "medium"))))
      | Candle_config.Off | Candle_config.Disabled _ -> fail "the explicit representable policy was rejected");
     let waiting = prepared ~due_date:None config goal_id in
     let calls = ref [] in
@@ -279,7 +288,7 @@ let test_refused_transport_waits_for_an_event () =
     if !accept then make_runner calls ~identity request
     else Error (A.Invalid_response "provider refused the unchanged request") in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    Candle_payout_worker.start ~sw ~config ~appraise:runner ();
     await env "provider refusal" (fun () -> !attempts > 0);
     idle env;
     let refused_attempts = !attempts in
@@ -421,7 +430,7 @@ let test_arithmetic_alone_cannot_authorize_an_outsider () =
   let identity : A.identity = {goal_id=waiting.goal_id;request_id=waiting.request_id;verification_run_id=waiting.verification_run_id} in
   let relations = List.map (fun task_id -> {A.task_id;relation=A.Related;trace=trace task_id})
       ["task-a";"task-b";"external"] in
-  let forged = Candle_payment.make ~identity ~grade:Candle_grade.Medium ~total_milli:3001
+  let forged = Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor} ~identity ~grade:(Option.get (Candle_grade.of_string "medium")) ~total_milli:3001
       ~grade_trace:(trace "grade") ~relations ~weights_trace:(trace "weights")
       ~weight_max:10 ~deduction_rate:10 ~deduction_floor:200 ~overdue_hours:30 ~weights:["outsider",1] |> ok in
   let result = Candle_ledger.update ~base_path:config.base_path (fun view ->
@@ -437,7 +446,7 @@ let test_settlement_requires_complete_snapshot_candidates () =
   let identity : A.identity = {goal_id=waiting.goal_id;request_id=waiting.request_id;verification_run_id=waiting.verification_run_id} in
   let payment ids weights =
     let relations=List.map (fun task_id -> {A.task_id;relation=A.Related;trace=trace task_id}) ids in
-    Candle_payment.make ~identity ~grade:Candle_grade.Medium ~total_milli:3001
+    Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor} ~identity ~grade:(Option.get (Candle_grade.of_string "medium")) ~total_milli:3001
       ~grade_trace:(trace "grade") ~relations ~weights_trace:(trace "weights")
       ~weight_max:10 ~deduction_rate:10 ~deduction_floor:200 ~overdue_hours:30 ~weights |> ok in
   let full=payment ["task-a";"task-b";"external"] ["keeper-a",1;"keeper-b",1] in
@@ -461,7 +470,7 @@ let test_settlement_requires_complete_snapshot_candidates () =
     | _ -> event) original in
   let only_ineligible_related = List.map (fun (r : A.task_relation) ->
     {r with relation=(if r.task_id="task-a" then A.Related else A.Unrelated)}) full.relations in
-  let ineligible_payment = Candle_payment.make ~identity ~grade:Candle_grade.Medium ~total_milli:3001
+  let ineligible_payment = Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor} ~identity ~grade:(Option.get (Candle_grade.of_string "medium")) ~total_milli:3001
     ~grade_trace:(trace "grade") ~relations:only_ineligible_related ~weights_trace:(trace "weights")
     ~weight_max:10 ~deduction_rate:10 ~deduction_floor:200 ~overdue_hours:30 ~weights:["keeper-a",1] |> ok in
   check bool "another eligible task cannot grant an ineligible task its Keeper" true
@@ -533,9 +542,9 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
   with_workspace @@ fun env config ->
   let historical_amount = max_int / 1000 in
   let history = List.concat (List.init 1000 (fun i ->
-    let payment = Candle_payment.make
+    let payment = Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
       ~identity:{A.goal_id="past-" ^ string_of_int i;request_id="past-request";verification_run_id="past-run"}
-      ~grade:Candle_grade.Epic ~total_milli:historical_amount
+      ~grade:(Option.get (Candle_grade.of_string "epic")) ~total_milli:historical_amount
       ~grade_trace:(trace "past-grade")
       ~relations:[{A.task_id="past-task";relation=A.Related;trace=trace "past-relation"}]
       ~weights_trace:(trace "past-weights") ~weight_max:1 ~deduction_rate:0
@@ -571,9 +580,9 @@ let test_finite_overflow_retries_after_decay () =
   with_workspace @@ fun _env config ->
   let historical_amount = max_int / 1000 in
   let history = List.concat (List.init 1000 (fun i ->
-    let payment = Candle_payment.make
+    let payment = Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
       ~identity:{A.goal_id="past-" ^ string_of_int i;request_id="past-request";verification_run_id="past-run"}
-      ~grade:Candle_grade.Epic ~total_milli:historical_amount
+      ~grade:(Option.get (Candle_grade.of_string "epic")) ~total_milli:historical_amount
       ~grade_trace:(trace "past-grade")
       ~relations:[{A.task_id="past-task";relation=A.Related;trace=trace "past-relation"}]
       ~weights_trace:(trace "past-weights") ~weight_max:1 ~deduction_rate:0
@@ -633,7 +642,8 @@ let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
   let registry = Runs.create ~path () in
   (match Runs.install_global registry with Ok () -> () | Error Runs.Already_installed -> fail "fixture registry already installed");
   let identity : A.identity = {goal_id="receipt";request_id="receipt-request";verification_run_id="receipt-verifier"} in
-  let request = A.Grade {title="Ship the ledger";metric=Some "tests";target_value=Some "10"} in
+  let request = A.Grade {goal={title="Ship the ledger";metric=Some "tests";target_value=Some "10"};
+    grades=[Option.get (Candle_grade.of_string "medium"), "Connected feature"]} in
   let execute ~request:_ ~prompt:_ =
     let run = match Runs.list_runs registry with
       | [run] -> run | _ -> fail "request must be registered before dispatch" in
@@ -830,10 +840,66 @@ let test_declaration_probe_retains_usable_baseline () =
   publish "slot-a";
   check bool "first usable declaration seeds missing baseline" false (initially_missing ())
 
+let test_configured_grade_and_distribution_reach_the_ledger () =
+  List.iter (fun (rounding, tie, deduction, total, expected_shares, expected_amounts, unallocated) ->
+    with_workspace @@ fun env config ->
+    let waiting = prepared config "configured-payout" in
+    let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+    Fs_compat.save_file path (Printf.sprintf {|half_life = "off"
+[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 0
+share_rounding = "%s"
+remainder_tie_break = "%s"
+deduction_rounding = "%s"
+[payout.grade_criteria]
+release = "A verified release outcome"
+[payout.grades_milli]
+release = %d
+|} rounding tie deduction total);
+    let release = Option.get (Candle_grade.of_string "release") in
+    let appraise ~identity:_ request =
+      let decision = match request with
+        | A.Grade grading ->
+          check (list (pair string string)) "configured criteria reach the model"
+            ["release","A verified release outcome"]
+            (List.map (fun (id, criterion) -> Candle_grade.to_string id, criterion) grading.grades);
+          let schema = A.schema request in
+          check bool "model schema admits only the configured grade" true
+            Yojson.Safe.Util.(member "enum" (member "grade" (member "properties" schema)) = `List [`String "release"]);
+          check bool "unconfigured grade is refused" true
+            (Result.is_error (A.decode request (`Assoc ["grade",`String "medium"])));
+          A.Grade_decided release
+        | A.Relation _ -> A.Relation_decided A.Related
+        | A.Weights w -> A.Weights_decided (List.map (fun keeper -> keeper,1) w.keepers) in
+      Ok {A.decision;trace=trace ("configured-" ^ A.stage request)} in
+    Eio.Switch.run (fun sw ->
+      Candle_payout_worker.start ~sw ~config ~appraise ();
+      await env "configured Paid" (fun () -> paid config waiting.goal_id <> []);
+      idle env);
+    let payment = one_payment config waiting.goal_id in
+    check string "configured grade is durable" "release" (Candle_grade.to_string payment.grade);
+    check int "configured money reaches payment" total payment.total_milli;
+    check (list int) "configured sharing and ties" expected_shares
+      (List.map (fun (a : Candle_payment.allocation) -> a.share_milli) payment.allocations);
+    check (list int) "configured deduction rounding" expected_amounts
+      (List.map (fun (a : Candle_payment.allocation) -> a.amount_milli) payment.allocations);
+    check int "unissued remainder is durable" unallocated payment.unallocated_milli;
+    (* A different current policy cannot rewrite a recorded grade or distribution. *)
+    Fs_compat.save_file path "";
+    let replay = ok (Candle_payment.of_yojson (Candle_payment.to_yojson payment)) in
+    check bool "receipt roundtrip preserves captured policy" true (replay = payment);
+    ignore (one_payment config waiting.goal_id))
+    ["largest_remainder","name_ascending","down",5,[3;2],[2;1],0;
+     "largest_remainder","name_descending","up",5,[2;3],[2;3],0;
+     "down","name_ascending","down",5,[2;2],[1;1],1]
+
 let () =
   run "candle_appraisal_flow"
     ["payout",
-      [test_case "published appraiser repair releases rejected payout" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:false)
+      [test_case "configured grade and distribution reach ledger" `Quick test_configured_grade_and_distribution_reach_the_ledger
+      ;test_case "published appraiser repair releases rejected payout" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:false)
       ;test_case "publication during refusal retains recovery event" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:true)
       ;test_case "declaration probe retains usable baseline" `Quick test_declaration_probe_retains_usable_baseline
       ;test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay

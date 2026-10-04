@@ -44,10 +44,13 @@ let settle_task_deletion_locked config backlog (receipt : task_deletion_receipt)
   let pending_completion_rejections = List.filter
     (fun (pending : pending_completion_rejection) -> not (String.equal pending.task_id task_id))
     backlog.pending_completion_rejections in
+  let pending_completion_approvals = List.filter
+    (fun (pending : pending_completion_approval) -> not (String.equal pending.task_id task_id))
+    backlog.pending_completion_approvals in
   let tasks = List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks in
   let receipts = if List.exists (fun old -> String.equal old.deletion_id receipt.deletion_id) backlog.task_deletion_receipts
     then backlog.task_deletion_receipts else receipt :: backlog.task_deletion_receipts in
-  let pending = {backlog with tasks; pending_completion_rejections; task_deletion_receipts=receipts} in
+  let pending = {backlog with tasks; pending_completion_rejections; pending_completion_approvals; task_deletion_receipts=receipts} in
   let protect f = match Eio_guard.execution_context () with
     | Eio_guard.Eio_fiber -> Eio.Cancel.protect f | Eio_guard.Non_eio -> f () in
   protect (fun () ->

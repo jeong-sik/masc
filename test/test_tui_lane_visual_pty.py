@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 import re
 from pathlib import Path
 
-import test_tui_keyboard_input as terminal
+import tui_keyboard_harness as terminal
 
 
 

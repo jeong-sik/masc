@@ -1,0 +1,4 @@
+PASS absent setting keeps all dated metrics
+PASS TOML target reaches actual dated rotation, pruning and reading
+PASS process environment overrides TOML and disables cleanup
+PASS negative TOML target is rejected at boot

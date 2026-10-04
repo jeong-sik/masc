@@ -191,6 +191,7 @@ export interface DashboardRuntimeProviderSnapshot {
   model_id?: string | null
   model_api_name?: string | null
   protocol?: string | null
+  usage_read_configured?: boolean
   transport?: string | null
   kind?: string | null
   runtime_kind?: string | null
@@ -372,6 +373,7 @@ export interface DashboardRuntimeModelMetric {
   total_input_tokens?: number | null
   total_output_tokens?: number | null
   total_cache_read_tokens?: number | null
+  cached_input?: { input_tokens: number; cache_read_tokens: number; sample_count: number } | null
   total_cache_creation_tokens?: number | null
   total_reasoning_tokens?: number | null
   usage_sample_count?: number | null
@@ -675,6 +677,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     model_id: asNullableString(raw.model_id),
     model_api_name: asNullableString(raw.model_api_name),
     protocol: asNullableString(raw.protocol),
+    usage_read_configured: asBoolean(raw.usage_read_configured),
     transport: asNullableString(raw.transport),
     kind: asNullableString(raw.kind),
     runtime_kind: asNullableString(raw.runtime_kind),
@@ -858,6 +861,17 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
   }
 }
 
+function decodeCachedInput(raw: unknown): DashboardRuntimeModelMetric['cached_input'] {
+  if (!isRecord(raw)) return null
+  const input = asNumber(raw.input_tokens)
+  const cached = asNumber(raw.cache_read_tokens)
+  const count = asNumber(raw.sample_count)
+  if (input == null || cached == null || count == null
+    || !Number.isSafeInteger(input) || !Number.isSafeInteger(cached) || !Number.isSafeInteger(count)
+    || input <= 0 || cached < 0 || cached > input || count <= 0) return null
+  return { input_tokens: input, cache_read_tokens: cached, sample_count: count }
+}
+
 function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | null {
   if (!isRecord(raw)) return null
   const modelId = asString(raw.model_id)
@@ -882,6 +896,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     total_input_tokens: asNumber(raw.total_input_tokens) ?? null,
     total_output_tokens: asNumber(raw.total_output_tokens) ?? null,
     total_cache_read_tokens: asNumber(raw.total_cache_read_tokens) ?? null,
+    cached_input: decodeCachedInput(raw.cached_input),
     total_cache_creation_tokens: asNumber(raw.total_cache_creation_tokens) ?? null,
     total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
     usage_sample_count: asNumber(raw.usage_sample_count) ?? null,

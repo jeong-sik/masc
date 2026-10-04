@@ -41,6 +41,7 @@ module For_testing : sig
     Yojson.Safe.t ->
     string
   val initialize_result_json : workspace_root:string -> unit -> Yojson.Safe.t
+  val language_server_initialize_params : workspace_root:string -> Yojson.Safe.t
   (** Fixed size of the inbound LSP dispatch worker pool
       ([Lsp_proxy_limits.inbound_dispatch_worker_count]); >1 keeps slow LSP
       init off the socket read path. *)

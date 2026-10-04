@@ -32,6 +32,10 @@ type config_observation =
   ; source_revision : config_source_revision
   }
 
+type config_edit_error =
+  | Config_source_conflict of config_observation
+  | Config_edit_failed of string
+
 type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
@@ -3033,6 +3037,39 @@ let save_config_text ?runtime_config_path content =
     ?runtime_config_path
     ~replace_file:Fs_compat.save_file_atomic_strict_staged
     content
+;;
+
+let save_config_text_if_current ?runtime_config_path ~expected_source_revision content =
+  let failed detail = Config_edit_failed detail in
+  let* () =
+    if String_util.is_lowercase_sha256_hex expected_source_revision then Ok ()
+    else Error (failed "expected_source_revision must be lowercase SHA-256 hex")
+  in
+  let* path = runtime_config_path_result ?runtime_config_path () |> Result.map_error failed in
+  let* locked =
+    with_runtime_config_lock_using File_lock_eio.with_durable_lock_observed path
+      (fun () ->
+        let* current_text = load_file_result path |> Result.map_error failed in
+        let current = config_observation ~path current_text in
+        if not (String.equal expected_source_revision
+                  (config_source_revision_to_string current.source_revision))
+        then Error (Config_source_conflict current)
+        else
+          let* () =
+            Keeper_config_journal.require_resolved ~runtime_config_path:path
+            |> Result.map_error failed
+          in
+          commit_runtime_config_text ~path content |> Result.map_error failed)
+    |> Result.map_error failed
+  in
+  match locked.value with
+  | Ok receipt -> Ok (attach_lock_warnings locked.warnings receipt)
+  | Error error ->
+    List.iter
+      (function Config_lock_release_unconfirmed detail ->
+        Log.Misc.warn "runtime source edit lock release unconfirmed: %s" detail)
+      locked.warnings;
+    Error error
 ;;
 
 (* The read-modify-write form of [save_config_text]. A caller that loads the

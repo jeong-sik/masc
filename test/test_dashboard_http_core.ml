@@ -6426,6 +6426,81 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
 
+(* Two raw editors read the same source; the first commit must survive the
+   second editor's POST, which carries its original revision. *)
+let test_runtime_raw_save_rejects_stale_source_without_write () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error detail -> fail ("runtime init: " ^ detail));
+  with_env "MASC_CONFIG_DIR" (Filename.dirname runtime_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post body =
+    post_to_handler ~target:"/api/v1/runtime/config/raw"
+      (fun request reqd body ->
+        Server_routes_http_routes_dashboard.For_testing.handle_runtime_config_raw_post
+          state "raw-editor-test" request reqd body)
+      body
+  in
+  let revision text = Runtime.config_source_revision_to_string
+    (Runtime.config_observation ~path:runtime_path text).source_revision in
+  let body source revision = Yojson.Safe.to_string
+    (`Assoc ["source_text", `String source; "expected_source_revision", `String revision]) in
+  let original_revision = revision config_sync_runtime_toml in
+  let winner = "# first editor\n" ^ config_sync_runtime_toml in
+  let loser = "# second editor\n" ^ config_sync_runtime_toml in
+  let winner_raw, winner_json = post (body winner original_revision) in
+  expect_http_status "first raw editor commits" 200 winner_raw;
+  let open Yojson.Safe.Util in
+  check string "raw save retains commit response" "committed"
+    (winner_json |> member "state" |> to_string);
+  let audit_before = Lib.Audit_log.read_entries config in
+  let loser_raw, loser_json = post (body loser original_revision) in
+  expect_http_status "second raw editor conflicts" 409 loser_raw;
+  check string "raw conflict code" "revision_conflict"
+    (loser_json |> member "code" |> to_string);
+  check bool "raw conflict has a readable error" true
+    (String.length (loser_json |> member "error" |> to_string) > 0);
+  let current = loser_json |> member "current" in
+  check string "conflict current source path" runtime_path
+    (current |> member "source_path" |> to_string);
+  check string "conflict current source text" winner
+    (current |> member "source_text" |> to_string);
+  check string "conflict current source revision" (revision winner)
+    (current |> member "source_revision" |> to_string);
+  check string "conflict preserves winner bytes" winner (read_file runtime_path);
+  check bool "conflict adds no audit entry" true
+    (Lib.Audit_log.read_entries config = audit_before);
+  List.iter (fun (label, invalid_body) ->
+    let raw, _ = post invalid_body in
+    expect_http_status label 400 raw;
+    check string (label ^ " preserves source") winner (read_file runtime_path))
+    [ "missing revision", Yojson.Safe.to_string (`Assoc ["source_text", `String loser]);
+      "malformed revision", body loser "bad";
+      "uppercase revision", body loser (String.make 64 'A');
+      "wrong revision type", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser; "expected_source_revision", `Int 1]);
+      "duplicate source", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser; "source_text", `String winner;
+                 "expected_source_revision", `String (revision winner)]);
+      "duplicate revision", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser;
+                 "expected_source_revision", `String (revision winner);
+                 "expected_source_revision", `String original_revision]) ];
+  check bool "invalid revisions add no audit entry" true
+    (Lib.Audit_log.read_entries config = audit_before);
+  let fresh_raw, _ = post (body loser (current |> member "source_revision" |> to_string)) in
+  expect_http_status "editor can save after reading current revision" 200 fresh_raw;
+  check string "fresh editor source is committed" loser (read_file runtime_path)
+
 (* The routing handler's create, remove and append branches. A created lane
    lands in runtime.toml; a lane under a runtime id, and a lane the default
    walks, are refused with 400 and the writer's own sentence; a removed lane
@@ -7825,6 +7900,8 @@ let () =
             test_direct_assignment_route_rejects_stale_revision_without_write;
           test_case "routing POST creates and removes a lane" `Quick
             test_runtime_routing_creates_and_removes_a_lane;
+          test_case "raw editors require a revision and stale source loses without a write" `Quick
+            test_runtime_raw_save_rejects_stale_source_without_write;
           test_case "direct assignment fences stale Keeper config POST" `Quick
             test_direct_assignment_intervening_write_fences_keeper_config_post;
           test_case "direct assignment response preserves lock warning" `Quick

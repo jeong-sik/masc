@@ -4633,8 +4633,17 @@ type workspace_activity_read = {
 
 type runtime_config_reading = {
   rcv_path : string;
+  rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+}
+
+type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list
+type runtime_config_edit_session = {
+  rce_workspace : string * string;
+  rce_session : Masc_tui_runtime_config_edit.t;
+  rce_rows : (string * string) list list;
+  rce_view : runtime_config_edit_view;
 }
 
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
@@ -5233,6 +5242,7 @@ type state = {
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
   mutable runtime_config_view: runtime_config_reading option;
+  mutable runtime_config_edits: runtime_config_edit_session list;
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
   (* The [a] form on the runtime.toml pane, which declares one more account
@@ -8177,6 +8187,7 @@ let create_state
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
   runtime_config_view = None;
+  runtime_config_edits = [];
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
@@ -9468,6 +9479,66 @@ let standalone_lanes_chrome ~row_count ~error ~truncated =
   in
   2 + evidence_rows + stale_error_row + (if truncated then 1 else 0)
 ;;
+
+(* Drafts belong to a workspace and exact config path, and survive view changes
+   and temporary loss of workspace authority. Only a matching current reading
+   can expose one. The colored rows are a rendering cache of that session text. *)
+let runtime_config_workspace (state : state) =
+  Option.map (fun identity ->
+    canonical_path identity.Tui_decode.sid_base_path,
+    canonical_path identity.Tui_decode.sid_masc_root) state.server_identity
+
+let runtime_config_edit_session (state : state) =
+  match runtime_config_workspace state, state.runtime_config_view with
+  | Some workspace, Some reading ->
+    List.find_opt (fun edit -> edit.rce_workspace = workspace
+      && String.equal edit.rce_session.base.path reading.rcv_path) state.runtime_config_edits
+  | None, _ | _, None -> None
+
+let runtime_config_source_rows ~path source =
+  Masc_tui_code_lexer.rows_of_source
+    ~language:(Masc_tui_code_lexer.language_of_path path) source
+  |> List.map (List.map (fun (text, kind) ->
+      Masc.Tui_terminal_text.sanitize_terminal_text text, kind))
+
+let put_runtime_config_edit (state : state) ~workspace session =
+  let edit = { rce_workspace = workspace; rce_session = session;
+    rce_rows = runtime_config_source_rows ~path:session.Masc_tui_runtime_config_edit.base.path session.text;
+    rce_view = Config_edit_draft } in
+  state.runtime_config_edits <- edit :: List.filter (fun existing ->
+    not (existing.rce_workspace = workspace
+      && String.equal existing.rce_session.base.path session.base.path)) state.runtime_config_edits
+
+let discard_runtime_config_edit (state : state) ~workspace ~path =
+  state.runtime_config_edits <- List.filter (fun edit ->
+    not (edit.rce_workspace = workspace && String.equal edit.rce_session.base.path path))
+    state.runtime_config_edits
+
+let runtime_config_active_rows (state : state) =
+  match runtime_config_edit_session state with
+  | Some { rce_view = Config_edit_draft; rce_rows; _ } -> rce_rows
+  | Some { rce_view = Config_edit_current rows; _ } -> rows
+  | None -> (match state.runtime_config_view with None -> [] | Some reading -> reading.rcv_rows)
+
+let runtime_config_edit_lines ~cols state =
+  match state.runtime_account_form, runtime_config_edit_session state with
+  | Some _, _ | None, None -> []
+  | None, Some edit ->
+    let session = edit.rce_session in
+    let heading = match edit.rce_view with
+      | Config_edit_draft -> "Local draft retained · e edit · S save · r read current · X discard"
+      | Config_edit_current _ -> "Current file snapshot · C return to draft · u adopt revision · U replace draft" in
+    let comparison = match session.current with
+      | None -> []
+      | Some current ->
+        let changed = not (String.equal current.source_revision session.base.source_revision) in
+        [(if changed then "Current file differs from the draft base. " else "Current file matches the draft base. ")
+         ^ "C compare · u keep draft, adopt revision · U use current text"] in
+    let lines = heading :: (comparison @ Option.to_list session.error) in
+    List.concat_map (fun line ->
+      Masc_tui_message_layout.wrap_words
+        ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
+        (Masc.Tui_terminal_text.sanitize_terminal_text line)) lines
 
 let dismiss_runtime_lane_notice (state : state) = state.runtime_lane_notice <- None
 
@@ -11282,8 +11353,10 @@ let scrolled_surface_rows ~cols (state : state) : surface -> scrolled option =
   | Config when state.config_pane = Config_runtime && state.runtime_config_status_open -> None
   | Config when state.config_pane = Config_runtime ->
       Some
-        { sc_count = (match state.runtime_config_view with None -> 0 | Some r -> List.length r.rcv_rows)
-        ; sc_chrome = 7 + (match state.runtime_config_view with None -> 0 | Some r ->
+        { sc_count = List.length (runtime_config_active_rows state)
+        ; sc_chrome = 7 + List.length (runtime_config_edit_lines ~cols state)
+            + (if Option.is_some state.runtime_config_view_error then 1 else 0)
+            + (match state.runtime_config_view with None -> 0 | Some r ->
               List.length (Masc_tui_runtime_config_view.summary_lines r.rcv_metadata))
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None

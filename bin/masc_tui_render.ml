@@ -12148,17 +12148,20 @@ let config_metadata_style = function
 
 (* What the runtime.toml body spends above the source: the server identity,
    one row per metadata line, and the rule under them. *)
-let config_heading_rows (state : state) =
+let config_heading_rows ~cols (state : state) =
   1 + List.length (config_metadata_summary state) + 1
+  + List.length (runtime_config_edit_lines ~cols state)
+  + (if Option.is_none state.runtime_account_form
+        && Option.is_some state.runtime_config_view_error then 1 else 0)
 
 (* The source rows the frame shows, and the height the cursor keeps itself
    inside. One number for both: the frame is [surface_chrome]'s, so what it
    spends is [surface_chrome_rows] and the heading above, not a literal. *)
 let config_content_height (state : state) =
-  let terminal_rows, _ = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
   max 1
     (Masc_tui_types.surface_body_rows state ~terminal_rows
-     - surface_chrome_rows - config_heading_rows state)
+     - surface_chrome_rows - config_heading_rows ~cols state)
 
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
   let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
@@ -12667,6 +12670,8 @@ let render_config (state : state) =
       List.iter (fun (tone, text) ->
         c.push_styled ~style:(config_metadata_style tone)
           ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
+      List.iter (fun line -> c.push_styled ~style:(Theme.warn ()) ("  " ^ line))
+        (runtime_config_edit_lines ~cols state);
       c.push_divider ();
       let content_height = config_content_height state in
       (* The account form stands where the file is drawn: it is opened on that
@@ -12683,12 +12688,16 @@ let render_config (state : state) =
           if Masc_tui_runtime_account_form.is_saved form then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
       | None ->
-      match state.runtime_config_view_error, state.runtime_config_view with
-      | Some detail, _ ->
-          c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
-      | None, None ->
-          c.push (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset)
-      | None, Some { rcv_rows = rows; _ } ->
+      (match state.runtime_config_view_error with
+       | Some detail ->
+         c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
+       | None -> ());
+      match state.runtime_config_view with
+      | None ->
+          if Option.is_none state.runtime_config_view_error then
+            c.push (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset)
+      | Some _ ->
+          let rows = runtime_config_active_rows state in
           let total = List.length rows in
           let max_scroll = max 0 (total - content_height) in
           let scroll = max 0 (min state.config_scroll max_scroll) in

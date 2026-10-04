@@ -1,4 +1,5 @@
 import * as coreApi from '../api/core'
+import { RuntimeTomlRevisionConflict } from '../api/dashboard-runtime'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
 import { html } from 'htm/preact'
 import { render } from 'preact'
@@ -365,7 +366,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision)
       expect(container.textContent).toContain('Skill catalog 게시됨')
       expect(container.textContent).toContain('파일 내구성 확인됨')
     })
@@ -639,7 +640,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.keyDown(textarea, { key: 's', metaKey: true })
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision)
     })
   })
 
@@ -963,9 +964,80 @@ describe('RuntimeTomlEditor', () => {
 
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision)
     })
     expect((container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value).toBe(nextSource)
+  })
+
+  it('preserves a conflicted draft and only retries against an explicitly adopted revision', async () => {
+    const current = { source_path: MOCK_RUNTIME_PATH, source_revision: 'b'.repeat(64),
+      source_text: `${baseConfig.source_text}# another writer\n` }
+    apiMocks.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlRevisionConflict('File changed', current))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = `${baseConfig.source_text}# my unsaved change\n`
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).not.toBeNull())
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, baseConfig.source_revision)
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    expect(container.querySelector('[aria-label="현재 서버 원문"]')?.textContent).toBe(current.source_text)
+    expect(container.querySelector('[aria-label="편집 기준 원문"]')?.textContent).toBe(baseConfig.source_text)
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 's', ctrlKey: true })
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-adopt-revision"]')!)
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(draft, current.source_revision))
+  })
+
+  it('replaces the draft with the displayed current file only on the separate replace action', async () => {
+    const current = { source_path: MOCK_RUNTIME_PATH, source_revision: 'b'.repeat(64),
+      source_text: `${baseConfig.source_text}# server text\n` }
+    apiMocks.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlRevisionConflict('File changed', current))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: `${baseConfig.source_text}# draft\n` } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-replace-draft"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-replace-draft"]')!)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(current.source_text))
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    const amended = `${current.source_text}# after explicit replace\n`
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: amended } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(amended, current.source_revision))
+  })
+
+  it('reads current text for comparison without replacing a dirty draft or its save basis', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = `${baseConfig.source_text}# local\n`
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...baseConfig,
+      source_text: `${baseConfig.source_text}# latest\n`, source_revision: 'c'.repeat(64) })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-read-current"]')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).not.toBeNull())
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    expect(container.querySelector('[aria-label="편집 기준 원문"]')?.textContent).toBe(baseConfig.source_text)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('keeps draft and revision after an unknown save result and explains file uncertainty', async () => {
+    apiMocks.saveRuntimeTomlConfig.mockRejectedValueOnce(new Error('connection lost'))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
+    const draft = `${baseConfig.source_text}# local\n`
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(container.textContent).toContain('파일 변경 여부를 확인하지 못했습니다'))
+    expect(container.querySelector('textarea')?.value).toBe(draft)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenNthCalledWith(2, draft, baseConfig.source_revision))
   })
 
   it('keeps the dirty draft when save validation fails', async () => {
@@ -1521,7 +1593,7 @@ is-non-interactive = true
     fireEvent.click(save)
     await waitFor(() => {
       expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce()
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited)
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited, baseConfig.source_revision)
       expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
     })
 

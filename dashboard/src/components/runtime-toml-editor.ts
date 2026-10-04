@@ -19,6 +19,7 @@ import {
   type RuntimeResolution,
   type StandaloneLaneSnapshotRow,
 } from '../api/dashboard'
+import { RuntimeTomlRevisionConflict, type RuntimeTomlCurrentSource } from '../api/dashboard-runtime'
 import { errorToString } from '../lib/format-string'
 import {
   cascadeDeleteProvider,
@@ -199,6 +200,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [currentSource, setCurrentSource] = useState<RuntimeTomlCurrentSource | null>(null)
+  const [readingCurrent, setReadingCurrent] = useState(false)
   const [section, setSection] = useState<RuntimeSectionId>('routing')
   const [exactLanes, setExactLanes] = useState<StandaloneLaneSnapshotRow[] | null>(null)
   const [laneRuntimes, setLaneRuntimes] = useState<RuntimeResolution[] | null>(null)
@@ -235,6 +238,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   async function adoptSavedRuntimeConfig(saved: CommittedRuntimeTomlConfig) {
     setConfig(saved)
     setDraft(saved.source_text)
+    setCurrentSource(null)
     const applicationNotice = runtimeConfigCommitReceiptNotice(saved)
     await resumeSavedModelSetup()
     await refreshExactLanes()
@@ -251,6 +255,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   const refresh = useCallback(async () => {
     setLoadState('loading')
+    setCurrentSource(null)
     setError(null)
     setNotice(null)
     try {
@@ -278,7 +283,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     if (seenSourceGeneration.current === sourceGeneration) return
     seenSourceGeneration.current = sourceGeneration
     if (dirty) {
-      setError('runtime.toml 이 다른 화면에서 저장되었습니다. 적용하지 않은 변경을 버리고 다시 불러와야 최신 파일을 봅니다.')
+      setError('runtime.toml 이 다른 화면에서 저장되었습니다. 초안은 유지됩니다. 현재 파일을 읽고 비교한 뒤 저장 기준을 선택하세요.')
       return
     }
     void refresh()
@@ -296,7 +301,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   async function handleSave(sourceText?: string) {
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
-    if (config === null || saving || loadState === 'loading' || invalidModelContexts) return
+    if (config === null || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts) return
     if (nextSourceText === config.source_text) return
     const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText, config.reserved_provider_ids)
     for (const provider of nextEnvironment.providers) {
@@ -316,17 +321,58 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setError(null)
     setNotice(null)
     try {
-      const saved = await saveRuntimeTomlConfig(nextSourceText)
+      const saved = await saveRuntimeTomlConfig(nextSourceText, config.source_revision)
       await adoptSavedRuntimeConfig(saved)
     } catch (err: unknown) {
-      setError(errorToString(err))
+      if (err instanceof RuntimeTomlRevisionConflict && err.current.source_path === config.path) {
+        setCurrentSource(err.current)
+        setSection('toml')
+        setError(`${err.message} 저장하지 않았습니다. 초안과 기존 저장 기준을 유지했습니다.`)
+      } else {
+        setError(`${errorToString(err)} 초안은 유지됩니다. 파일 변경 여부를 확인하지 못했습니다. 현재 파일을 읽고 비교한 뒤 다시 저장하세요.`)
+      }
     } finally {
       setSaving(false)
     }
   }
 
+  async function handleReadCurrent() {
+    if (saving || readingCurrent || loadState !== 'loaded' || config === null) return
+    setReadingCurrent(true)
+    setError(null)
+    try {
+      const current = await fetchRuntimeTomlConfig()
+      if (current.path === null || current.path !== config.path) {
+        throw new Error('현재 파일 경로가 편집 중인 runtime.toml과 다릅니다.')
+      }
+      setCurrentSource({ source_path: current.path, source_text: current.source_text,
+        source_revision: current.source_revision })
+      setSection('toml')
+      setNotice('현재 파일을 읽었습니다. 초안과 저장 기준은 바뀌지 않았습니다.')
+    } catch (err: unknown) {
+      setError(`현재 파일 읽기 실패: ${errorToString(err)} 초안과 저장 기준은 유지됩니다.`)
+    } finally {
+      setReadingCurrent(false)
+    }
+  }
+
+  function useCurrentSource(replaceDraft: boolean) {
+    if (config === null || currentSource === null || saving || readingCurrent) return
+    setConfig({ ...config, path: currentSource.source_path,
+      source_text: currentSource.source_text, source_revision: currentSource.source_revision })
+    if (replaceDraft) {
+      setDraft(currentSource.source_text)
+      setModelContextDrafts({})
+    }
+    setCurrentSource(null)
+    setError(null)
+    setNotice(replaceDraft
+      ? '표시된 현재 원문으로 초안을 교체했습니다.'
+      : '표시된 현재 revision을 저장 기준으로 채택했습니다. 초안은 유지됩니다. 다음 저장은 이 초안으로 현재 파일을 교체합니다.')
+  }
+
   async function handleRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null) {
-    if (saving || loadState === 'loading' || dirty) return
+    if (saving || readingCurrent || currentSource !== null || loadState === 'loading' || dirty) return
     setSaving(true)
     setError(null)
     setNotice(null)
@@ -341,7 +387,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   }
 
   async function handleAssignmentPatch(keeperName: string, runtimeId: string | null) {
-    if (saving || loadState === 'loading' || dirty || !config) return
+    if (saving || readingCurrent || currentSource !== null || loadState === 'loading' || dirty || !config) return
     setSaving(true)
     setError(null)
     setNotice(null)
@@ -399,7 +445,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   async function handleExactSlotAction(laneId: string, action: RuntimeExactSlotAction,
     runtimeId: string, direction?: RuntimeExactSlotDirection) {
-    if (saving || loadState !== 'loaded' || dirty) return
+    if (saving || readingCurrent || currentSource !== null || loadState !== 'loaded' || dirty) return
     setSaving(true)
     setError(null)
     setNotice(null)
@@ -525,6 +571,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   }
 
   async function handleRefresh() {
+    if (saving || readingCurrent) return
     if (dirty) {
       const confirmed =
         typeof window === 'undefined' ||
@@ -683,7 +730,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             variant="ghost"
             size="sm"
             onClick=${handleRefresh}
-            disabled=${saving || loadState === 'loading'}
+            disabled=${saving || readingCurrent || loadState === 'loading'}
             ariaBusy=${loadState === 'loading'}
             ariaLabel="runtime.toml 다시 불러오기"
             title="다시 불러오기"
@@ -694,10 +741,17 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             <span>새로고침</span>
           <//>
           <${ActionButton}
+            variant="ghost"
+            size="sm"
+            onClick=${handleReadCurrent}
+            disabled=${saving || readingCurrent || loadState !== 'loaded' || config === null}
+            testId="runtime-toml-read-current"
+          >${readingCurrent ? '현재 파일 읽는 중' : '현재 파일 읽고 비교'}<//>
+          <${ActionButton}
             variant="primary"
             size="sm"
             onClick=${handleSave}
-            disabled=${!dirty || saving || loadState === 'loading' || invalidModelContexts}
+            disabled=${!dirty || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts}
             ariaBusy=${saving}
             ariaLabel="runtime.toml 저장 및 적용"
             title="저장 및 적용 경계 확인"
@@ -787,6 +841,23 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
           <div class="rt-body">
             ${toolbar}
             ${error ? html`<${ErrorState} message=${error} />` : null}
+            ${currentSource !== null && config !== null ? html`
+              <section class="space-y-3 rounded border border-[var(--color-border-default)] p-3" aria-label="runtime.toml 현재 파일 비교" data-testid="runtime-toml-conflict">
+                <p>현재 파일과 초안을 비교하세요. 읽기만으로 저장 기준이 바뀌지 않습니다.</p>
+                <p class="break-all">${currentSource.source_path}</p>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div><h2>편집 기준 원문</h2><code class="break-all">${config.source_revision}</code>
+                    <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-all" aria-label="편집 기준 원문">${config.source_text}</pre></div>
+                  <div><h2>현재 서버 원문</h2><code class="break-all">${currentSource.source_revision}</code>
+                    <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-all" aria-label="현재 서버 원문">${currentSource.source_text}</pre></div>
+                </div>
+                <p>초안을 유지하고 현재 revision을 채택하면, 다음 저장 시 현재 파일을 아래 초안으로 교체합니다. 필요한 변경을 먼저 합치세요.</p>
+                <div class="flex flex-wrap gap-2">
+                  <${ActionButton} disabled=${saving || readingCurrent} onClick=${() => useCurrentSource(false)} testId="runtime-toml-adopt-revision">현재 revision 채택 · 초안 유지<//>
+                  <${ActionButton} disabled=${saving || readingCurrent} onClick=${() => useCurrentSource(true)} testId="runtime-toml-replace-draft">현재 원문으로 초안 교체<//>
+                </div>
+              </section>
+            ` : null}
             ${notice ? html`
               <div
                 class="px-1 text-xs text-[var(--color-status-ok)]"
@@ -856,7 +927,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 reservedProviderIds=${config.reserved_provider_ids}
                 section=${structuredSection}
                 disabled=${loadState !== 'loaded' || parseError !== null}
-                draftDirty=${dirty}
+                draftDirty=${dirty || readingCurrent || currentSource !== null}
                 saving=${saving}
                 onRoutingChange=${(lane: RuntimeRoutingLane, runtimeId: string | null) => {
                   void handleRoutingPatch(lane, runtimeId)
@@ -882,7 +953,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
               ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}
               ${parseError !== null ? html`<p role="alert">${parseError}</p>` : exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
                 sourceText=${draft} lanes=${exactLanes} runtimes=${laneRuntimes}
-                slotsDisabled=${saving || loadState !== 'loaded' || dirty}
+                slotsDisabled=${saving || readingCurrent || currentSource !== null || loadState !== 'loaded' || dirty}
                 deadlineDisabled=${saving || loadState !== 'loaded'}
                 onSlotAction=${(laneId: string, action: RuntimeExactSlotAction, runtimeId: string,
                   direction?: RuntimeExactSlotDirection) => { void handleExactSlotAction(laneId, action, runtimeId, direction) }}

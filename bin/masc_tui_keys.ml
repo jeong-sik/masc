@@ -71,6 +71,21 @@ let config_bindings =
        80 cells, the only other thing the pane does. A reader left with
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
+  ; b Act "S" "save draft"
+      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
+      Some [ Config_runtime ]
+  ; b Act "C" "compare file"
+      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
+      Some [ Config_runtime ]
+  ; b Act "u" "adopt revision"
+      ~help:"runtime.toml: keep the draft and adopt the displayed current file revision; S saves",
+      Some [ Config_runtime ]
+  ; b Act "U" "use current text"
+      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
+      Some [ Config_runtime ]
+  ; b Act "X" "discard draft"
+      ~help:"runtime.toml: discard only the local draft and read the current file",
+      Some [ Config_runtime ]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]

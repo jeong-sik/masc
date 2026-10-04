@@ -309,7 +309,8 @@ Antigravity). The form copies that provider's command and model bindings,
 refuses a location another provider of the same client already uses, and
 saves through the same preview. Enter on the last field re-reads
 `runtime.toml` from the server and declares against that, so a change made
-while the form was open is kept. It does not sign in; the rows under the
+while the form was open is kept. The save also guards that fresh revision; a
+concurrent write is refused and the form remains available for retry. It does not sign in; the rows under the
 fields name the command that does, and after the save the same command is
 in the session log. Turns reach the new account only after a lane lists it
 as a candidate. The
@@ -1923,6 +1924,22 @@ and settings preempted by environment variables. Use `j/k` or `PgUp/PgDn` to
 scroll, `v` or `Esc` to return, and `r` to reload. A failed reload remains visible
 and labels retained metadata as a previous read. Invalid TOML remains readable
 with its parse error; a read status does not claim a write committed.
+
+`e` opens the raw source or retained draft in `$EDITOR`. Preview and save
+failures keep the edited text in this TUI session, scoped to the workspace and
+configuration path. Moving to another screen or temporarily losing workspace
+authority does not discard it; quitting the TUI ends the session. The save
+compares the revision read with the original source under the server's write
+lock, so another writer's changes cause a conflict instead of an overwrite.
+
+With a retained draft, `r` reads the current file without changing the draft or
+its save basis. `C` switches between the draft and that current snapshot.
+After comparing and combining changes in the editor, `u` adopts the displayed
+current revision while keeping your draft; `S` retries saving it. `U` instead
+replaces the draft with the displayed current text, and `X` discards the local
+draft and reads the file again. Adoption does not write anything. Another writer
+can still cause a new conflict. A lost response or uncertain durability keeps
+the draft and asks you to read the file before retrying.
 
 The `runtime.toml` view keeps comments and section headings on screen, while
 `j`/`k` select only rows that contain actual assignments. `PgUp`/`PgDn` jump

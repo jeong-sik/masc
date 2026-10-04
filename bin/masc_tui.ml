@@ -265,13 +265,9 @@ let surface_rows (state : state) =
 let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 
 let runtime_config_assignment_rows (state : state) =
-  match state.runtime_config_view with
-  | None -> []
-  | Some reading ->
-      reading.rcv_rows
-      |> List.filter_mapi (fun index row ->
-             if Masc_tui_code_lexer.row_has_assignment row then Some index
-             else None)
+  Masc_tui_types.runtime_config_active_rows state
+  |> List.filter_mapi (fun index row ->
+       if Masc_tui_code_lexer.row_has_assignment row then Some index else None)
 
 (* Pick an actual value row at or beyond [target] in the requested direction.
    The cursor never lands on a comment, table heading, or blank line; those
@@ -327,7 +323,8 @@ let runtime_config_jump_context_rows = 3
    view then. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
-  | Some path, Some { rcv_rows = rows; _ } ->
+  | Some path, Some _ ->
+    let rows = Masc_tui_types.runtime_config_active_rows state in
     state.runtime_config_jump_section <- None;
     state.config_pane <- Config_runtime;
     state.runtime_config_status_open <- false;
@@ -14222,7 +14219,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            launch_runtime_params_load state ~mailbox)
   | Runtime_config_view_loaded result -> (
       match result with
-      | Ok (path, lines, metadata) ->
+      | Ok (reading : Masc_tui_runtime_config_view.reading) ->
+          let path = reading.path in
+          let lines = String.split_on_char '\n' reading.source_text in
+          let metadata = reading.metadata in
           (* Lexed once here rather than per frame or per row. TOML opens a
              string with a triple quote that closes several rows later, and
              masc's own tool declarations are written that way, so a row cannot
@@ -14237,7 +14237,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                       (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           state.runtime_config_view <- Some
-             { rcv_path = path; rcv_rows = rows; rcv_metadata = metadata };
+             { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata };
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind
              the keys on a reload. *)
@@ -14246,6 +14246,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           set_runtime_config_cursor_near state ~direction:1
             ~target:state.runtime_config_cursor;
           state.runtime_config_view_error <- None;
+          (match Masc_tui_types.runtime_config_edit_session state with
+           | None -> ()
+           | Some edit ->
+             let current = { Masc_tui_runtime_config_edit.path;
+               source_text = reading.source_text; source_revision = metadata.source_revision } in
+             (match Masc_tui_runtime_config_edit.observe current edit.rce_session with
+              | Ok session -> Masc_tui_types.put_runtime_config_edit state ~workspace:edit.rce_workspace session
+              | Error _ -> ()));
+
           (match apply_runtime_config_jump state with
            | None -> ()
            | Some (section, true) ->
@@ -17424,7 +17433,8 @@ let main
     | Some row -> (
       match state.runtime_config_view with
       | None -> report_action state "error" "config not loaded yet; r to reload"
-      | Some { rcv_rows = source_rows; _ } ->
+      | Some _ ->
+        let source_rows = Masc_tui_types.runtime_config_active_rows state in
         state.config_pane <- Config_runtime;
         state.runtime_config_status_open <- false;
         (* Land a few rows above the header so the section reads as a block
@@ -17465,75 +17475,121 @@ let main
          | Some session -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
          | None -> launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path))
   in
-  (* Rebuilt from the rows on screen rather than kept as a second copy. The
-     editor and the account form have to start from the file as it is, and
-     the colours are a reading of that file rather than a change to it --
-     dropping the kinds gives back exactly what was loaded. *)
-  let runtime_config_source rows =
-    String.concat "\n"
-      (List.map (fun segments -> String.concat "" (List.map fst segments)) rows)
-  in
-  (* Preview, then save: the one write path for runtime.toml text, which the
-     $EDITOR round trip and the account form both take. The save route
-     validates the text again but does not compare it with what the file held
-     when the text was read, so a caller that holds text for long re-reads
-     the file first; the account form does. *)
-  let save_runtime_config_text ~authority ~identity edited =
+  (* The raw editor and account form share preview and guarded commit. Each
+     caller keeps the revision from the same read as the text it edits. *)
+  let save_runtime_config_text ~authority ~identity ~expected_source_revision edited =
     let host = server_peer_host in
     let port = state.port in
     let ( let* ) = Result.bind in
-    let* () = check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port () in
-    match
-      Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited
-    with
-    | Error detail -> Error ("preview failed: " ^ detail)
-    | Ok preview -> (
-      match Masc_tui_runtime_config_receipt.decode_preview preview with
-      | Error detail -> Error ("preview answer unreadable: " ^ detail)
-      | Ok (Masc_tui_runtime_config_receipt.Cannot_save reason) ->
-        Error ("preview rejected the edit: " ^ Terminal_text.single_line reason)
-      | Ok Masc_tui_runtime_config_receipt.Can_save -> (
-        let* () = check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port () in
-        match
-          Masc_tui_http.post_runtime_config_raw ~host ~port ~source_text:edited
-        with
-        | Ok receipt ->
-          launch_runtime_config_load state ~mailbox:async_messages;
-          Ok (Masc_tui_http.runtime_config_commit_receipt_summary receipt)
-        | Error detail -> Error ("save failed: " ^ detail)))
+    let refused result = Result.map_error (fun detail -> Masc_tui_http.Runtime_config_save_refused detail) result in
+    let* () = refused (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ()) in
+    let* preview = refused (Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited) in
+    let* preview = refused (Masc_tui_runtime_config_receipt.decode_preview preview) in
+    match preview with
+    | Masc_tui_runtime_config_receipt.Cannot_save reason ->
+      Error (Masc_tui_http.Runtime_config_save_refused ("Preview rejected the edit: " ^ reason))
+    | Masc_tui_runtime_config_receipt.Can_save ->
+      let* () = refused (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ()) in
+      let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
+        ~source_text:edited ~expected_source_revision in
+      launch_runtime_config_load state ~mailbox:async_messages;
+      Ok receipt
   in
-  let handle_runtime_config_edit () =
+  let save_runtime_config_edit_session ~workspace session =
+    let module Edit = Masc_tui_runtime_config_edit in
     let authority = state.workspace_authority in
     let identity = state.server_identity in
-    match state.runtime_config_view with
-    | None -> report_action state "error" "config not loaded yet; r to reload"
-    | Some { rcv_rows = rows; _ } -> (
-      match Masc_tui_editor.editor_command () with
-      | None ->
-        report_action state "error"
-          "no $EDITOR set; export EDITOR to edit runtime.toml here"
-      | Some _ -> (
-        match
-          Masc_tui_editor.roundtrip ~restore:restore_terminal
-            ~reenter:reenter_terminal (runtime_config_source rows)
-        with
-        | Error abort ->
-          report_editor_abort state ~action:"runtime.toml"
-            ~cancelled:"runtime.toml unchanged" abort
-        | Ok edited -> (
-          match save_runtime_config_text ~authority ~identity edited with
-          | Ok summary -> report_action state "system" ("runtime.toml saved · " ^ summary)
-          | Error message -> report_action state "error" message)))
+    Masc_tui_types.put_runtime_config_edit state ~workspace session;
+    match save_runtime_config_text ~authority ~identity
+        ~expected_source_revision:session.Edit.base.source_revision session.text with
+    | Ok receipt ->
+      (match receipt.Masc_tui_runtime_config_receipt.durability with
+       | Masc_tui_runtime_config_receipt.Durable ->
+         Masc_tui_types.discard_runtime_config_edit state ~workspace ~path:session.base.path
+       | Masc_tui_runtime_config_receipt.Durability_unconfirmed ->
+         Masc_tui_types.put_runtime_config_edit state ~workspace
+           (Edit.failed "File written; durability is unconfirmed. Read the current file before retrying." session));
+      report_action state "system" (Masc_tui_runtime_config_receipt.lane_summary receipt)
+    | Error error ->
+      let message = Masc_tui_http.runtime_config_save_error_message error in
+      let session = match error with
+        | Masc_tui_http.Runtime_config_conflict current ->
+          (match Edit.observe current session with
+           | Ok session -> Edit.failed message session
+           | Error detail -> Edit.failed (message ^ " " ^ detail) session)
+        | Masc_tui_http.Runtime_config_save_refused _
+        | Masc_tui_http.Runtime_config_save_unconfirmed _ -> Edit.failed message session in
+      Masc_tui_types.put_runtime_config_edit state ~workspace session;
+      report_action state "error" (message ^ " Draft retained; e to edit, r to read current.")
+  in
+  let handle_runtime_config_edit () =
+    let module Edit = Masc_tui_runtime_config_edit in
+    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
+    | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
+    | Some workspace, Some reading ->
+      let session = match Masc_tui_types.runtime_config_edit_session state with
+        | Some edit -> edit.rce_session
+        | None -> Edit.open_document { path = reading.rcv_path;
+            source_text = reading.rcv_source_text; source_revision = reading.rcv_metadata.source_revision } in
+      (match Masc_tui_editor.roundtrip ~restore:restore_terminal
+          ~reenter:reenter_terminal ~suffix:".toml" session.text with
+       | Error abort -> report_editor_abort state ~action:"runtime.toml"
+           ~cancelled:"runtime.toml unchanged; any earlier draft is retained" abort
+       | Ok edited ->
+         if String.equal edited session.base.source_text then begin
+           Masc_tui_types.discard_runtime_config_edit state ~workspace ~path:session.base.path;
+           report_action state "system" "No changes from the draft base; no file was written."
+         end else save_runtime_config_edit_session ~workspace (Edit.edit edited session))
+  in
+  let handle_runtime_config_draft key =
+    let module Edit = Masc_tui_runtime_config_edit in
+    match Masc_tui_types.runtime_config_edit_session state with
+    | None -> report_action state "system" "No retained runtime.toml draft; e to edit."
+    | Some edit ->
+      let session = edit.rce_session in
+      (match key with
+       | "S" -> save_runtime_config_edit_session ~workspace:edit.rce_workspace session
+       | "X" ->
+         Masc_tui_types.discard_runtime_config_edit state ~workspace:edit.rce_workspace ~path:session.base.path;
+         launch_runtime_config_load state ~mailbox:async_messages;
+         report_action state "system" "Local draft discarded; reading current runtime.toml."
+       | "C" ->
+         let view = match edit.rce_view with
+           | Config_edit_current _ -> Ok Config_edit_draft
+           | Config_edit_draft ->
+             (match session.current with
+              | None -> Error "Read the current file with r before comparing."
+              | Some current -> Ok (Config_edit_current
+                  (Masc_tui_types.runtime_config_source_rows ~path:current.path current.source_text))) in
+         (match view with
+          | Error message -> report_action state "error" message
+          | Ok view ->
+            state.runtime_config_edits <- List.map (fun candidate ->
+              if candidate.rce_workspace = edit.rce_workspace
+                 && String.equal candidate.rce_session.base.path session.base.path
+              then {candidate with rce_view = view} else candidate) state.runtime_config_edits;
+            state.config_scroll <- 0; state.runtime_config_cursor <- 0)
+       | "u" | "U" ->
+         let result = if key = "u" then Edit.adopt_current session else Edit.replace_with_current session in
+         (match result with
+          | Error message -> report_action state "error" message
+          | Ok session ->
+            Masc_tui_types.put_runtime_config_edit state ~workspace:edit.rce_workspace session;
+            state.config_scroll <- 0; state.runtime_config_cursor <- 0;
+            report_action state "system"
+              (if key = "u" then "Current revision adopted; draft text retained. S to save."
+               else "Draft replaced with the displayed current file. No file was written."))
+       | _ -> ())
   in
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
   let handle_runtime_account_open () =
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
-    | Some { rcv_rows = rows; _ } -> (
+    | Some reading -> (
       match
         Masc_tui_runtime_account_form.open_on ?home_dir:(Sys.getenv_opt "HOME")
-          (runtime_config_source rows)
+          reading.rcv_source_text
       with
       | Ok form -> state.runtime_account_form <- Some form
       | Error reason -> report_action state "error" reason)
@@ -19740,7 +19796,7 @@ and is loaded on demand through keeper_skill.
                      | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
                      | Ok json -> (
                          match Masc_tui_runtime_config_view.decode json with
-                         | Ok reading -> Ok reading.Masc_tui_runtime_config_view.source_text
+                         | Ok reading -> Ok reading
                          | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
                    in
                    let declared =
@@ -19749,13 +19805,15 @@ and is loaded on demand through keeper_skill.
                      | Ok current ->
                        Masc_tui_runtime_account_form.declare_on
                          ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
-                         current
+                         current.Masc_tui_runtime_config_view.source_text
+                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision)
                    in
                    match declared with
                    | Error form -> state.runtime_account_form <- Some form
-                   | Ok { Masc_tui_runtime_account_form.id; text; sign_in } -> (
-                       match save_runtime_config_text ~authority ~identity text with
-                       | Ok summary ->
+                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision) -> (
+                       match save_runtime_config_text ~authority ~identity ~expected_source_revision text with
+                       | Ok receipt ->
+                         let summary = Masc_tui_http.runtime_config_commit_receipt_summary receipt in
                          (* A sign-in keeps the form open on its command;
                             Antigravity has none and closes. *)
                          state.runtime_account_form <-
@@ -19775,7 +19833,8 @@ and is loaded on demand through keeper_skill.
                            sign_in
                        | Error message ->
                          state.runtime_account_form <-
-                           Some (Masc_tui_runtime_account_form.refused form message)))))
+                           Some (Masc_tui_runtime_account_form.refused form
+                             (Masc_tui_http.runtime_config_save_error_message message))))))
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_param ->
@@ -21692,6 +21751,10 @@ and is loaded on demand through keeper_skill.
             | None, _ | _, None -> ())
        | Some key when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
+       | Some (("S" | "C" | "u" | "U" | "X") as key)
+         when state.view = Config && state.config_pane = Config_runtime
+              && not state.runtime_config_status_open && Option.is_none state.runtime_account_form ->
+           handle_runtime_config_draft key
        | Some ("v" | "V")
          when state.view = Config && state.config_pane = Config_runtime ->
            state.runtime_config_status_open <- not state.runtime_config_status_open;

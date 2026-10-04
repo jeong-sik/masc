@@ -2908,17 +2908,61 @@ let post_runtime_config_preview ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/runtime/config/raw/preview"
     ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
 
-(** POST /api/v1/runtime/config/raw — write the edited text. Callers go
-    through the preview first; this route also validates, so a race still
-    fails closed. *)
+type runtime_config_save_error =
+  | Runtime_config_conflict of Masc_tui_runtime_config_edit.document
+  | Runtime_config_save_refused of string
+  | Runtime_config_save_unconfirmed of string
+
+let runtime_config_save_error_message = function
+  | Runtime_config_conflict _ -> "The file changed after this draft was opened. Compare the current file before saving."
+  | Runtime_config_save_refused detail -> detail
+  | Runtime_config_save_unconfirmed detail ->
+    detail ^ " The file may already have changed; read the current file before retrying."
+
+let runtime_config_text_revision ~path source_text =
+  let observation = Runtime.config_observation ~path source_text in
+  Runtime.config_source_revision_to_string observation.source_revision
+
+let runtime_config_conflict_document body =
+  let ( let* ) = Result.bind in
+  let* json = try Ok (Yojson.Safe.from_string body)
+    with Yojson.Json_error detail -> Error detail in
+  let* current = match Json_util.assoc_member_opt "code" json, Json_util.assoc_member_opt "current" json with
+    | Some (`String "revision_conflict"), Some (`Assoc _ as current) -> Ok current
+    | _ -> Error "Malformed configuration conflict response" in
+  match Json_util.assoc_member_opt "source_path" current,
+        Json_util.assoc_member_opt "source_text" current,
+        Json_util.assoc_member_opt "source_revision" current with
+  | Some (`String path), Some (`String source_text), Some (`String source_revision)
+    when path <> "" && String_util.is_lowercase_sha256_hex source_revision
+      && String.equal source_revision (runtime_config_text_revision ~path source_text) ->
+    Ok { Masc_tui_runtime_config_edit.path; source_text; source_revision }
+  | _ -> Error "Configuration conflict document has an invalid source revision"
+
+(** Both the preview and guarded save validate, but only the save compares the
+    captured source revision under the server write lock. *)
 let post_runtime_config_raw ~(host : string) ~(port : int)
-    ~(source_text : string) : (runtime_config_commit_receipt, string) result =
-  match
-    post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
-      ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
-  with
-  | Error _ as error -> error
-  | Ok json -> decode_runtime_config_commit_receipt json
+    ~(source_text : string) ~(expected_source_revision : string)
+    : (runtime_config_commit_receipt, runtime_config_save_error) result =
+  let body = Yojson.Safe.to_string (`Assoc
+    [ "source_text", `String source_text;
+      "expected_source_revision", `String expected_source_revision ]) in
+  match http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:"/api/v1/runtime/config/raw" ~body with
+  | Error detail -> Error (Runtime_config_save_unconfirmed detail)
+  | Ok (409, body) ->
+    (match runtime_config_conflict_document body with
+     | Ok current -> Error (Runtime_config_conflict current)
+     | Error detail -> Error (Runtime_config_save_unconfirmed detail))
+  | Ok (status_code, body) when status_code >= 400 && status_code < 500 ->
+    Error (Runtime_config_save_refused (refusal ~status_code ~body))
+  | Ok (status_code, body) ->
+    (match Result.bind (decode_json ~allow_empty:false ~status_code ~body)
+        decode_runtime_config_commit_receipt with
+     | Ok receipt when String.equal receipt.source_revision
+         (runtime_config_text_revision ~path:"" source_text) -> Ok receipt
+     | Ok _ -> Error (Runtime_config_save_unconfirmed "Save receipt does not match the submitted draft.")
+     | Error detail -> Error (Runtime_config_save_unconfirmed detail))
 
 type skill_editor_loaded =
   { sel_reference : Skill_reference.t

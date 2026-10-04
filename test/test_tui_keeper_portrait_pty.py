@@ -479,8 +479,12 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
     def health():
         identity["matched_reads"] += 1
         base = identity["base"] or ""
-        return 200, {"paths": {"effective_base_path": base,
-                               "effective_masc_root": os.path.join(base, ".masc")}}
+        # A tuple health response is normalized to the local workspace by
+        # the harness. Preserve the foreign identity this scenario supplies.
+        return h.RawHttpResponse(200, json.dumps({"paths": {
+            "effective_base_path": base,
+            "effective_masc_root": os.path.join(base, ".masc"),
+        }}).encode(), content_type="application/json")
 
     def account():
         value = balance[0]
@@ -521,10 +525,13 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
                         and b"Balance 12.500 Candle" not in frame)
             previous_reads = identity["matched_reads"]
             identity["base"] = str(base)
-            # Two serial full-refresh probes prove the first matching result
-            # was admitted before its successor could start.
+            # Request admission precedes the TUI applying its identity result.
+            # The recovered list's ready composer proves that the matching
+            # workspace and selected Keeper are visible before Enter is sent.
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            await_frame(process, fd, output, lambda frame: b"MASC Keepers" in frame
+                        and "› to alpha".encode() in frame)
             balance[0] = "13000"
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", "▸Items".encode())
@@ -858,7 +865,7 @@ def item_account_refreshes_without_public_currency(binary: str) -> None:
         refresh=0.5, terminal_cols=200)
 
 
-def item_account_survives_partial_roster_refresh(binary: str) -> None:
+def item_account_survives_partial_roster_refresh(binary: str, *, initially_present: bool = False) -> None:
     fixtures = item_roster_fixtures()
     public_roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
     # Alpha is known in the local workspace but omitted from this capped page.
@@ -874,7 +881,8 @@ def item_account_survives_partial_roster_refresh(binary: str) -> None:
 
     def roster():
         observed["roster_reads"] += 1
-        return ((503, {"error": "roster unread"}) if observed["failed"] else (200, partial))
+        visible = public_roster if initially_present and not observed["hold"] else partial
+        return ((503, {"error": "roster unread"}) if observed["failed"] else (200, visible))
 
     def account():
         if held.release.is_set():
@@ -934,7 +942,9 @@ def item_account_survives_partial_roster_refresh(binary: str) -> None:
             following.release.set()
 
     h.run_terminal_scenario(binary,
-        description="partial roster preserves an authoritative Item account and one pending refresh",
+        description=("present Keeper leaves a capped roster without losing its Item account"
+                     if initially_present else
+                     "partial roster preserves an authoritative Item account and one pending refresh"),
         interact=interact, prepare_workspace=items.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=COLUMNS)
 
@@ -1094,8 +1104,8 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
 
     def wait_refreshes(process, fd, output):
         before = identity["probes"]
-        # Full refreshes are serial: the following probe starts after applying
-        # the preceding identity response, so this crosses the state boundary.
+        # Observe endpoint activity; input boundaries also wait for the
+        # rendered authority because request admission precedes application.
         assert h.wait_for_fixture_state(process, fd, output,
             lambda: identity["probes"] >= before + 2, timeout=10)
 
@@ -1112,6 +1122,9 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             assert h.wait_for_fixture_event(process, fd, output, held, timeout=3)
             identity["unread"] = True
             wait_refreshes(process, fd, output)
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"No keeper selected." in frame(output), timeout=10), \
+                "the TUI did not apply the detail authority withdrawal"
             # A manual read during revocation must not create a new token
             # that would admit an answering but unverified endpoint.
             os.write(fd, b"o" if sandbox_logs else b"r")
@@ -1196,6 +1209,7 @@ if __name__ == "__main__":
     portrait_as_pixels(binary)
     item_account_refreshes_without_public_currency(binary)
     item_account_survives_partial_roster_refresh(binary)
+    item_account_survives_partial_roster_refresh(binary, initially_present=True)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_private_changes(binary)
@@ -1208,4 +1222,4 @@ if __name__ == "__main__":
     instructions_read_recovers_workspace_authority(binary, sandbox_logs=True)
     instructions_read_recovers_workspace_authority(binary, leave=True)
     instructions_read_recovers_workspace_authority(binary, fallback_exit=True)
-    print("tui keeper portrait: PASS (17 scenarios)")
+    print("tui keeper portrait: PASS (18 scenarios)")

@@ -3557,8 +3557,13 @@ let keeper_item_revision state keeper_name =
   | Keeper_control.Present runtime -> runtime.kr_candle_account_revision
   | Unobserved | Invalid _ | Absent -> Error "Keeper account revision is not observed in the current roster"
 
-let launch_keeper_items ?(preserve_partial_account=false) state ~mailbox keeper_name =
-  let previous_account = state.item_account in
+let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_name =
+  let observed_account =
+    match state.item_account with
+    | Some (name, _) as account when keep_observed_account
+        && String.equal name keeper_name -> account
+    | _ -> None
+  in
   withdraw_keeper_items state;
   match state.workspace_identity, state.server_identity with
   | (Workspace_identity_unread | Workspace_identity_mismatch _), _
@@ -3572,7 +3577,7 @@ let launch_keeper_items ?(preserve_partial_account=false) state ~mailbox keeper_
   | Workspace_identity_match, Some identity ->
   (* The read-state Item endpoint owns account authority. Public roster
      currency observations require CanAdmin and may legitimately be absent;
-     a current roster reading is required before this authenticated read.
+     the roster itself must have been successfully observed before this read.
      A partial roster's silence is not absence: past the cap the roster says
      nothing about a locally known Keeper, and [Unobserved] is exactly that
      silence -- the authoritative read proceeds and the endpoint itself
@@ -3581,16 +3586,11 @@ let launch_keeper_items ?(preserve_partial_account=false) state ~mailbox keeper_
   match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
   | Invalid _ | Absent ->
     state.item_account_error <- Some "Keeper is not observed in the current roster"
-  | (Present _ | Unobserved) as liveness ->
-  (* A successful partial cadence does not revoke an earlier authenticated
-     account. Keep it visible during this background read, after the same
-     workspace and roster checks that authorize the new request. Explicit
-     reads and another Keeper's account keep the normal withdrawal path. *)
-  (match previous_account with
-   | Some (name, _) when preserve_partial_account
-       && liveness = Unobserved && String.equal name keeper_name ->
-       state.item_account <- previous_account
-   | Some _ | None -> ());
+  | Present _ | Unobserved ->
+  (* A cadence read under unchanged authority refreshes an observed account
+     without blanking it while the request is pending. Refusals above and a
+     failed endpoint response still withdraw it. *)
+  state.item_account <- observed_account;
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -3621,16 +3621,29 @@ let visible_item_revision state =
 
 let refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous =
   let current = visible_item_revision state in
+  (* A capped roster can stop reporting this Keeper's public revision without
+     changing the authority of its private account or pending Item read. *)
+  let partial_same_authority =
+    match previous, current with
+    | Some (previous_keeper, _, _, previous_workspace),
+      Some (keeper, _, _, workspace) ->
+        roster_refreshed && String.equal previous_keeper keeper
+        && previous_workspace = workspace
+        && Keeper_control.liveness_of_roster state.keeper_roster keeper = Unobserved
+    | None, _ | _, None -> false
+  in
+  let revision_changed = current <> previous && not partial_same_authority in
   let read_pending =
     List.exists (fun request -> request.drr_tab = Detail_items) state.detail_reads
   in
   let retry_settled_failure =
     Option.is_some state.item_account_error && not read_pending
   in
-  if current <> previous || retry_settled_failure || (roster_refreshed && not read_pending) then
+  if revision_changed || retry_settled_failure || (roster_refreshed && not read_pending) then
     match current with
     | Some (keeper_name, _, _, _) ->
-        launch_keeper_items ~preserve_partial_account:roster_refreshed state ~mailbox keeper_name
+        launch_keeper_items ~keep_observed_account:(not revision_changed)
+          state ~mailbox keeper_name
     | None -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
@@ -9706,11 +9719,7 @@ let apply_keeper_roster_load state result =
        | None -> ()
        | Some (keeper_name, _) ->
          (match Keeper_control.liveness_of_roster roster keeper_name with
-          | Keeper_control.Present _ -> ()
-          | Unobserved ->
-              (match roster with
-               | Keeper_control.Roster_unobserved -> withdraw_keeper_items state
-               | Roster_partial _ | Roster_invalid _ | Roster_complete _ -> ())
+          | Keeper_control.Present _ | Unobserved -> ()
           | Invalid _ | Absent -> withdraw_keeper_items state))
   | Error failure ->
       (* The last good roster is dropped rather than kept: a stale one reports

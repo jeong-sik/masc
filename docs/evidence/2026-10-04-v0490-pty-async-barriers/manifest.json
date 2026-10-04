@@ -1,0 +1,264 @@
+{
+  "scope": "official remote workspace history and Item workspace authority entrypoints, existing e4 native binary and candidate Python fixtures",
+  "script_sha256": "38eff88e96da6bb51af2ef3ca714f43bbefd3cc7be039cb027cad165a08bff0f",
+  "binary_commit": "e4afdce8f0c4ba4cf02e4326ba423c4fe2207339",
+  "binary_sha256": "64ea20854e47c3a5883c717303de468cbc7ed7b811b8fcea815f263ee8bc41d6",
+  "exit_code": 0,
+  "sources": {
+    "test/test_tui_remote_workspace_history_pty.py": "38eff88e96da6bb51af2ef3ca714f43bbefd3cc7be039cb027cad165a08bff0f",
+    "test/test_tui_keyboard_input.py": "07f9a7c87e5fda04349936561a4f69afa3d97bf10b61a6016bfc99534c49d0dd",
+    "test/test_tui_item_workspace_authority_pty.py": "d2350ac480a18ca5e2e4b1458f3610f8cad439f7fc2cf6824c68896dbcd473c1"
+  },
+  "fixture_errors": [
+    {
+      "type": "BrokenPipeError",
+      "detail": "[Errno 32] Broken pipe",
+      "expected_disconnect": true
+    },
+    {
+      "type": "BrokenPipeError",
+      "detail": "[Errno 32] Broken pipe",
+      "expected_disconnect": true
+    },
+    {
+      "type": "BrokenPipeError",
+      "detail": "[Errno 32] Broken pipe",
+      "expected_disconnect": true
+    },
+    {
+      "type": "BrokenPipeError",
+      "detail": "[Errno 32] Broken pipe",
+      "expected_disconnect": true
+    }
+  ],
+  "scenarios": [
+    {
+      "description": "workspace withdrawal cancels pending task creation and permits a fresh task after return",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace verification withdrawal requires fresh rows and confirmation",
+      "status": "PASS"
+    },
+    {
+      "description": "Tools workspace withdrawal clears cached inventory and supersedes held same-Keeper reads",
+      "status": "PASS"
+    },
+    {
+      "description": "Resource initialize ownership is withdrawn before same-URI B recovery",
+      "status": "PASS"
+    },
+    {
+      "description": "Resource resources/read ownership is withdrawn before same-URI B recovery",
+      "status": "PASS"
+    },
+    {
+      "description": "Workspace withdrawal retires parameter edits before successor writes",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace switch withdraws connector arms and held sequential writes with reused IDs",
+      "status": "PASS"
+    },
+    {
+      "description": "Live dispatch identity refuses cached workspace chat",
+      "status": "PASS"
+    },
+    {
+      "description": "Live dispatch identity refuses cached workspace pause",
+      "status": "PASS"
+    },
+    {
+      "description": "Live dispatch identity refuses cached workspace boot-recovery",
+      "status": "PASS"
+    },
+    {
+      "description": "discard a bundle whose workspace changes during its roster GET",
+      "status": "PASS"
+    },
+    {
+      "description": "same-revision workspace replacement during settings editor refuses the POST",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace replacement while Schedule editor blocks refuses the update POST",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace replacement while runtime.toml editor blocks refuses preview and save",
+      "status": "PASS"
+    },
+    {
+      "description": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+      "status": "PASS"
+    },
+    {
+      "description": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+      "status": "PASS"
+    },
+    {
+      "description": "GitHub device stream cannot restore a withdrawn workspace view",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace change withdraws held chat history and retains its unsent draft",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace change suspends complete unsent inputs until explicit resume in A",
+      "status": "PASS"
+    },
+    {
+      "description": "MASC-root-only change suspends complete unsent inputs until explicit resume in A",
+      "status": "PASS"
+    },
+    {
+      "description": "superseded scoped roster cannot replace a newer full workspace reading",
+      "status": "PASS"
+    },
+    {
+      "description": "staged image bytes and references retain exact workspace and Keeper ownership",
+      "status": "PASS"
+    },
+    {
+      "description": "MASC-root-only transition: staged image bytes and references retain exact workspace and Keeper ownership",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace switch withdraws schedule confirmation, runtime picker and unknown-identity lifecycle",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace switch retires live observer session, cursor and acting events",
+      "status": "PASS"
+    },
+    {
+      "description": "workspace withdrawal cancels held identity mutation before its next provider and allows fresh A retry",
+      "status": "PASS"
+    },
+    {
+      "description": "Item accounts follow A/B/A workspace authority",
+      "status": "PASS"
+    },
+    {
+      "description": "Partial roster retains authoritative Item account",
+      "status": "PASS"
+    }
+  ],
+  "archive": {
+    "path": "raw-run.tar.gz",
+    "sha256": "b9ad1491306e34c6158324ff9e28f08324bbce2252a993a72e1b2113ac53eecb",
+    "bytes": 527572
+  },
+  "archived_files": {
+    "28.pty": "86488f26e34c931b6053effd6c8edc57f03b3b55aeb82a84bd42f2faabc8cdff",
+    "14.pty": "cdbbfb5bde6acc95e8dfd8c8e0bc3596df8d73336cd31b3b833534cf30be0fca",
+    "15.txt": "3098531688d1085e1efc1b3c1355a26e8c7cf3c1f57ec9a97f7f7dd2c7bf4059",
+    "01.txt": "668dbc77a926c3b32dd6c30517c9daa64e95ad0b4940a7d604965861b57fa9dd",
+    "14.txt": "60274f873ca5337366d524ad6c8d9b57c55a6fa42631d009b904b18f5cd5e6bf",
+    "28.txt": "d3b32620337ceb31a00264457ba3d6f50c1240eb4f5999a336d3da2d7dcb5c6a",
+    "15.pty": "c706d2f5ce87e1a1b3dbb2b3c5cc3b0821596fda48b2a036c33792823ad967bc",
+    "01.pty": "7a7842b612131e035e89a7cdc717a364dc8d3056d68b81bb23204c0e370d8e47",
+    "17.pty": "71d8c38b68388b39c881a30de8db37773c23b0297cf2b0e7e2f39c52afbd0fb3",
+    "03.pty": "832ca6b4158a3174597a278de937b4c91fea85a7bbb9346e3fd00913ce7c35cd",
+    "02.txt": "c948d68f2aea6e266758d0e17ef31c68b1f3f0b6e789bbc99dbc5b0f1619dacb",
+    "16.txt": "45c44dcd2e5bdd134c30c8f44920353869914459a71dc2fece36bd230b5a5d75",
+    "run.py": "d441926a951d30d9ea339f7e206d6fce6a576fdc1ee940fcd7c8f440490e12bd",
+    "17.txt": "cba753f133a83cf0c244a22fcbc2eea448003a8022cd0b6b2ac6f98b793d77a2",
+    "03.txt": "075f874051a918735ae062f2eb67d2499173aac7c98934f1e3d59d3b28474ded",
+    "02.pty": "cd9194018f8220d5459cdeba6fd013c1b7875b69808733a4e05fc62610946c6d",
+    "16.pty": "6811620f46f3b51628dc459aa734f38ef1a8b4e17e73d996ff8074c687623596",
+    "12.pty": "385f3c90b068f47466eadddb28a676c1e8e3c033510d26a84a966f9b90cf7c30",
+    "06.pty": "4a3935f5822177a519fc3e7810470d3344e741cdd732fe78e3fedbd22e4abdf4",
+    "07.txt": "3b980b0ac428892aec6f424ccc0c06fa8fd7fed009db7ca25de7c81b248d099b",
+    "13.txt": "5c10a7417209019cf28e9ea59588aa0f4261bf1f0587a4b4104353172a9b3868",
+    "12.txt": "951c7b99ac8e3a3176366d8e4eef5033f1486f7e3463931326df05e75f4d38ed",
+    "06.txt": "735f624f090a870a7988185affb06bc19e6e5386f86ff6b394067b61cc82b1f4",
+    "07.pty": "2ef22f61b2e10d00e3fc0690d5f9a5a985e0b4e6c143d3b67073639fcf68f62b",
+    "13.pty": "93a33539737378f65bc65dd4d26981ce0a4ff7b53acb4b9863162c0f5702a57b",
+    "05.pty": "8485ce43c61366331c80d7c82d1578da274a99e258fa54d31b8a0a3305229aef",
+    "11.pty": "b554758fa45126e8c38a17b0f6a50990647add8698d82dd26c7600c4a0b3cee4",
+    "10.txt": "e78efcbdb388debbc03fefcb1e37f42de7d7e6eb58cdb917816c7521fe1a131b",
+    "04.txt": "ddeb6fee4eb1f06edfef2374280b7fe1c1b44af3f4a9272084752fcc4b3e71cf",
+    "05.txt": "33a8cf3a9ce145fe56ae783662356a14b10c18ca6a7ee5bfb44921e6a8f2a614",
+    "11.txt": "e23ca45a8f7ac60a563096699990e4150116354e1c94941e4803869d5392bcf9",
+    "10.pty": "48e097f6a889749dc54ceba85025d9bd0cda1f52e1f623e3881a4d1a034c4796",
+    "04.pty": "ec8d5175fccd9f91e4c0382cc346e97fa2e6b09c97cce3bd3cc760e888680a82",
+    "run.log": "52b1994a39b020a96427da8888bcb84186bd4945d9eaf067953251e665136603",
+    "manifest.json": "7cecdf4c9ad040576172e4e8cec2ff5f8006a33ce1bdc7e9dfd8e491e2d702aa",
+    "09.pty": "0cc66a05d7617c7afb7d25d115541da7561f843f02d481936d466f043f3767a2",
+    "21.pty": "3febbae0e12e2e890083df2e21142472c85ba6663f1a597751a7ffbe2da2f6bf",
+    "08.txt": "db597182b578cb523fc9ad2e9ccf1742f8309f364259ae95762ac1ece3680815",
+    "20.txt": "f79eb82dbb8849631893753144e1e43996446ceb142bf5df1f1573f158dbc122",
+    "21.txt": "f847a0e03f8069e5297f15ee14ba70958ebe3e7aa76fb41313b148a2620fd861",
+    "09.txt": "39fdfcbfb664a2e83178a730ea15fe4157b3554d41e6d60acd9cb1b323788c04",
+    "20.pty": "8b01202fa5f6a95311fd79a1fbdec7315ea2bd133b5b4d54b67d2249a508a91a",
+    "08.pty": "128460332ac581fe487beaceb1bc56400501d222539b92d7134eff9c493148b1",
+    "22.pty": "28f33e8d86f0ec7c683be873c7e28da6c4353bedfbfc8f0ec569582600bf6ba4",
+    "23.txt": "1966e9d649d3f8cedb3ed193058d35afafd5e255b66cd2ca48bc72c1137832c5",
+    "scenarios.json": "98c697b43135f261f52f33eb3d16c34a3916f197aa25135ab75d8a868c33faf6",
+    "22.txt": "6f29b1a9cf86fd1570a2d487c0d8a3aa93d74949125fe280ef6eafa15a393484",
+    "23.pty": "58af93c00f2d22244d50496b1688d0a6f902d5a39ef16dec26b4f72489d2a00a",
+    "27.pty": "18a784b96904f551c5f04ce06ccf7872a9d1bb853e28806d6fd8f37ef366ca22",
+    "26.txt": "50678f0da2c56254b6887ace8e1ce94b25bf017ae0bd58becc7799d1d13996a7",
+    "27.txt": "95ce060002bc626170dfb4ba06f99188d57e015e767f0ffa1b0dbc5791182538",
+    "26.pty": "1092bf88adfb07ec7248b5c526c211117afad8aaa3b55fd207d7bb6b6f64e120",
+    "24.pty": "6ea87d95b1e54df0aba0acd8f83f47c0014e0e7005dc1efab9d774df9e96a201",
+    "18.pty": "4abd165535449fc422154c009c5ade434a8c75490a424b808edf31fb91ed23ed",
+    "25.txt": "4dbcbd19593ab6100e7498309a75db753ca8a2b2b4842d1b9db6e6eb9ed24287",
+    "19.txt": "59ceb3956d663c7cee70c963c1b15347cc4e3fbda180f6199d406411c00e2009",
+    "18.txt": "e4fca03a4029a5ed9b5c8d3bdcfd6b19844c9b8dd3307decaba4c35fab68daf5",
+    "24.txt": "608fadde43ca5f378ea959a72e5e3694ca670fa063367e40ee54a4be87cb410c",
+    "19.pty": "b4dcd86550de67106598643b29879444bb773330d8089a18a888a3c7b52d76cb",
+    "25.pty": "c4489662bef3e3d7c817d79fd70509e12adf0b8297b42abb0465a19a76abc222",
+    "tui-remote-workspace-history/a-restored-draft-current-history.pty": "91da984ca0e22be4c36298602859317b656e1e29c50b65e46cb085629bf9b9fd",
+    "tui-remote-workspace-history/a-restored-draft-current-history.txt": "046e0ba143e0fc851e45de16a6c7d6727594da276412fb2f4ead615f5baac4c5",
+    "tui-remote-workspace-history/b-with-history-held.pty": "b2d1b05ca33b166de7c027eab87baf1d57a4de3538c5a7e906bc7ceedcf082e0",
+    "tui-remote-workspace-history/b-with-history-held.txt": "2a8fedc65adac05962edbc651bf9662d38e158ea36b048783eea97849266e367",
+    "tui-remote-workspace-history/complete.pty": "4abd165535449fc422154c009c5ade434a8c75490a424b808edf31fb91ed23ed",
+    "tui-remote-workspace-history/a-fresh-context-after-return.pty": "dbcabcc3ccfe3af6f9aadc4693ad711eb3e1568f993d2093cac6811957efe37c",
+    "tui-remote-workspace-history/a-fresh-context-after-return.txt": "53a2516dd597c715cb5e9477e916d9b5d3457af2262318ac56a2aaf25b502588",
+    "tui-remote-workspace-history/b-after-late-response.pty": "0c31e57e82d7247c588569292408949356b21a0aa8a9a634d241fc7680a816ab",
+    "tui-remote-workspace-history/b-after-late-response.txt": "27edea31a35a1bda0a023aa6148103252b3faf92d9dae128f5964b4e0cbe6136",
+    "tui-remote-workspace-history/a-history-and-draft.txt": "d0047598a59bcd8282900516fa6925ce385be5b4bb9ca07fc7512fea3004daff",
+    "tui-remote-workspace-history/a-history-and-draft.pty": "76222966be4ea955520e05bdfeb8da3cb563d1364fddea0aeceb2cedb03e1f94",
+    "tui-remote-workspace-history/requests.json": "ae872692fc0bed28600fbf5ee001bcd3c1f82d44a5318fa94fe33757f3b0534b",
+    "tui-remote-workspace-history/manifest.json": "1dfb0d99ecbde4aff78745815f9174f4666f48aa07ecad0ab4aa3e25dc922921",
+    "tui-item-workspace-authority/a-booting.txt": "0566ecbe58b5e85002b6793031eb2154b674fda2976cb9ef3949fe83371dcf51",
+    "tui-item-workspace-authority/a-recovered.txt": "95ce060002bc626170dfb4ba06f99188d57e015e767f0ffa1b0dbc5791182538",
+    "tui-item-workspace-authority/a-current-after-return.txt": "95ce060002bc626170dfb4ba06f99188d57e015e767f0ffa1b0dbc5791182538",
+    "tui-item-workspace-authority/a-revision-malformed.pty": "ae2e9db1a830842da0fec3764091158328bc5ff1eaf558dbb1acc58d75884818",
+    "tui-item-workspace-authority/a-booting.pty": "19a75a2a565b8e86f216529eaa066d1631d5fc0fd9c60d429d9a6d6ef548aa2d",
+    "tui-item-workspace-authority/a-recovered.pty": "861efc11008c97425fafc6d7d804a02839fcfe727ce85c6ccf67db646fbec824",
+    "tui-item-workspace-authority/a-current-after-return.pty": "6db164ad8247bf603c72c00087b48ee714de619ba9ce18717c5a3a267d4a01e3",
+    "tui-item-workspace-authority/a-revision-malformed.txt": "95ce060002bc626170dfb4ba06f99188d57e015e767f0ffa1b0dbc5791182538",
+    "tui-item-workspace-authority/a-off.pty": "5ab19c711fe43ed70fc80fd3a724feea413e62d01e80ac9f92929aa1d7736d1d",
+    "tui-item-workspace-authority/b-unadmitted-after-late-a.pty": "42c3577982c6bfd2f22757cfe094b01d6e049356839ef844cef2f73324cf6b00",
+    "tui-item-workspace-authority/a-off.txt": "c7309d3683dbd10ab8fcdef2ddd24dd2ea7f1ed50e405fc2a95bf53ca4073067",
+    "tui-item-workspace-authority/b-unadmitted-after-late-a.txt": "3de5b5bfca2ac798662fa7b3cd61f693229d5e732e36d45a53172614c44c4a25",
+    "tui-item-workspace-authority/a-unread.pty": "656ffec7550f1ebe9b6a30f0f2daa0e112fbc3af01f3746412bf0b0c7ba179a4",
+    "tui-item-workspace-authority/a-ready.txt": "9008e40932bd533787ac5bd8010deb84670d615a8dbae18e59bab85cc606410d",
+    "tui-item-workspace-authority/a-unread.txt": "8e4550515b9443b234a3133824a23da7765f9b89269f8a18c44b7df8101ebe0c",
+    "tui-item-workspace-authority/a-ready.pty": "1d81b7cac01253beff58a7422a20fe943808a4d56c1a281f436c1f0b4daf82e0",
+    "tui-item-workspace-authority/complete.pty": "18a784b96904f551c5f04ce06ccf7872a9d1bb853e28806d6fd8f37ef366ca22",
+    "tui-item-workspace-authority/b-with-a-read-held.pty": "276209cdd38f0c2a0fad5956350b59a0d9c8da70d5297d769208d9c16eacc529",
+    "tui-item-workspace-authority/b-with-a-read-held.txt": "e296f418f87047678f9f77b13b6d31a36b1c6f7318935d54f74dd02cc92d7059",
+    "tui-item-workspace-authority/requests.json": "d6dd7c6d795ba70dcc7e1004d23feb471f89a133a586de53e4f4ebb5b3123630",
+    "tui-item-workspace-authority/manifest.json": "75faa6414fb3ffaffbea5fcce90f261b7a90a5a0dd488f86306d14f6aa88b3b3",
+    "tui-item-workspace-authority/a-revision-unavailable.pty": "2eb23367bdf3e514a5781c9cde74ada3313d18c6159311bbd29435a65a3db04f",
+    "tui-item-workspace-authority/a-revision-unavailable.txt": "10e09cdde1581cad34593442250ce1a0d7448394f0d5e6ba3452aa0ac88829b9",
+    "tui-item-workspace-authority/partial-roster.pty": "86488f26e34c931b6053effd6c8edc57f03b3b55aeb82a84bd42f2faabc8cdff",
+    "tui-item-workspace-authority/partial-roster-held.txt": "8d33819bb8e8dc298d51c3036ce1b14a6458e908ebdc4962233b9d171a60a44f",
+    "tui-item-workspace-authority/partial-roster-requests.json": "78591d33947db2a841a3b36227627bb718b44175c23831be6a2f11da63bb03f5",
+    "sources/test/test_tui_remote_workspace_history_pty.py": "38eff88e96da6bb51af2ef3ca714f43bbefd3cc7be039cb027cad165a08bff0f",
+    "sources/test/test_tui_keyboard_input.py": "07f9a7c87e5fda04349936561a4f69afa3d97bf10b61a6016bfc99534c49d0dd",
+    "sources/test/test_tui_item_workspace_authority_pty.py": "d2350ac480a18ca5e2e4b1458f3610f8cad439f7fc2cf6824c68896dbcd473c1",
+    "negative-ask/run.log": "9a851a4fce860549fbd305a4944ece945f45aa1f59a4e6386c312285287c2431",
+    "negative-ask/run.py": "82dca83b09b46ffec692f528dd62352533d72cacd503bce7776ecd2e59218b74",
+    "negative-alpha/run.log": "2aa1b783c00bd1a655b3a2012315dcf724a5937d1a05ba3c420497cd523261d0",
+    "negative-alpha/run.py": "907618c234fc51262e09b9370223bb34a279ed09d8f9b5643ef7d8de04a30047",
+    "negative-item/run.log": "57ed3437a9f31707764f8bb46a99210c733df0b0880a1f092404616ff41cf342",
+    "negative-item/run.py": "6ce7732971dcc5becaa6713c9daa2bba0f164fac26d0d8c95f7ca16d6345a4e7",
+    "negative-item/result.json": "88eaa5401dde796ff2a9b85d9f2ee37191ad7a551b426df00387e77f540ad61b"
+  }
+}

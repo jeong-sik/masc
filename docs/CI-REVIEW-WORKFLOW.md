@@ -40,7 +40,7 @@ existing distribution; it does not rebuild or rerun tests. A publication run is
 not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
 one toolchain job; node behavior runs under the behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
 there is no known-failure exemption list or second standalone compilation pass.
-The behavior lane runs product suites, without CI/review/PTY-helper self-tests.
+The behavior lane runs product suites. CI/review/PTY-helper, build-checker and evidence-validator self-tests are not part of the test suite. The optional credential check runs the scanner directly against the tracked tree.
 Presentation tools are installed only for the behavior lane. The dashboard is
 built once with the production configuration and shared by all native targets;
 type checks and dashboard payload-consumer tests stay in their own job. That

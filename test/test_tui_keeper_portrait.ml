@@ -220,7 +220,7 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
   check bool "removing face equipment restores the cached icon" true
     (restored.Portrait.image == bare.Portrait.image)
 
-let test_mosaic_preserves_every_catalog_accessory_rendering () =
+let test_mosaic_previews_every_catalog_accessory () =
   let previous = View.current_display () in
   Fun.protect ~finally:(fun () -> View.set_display previous) (fun () ->
     View.set_display View.Mosaic;
@@ -294,7 +294,7 @@ let () =
             test_a_small_pane_keeps_its_rows_for_facts
         ; test_case "no picture is no band" `Quick test_no_picture_is_no_band
         ; test_case "Item Mosaic selection changes accessory preview" `Quick test_item_mosaic_preview_changes_with_selected_accessory
-        ; test_case "Mosaic preserves every catalog accessory rendering" `Quick test_mosaic_preserves_every_catalog_accessory_rendering
+        ; test_case "Mosaic previews every catalog accessory" `Quick test_mosaic_previews_every_catalog_accessory
         ; test_case "the band is compact" `Quick test_the_band_is_compact
         ; test_case "the still portrait the name draws" `Quick
             test_the_still_portrait_the_name_draws

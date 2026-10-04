@@ -30,3 +30,24 @@ From `dashboard/`: run `pnpm exec tsc --noEmit` and `pnpm exec eslint src/lib/la
 For the isolated browser fixture, start Vite from the repository root with `MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:1 pnpm --dir dashboard exec vite --host 127.0.0.1 --port 5198 --strictPort`, then run `node dashboard/evidence/2026-10-04-lane-declaration-drafts/browser-fixture.mjs` in another shell. Stop Vite afterward. The HTTP driver deliberately continues module requests such as `/dashboard/src/api/...` and intercepts only actual `/api/...` requests. An initial driver run waited on an absent textarea aria-label and was stopped; the corrected driver uses the accessible label locator. This was a fixture-selector issue, not a product failure.
 
 No local Dune/native/full CI, real backend/filesystem write, provider, deployment or page-reload persistence was exercised. Synthetic receipts and workspace publications are not evidence of those operations. The temporary dependency symlink and local Vite process are removed/stopped after this run.
+
+## Stack integration and review response
+
+The initial 54-test evidence above was collected against the original author base.
+The change was then stacked on `d819bd3221b614a0f7c1731752556ccac715de3a`,
+which includes package readings and removal guidance. `integration-checks.json`
+records 57/57 focused tests, typecheck and lint at the pre-response source;
+`integrated-browser/` records the repeated 10 browser assertions.
+
+Independent source review found that an old comparison could be adopted after a
+pending read/save crossed workspace A → B → A, bypassing the fresh-read recovery
+requirement. The response clears that comparison and rejects adoption while the
+document is busy or needs a read. Two actual component-flow cases failed before
+the fix and passed afterward. `response-checks.json` pins the final source bytes:
+**59/59 tests**, typecheck and changed-file lint pass. `response-browser/` records
+10 repeated routed Chromium assertions and two screenshots inspected by the root
+reviewer. The new stale-comparison cases are component evidence; the browser
+scenario exercises navigation, late creation and workspace separation.
+
+These are frontend and scoped source-review results. Real backend writes, native
+TUI/PTY, deployment, GitHub independent approval and merge remain unverified.

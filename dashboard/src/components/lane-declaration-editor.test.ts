@@ -225,6 +225,51 @@ describe('Lane declaration editing through the status surface', () => {
     expect(files.saveLaneDeclaration).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['read', 'save'] as const)('discards an old comparison after a pending %s crosses A-B-A and requires a fresh read', async pending => {
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await open(screen)
+    const draft = '# retained draft\n' + original
+    fireEvent.input(source(screen), { target: { value: draft } })
+    const oldComparison = { ...document, source_text: '# old comparison\n' + original, source_revision: 'old-comparison-revision' }
+    files.fetchLaneDeclaration.mockResolvedValueOnce(oldComparison)
+    fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
+    await screen.findByText(oldComparison.source_revision, { exact: false })
+    expect(screen.getByRole('button', { name: 'Use current file revision' })).toBeTruthy()
+
+    let finish!: () => void
+    if (pending === 'read') {
+      files.fetchLaneDeclaration.mockReturnValueOnce(new Promise(resolve => { finish = () => resolve(oldComparison) }))
+      fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
+      await screen.findByRole('button', { name: 'Reading current file…' })
+    } else {
+      files.saveLaneDeclaration.mockReturnValueOnce(new Promise(resolve => { finish = () => resolve(receipt(draft)) }))
+      fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
+      await screen.findByRole('button', { name: 'Saving TOML…' })
+    }
+    act(() => observeWorkspace('/workspace-b'))
+    await waitFor(() => expect(screen.queryByLabelText('TOML source')).toBeNull())
+    act(() => observeWorkspace('/workspace'))
+    await waitFor(() => expect(source(screen).value).toBe(draft))
+    await act(async () => { finish(); await Promise.resolve() })
+    await screen.findByText(/Workspace authority changed while the request was pending/)
+    expect(screen.queryByLabelText('Current file comparison')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Use current file revision' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Replace draft with current file' })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(source(screen).value).toBe(draft)
+
+    const fresh = { ...document, source_text: '# fresh comparison\n' + original, source_revision: 'fresh-authority-revision' }
+    files.fetchLaneDeclaration.mockResolvedValueOnce(fresh)
+    fireEvent.click(screen.getByRole('button', { name: 'Read current file' }))
+    await screen.findByText(fresh.source_revision, { exact: false })
+    fireEvent.click(screen.getByRole('button', { name: 'Use current file revision' }))
+    expect(source(screen).value).toBe(draft)
+    files.saveLaneDeclaration.mockResolvedValueOnce(receipt(draft, 'saved-fresh-revision'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
+    await waitFor(() => expect(files.saveLaneDeclaration).toHaveBeenLastCalledWith({ mode: 'save', file_name: 'custom.toml', source_text: draft, expected_source_revision: fresh.source_revision }))
+    await screen.findByText(/File saved/)
+  })
+
   it('creates a user TOML file without Attach and separates the file receipt from application', async () => {
     files.saveLaneDeclaration.mockResolvedValue({ ...receipt(original), write: { state: 'created', durability: 'durable', detail: null } })
     const screen = render(html`<${LaneAddonsPanel} />`)

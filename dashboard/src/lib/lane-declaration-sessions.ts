@@ -45,7 +45,7 @@ export class LaneDeclarationSession {
     syncUnloadGuard()
   }
   private changedAuthority(key: string) {
-    this.update(key, draft => ({ ...draft, phase: 'idle', needsRead: true,
+    this.update(key, draft => ({ ...draft, phase: 'idle', current: null, needsRead: true,
       error: 'Workspace authority changed while the request was pending. Your draft is preserved. Read the current file before saving again.' }))
   }
   private pathFor(fileName: string): string | null {
@@ -133,8 +133,9 @@ export class LaneDeclarationSession {
   }
   useCurrent(key: string, replaceDraft: boolean, authority: ExecutionWorkspaceAuthority) {
     if (!this.admits(authority)) return
-    const current = this.state.peek().drafts[key]?.current
-    if (!current) return
+    const draft = this.state.peek().drafts[key]
+    if (!draft || draft.phase !== 'idle' || draft.needsRead || !draft.current) return
+    const current = draft.current
     this.update(key, value => ({ ...value, document: current, fileName: current.file_name,
       text: replaceDraft ? current.source_text : value.text, current: null, error: null, needsRead: false,
       notice: replaceDraft ? 'Draft replaced with the displayed current file.' : 'Current file revision selected for the next save. Your draft is unchanged.' }))

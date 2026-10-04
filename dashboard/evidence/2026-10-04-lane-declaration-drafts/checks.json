@@ -54,9 +54,14 @@
     "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "fixture.html": "287d9349759cd177905836fc785c0e312127c5788c2b789b7e99b3a018318818",
     "fixture.ts": "0167d9f088602af3fa5048a6a7c60be92aba816a37bdf87782f60732ff81b6ff",
-    "focused-vitest.log": "32e2cf0aa914bf95ae03cb95d8b49e7b1e6b42cffce5722584290cbbf294cef8",
+    "focused-vitest.log": "f8c80475bd9a2921384228a933a947cc9d2625079a406bf3a0e45863c72f7e0f",
     "late-create-restored.png": "c80bad2546079fda44b204688953edd50d0237464db3191663005b5aee58e1d1",
     "typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "workspace-a-restored.png": "313fc2109f3c372283cc3415582c7978035795ac672028ceb097aacd802a9962"
+  },
+  "artifact_normalization": {
+    "file": "focused-vitest.log",
+    "change": "Removed terminal blank line at EOF only; test output content is unchanged.",
+    "original_sha256": "32e2cf0aa914bf95ae03cb95d8b49e7b1e6b42cffce5722584290cbbf294cef8"
   }
 }

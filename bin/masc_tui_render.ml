@@ -3459,11 +3459,13 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")));
+            let prefix = "      Account " in
+            let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+            let account_width =
+              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
-              (Printf.sprintf "      Account %s · %s context"
-                (Masc_tui_message_layout.fit_middle (max 1 (cols - 32))
-                   (Terminal_text.single_line runtime.ro_provider_id))
-                (format_context_tokens runtime.ro_effective_max_context)));
+              (prefix ^ Masc_tui_message_layout.fit_middle account_width
+                 (Terminal_text.single_line runtime.ro_provider_id) ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
@@ -3548,11 +3550,13 @@ let render_exact_lane_provider_editor (state : state) editor =
         (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
            String.equal runtime.ro_id row.sr_slot) catalog with
          | Some runtime ->
+           let prefix = "  Account " in
+           let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+           let account_width =
+             max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
-             (Printf.sprintf "  Account %s · %s context"
-                (Masc_tui_message_layout.fit_middle (max 1 (cols - 28))
-                   (Terminal_text.single_line runtime.ro_provider_id))
-                (format_context_tokens runtime.ro_effective_max_context))
+             (prefix ^ Masc_tui_message_layout.fit_middle account_width
+                (Terminal_text.single_line runtime.ro_provider_id) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
           ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16)) identity));

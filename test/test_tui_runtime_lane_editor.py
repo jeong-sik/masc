@@ -1156,11 +1156,19 @@ def run_replace_and_promote(executable: str) -> None:
         refresh_called.set()
         return _keyboard_runtime.runtime_probe_response(fresh=True)
 
+    routing_calls: list[bytes] = []
+
+    def route(raw: bytes):
+        # The shared request log records completed replies. Count arrivals
+        # here as well so the deliberately held POST remains observable.
+        routing_calls.append(raw)
+        return store.route(raw)
+
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = forced_probe
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = resolved
     fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
-    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
 
@@ -1179,7 +1187,8 @@ def run_replace_and_promote(executable: str) -> None:
         try:
             if not _keyboard_harness.wait_for_fixture_event(process, fd, output, catalog_arrived, timeout=5.0):
                 raise AssertionError("editor catalogue did not start loading")
-            _keyboard_harness.send_and_wait(process, fd, output, _keyboard_harness.FULL_REDRAW, b"account.backup")
+            if b"account.backup" not in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("loading editor did not show the declared slot ID")
             if b"gpt-6-sol high" in _keyboard_harness.screen_text(bytes(output)):
                 raise AssertionError("editable candidate kept its cached model label")
         finally:
@@ -1200,9 +1209,15 @@ def run_replace_and_promote(executable: str) -> None:
             try:
                 if not _keyboard_harness.wait_for_fixture_event(process, fd, output, catalog_arrived, timeout=5.0):
                     raise AssertionError("replacement catalogue did not start loading")
-                _keyboard_harness.send_and_wait(process, fd, output, b"luna medium", b"runtime catalogue loading")
-                press(process, fd, output, b"\r")
-                if any(path == ROUTING_PATH for path, _ in requests):
+                _keyboard_harness.send_and_wait(process, fd, output, b"luna medium", b"filter: luna medium")
+                if b"runtime catalogue loading" not in _keyboard_harness.screen_text(bytes(output)):
+                    raise AssertionError("replacement search lost its pending catalogue state")
+                _keyboard_harness.write_all(fd, output, b"\r")
+                # A refused Enter need not redraw. A subsequent filter edit
+                # confirms the input queue passed it before releasing the read.
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x7f", b"filter: luna mediu")
+                _keyboard_harness.send_and_wait(process, fd, output, b"m", b"filter: luna medium")
+                if routing_calls:
                     raise AssertionError("Enter submitted a cached replacement during refresh")
             finally:
                 release_catalog.set()
@@ -1226,10 +1241,11 @@ def run_replace_and_promote(executable: str) -> None:
             if not _keyboard_harness.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
                 raise AssertionError("promotion write did not reach the fixture")
             _keyboard_harness.send_and_wait(process, fd, output, b"r", BUSY)
-            _keyboard_harness.send_and_wait(process, fd, output, _keyboard_harness.FULL_REDRAW, BUSY)
+            if BUSY not in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("pending write notice is not visible")
             if b"Replace selected candidate" in _keyboard_harness.screen_text(bytes(output)):
                 raise AssertionError("replacement search opened during the previous write")
-            if len([path for path, _ in requests if path == ROUTING_PATH]) != 2:
+            if len(routing_calls) != 2:
                 raise AssertionError("pending replacement search posted another write")
         finally:
             release.set()
@@ -1245,17 +1261,19 @@ def run_replace_and_promote(executable: str) -> None:
             raise AssertionError("promotion lost or reordered other candidates")
         _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=131,
-                          needle=b"Account", controls=(_keyboard_harness.FULL_REDRAW,))
+                          needle=b"gpt-6-luna medium", controls=(_keyboard_harness.FULL_REDRAW,))
         screen = _keyboard_harness.screen_text(bytes(output))
         if screen.count(b"context") <= 3:
             raise AssertionError("a tall terminal still shows only three model choices")
         if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
             raise AssertionError("expanded model choices are not visible")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Model order")
-        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"MASC Runtime")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"> 1/2  [CLI] gpt-6-luna medium")
+        if b"Model order" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("closing the picker lost the model order editor")
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"MASC System / Runtime")
         mark = mark_output(fd, output)
         refresh_called.clear()
-        press(process, fd, output, b"r")
+        _keyboard_harness.write_all(fd, output, b"r")
         if not _keyboard_harness.wait_for_fixture_event(process, fd, output, refresh_called, timeout=5.0):
             raise AssertionError("Runtime r was swallowed by the previous Lane editor")
         frame = _keyboard_harness.screen_text(bytes(output[mark:]))
@@ -1268,11 +1286,11 @@ def run_replace_and_promote(executable: str) -> None:
                                         b"the order the vision runtimes are called in")
         writes_before_refresh = list(requests)
         refresh_called.clear()
-        press(process, fd, output, b"r")
+        _keyboard_harness.write_all(fd, output, b"r")
         if not _keyboard_harness.wait_for_fixture_event(process, fd, output, refresh_called, timeout=5.0):
             raise AssertionError("media editor swallowed Runtime refresh")
-        _keyboard_harness.send_and_wait(process, fd, output, _keyboard_harness.FULL_REDRAW,
-                                        b"the order the vision runtimes are called in")
+        if b"the order the vision runtimes are called in" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("Runtime refresh closed the media editor")
         if requests != writes_before_refresh:
             raise AssertionError("refreshing Runtime from the media editor posted a write")
         _keyboard_harness.drain_until_quiet(process, fd, output)

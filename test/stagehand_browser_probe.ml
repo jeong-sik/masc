@@ -170,6 +170,8 @@ let () =
       ~call:(fun stagehand -> Session.call (Server_browser_stagehand.session stagehand))
       ~pid:Server_browser_stagehand.pid ~log:Server_browser_stagehand.log_event
   in
+  Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+  Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None);
   Browser_lane.install_stagehand_executor (Some (Backend.execute backend));
   let args fields = `Assoc fields in
   let lane = "lane", `String "stagehand" in

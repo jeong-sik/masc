@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts src/api/lane-addons.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  42 passed (42)
+   Start at  23:36:54
+   Duration  1.84s (tests 41%, import 22%, environment 15%, setup 11%, transform 11%)
+

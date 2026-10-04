@@ -1,0 +1,103 @@
+[
+  {
+    "choice": "ollama",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true,
+    "endpoint": "https://fixture.invalid/v1"
+  },
+  {
+    "choice": "llama_cpp",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true,
+    "endpoint": "https://fixture.invalid/v1"
+  },
+  {
+    "choice": "vllm",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true,
+    "endpoint": "https://fixture.invalid/v1"
+  },
+  {
+    "choice": "openai_compatible",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true,
+    "endpoint": "https://fixture.invalid/v1"
+  },
+  {
+    "choice": "messages",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true,
+    "endpoint": "https://fixture.invalid/v1",
+    "provider_kind": "anthropic"
+  },
+  {
+    "choice": "claude_code",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true
+  },
+  {
+    "choice": "codex",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true
+  },
+  {
+    "choice": "antigravity",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true,
+    "credential_file": "/fixture/private/oauth",
+    "timeout_s": 45.0
+  },
+  {
+    "choice": "messages",
+    "model": "kimi-model",
+    "max_context": 16384,
+    "tools": true,
+    "streaming": false,
+    "endpoint": "https://fixture.invalid",
+    "provider_kind": "kimi",
+    "api_key_env": "FIXTURE_KEY"
+  },
+  {
+    "choice": "openai_compatible",
+    "model": "model \"quoted\" 모델",
+    "max_context": 2048,
+    "tools": false,
+    "streaming": false,
+    "endpoint": "http://[::1]:8181/v1",
+    "provider_kind": "glm",
+    "credential_file": "/fixture/private/key"
+  },
+  {
+    "choice": "antigravity",
+    "model": "fixture-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": true,
+    "credential_file": "/fixture/private/oauth",
+    "timeout_s": 1e-05
+  },
+  {
+    "choice": "codex",
+    "model": "custom-model",
+    "max_context": 8192,
+    "tools": true,
+    "streaming": false,
+    "command": "/fixture/bin/custom codex"
+  }
+]

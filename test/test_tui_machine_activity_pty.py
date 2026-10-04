@@ -95,8 +95,21 @@ def run(binary):
         h.drain_until_quiet(process, fd, output)
         assert b'Server activity: Off' in h.screen_text(bytes(output))
         h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
-        h.send_and_wait(process, fd, output, b'?', b'reapply activity')
+        h.send_and_wait(process, fd, output, b'?', b'MASC Cheat Sheet')
         h.send_and_wait(process, fd, output, b'\x1b', b'MASC Machine activity')
+        for dismiss in (b'?', b'\x1b'):
+            print(f'Compact Machine help hidden key: {dismiss!r}', flush=True)
+            h.send_and_wait(process, fd, output, b'?', b'MASC Cheat Sheet')
+            h.resize_and_wait(process, fd, output, rows=12, columns=120,
+                              needle=b'terminal too small')
+            os.write(fd, dismiss)
+            h.drain_until_quiet(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=40, columns=120,
+                              needle=b'MASC Cheat Sheet')
+            h.send_and_wait(process, fd, output, b'\x1b', b'Current file: On')
+            assert b'Activity draft: Off' in h.screen_text(bytes(output)), 'help dismissal closed the Machine activity draft'
+            with server.lock:
+                assert server.previews == 0 and not server.saves, 'compact help dispatched a write'
         h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
         h.send_and_wait(process, fd, output, b' ', b'Current file: On')
         h.drain_until_quiet(process, fd, output)

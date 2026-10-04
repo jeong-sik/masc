@@ -133,12 +133,12 @@ val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
 val telemetry_observe_failure_fn : (string -> unit) Atomic.t
 val get_default_runtime_id_fn : (unit -> string) Atomic.t
 
-(** Admitted [\[runtime.exact_output_lanes.verifier_exact\]] slot ids in frozen
+(** Admitted [\[runtime.exact_output_lanes.verifier_exact\]] slot ids and kinds in frozen
     declaration order for the completion-authority evaluator (RFC-0361 D7(a)).
-    Wired to [Runtime.verifier_exact_lane_slot_ids] at startup; the unconnected
+    Wired to [Runtime.verifier_exact_lane_slots] at startup; the unconnected
     default is an explicit [Error], so test contexts that drive a review must
     install their own slot list rather than inherit a silent runtime default. *)
-val get_verifier_exact_lane_slot_ids_fn : (unit -> (string list, string) result) Atomic.t
+val get_verifier_exact_lane_slots_fn : (unit -> ((string * Types_core.verifier_slot_kind) list, string) result) Atomic.t
 
 val record_task_metric_fn :
   (Workspace_utils_backend_setup.config ->
@@ -233,7 +233,7 @@ val verification_notify_verdict_fn :
    unit) Atomic.t
 
 
-(** Acceleration hint after the verdict and its delivery obligation commit.
+(** Acceleration hint for either verdict after its delivery obligation commits.
     The runtime owns retries; an absent callback never loses the obligation. *)
 val rejection_delivery_requested_fn :
   (Workspace_utils_backend_setup.config -> unit) Atomic.t

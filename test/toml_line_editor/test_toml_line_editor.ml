@@ -943,10 +943,42 @@ let test_bool_entry_edit_preserves_inline_comment () =
     "[[voice.stt.endpoints]]\nid = \"local\"\nenabled = false # operator note\n" out;
   check_loads "comment-preserving typed entry bool" out
 
+let test_nested_bool_preserves_binding_layouts () =
+  List.iter (fun (name, declaration, path, expected_price) ->
+    let source = declaration ^ "\n[unrelated]\nnotes = \"keep this\"\n" in
+    let changed = match Toml_line_editor.edit_nested_bool source ~path
+        ~key:"wizard-default" ~value:true with
+      | Ok changed -> changed | Error _ -> Alcotest.fail (name ^ ": edit refused") in
+    let parsed = Otoml.Parser.from_string changed in
+    if name = "dotted binding" then
+      Alcotest.(check bool) "dotted declaration must not acquire a conflicting table header" false
+        (has_line changed "[account.old]");
+    Alcotest.(check bool) (name ^ ": default is a typed boolean") true
+      (Otoml.find parsed Otoml.get_boolean (path @ ["wizard-default"]));
+    Alcotest.(check string) (name ^ ": unrelated statement retained") "keep this"
+      (Otoml.find parsed Otoml.get_string ["unrelated"; "notes"]);
+    Option.iter (fun price -> Alcotest.(check (float 0.)) (name ^ ": float remains exact") price
+      (Otoml.find parsed Otoml.get_float (path @ ["price-input"]))) expected_price;
+    check_comments_unchanged source changed;
+    let repeated = match Toml_line_editor.edit_nested_bool changed ~path
+        ~key:"wizard-default" ~value:true with
+      | Ok text -> text | Error _ -> Alcotest.fail "repeat refused" in
+    Alcotest.(check string) (name ^ ": repeat is idempotent") changed repeated)
+    ["implicit binding in inline parent", "account = {}", ["account"; "old"], None;
+     "implicit binding in nested inline parent", "root = { account = {} }", ["root"; "account"; "old"], None;
+     "inline binding", "[account]\n# operator note\nold = { max-context = 8192, price-input = 0.075 }", ["account"; "old"], Some 0.075;
+     "inline explicit false", "[account]\nold = { wizard-default = false, price-input = 0.004 } # keep trailing", ["account"; "old"], Some 0.004;
+     "nested inline quoted IDs", "'account.one' = { 'model.v1' = { price-input = 0.123456789012345 } }", ["account.one"; "model.v1"], Some 0.123456789012345;
+     "dotted binding", "[account]\nold.price-input = 0.075", ["account"; "old"], Some 0.075;
+     "dotted existing false", "[account]\nold.price-input = 0.075\nold.wizard-default = false", ["account"; "old"], Some 0.075;
+     "implicit model-set binding", "[providers.account]\nmodel-set = \"shared\"", ["account"; "old"], None]
+
 let () =
   Alcotest.run "toml_line_editor"
     [ ( "comment-preserving edits"
-      , [ Alcotest.test_case "scalar edit preserves comments" `Quick
+      , [ Alcotest.test_case "nested bool preserves inline dotted and absent bindings" `Quick
+            test_nested_bool_preserves_binding_layouts
+        ; Alcotest.test_case "scalar edit preserves comments" `Quick
             test_scalar_edit_preserves_comments
         ; Alcotest.test_case "scalar remove" `Quick test_scalar_remove
         ; Alcotest.test_case "float edit on a quoted table" `Quick

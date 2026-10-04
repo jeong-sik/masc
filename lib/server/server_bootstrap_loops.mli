@@ -192,6 +192,7 @@ module For_testing : sig
     Workspace_broadcast.broadcast_delivery ->
     Workspace_broadcast.mention_delivery
 
+  val goal_notification_backend : Goal_delivery.backend
   val append_workspace_message_to_recipient : base_path:string ->
     sender_authority:Lane_addon_broadcast_delivery.sender_authority -> Workspace_broadcast.broadcast_delivery ->
     keeper_name:string -> (unit,string) result

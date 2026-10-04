@@ -3946,13 +3946,19 @@ let launch_lane_package_preview state ~mailbox path =
       (fun () -> Masc_tui_http.get_json ~host ~port
         ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)))
 
+let lane_draft_directory (view : Masc_tui_lane_addons.t) =
+  Option.bind view.snapshot (fun snapshot ->
+    Option.map (fun (config : Masc_tui_lane_addons.configuration) -> config.directory)
+      snapshot.configuration)
+
 let launch_lane_declaration state ~mailbox ~edit request =
   let module Document = Masc_tui_lane_declaration in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  let create_directory = lane_draft_directory view in
   if view.loading then
     map_lane_addons state (fun view -> {view with error=lane_addons_input_failure "A request is pending; drafts remain editable"})
   else match (match request with
-    | Document.Read path -> Result.map (fun _ -> ()) (Document.find_for_path ~path view.documents)
+    | Document.Read path -> Result.map (fun _ -> ()) (Document.find_for_path ?create_directory ~path view.documents)
     | Document.Save _ -> Ok ()) with
   | Error detail -> state.lane_addons <- Some {view with document_key=None;
       editor_ready=false; scroll=0; error=lane_addons_input_failure detail}
@@ -3972,7 +3978,7 @@ let launch_lane_declaration state ~mailbox ~edit request =
             ~body:(Yojson.Safe.to_string (Document.write_json session)) in
       Document.decode_response request ~status ~body in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, result))
+      ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, create_directory, result))
       perform)
 
 let launch_lane_subscriptions state ~mailbox request =
@@ -13059,7 +13065,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               && Option.is_none view.evidence_prompt ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
-  | Lane_declaration_loaded (generation, request, edit, result) ->
+  | Lane_declaration_loaded (generation, request, edit, create_directory, result) ->
       let module Addons = Masc_tui_lane_addons in
       let module Document = Masc_tui_lane_declaration in
       let visible = Option.is_some state.lane_addons in
@@ -13075,7 +13081,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             let key = match request with Document.Read path -> Filename.basename path
               | Document.Save session -> session.file_name in
             let existing = match request with
-              | Document.Read path -> Document.find_for_path ~path view.documents
+              | Document.Read path -> Document.find_for_path ?create_directory ~path view.documents
               | Document.Save _ -> Ok (List.find_opt (fun (s : Document.session) -> s.file_name=key) view.documents) in
             match existing with
             | Error detail -> {view with document_key=None;editor_ready=false;scroll=0;

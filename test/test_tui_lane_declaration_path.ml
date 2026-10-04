@@ -28,7 +28,19 @@ let create_draft_is_not_an_existing_file () =
     (Result.is_error (D.find_for_path ~path:"/current/foo.toml" [draft]));
   check bool "another filename can start a read" true
     (get (D.find_for_path ~path:"/current/bar.toml" [draft]) = None)
+let create_draft_can_explicitly_compare_owned_file () =
+  let draft = {(get (D.create "foo.toml")) with text="operator create draft"} in
+  let path = "/current/foo.toml" in
+  let selected = get (D.find_for_path ~create_directory:"/current" ~path [draft]) |> Option.get in
+  let compared = D.after_response selected (D.Read_document (document path)) in
+  check string "explicit read preserves new draft" "operator create draft" compared.text;
+  check bool "read alone does not change create into overwrite" true (compared.base=None);
+  check bool "owner does not permit another directory" true
+    (Result.is_error (D.find_for_path ~create_directory:"/current" ~path:"/old/foo.toml" [draft]));
+  let adopted = get (D.use_current_revision compared) in
+  check string "adopt uses compared source" path (Option.get adopted.base).source_path
 let () = run "Lane declaration path identity" ["draft navigation",[
+  test_case "explicit create comparison uses its owner directory" `Quick create_draft_can_explicitly_compare_owned_file;
   test_case "same basename does not alias paths" `Quick retained_draft_uses_full_path;
   test_case "conflict comparison retains exact target" `Quick conflict_read_keeps_source;
   test_case "create-only draft is preserved" `Quick create_draft_is_not_an_existing_file]]

@@ -20,9 +20,10 @@ val template : string
 val create : string -> (session, string) result
 val editable_source_path : directory:string -> string -> bool
 (** Reuse only a draft whose known source is the requested full path. A
-    different path or a create-only draft with the same filename is a conflict;
-    it is retained and cannot receive another file's read response. *)
-val find_for_path : path:string -> session list -> (session option, string) result
+    different path or an unbound create-only draft is a conflict. Explicit
+    re-reading of a create draft may supply its owner's [create_directory];
+    only that direct-child path can then receive the comparison. *)
+val find_for_path : ?create_directory:string -> path:string -> session list -> (session option, string) result
 val from_document : document -> session
 val write_json : session -> Yojson.Safe.t
 val decode_response : request -> status:int -> body:string -> (response, string) result

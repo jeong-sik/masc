@@ -6,7 +6,7 @@ extracts unchanged exact/phase decoder blocks; its only generated modules are
 namespace aliases. `inventory-check-provenance.json` hashes those sources and
 extracts. This is not a complete Masc or TUI link.
 
-The actual declaration session module passed 3 isolated navigation scenarios;
+The actual declaration session module passed 4 isolated navigation scenarios;
 `declaration-path-check.json` records source hashes and commands. Five authored
 Python fixture payloads also passed the actual production inventory decoder;
 `fixture_wire_check.ml`, the input corpus and its log retain that check.

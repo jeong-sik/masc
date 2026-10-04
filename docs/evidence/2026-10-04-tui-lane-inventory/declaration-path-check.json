@@ -1,17 +1,50 @@
 {
   "scope": "Actual declaration module compiled and linked alone; not a full TUI build or PTY run",
   "compiler": "5.5.1",
-  "tests_passed": 3,
-  "sources": {
-    "bin/masc_tui_lane_declaration.ml": "2f117bf22821176681443e186832a13e59789fcfee006b8e2bb94f6946be5e59",
-    "bin/masc_tui_lane_declaration.mli": "3a58f9630b2bb2802ffe1a061d7d1b67d7ecb127db9405c0dd117641569871b4",
-    "test/test_tui_lane_declaration_path.ml": "70c4dff3372a808e15792e8b33088e1ac85290a2943250cf03a8ced87a0f6edf"
-  },
+  "tests_passed": 4,
   "commands": [
-    "ocamlfind ocamlc -package yojson,alcotest -c <source>",
-    "ocamlfind ocamlc -package yojson,alcotest -linkpkg masc_tui_lane_declaration.cmo test_tui_lane_declaration_path.cmo -o test.exe",
-    "./test.exe"
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest",
+      "-c",
+      "masc_tui_lane_declaration.mli"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest",
+      "-c",
+      "masc_tui_lane_declaration.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest",
+      "-c",
+      "test_tui_lane_declaration_path.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest",
+      "-linkpkg",
+      "masc_tui_lane_declaration.cmo",
+      "test_tui_lane_declaration_path.cmo",
+      "-o",
+      "test.exe"
+    ],
+    [
+      "./test.exe"
+    ]
   ],
-  "result": "3 tests passed: same basename does not alias paths; conflict comparison retains exact target; create-only draft is preserved",
-  "run_id": "K3L731X3"
+  "sources": {
+    "bin/masc_tui_lane_declaration.mli": "5b2d8b6144bccb05522a8211f5a1eaa7a6ef76705c6224819d2b5bd6a8563c53",
+    "bin/masc_tui_lane_declaration.ml": "d210bf7643f18223eaa610351e2e67409ff7f8dcbfefeba16db9a6ef20b3d9b4",
+    "test/test_tui_lane_declaration_path.ml": "488150794544a2e23ffb2e678ddda91dea56edfa1ebf7c4ed9d62fb856ba73e9"
+  }
 }

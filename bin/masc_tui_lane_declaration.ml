@@ -68,7 +68,7 @@ let create file_name =
 let editable_source_path ~directory source_path =
   let file_name = Filename.basename source_path in
   source_path=Filename.concat directory file_name && Result.is_ok (create file_name)
-let find_for_path ~path sessions =
+let find_for_path ?create_directory ~path sessions =
   match List.find_opt (fun (session : session) ->
     session.file_name = Filename.basename path) sessions with
   | None -> Ok None
@@ -80,6 +80,8 @@ let find_for_path ~path sessions =
        | Some source when source = path -> Ok (Some session)
        | Some source -> Error ("Draft retained for " ^ source
            ^ "; it cannot be opened as " ^ path)
+       | None when Option.exists (fun directory ->
+           path = Filename.concat directory session.file_name) create_directory -> Ok (Some session)
        | None -> Error ("Create-only draft " ^ session.file_name
            ^ " retained; it cannot be opened as " ^ path))
 let from_document (document : document) =

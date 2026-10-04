@@ -3456,7 +3456,7 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
         ~deliver:(fun result -> Runtime_config_view_loaded (generation, requested_model, result))
         (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
-let save_runtime_config_text state ~mailbox ~authority ~identity ~expected_source_revision edited =
+let save_runtime_config_text state ~mailbox ~authority ~identity ~expected_source_path ~expected_source_revision edited =
   let host = server_peer_host in
   let port = state.port in
   let ( let* ) = Result.bind in
@@ -3470,7 +3470,7 @@ let save_runtime_config_text state ~mailbox ~authority ~identity ~expected_sourc
   | Masc_tui_runtime_config_receipt.Can_save ->
     let* () = refused (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()) in
     let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
-      ~source_text:edited ~expected_source_revision in
+      ~source_text:edited ~expected_source_path ~expected_source_revision in
     launch_runtime_config_load ~force:true state ~mailbox;
     Ok receipt
 
@@ -5067,12 +5067,14 @@ let launch_machine_activity_read state ~mailbox owner =
      | Some (session, request) ->
        Masc_tui_types.put_machine_activity state session;
        let host = server_peer_host and port = state.port in
+       let check = capture_workspace_check state ~mailbox in
        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
          ~deliver:(fun result -> Machine_activity_read (request,result)) (fun () ->
            let document = Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;
               source_text=reading.source_text;source_revision=reading.metadata.source_revision})
              (Masc_tui_loader.load_runtime_config_view ~host ~port) in
+           Result.bind (check ()) (fun () ->
            let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
              (fun snapshot ->
                match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
@@ -5083,7 +5085,8 @@ let launch_machine_activity_read state ~mailbox owner =
                      | Machine_disabled -> Machine_configuration.Disabled
                      | Machine_unobserved -> Machine_configuration.Unobserved)
                | None | Some _ -> Error "The selected machine is absent from the server reading.") in
-           Ok Masc_tui_machine_activity.{document;activity}))
+           Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
+             (check ()))))
 
 let launch_machine_activity_save state ~mailbox session =
   let module Activity = Masc_tui_machine_activity in
@@ -5103,7 +5106,7 @@ let launch_machine_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
         Machine_activity_saved (request,result))
       (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
-        ~expected_source_revision:write.expected_source_revision write.source_text)
+        ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
 let open_machine_activity state ~mailbox machine =
   match Masc_tui_types.runtime_config_workspace state with
@@ -5153,7 +5156,7 @@ let launch_browser_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
         Browser_activity_saved (request,result))
       (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
-        ~expected_source_revision:write.expected_source_revision write.source_text)
+        ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
 let open_browser_activity state ~mailbox lane =
   match Masc_tui_types.runtime_config_workspace state with
@@ -5203,7 +5206,7 @@ let launch_exact_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
         Exact_activity_saved (request,result))
       (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
-        ~expected_source_revision:write.expected_source_revision write.source_text)
+        ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
 let open_exact_activity state ~mailbox lane =
   match Masc_tui_types.runtime_config_workspace state with
@@ -18089,7 +18092,7 @@ let main
     let identity = state.server_identity in
     Masc_tui_types.put_runtime_config_edit state ~workspace session;
     match save_runtime_config_text ~authority ~identity
-        ~expected_source_revision:session.Edit.base.source_revision session.text with
+        ~expected_source_path:session.Edit.base.path ~expected_source_revision:session.Edit.base.source_revision session.text with
     | Ok receipt ->
       (match receipt.Masc_tui_runtime_config_receipt.durability with
        | Masc_tui_runtime_config_receipt.Durable ->
@@ -20444,7 +20447,7 @@ and is loaded on demand through keeper_skill.
                   let* reading = Masc_tui_runtime_config_view.decode json in
                   let* draft = Masc_tui_model_form.apply form reading.source_text in
                   save_runtime_config_text ~authority ~identity
-                    ~expected_source_revision:reading.metadata.source_revision draft
+                    ~expected_source_path:reading.path ~expected_source_revision:reading.metadata.source_revision draft
                   |> Result.map Masc_tui_runtime_config_receipt.lane_summary
                   |> Result.map_error Masc_tui_http.runtime_config_save_error_message in
                 (match result with
@@ -20494,12 +20497,12 @@ and is loaded on demand through keeper_skill.
                        Masc_tui_runtime_account_form.declare_on
                          ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
                          current.Masc_tui_runtime_config_view.source_text
-                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision)
+                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision, current.path)
                    in
                    match declared with
                    | Error form -> state.runtime_account_form <- Some form
-                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision) -> (
-                       match save_runtime_config_text ~authority ~identity ~expected_source_revision text with
+                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision, expected_source_path) -> (
+                       match save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision text with
                        | Ok receipt ->
                          let summary = Masc_tui_http.runtime_config_commit_receipt_summary receipt in
                          (* A sign-in keeps the form open on its command;

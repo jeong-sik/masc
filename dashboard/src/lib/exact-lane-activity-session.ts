@@ -8,7 +8,7 @@ import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '.
 import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { readExactActivity, writeExactActivity, type ExactActivityLane } from './exact-lane-activity'
 import { errorToString } from './format-string'
-import { resumeSavedModelSetup } from './model-setup-resume'
+import { resumeSavedModelSetup, type ModelSetupResumeState } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
 import { announceExactLaneObservationChanged } from './exact-lane-observation'
 import { announceRuntimeTomlCommitted } from './runtime-toml-session'
@@ -17,7 +17,7 @@ type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
 type State = {
   draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving' | 'followup';
-  error: string | null; notice: string | null; followupError: string | null;
+  error: string | null; notice: string | null; followupError: string | null; setupResumeError: string | null;
   receipt: CommittedRuntimeTomlConfig | null; uncertain: boolean;
 }
 const sessions = new Map<string, ExactLaneActivitySession>()
@@ -41,7 +41,7 @@ function document(config: RuntimeTomlConfig): Document {
  * full raw editor's independent draft, including when that editor is hidden. */
 export class ExactLaneActivitySession {
   readonly expanded = signal(false)
-  readonly state = signal<State>({ draft: null, current: null, phase: 'idle', error: null, notice: null, followupError: null, receipt: null, uncertain: false })
+  readonly state = signal<State>({ draft: null, current: null, phase: 'idle', error: null, notice: null, followupError: null, setupResumeError: null, receipt: null, uncertain: false })
   private authority: ExecutionWorkspaceAuthority | null = null
   private version = 0
   private generation = runtimeTomlSourceGeneration.peek()
@@ -50,6 +50,11 @@ export class ExactLaneActivitySession {
   private update(change: Partial<State>) { this.state.value = { ...this.state.peek(), ...change }; syncUnloadGuard() }
   admits(authority: ExecutionWorkspaceAuthority) {
     return authority.workspaceRoot === this.workspaceRoot && executionWorkspaceAuthority.peek() === authority
+  }
+  completeSetupResume(authority: ExecutionWorkspaceAuthority, result: ModelSetupResumeState) {
+    if (result.kind === 'active' && this.admits(authority) && this.authority === authority) {
+      this.update({ setupResumeError: null })
+    }
   }
   ready(authority: ExecutionWorkspaceAuthority) {
     return this.admits(authority) && this.authority === authority && this.state.peek().phase === 'idle'
@@ -145,13 +150,13 @@ export class ExactLaneActivitySession {
     const version = ++this.version, options = this.options(authority, version)
     let sent = false, committed = false
     const sourceGeneration = runtimeTomlSourceGeneration.peek()
-    this.update({ phase: 'saving', error: null, notice: null, followupError: null })
+    this.update({ phase: 'saving', error: null, notice: null, followupError: null, setupResumeError: null })
     try {
       const preview = await previewRuntimeTomlConfig(source, options)
       if (!this.owns(authority, version)) return false
       if (!preview.ok || !preview.can_save) throw new Error('설정 검증에서 저장을 거절했습니다. Runtime 설정에서 원문과 오류를 확인하세요.')
       sent = true
-      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, options)
+      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, { ...options, expectedSourcePath: draft.base.source_path })
       if (!this.owns(authority, version)) return false
       const saved = document(receipt)
       if (saved.source_path !== draft.base.source_path || saved.source_text !== source || receipt.commit.source_revision !== saved.source_revision)
@@ -166,7 +171,7 @@ export class ExactLaneActivitySession {
       if (!this.owns(authority, version)) return false
       announceRuntimeTomlCommitted(authority)
       announceExactLaneObservationChanged(authority)
-      if (resumed.kind === 'failed') this.update({ followupError: '설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.' })
+      if (resumed.kind === 'failed') this.update({ setupResumeError: '설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.' })
       try { await refreshRuntimeConfigConsumers() }
       catch (error) { if (this.owns(authority, version)) this.update({ followupError:
         [this.state.peek().followupError, `설정 저장 후 목록 갱신 실패: ${errorToString(error)}`].filter(Boolean).join(' ') }) }
@@ -191,6 +196,10 @@ export class ExactLaneActivitySession {
     if (committed && this.owns(authority, version)) await this.read(authority)
     return committed && this.admits(authority)
   }
+}
+
+export function completeExactLaneSetupResume(authority: ExecutionWorkspaceAuthority, result: ModelSetupResumeState) {
+  for (const session of sessions.values()) session.completeSetupResume(authority, result)
 }
 
 export function exactLaneActivitySessionFor(authority: ExecutionWorkspaceAuthority, lane: ExactActivityLane) {

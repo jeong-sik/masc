@@ -162,7 +162,7 @@ export class MachineLaneActivitySession {
       const preview = await previewRuntimeTomlConfig(source, options)
       if (!this.owns(authority, version)) return false
       if (!preview.ok || !preview.can_save) throw new Error('설정 검증에서 저장을 거절했습니다. Runtime 설정에서 원문과 오류를 확인하세요.')
-      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, { beforeDispatch: () => {
+      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, { expectedSourcePath: draft.base.source_path, beforeDispatch: () => {
         options.beforeDispatch()
         if (sourceGeneration !== runtimeTomlSourceGeneration.peek()) throw new Error('다른 화면에서 설정이 변경됐습니다. 현재 설정을 다시 읽으세요.')
         sent = true

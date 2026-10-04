@@ -4,7 +4,7 @@ type document = Masc_tui_runtime_config_edit.document
 type reading = { document : (document, string) result; activity : (Machine_configuration.activity, string) result }
 type t
 type request
-type write = { source_text : string; expected_source_revision : string }
+type write = { source_text : string; expected_source_revision : string; expected_source_path : string }
 type write_result =
   | Saved of Masc_tui_runtime_config_receipt.t
   | Conflict of document

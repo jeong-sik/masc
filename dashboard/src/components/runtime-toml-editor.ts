@@ -1,3 +1,5 @@
+import type { ModelSetupResumeState } from '../lib/model-setup-resume'
+import { completeExactLaneSetupResume } from '../lib/exact-lane-activity-session'
 import { ModelSetupResumeControl } from './model-setup-resume-control'
 import { html } from 'htm/preact'
 import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
@@ -289,8 +291,9 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
     void session.ensure(authority)
   }, [session, authority, sourceGeneration])
 
-  async function afterSetupResume() {
+  async function afterSetupResume(result: ModelSetupResumeState) {
     if (!session.admits(authority)) return
+    completeExactLaneSetupResume(authority, result)
     announceExactLaneObservationChanged(authority)
     try { await refreshRuntimeConfigConsumers() }
     catch (error) {
@@ -307,6 +310,11 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
     if (!ready || config === null || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts) return
     if (nextSourceText === config.source_text) return
+    const expectedSourcePath = config.path
+    if (expectedSourcePath === null || expectedSourcePath === '') {
+      setError('runtime.toml 저장 기준 path를 확인하지 못했습니다. 현재 파일을 다시 읽으세요.')
+      return
+    }
     const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText, config.reserved_provider_ids)
     for (const provider of nextEnvironment.providers) {
       const protocol = config?.provider_protocols.find(item => item.protocol === provider.protocol)
@@ -322,7 +330,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
       }
     }
     await afterWrite(await session.write(authority,
-      options => saveRuntimeTomlConfig(nextSourceText, config.source_revision, options), nextSourceText))
+      options => saveRuntimeTomlConfig(nextSourceText, config.source_revision, { ...options, expectedSourcePath }), nextSourceText))
   }
 
   async function handleReadCurrent() { await session.read(authority, 'compare') }

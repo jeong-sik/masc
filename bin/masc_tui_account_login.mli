@@ -2,7 +2,8 @@ type client = Codex | Claude | Antigravity | Muse
 type origin = Configured | Catalog
 (** [Configured]: an account the runtime configuration declares.
     [Catalog]: the client's own entry for adding a new account. *)
-type provider = { id : string; label : string; client : client; origin : origin }
+type provider = { id : string; label : string; client : client; origin : origin;
+  enabled : bool; setup_supported : bool }
 type model = { id : string; label : string; context : int option; tools : bool option }
 
 (** What removing an account changes, as the setup API's removal preview
@@ -33,7 +34,8 @@ type saved =
     means the server left selected runtimes it did not call again:
     [not_rechecked] names them and [unverified] lists any that were called and
     declined for usage. Neither is reported as verified. *)
-type list_view = Clients | Accounts of client
+type account_group = { group_id : string; provider_ids : string list; runtime_ids : string list }
+type list_view = Clients | Accounts of client | Account_providers of client * string list
 (** The list opens on [Clients]; choosing one shows [Accounts] of that client:
     a row that adds a new account, then its configured accounts. *)
 type activation = Activating | Activation_failed of string
@@ -67,6 +69,7 @@ type t = {
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
   mutable account_emails : account_emails;
+  mutable account_groups : account_group list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
@@ -116,7 +119,7 @@ val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t ->
     cannot be removed. [Error] when the answer is for another provider or does
     not read. *)
 val removed_notice : provider -> string option -> string
-(** What the list says once [provider] is removed, with the login store left
+(** What the list says once the selected provider connection is removed, with the login store left
     on disk. *)
 val save_failed : t -> string -> unit
 val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit

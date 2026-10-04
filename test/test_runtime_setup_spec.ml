@@ -294,9 +294,57 @@ is-non-interactive = true
   Alcotest.(check bool) "identical operator accounts require explicit choice" true
     (Result.is_error (Runtime_setup_spec.resolve_provider spec [provider; {provider with id="other"}]))
 
+let test_inventory_groups_existing_account_providers () =
+  let source = {|
+[providers.first]
+display-name = "Codex shared label"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/fixture/account-one"
+[providers.first_wide]
+display-name = "Codex shared label"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/fixture/account-one"
+[providers.second]
+display-name = "Codex shared label"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/fixture/account-two"
+[models.luna]
+api-name = "gpt-6-luna"
+max-context = 272000
+[models.luna_wide]
+api-name = "gpt-6-luna"
+max-context = 500000
+[first.luna]
+[first_wide.luna_wide]
+[second.luna]
+|} in
+  let config = match Runtime_toml.parse_string source with
+    | Ok config -> config | Error _ -> Alcotest.fail "account grouping fixture must parse" in
+  let json = Runtime_wizard_inventory.to_json config in
+  let open Yojson.Safe.Util in
+  let groups = json |> member "account_groups" |> to_list in
+  let ids group field = group |> member field |> to_list |> List.map to_string in
+  Alcotest.check (Alcotest.list (Alcotest.list Alcotest.string)) "same native scope groups only its own providers"
+    [["first";"first_wide"];["second"]] (List.map (fun group -> ids group "integration_ids") groups);
+  Alcotest.check (Alcotest.list (Alcotest.list Alcotest.string)) "both context variants retain their original runtime IDs"
+    [["first.luna";"first_wide.luna_wide"];["second.luna"]] (List.map (fun group -> ids group "runtime_ids") groups);
+  Alcotest.check Alcotest.int "public inventory retains all runtime rows" 3
+    (json |> member "runtimes" |> to_list |> List.length);
+  Alcotest.check (Alcotest.list Alcotest.int) "public runtime variants retain context" [272000;500000;272000]
+    (json |> member "runtimes" |> to_list |> List.map (fun row -> row |> member "max_context" |> to_int));
+  Alcotest.check Alcotest.bool "public account identities expose no account home" false
+    (String_util.contains_substring (Yojson.Safe.to_string (`List groups)) "/fixture/")
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "HTTP request surface survives setup" `Quick test_http_request_surface;
   Alcotest.test_case "existing and disabled account identity" `Quick test_configured_account_resolution;
+  Alcotest.test_case "inventory groups existing account providers without renaming" `Quick test_inventory_groups_existing_account_providers;
   Alcotest.test_case "image declaration survives native save" `Quick test_image_declaration_survives_native_save;
   Alcotest.test_case "installer declarations survive rendering" `Quick test_installer_declarations;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;

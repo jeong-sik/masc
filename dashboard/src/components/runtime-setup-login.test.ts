@@ -164,3 +164,30 @@ it('explicitly retries a different recovered account without replacing choices b
   expect(screen.queryByRole('list', { name: '기본 모델과 대체 순서' })).toBeNull()
   expect(api.discoverSetupModels).toHaveBeenLastCalledWith({ integration_id: 'codex', account_ref: account }, expect.anything())
 })
+
+it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('%s account replacement clears hidden sibling connections but preserves another account', async (client, protocol) => {
+  const first = `${client}-one`, sibling = `${client}-two`, other = `${client}-other`
+  const grouped = {
+    ...inventory(first, protocol),
+    integrations: [first, sibling, other].map(id => ({ id, display_name: id, protocol, setup_support: 'existing_connection' })),
+    account_groups: [{ id: '1'.repeat(64), integration_ids: [first, sibling], runtime_ids: [`${first}.luna`, `${sibling}.luna`] }],
+    runtimes: [first, sibling, other].map(id => ({ id: `${id}.luna`, provider_id: id, display_name: id, protocol, model: 'luna', endpoint: null })),
+  }
+  render(html`<${RuntimeSetupPicker} inventory=${grouped} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText(new RegExp(`연결 ${sibling}\\.luna`)))
+  fireEvent.click(screen.getByLabelText(new RegExp(`연결 ${other}\\.luna`)))
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: first } })
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  await screen.findByLabelText('Selected Model')
+  expect((screen.getByLabelText(new RegExp(`연결 ${sibling}\\.luna`)) as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByLabelText(new RegExp(`연결 ${other}\\.luna`)) as HTMLInputElement).checked).toBe(true)
+  fireEvent.click(screen.getByLabelText('Selected Model'))
+  fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(api.saveSetupSelections).toHaveBeenCalled())
+  const choices = vi.mocked(api.saveSetupSelections).mock.calls[0]![1]
+  expect(choices).toMatchObject([
+    { kind: 'existing', id: `${other}.luna` },
+    { kind: 'new', source: { integration_id: first, account_ref: account } },
+  ])
+})

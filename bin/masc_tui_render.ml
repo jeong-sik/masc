@@ -3465,14 +3465,14 @@ let render_exact_lane_provider_editor (state : state) editor =
               max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
               (prefix ^ Masc_tui_message_layout.fit_middle account_width
-                 (Terminal_text.single_line runtime.ro_provider_id) ^ suffix));
+                 (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
          | Some runtime ->
            box_line_styled buf cols ~style:(Theme.recede ())
-             ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16))
-                (Terminal_text.single_line runtime.ro_id))
+             ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6))
+                (Terminal_text.single_line ("Connection " ^ runtime.ro_provider_id ^ " · Selected " ^ runtime.ro_id)))
          | None -> ())
       | None -> ());
      box_line_styled buf cols ~style:(Theme.info ())
@@ -3546,9 +3546,13 @@ let render_exact_lane_provider_editor (state : state) editor =
      (match Masc_tui_types.slot_editor_cursor_row state with
       | None -> ()
       | Some row ->
-        let identity = Terminal_text.single_line row.Masc_tui_types.sr_slot in
-        (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
-           String.equal runtime.ro_id row.sr_slot) catalog with
+        let selected_runtime = List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
+           String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog in
+        let identity = Terminal_text.single_line
+          ((match selected_runtime with
+            | Some runtime -> "Connection " ^ runtime.ro_provider_id ^ " · "
+            | None -> "") ^ "Selected " ^ row.sr_slot) in
+        (match selected_runtime with
          | Some runtime ->
            let prefix = "  Account " in
            let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
@@ -3556,10 +3560,10 @@ let render_exact_lane_provider_editor (state : state) editor =
              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
              (prefix ^ Masc_tui_message_layout.fit_middle account_width
-                (Terminal_text.single_line runtime.ro_provider_id) ^ suffix)
+                (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
-          ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16)) identity));
+          ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6)) identity));
      box_line_styled buf cols ~style:(Theme.recede ())
        "  arrows/j/k select · r replace model/effort · a add fallback · 1 first in group";
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -3852,7 +3856,8 @@ let render_lanes_overview (state : state) =
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset));
               box_line_styled buf cols ~style:(Theme.recede ())
-                ("      " ^ Terminal_text.single_line runtime.ro_provider_id
+                ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                  ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
@@ -9991,7 +9996,8 @@ let render_runtime (state : state) =
                 (Ansi.dim ^ note ^ Ansi.reset));
            (match picker.rlp_pick with
             | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
-                c.push ("      " ^ Terminal_text.single_line runtime.ro_provider_id
+                c.push ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                  ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id)
             | _ -> ())) picker.rlp_choices;
        c.push_divider ());

@@ -3,7 +3,7 @@ module Login = Masc_tui_account_login
 let session = String.make 64 'a'
 let account = String.make 64 'b'
 let other = String.make 64 'c'
-let provider : Login.provider = {id="codex";label="Codex";client=Login.Codex;origin=Login.Configured}
+let provider : Login.provider = {id="codex";label="Codex";client=Login.Codex;origin=Login.Configured;enabled=true;setup_supported=true}
 let ok = function Ok value -> value | Error message -> fail message
 let model i : Login.model = {id=string_of_int i;label="model " ^ string_of_int i;context=Some 32768;tools=Some true}
 let frame name data = "event: " ^ name ^ "\r\ndata: " ^ Yojson.Safe.to_string data ^ "\r\n\r\n"
@@ -789,7 +789,7 @@ let a_later_read_keeps_its_view () =
     (t.phase = Login.Providers (Login.Accounts Login.Codex))
 (* A pending login is offered back only for what /login asked for. *)
 let a_pending_login_belongs_to_the_request () =
-  let provider id origin : Login.provider = {id; label=id; client=Login.Codex; origin} in
+  let provider id origin : Login.provider = {id; label=id; client=Login.Codex; origin;enabled=true;setup_supported=true} in
   let one = provider "codex_one" Login.Configured and two = provider "codex_two" Login.Configured
   and catalog = provider "codex" Login.Catalog in
   let asked requested = let t = Login.create requested in t.providers <- [catalog; one; two]; t in
@@ -897,7 +897,83 @@ let already_bound_model_is_not_offered () =
        | _ -> fail "expected Save"))
     [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
+let grouped_existing_accounts () =
+  let provider id = `Assoc ["id", `String id; "display_name", `String ("Model provider " ^ id);
+    "protocol", `String "codex-app-server"; "origin", `String "runtime_config"] in
+  let ids ids = `List (List.map (fun id -> `String id) ids) in
+  let group id providers runtimes = `Assoc ["id", `String id;
+    "integration_ids", ids providers; "runtime_ids", ids runtimes] in
+  let inventory = `Assoc ["setup_revision", `String "grouped"; "default_runtime_selection", `List [];
+    "runtimes", `List (List.map (fun id -> `Assoc ["id", `String id]) ["a1.luna";"a2.luna-wide";"b.luna"]);
+    "integrations", `List [provider "a1"; provider "a2"; provider "b"];
+    "account_emails", `List [];
+    "account_groups", `List [group "first-account" ["a1";"a2"] ["a1.luna";"a2.luna-wide"];
+      group "second-account" ["b"] ["b.luna"]]] in
+  let t=Login.create "" in
+  ok (Login.inventory t inventory);
+  check bool "two homes display as two accounts" true
+    (List.exists (fun row -> contains (Login.row_text row) "계정 2") (Login.lines t));
+  let t=Login.create "a2" in
+  ok (Login.inventory t inventory);
+  check int "requested nonrepresentative provider selects its account group" 1 t.cursor;
+  check bool "group selects an actual provider for model discovery" true
+    (match Login.key t "enter" with Login.Select_existing provider -> provider.id="a1" | _ -> false);
+  check bool "D opens a member chooser, never a partial account deletion" true (Login.key t "D"=Login.Nothing);
+  check bool "member chooser lists both original providers" true
+    (match t.phase with Login.Providers (Login.Account_providers (Codex, ["a1";"a2"])) -> true | _ -> false);
+  ignore (Login.key t "down");
+  check bool "removal preview targets the explicitly selected provider only" true
+    (match Login.key t "enter" with Login.Preview_removal {provider;_} -> provider.id="a2" | _ -> false);
+  let selected = match Login.key t "enter" with
+    | Login.Preview_removal {provider;_} -> provider
+    | _ -> fail "expected selected connection preview" in
+  let preview = match removable with
+    | `Assoc fields -> `Assoc (("integration_id", `String selected.id) :: List.remove_assoc "integration_id" fields)
+    | _ -> assert false in
+  ok (Login.removal_preview t selected ~refused:None preview);
+  check bool "confirmation names the selected connection" true
+    (mentions "지울 공급자 연결: a2" t);
+  check bool "confirmation does not claim account deletion" false (mentions "지울 계정:" t);
+  let completion = Login.removed_notice selected None in
+  check bool "completion names selected connection" true (contains completion "연결 (a2)");
+  check bool "completion does not claim the account was deleted" false (contains completion "계정을 지웠습니다");
+  ignore (Login.key t "esc");
+  check bool "Esc returns to grouped account list" true
+    (t.phase=Login.Providers (Login.Accounts Codex));
+  let invalid = match inventory with
+    | `Assoc fields -> `Assoc (("account_groups", `List [group "bad" ["missing"] []]) :: List.remove_assoc "account_groups" fields)
+    | _ -> assert false in
+  check bool "unknown grouping member cannot redirect account selection" true
+    (Result.is_error (Login.inventory t invalid));
+  let update name value = match inventory with
+    | `Assoc fields -> `Assoc ((name,value) :: List.remove_assoc name fields)
+    | _ -> assert false in
+  let availability id enabled supported = match provider id with
+    | `Assoc fields -> `Assoc (("enabled",`Bool enabled) ::
+        ("setup_support",`String (if supported then "new_connection" else "unsupported")) :: fields)
+    | _ -> assert false in
+  List.iter (fun unavailable ->
+    let changed = update "integrations" (`List [unavailable;availability "a2" true true;provider "b"]) in
+    ok (Login.inventory t changed);
+    check bool "usable member represents the account despite disabled or unsupported first member" true
+      (match Login.key t "enter" with Login.Select_existing provider -> provider.id="a2" | _ -> false))
+    [availability "a1" false true;availability "a1" true false];
+  let disabled = update "integrations" (`List [availability "a1" false true;availability "a2" false true;provider "b"]) in
+  ok (Login.inventory t disabled);
+  check bool "an entirely disabled account cannot start model discovery" true (Login.key t "enter"=Login.Nothing);
+  ok (Login.inventory t inventory);
+  ignore (Login.key t "D");
+  let changed = update "account_groups" (`List [group "rejoined" ["a1";"b"] [];
+    group "separated" ["a2"] []]) in
+  ok (Login.inventory ~view:(Login.Account_providers (Codex,["a1";"a2"])) t changed);
+  check bool "refresh returns to fresh account membership instead of stale deletion IDs" true
+    (t.phase=Login.Providers (Login.Accounts Codex));
+  ignore (Login.key t "down"); ignore (Login.key t "D");
+  check bool "reopening removal uses newly joined and excludes departed members" true
+    (t.phase=Login.Providers (Login.Account_providers (Codex,["a1";"b"])))
+
 let () = run "TUI account login" ["workflow",[
+  test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;
   test_case "multi-model selection submits ordered models" `Quick multi_model_selection;
   test_case "reopening shows connected models without adding them" `Quick already_bound_model_is_not_offered;
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;

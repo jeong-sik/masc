@@ -137,6 +137,46 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   `List (configured @ prototypes @ clients)
 ;;
 
+(* Reuse the runtime's quota ownership, never a display name or an email.
+   Providers without an authoritative native account remain separate. *)
+let account_scope (provider : Runtime_schema.provider) =
+  let native home scope = Option.bind home (fun home ->
+    match Runtime_account_home.of_string home with
+    | Ok home -> Some (scope home) | Error _ -> None) in
+  match provider.api_format with
+  | Codex_app_server_runtime ->
+      native (Runtime_codex_app_server.effective_account_home provider.account_home)
+        (fun home -> Runtime_quota_window.scope_of_codex_home (Some home))
+  | Claude_code_runtime ->
+      native (Runtime_claude_code.effective_account_home provider.account_home)
+        (fun home -> Runtime_quota_window.scope_of_claude_code_home (Some home))
+  | Muse_serve_runtime -> native provider.account_home Runtime_quota_window.scope_of_muse_home
+  | Antigravity_cli_runtime ->
+      (match provider.credentials with
+       | Some (Runtime_schema.File _) ->
+           Some (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
+       | Some (Env _ | Inline _) | None -> None)
+  | Chat_completions_api | Messages_api | Ollama_api | Gemini_api | Vertex_gemini_api -> None
+;;
+
+let account_groups_json (config : Runtime_schema.config) =
+  let groups = List.fold_left (fun groups (provider : Runtime_schema.provider) ->
+    match account_scope provider with
+    | None -> groups
+    | Some scope ->
+      if List.exists (fun (known, _) -> Runtime_quota_window.scope_equal scope known) groups then
+        List.map (fun (known, ids) -> known,
+          if Runtime_quota_window.scope_equal scope known then ids @ [provider.id] else ids) groups
+      else groups @ [scope, [provider.id]]) [] config.providers in
+  `List (List.map (fun (scope, ids) ->
+    let id = Digestif.SHA256.(to_hex (digest_string (Runtime_quota_window.scope_to_string scope))) in
+    let runtimes = List.filter_map (fun (binding : Runtime_schema.binding) ->
+      if List.mem binding.provider_id ids then Some (`String (Runtime_schema.binding_key binding)) else None) config.bindings in
+    `Assoc ["id", `String id;
+      "integration_ids", `List (List.map (fun id -> `String id) ids);
+      "runtime_ids", `List runtimes]) groups)
+;;
+
 let to_json ?(include_credential_references=false) (config : Runtime_schema.config) =
   let runtimes =
     List.filter_map
@@ -209,6 +249,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
     ; "model_release_catalog", Model_release_evidence.default_catalog_json ()
     ; "runtimes", `List runtimes
     ; "integrations", integrations_json ~include_credential_references config
+    ; "account_groups", account_groups_json config
     ]
 ;;
 

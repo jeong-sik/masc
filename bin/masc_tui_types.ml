@@ -10026,8 +10026,8 @@ let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
       runtime.Tui_decode.ro_declared_reasoning_effort in
   Masc.Tui_terminal_text.sanitize_terminal_text
-    (Printf.sprintf "%s %s · %s · %s context · %s"
-       runtime.Tui_decode.ro_model effort runtime.Tui_decode.ro_provider_id
+    (Printf.sprintf "%s %s · Account %s · Connection %s · %s context · %s"
+       runtime.Tui_decode.ro_model effort (runtime_account_label runtime) runtime.Tui_decode.ro_provider_id
        (format_context_tokens runtime.Tui_decode.ro_effective_max_context) runtime.Tui_decode.ro_id)
 
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =

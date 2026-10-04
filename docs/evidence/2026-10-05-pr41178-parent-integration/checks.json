@@ -1,0 +1,48 @@
+{
+  "head": "805b2a47ded80e9f076a5dcdda7a5ccb3a047be2",
+  "parent": "599bcfd939f2f0039d2d93181aa95999a5a2383c",
+  "rest_stack_key_present": false,
+  "stack_membership": "unknown",
+  "build": {
+    "handle": 70400,
+    "exit_code": 0,
+    "command": "opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_workspace_memory_curator_lane.exe test/test_exact_output_catalog_precedence.exe"
+  },
+  "tests": [
+    {
+      "handle": 44989,
+      "exit_code": 0,
+      "count": 13,
+      "cwd": "test",
+      "command": "../_build/default/test/test_workspace_memory_curator_lane.exe"
+    },
+    {
+      "handle": 91933,
+      "exit_code": 0,
+      "count": 15,
+      "cwd": ".",
+      "command": "_build/default/test/test_exact_output_catalog_precedence.exe"
+    }
+  ],
+  "logs": {
+    "focused-build.log": {
+      "source": "/tmp/pr41178-focused-build.log",
+      "sha256": "70bf904036875ce0375288ee3b90e8e212165d084468191c2eb53c722f2cc941",
+      "byte_identical_to_source": true
+    },
+    "curator-native.log": {
+      "source": "/tmp/pr41178-curator-native.log",
+      "sha256": "30f397398d960288f567e0717d5e0973e9af4dabd7dc0be96b0ed0bb03860369",
+      "byte_identical_to_source": true
+    },
+    "registry-native.log": {
+      "source": "/tmp/pr41178-registry-native.log",
+      "sha256": "483af3c1bceaa4ccd4d1480310aea516e47845b852d40e303c9d8ab394cf9feb",
+      "byte_identical_to_source": true
+    }
+  },
+  "binaries": {
+    "_build/default/test/test_workspace_memory_curator_lane.exe": "9b78b06226ac64a516092af94f9209e30a9db94d269faa027105805a24770e52",
+    "_build/default/test/test_exact_output_catalog_precedence.exe": "e14fce75b7e3b4a35f6cc4ee24448742c8d35037510ffa5f1545dc3ab826736f"
+  }
+}

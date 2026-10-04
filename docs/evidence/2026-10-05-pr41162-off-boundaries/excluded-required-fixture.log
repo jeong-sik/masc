@@ -1,0 +1,28 @@
+Testing `runtime_account_removal'.
+This run has ID `R72IR6Z8'.
+
+> [FAIL]        remove          0   disabled exact lane can lose last account.
+  [OK]          remove          1   the account and what routes to it go.
+  [OK]          remove          2   an antigravity account takes its credenti...
+  [OK]          remove          3   accounts using a shared model set are rem...
+  [OK]          remove          4   what has no replacement is refused.
+  [OK]          remove          5   a lane named like its runtime keeps its r...
+  [OK]          remove          6   a layout the line editor cannot reach is ...
+  [OK]          remove          7   only an official-client account is removed.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        remove          0   disabled exact lane can lose last acco...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT codex_acct1 was not removed: runtime.exact_output_lanes.hitl_auto_judge.enabled: required exact-output lane cannot be disabled
+FAIL codex_acct1 was not removed: runtime.exact_output_lanes.hitl_auto_judge.enabled: required exact-output lane cannot be disabled
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_runtime_account_removal.test_disabled_exact_lane_can_lose_last_a in file "test/test_runtime_account_removal.ml", line 255, characters 17-51
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/runtime_account_removal/remove.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/runtime_account_removal'.
+1 failure! in 0.024s. 8 tests run.

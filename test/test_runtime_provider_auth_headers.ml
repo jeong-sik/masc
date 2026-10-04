@@ -34,6 +34,7 @@ let runpod_provider =
   ; display_name = "RunPod"
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
+  ; request_path = None
   ; wire_kind = None
   ; max_context = None
   ; transport = Http "https://example-runpod.proxy.runpod.net/v1"
@@ -1726,6 +1727,7 @@ let test_dashboard_runtime_probe_auth_header_follows_provider_kind () =
     ; display_name = "Gemini"
     ; protocol = "gemini-http"
     ; api_format = Runtime_schema.Gemini_api
+    ; request_path = None
     ; wire_kind = None
     ; transport = Runtime_schema.Http "https://generativelanguage.googleapis.com/v1beta"
     ; credentials = Some (Runtime_schema.Inline "gm-test-key")
@@ -1771,6 +1773,7 @@ let test_dashboard_runtime_probe_vertex_is_a_stated_skip () =
       display_name = "Vertex"
     ; protocol = "vertex-gemini"
     ; api_format = Runtime_schema.Vertex_gemini_api
+    ; request_path = None
     ; wire_kind = None
     ; transport = Runtime_schema.Http base_url
     ; credentials = None
@@ -2123,6 +2126,46 @@ let fresh_loopback_port () =
    Explicit sampling values must survive binding and then be omitted by the
    catalog-owned wire policy. The loopback responses prove local wire/parser
    behavior, not account access or acceptance by OpenAI. *)
+let test_setup_responses_http_dispatch () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let observed = ref None in
+  let handler _ request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) |> Yojson.Safe.from_string in
+    observed := Some (Uri.path (Cohttp.Request.uri request), body);
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"id":"setup-response","model":"fixture-model","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}|} () in
+  let socket = Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ()) ~on_error:raise);
+  let credential = Filename.temp_file "masc-setup-surface-" ".key" in
+  Out_channel.with_open_bin credential (fun out -> output_string out "fixture-only-key");
+  Unix.chmod credential 0o600;
+  Eio.Switch.on_release sw (fun () -> Sys.remove credential);
+  List.iter (fun request_path ->
+    let spec = Runtime_setup_spec.of_json (`Assoc [
+      "choice", `String "openai_compatible"; "model", `String "fixture-model";
+      "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool false;
+      "endpoint", `String (Printf.sprintf "http://127.0.0.1:%d/v1" port);
+      "request_path", `String request_path; "credential_file", `String credential]) |> Result.get_ok in
+    let rendered = Runtime_setup_spec.render spec in
+    let runtime = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
+    let config = Runtime_adapter.binding_to_provider_config runtime (List.hd runtime.bindings) |> Result.get_ok in
+    let response = Llm_provider.Complete.complete ~sw ~net ~config
+        ~messages:[Llm_provider.Types.make_message ~role:Llm_provider.Types.User [Llm_provider.Types.Text "Reply ok."]] () in
+    (match response with
+     | Ok response -> check string "Responses envelope decoded" "setup-response" response.id
+     | Error _ -> fail "setup-generated Responses request failed");
+    let path, body = Option.get !observed in
+    check string "actual request path" "/v1/responses" path;
+    let open Yojson.Safe.Util in
+    check int "actual Responses input envelope" 1 (body |> member "input" |> to_list |> List.length);
+    check bool "chat envelope absent" true (body |> member "messages" = `Null))
+    ["/responses"; "/v1/responses"]
+
 let test_openai_responses_round_trip_through_runtime_toml () =
   let module Provider = Llm_provider.Provider_config in
   let module Types = Llm_provider.Types in
@@ -3130,6 +3173,7 @@ let () =
             "an OpenAI-compatible surface keeps the chat-completions path"
             `Quick
             test_openai_compat_surface_keeps_the_chat_completions_path
+        ; test_case "setup-generated Responses account dispatches real HTTP" `Quick test_setup_responses_http_dispatch
         ; test_case
             "catalog Responses models round trip through runtime TOML and HTTP"
             `Quick

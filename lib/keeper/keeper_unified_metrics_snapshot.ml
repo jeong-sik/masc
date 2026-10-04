@@ -44,7 +44,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
   in
   let tools_used = Keeper_agent_result.tool_names result in
   let tool_call_count = Keeper_agent_result.tool_call_count result in
-  let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
   let usage_json =
     match usage_resolution.delta with
     | Some delta ->
@@ -168,5 +167,5 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          | None -> `Null);
       ])
   in
-  Dated_jsonl.append metrics_store snapshot;
+  Keeper_types_support.append_keeper_metrics config meta.name snapshot;
   ()

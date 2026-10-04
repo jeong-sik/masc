@@ -9,7 +9,7 @@ let info browser : Lane.client_info =
   let raw = Printf.sprintf "00000000-0000-4000-8000-%012d" !serial in
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
   {client_id; browser; version="1.0"; engine_version="155.0.1"}
-let target id = match Lane.resolve_target (Lane.Live_route (Some id)) with
+let target id = match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some id)) with
   | Ok value -> value | Error error -> fail (Lane.selection_error_code error)
 let with_clients f = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -29,7 +29,7 @@ let answered promise expected = match Eio.Promise.await promise with
 let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
   let firefox = connect Lane.Firefox and zen = connect Lane.Zen in
   check bool "multiple clients require selection" true
-    (Lane.resolve_target (Lane.Live_route None)
+    (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None)
      = Error (Lane.Ambiguous_clients [firefox.client_id; zen.client_id]));
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for
     ~target:(target firefox.client_id)
@@ -44,15 +44,15 @@ let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
   answered result "firefox")
 let test_single_and_stale_selection () = with_clients (fun _ connect ->
   check bool "no connected browser is its own answer" true
-    (Lane.resolve_target (Lane.Live_route None) = Error Lane.No_live_client);
+    (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None) = Error Lane.No_live_client);
   let old = connect Lane.Firefox in
   check bool "one live client auto-resolves" true
-    (Result.is_ok (Lane.resolve_target (Lane.Live_route None)));
+    (Result.is_ok (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None)));
   let pinned = target old.client_id in
   ignore (Lane.disconnect_client ~client_id:old.client_id);
   ignore (connect Lane.Zen);
   check bool "old identity never selects new single client" true
-    (Lane.resolve_target (Lane.Live_route (Some old.client_id))
+    (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some old.client_id))
      = Error (Lane.Selected_client_disconnected old.client_id));
   check bool "captured target also stays disconnected" true
     (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1

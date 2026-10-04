@@ -804,6 +804,8 @@ let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
     let* () = if Filename.basename path = Lane_addon_store.digest instance_id ^ ".json"
       then Ok () else Error "binding filename does not match its instance identity" in
     let* incarnation = text fields "incarnation" in
+    let* () = if incarnation=instance_id then Ok ()
+      else Error "retained incarnation does not match its instance identity" in
     let* run_id = text fields "run_id" in
     let* package_id = text fields "addon_id" in
     let* title = text fields "title" in
@@ -1847,6 +1849,14 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Ok _ -> ());
     let nullable_string = function None -> `Null | Some s -> `String s in
     let exports = entries m |> List.filter_map (fun e ->
+      let configured_off = snapshot.complete && match e.configuration with
+        | None -> false
+        | Some owner -> List.exists (fun (d : Lane_addon_config.declaration) ->
+            d.id = owner.id && not d.enabled) snapshot.declarations in
+      (* Cleanup failures retain their worker and evidence for retry, but a
+         retiring owner cannot supply a usable Skill. An incomplete reading
+         does not authorize inferring desired activity for a running owner. *)
+      if e.stopping || configured_off then None else
       match e.package.skills_directory, e.phase with
       | None, _ | Some _, Detached -> None
       | Some _, (Attached | Observing | Failed _ | Detaching) ->

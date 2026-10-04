@@ -1,0 +1,9 @@
+Testing `browser lane watched work'.
+This run has ID `0O4UVFML'.
+
+  [OK]          what arrived as the window passed stands          0   an answ...
+  [OK]          what arrived as the window passed stands          1   a comma...
+  [OK]          what arrived as the window passed stands          2   an auto...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-parent-sync-20261005/_build/_tests/browser lane watched work'.
+Test Successful in 0.001s. 3 tests run.

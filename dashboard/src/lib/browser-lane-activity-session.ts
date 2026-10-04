@@ -10,6 +10,7 @@ import { readBrowserActivity, writeBrowserActivity, type BrowserActivityLane } f
 import { errorToString } from './format-string'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
 import { announceBrowserLaneObservationChanged } from './browser-lane-observation'
+import { announceRuntimeTomlCommitted } from './runtime-toml-session'
 
 type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
@@ -154,6 +155,7 @@ export class BrowserLaneActivitySession {
         throw new Error('저장 응답이 제출한 파일과 일치하지 않습니다. 현재 설정을 다시 읽으세요.')
       committed = true
       announceRuntimeTomlWritten()
+      announceRuntimeTomlCommitted(authority)
       this.update({ receipt, current: null, uncertain: receipt.commit.durability !== 'durable',
         draft: receipt.commit.durability === 'durable' ? { ...draft, base: saved } : draft,
         notice: '파일 저장 응답을 받았습니다. 현재 설정과 적용 상태를 다시 확인합니다.' })

@@ -2602,7 +2602,7 @@ let test_inventory_selection_keeps_exact_editor_identity () =
   Alcotest.(check (option string)) "exact selection joins by typed identity"
     (Some "librarian_exact")
     (Option.map (fun lane -> Standalone_lane.to_id lane.Tui_decode.sl_lane) (selected_standalone_lane state));
-  state.standalone_lanes <- Option.map (fun snapshot ->
+  state.standalone_lanes <- Option.map (fun (snapshot : Tui_decode.standalone_lanes_snapshot) ->
     {snapshot with Tui_decode.sls_lanes=List.rev snapshot.sls_lanes}) state.standalone_lanes;
   Alcotest.(check (option string)) "exact detail reorder does not change selected lane"
     (Some "librarian_exact")

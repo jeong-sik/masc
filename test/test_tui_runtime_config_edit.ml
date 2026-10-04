@@ -42,8 +42,32 @@ let foreign_document () =
     | Error _ -> () | Ok _ -> Alcotest.fail "adopted without a current file")
     [Edit.adopt_current; Edit.replace_with_current]
 
+let comparison_survives_refresh () =
+  let module T = Masc_tui_types in
+  let state = T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let workspace = ("/workspace", "/workspace/.masc") in
+  let session = Edit.open_document initial |> Edit.edit draft |> Edit.observe newer |> ok in
+  T.put_runtime_config_edit state ~workspace session;
+  let edit = List.hd state.runtime_config_edits in
+  state.runtime_config_edits <- [{ edit with rce_view = T.Config_edit_current [] }];
+  let latest = document "value = 4\n# latest comparison\n" "latest" in
+  let refreshed = Edit.observe latest session |> ok in
+  T.put_runtime_config_edit ~preserve_view:true state ~workspace refreshed;
+  let edit = List.hd state.runtime_config_edits in
+  same "polling retains operator draft" draft edit.rce_session.text;
+  (match edit.rce_view with
+   | T.Config_edit_current rows ->
+       Alcotest.(check bool) "comparison rows reflect latest snapshot" true
+         (rows = T.runtime_config_source_rows ~path:latest.path latest.source_text)
+   | T.Config_edit_draft -> Alcotest.fail "polling withdrew comparison view");
+  T.put_runtime_config_edit state ~workspace refreshed;
+  (match (List.hd state.runtime_config_edits).rce_view with
+   | T.Config_edit_draft -> ()
+   | T.Config_edit_current _ -> Alcotest.fail "explicit edit did not select draft")
+
 let () = Alcotest.run "runtime config draft recovery"
   [ "operator flows", [
+      Alcotest.test_case "comparison survives a refreshed observation" `Quick comparison_survives_refresh;
       Alcotest.test_case "retry after refusal and concurrent edits" `Quick retry_after_failure;
       Alcotest.test_case "replace only after explicit choice" `Quick explicit_replacement;
       Alcotest.test_case "foreign current file cannot replace draft" `Quick foreign_document;

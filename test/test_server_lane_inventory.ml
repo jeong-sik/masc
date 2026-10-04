@@ -183,9 +183,113 @@ let machine_wire_preserves_both_readings () =
       [Machine_configuration.Enabled,"on";Disabled,"off";Unobserved,"unobserved"])
     [Machine_lane.Msx;Dos]
 
+let h2_read ~sw ~clock ~state token =
+  let trust_policy = match Server_request_authority.make_trust_policy
+    ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None with
+    | Ok value -> value | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+  let previous = Server_auth.For_testing.snapshot_server_state () in
+  Server_auth.publish_server_state state;
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous) (fun () ->
+    let server_flow,client_flow = Eio_unix.Net.socketpair_stream ~sw () in
+    let gateway = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock ~server_start_time:0. in
+    let server = Eio.Fiber.fork_promise ~sw (fun () -> Eio.Switch.run (fun conn_sw ->
+      Server_bootstrap_http.serve_h2_connection ~sw:conn_sw ~h2_request_handler:gateway
+        ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow)) in
+    let reply,resolve = Eio.Promise.create () in
+    let client = H2_eio.Client.create_connection ~sw
+      ~error_handler:(fun _ -> if not (Eio.Promise.is_resolved reply) then
+        Eio.Promise.resolve resolve (Error "H2 connection failed")) client_flow in
+    Fun.protect ~finally:(fun () -> Eio.Flow.shutdown client_flow `All; Eio.Promise.await_exn server) (fun () ->
+      let headers = [":authority","127.0.0.1:8935";"origin","http://127.0.0.1:8935"]
+        @ (match token with None -> [] | Some token -> ["authorization","Bearer " ^ token]) in
+      let request = H2.Request.create ~scheme:"http" ~headers:(H2.Headers.of_list headers) `GET "/api/v1/lanes" in
+      let writer = H2_eio.Client.request client ~flush_headers_immediately:true request
+        ~error_handler:(fun _ -> if not (Eio.Promise.is_resolved reply) then
+          Eio.Promise.resolve resolve (Error "H2 stream failed"))
+        ~response_handler:(fun response reader ->
+          let body = Buffer.create 1024 in
+          let rec read () = H2.Body.Reader.schedule_read reader
+            ~on_eof:(fun () -> Eio.Promise.resolve resolve (Ok (H2.Status.to_code response.status,Buffer.contents body)))
+            ~on_read:(fun bytes ~off ~len -> Buffer.add_string body (Bigstringaf.substring bytes ~off ~len);read ()) in
+          read ()) in
+      H2.Body.Writer.close writer;
+      match Eio.Time.with_timeout_exn clock 10. (fun () -> Eio.Promise.await reply) with
+      | Ok response -> response | Error error -> fail error))
+
+let h2_operator_route () = with_fixture (fun env sw config root _directory ->
+  Auth.save_auth_config root {Masc_domain.default_auth_config with enabled=true; require_token=true};
+  let token name role = match Auth.create_token root ~agent_name:name ~role with
+    | Ok (token,_) -> token | Error e -> fail (Masc_domain.masc_error_to_string e) in
+  let admin = token "h2-inventory-admin" Masc_domain.Admin in
+  let worker = token "h2-inventory-worker" Masc_domain.Worker in
+  let state = Mcp_server.For_testing.create_state ~base_path:root in
+  let get token = h2_read ~sw ~clock:(Eio.Stdenv.clock env) ~state token in
+  let before = files root in
+  let status,body = get (Some admin) in
+  check int "H2 admin inventory is registered" 200 status;
+  let json = Yojson.Safe.from_string body in
+  check string "same common projection schema" "masc.lane-inventory/v1" (text "schema" json);
+  check (list string) "H2 projects all builtin rows"
+    (List.map (fun id -> Lane_id.to_wire (Lane_id.Builtin id)) Lane_id.all_of_builtin)
+    (List.map (text "id") (values "rows" json));
+  check int "H2 anonymous refused" 401 (fst (get None));
+  check int "H2 worker cannot read operator inventory" 403 (fst (get (Some worker)));
+  check bool "H2 read leaves package manager unconstructed" false (Addon.inventory ~config).owner_present;
+  check bool "H2 read leaves workspace bytes unchanged" true (before=files root))
+
+let retained_binding config id incarnation configuration =
+  let masc = Workspace.masc_dir config in
+  if not (Sys.file_exists masc) then Unix.mkdir masc 0o700;
+  let store = Lane_addon_store.create ~root:(Filename.concat masc "lane-addons") in
+  let json = `Assoc ["instance_id",`String id;"incarnation",`String incarnation;"run_id",`String "world";
+    "addon_id",`String "observer";"title",`String "Retained observer";"revision",`String "1";
+    "phase",Lane_addon_types.phase_to_json (Failed "cleanup incomplete");"configuration",configuration;
+    "visibility",`Assoc ["kind",`String "shared"];
+    "source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated] in
+  match Lane_addon_store.save_binding store ~instance_id:id json with Ok () -> () | Error e -> fail e
+
+let invalid_config_root () = with_fixture (fun _ _ config root directory ->
+  let owned = Filename.concat directory "owned.toml" in
+  retained_binding config "managed" "managed"
+    (`Assoc ["id",`String "owned";"source_path",`String owned;"revision",`String "r1"]);
+  let not_directory = Filename.concat root "ordinary-file" in write not_directory "not a directory";
+  List.iter (fun invalid -> with_env "MASC_CONFIG_DIR" invalid (fun () ->
+    let observation = Inventory.snapshot ~config |> Inventory.to_json in
+    let reading = member "package_read" observation in
+    check bool "invalid explicit root is incomplete" false (member "complete" reading |> Yojson.Safe.Util.to_bool);
+    check bool "resolver warning is visible" true (values "issues" reading <> []);
+    let row = List.find (fun row -> member "source_path" (member "selection" row)=`String owned) (values "rows" observation) in
+    check string "retained owner is unobserved, not absent" "unobserved"
+      (text "kind" (member "declaration" (member "state" row)))))
+    [Filename.concat root "missing-explicit-root";not_directory])
+
+let mismatched_retained_incarnation () = with_fixture (fun _ _ config _ _ ->
+  retained_binding config "good" "good" `Null;
+  retained_binding config "bad" "another-incarnation" `Null;
+  let observed = Addon.inventory ~config in
+  check (list string) "valid sibling survives corrupt identity" ["good"]
+    (List.map (fun (i : Addon.inventory_instance) -> i.instance_id) observed.instances);
+  check bool "bad record is reported" true (observed.issues <> []);
+  check bool "bad record makes retained inventory partial" false observed.complete)
+
+let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root directory ->
+  let source_path = Filename.concat directory ".toml" in
+  write source_path (declaration (package root) "suffix-only");
+  let observed = Inventory.snapshot ~config |> Inventory.to_json in
+  check bool "loader exposes suffix-only direct child" true
+    (List.exists (fun row -> member "source_path" (member "selection" row)=`String source_path) (values "rows" observed));
+  match Lane_addon_declaration.read ~directory ~source_path with
+  | Ok document -> check string "same enumerated source can be opened" ".toml" document.file_name
+  | Error e -> fail e.message)
+
 let () = run "operator lane inventory" ["read boundaries",[
   test_case "machine activity and publication serialize independently" `Quick machine_wire_preserves_both_readings;
+  test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;
+  test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;
+  test_case "suffix-only declaration stays editable" `Quick suffix_only_declaration_is_editable;
   test_case "all builtin and invalid/duplicate declarations before reconcile" `Quick before_reconcile;
   test_case "retained manual/managed owners survive partial metadata" `Quick retained_metadata;
   test_case "confirmed cleanup leaves history without crowding active inventory" `Quick detached_history;
-  test_case "HTTP inventory requires operator authority and preserves files" `Quick operator_route]]
+  test_case "HTTP inventory requires operator authority and preserves files" `Quick operator_route;
+  test_case "H2 inventory has the same admin gate and projection" `Quick h2_operator_route]]

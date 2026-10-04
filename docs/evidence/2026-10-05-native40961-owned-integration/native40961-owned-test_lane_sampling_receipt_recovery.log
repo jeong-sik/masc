@@ -1,0 +1,17 @@
+Testing `Sampling receipt recovery'.
+This run has ID `E2BR0RX4'.
+
+  [OK]          bounded downstream          0   outcome_first=false missing.
+  [OK]          bounded downstream          1   outcome_first=false canonical.
+  [OK]          bounded downstream          2   outcome_first=false fallback.
+  [OK]          bounded downstream          3   outcome_first=false compactio...
+  [OK]          bounded downstream          4   outcome_first=true missing.
+  [OK]          bounded downstream          5   outcome_first=true canonical.
+  [OK]          bounded downstream          6   outcome_first=true fallback.
+  [OK]          bounded downstream          7   outcome_first=true compaction...
+  [OK]          bounded downstream          8   aggregate allowance is preser...
+  [OK]          bounded downstream          9   journal file bound is preserved.
+  [OK]          bounded downstream         10   failed verification consumes ...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/test/_build/_tests/Sampling receipt recovery'.
+Test Successful in 1.956s. 11 tests run.

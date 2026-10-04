@@ -1,0 +1,150 @@
+{
+  "tested_head": "6f5442044b9d82b2853718b77ba20879208a5d87",
+  "tested_tree": "4f4ccc6225c67beb3eb1f5645b14782ecf18f7c6",
+  "mapping": [
+    {
+      "pr": 40943,
+      "branch": "fix/sampling-finite-main-20261003",
+      "old_head": "2d568103f3392c46a53e02ae2a09bb96cc3053a5",
+      "head": "2d568103f3392c46a53e02ae2a09bb96cc3053a5",
+      "tree": "e2cc3a249159c9860870d4cecb31920afe8c0a1b"
+    },
+    {
+      "pr": 40960,
+      "branch": "fix/sampling-recovery-receipt-20261003",
+      "old_head": "2e34863666dde7dd334adb47dee397b81358f928",
+      "head": "d3e765062a3f2621b3f4a5f0f2dddb61ac1c26be",
+      "tree": "298ae1b5de9971e04bc2ba97d3f5265ac216337f"
+    },
+    {
+      "pr": 40966,
+      "branch": "fix/sampling-host-diagnostics-20261003",
+      "old_head": "023dcec7e8f95b9405d85074f1e09a38019f480f",
+      "head": "52b3ec66a9e2ad74c672e12153e94de6127c02ba",
+      "tree": "3e9877ad5a96f8f67149c7ca78cf1c2c4f76b402"
+    },
+    {
+      "pr": 40981,
+      "branch": "fix/sampling-store-duplicate-20261003",
+      "old_head": "6b4b882ea5b77bc562e503801c60ebcf15f713f9",
+      "head": "c8d702d5e34bad60953f73fee6a0a8ac7d8fd189",
+      "tree": "8d1dcba819657f89a3ddb3f116355a2218c6b513"
+    },
+    {
+      "pr": 40991,
+      "branch": "fix/sampling-terminal-contract-20261003",
+      "old_head": "267f9b9ceee1cf1ea905f62ef332c93e4914fa92",
+      "head": "b46b5048fc0a4d50ddaf034d313f99245a609c96",
+      "tree": "374f5bfe5aff80307379a3e27ab2c8865164de83"
+    },
+    {
+      "pr": 41033,
+      "branch": "fix/audit-sampling-cold-recovery-20261004",
+      "old_head": "448e0e059941105bdcd055ab9a21002e0378cf8e",
+      "head": "3cd577f0ddea3a771e64c581f6630d36c261d3c6",
+      "tree": "255c97a9b46e3410d220939a798cba5ea3320ec7"
+    },
+    {
+      "pr": 41126,
+      "branch": "fix/sampling-inline-budget-20261004",
+      "old_head": "87185d22d2028eac6a8db4c6fe258b80fe94a325",
+      "head": "6f5442044b9d82b2853718b77ba20879208a5d87",
+      "tree": "4f4ccc6225c67beb3eb1f5645b14782ecf18f7c6"
+    }
+  ],
+  "results": {
+    "test/test_lane_addon_worker.exe": 36,
+    "test/test_server_lane_addon_sampling.exe": 17,
+    "test/test_lane_sampling_receipt_recovery.exe": 11,
+    "test/test_lane_addon.exe": 22,
+    "test/test_lane_addon_sources.exe": 15,
+    "test/test_lane_addon_store_query.exe": 13,
+    "packages/agent_core/test/test_mcp_integration.exe": 27
+  },
+  "total": 141,
+  "runs": [
+    {
+      "target": "test/test_lane_addon_worker.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-owned-test_lane_addon_worker.log",
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/test"
+    },
+    {
+      "target": "test/test_server_lane_addon_sampling.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-owned-test_server_lane_addon_sampling.log",
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/test"
+    },
+    {
+      "target": "test/test_lane_sampling_receipt_recovery.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-owned-test_lane_sampling_receipt_recovery.log",
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/test"
+    },
+    {
+      "target": "test/test_lane_addon.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-owned-test_lane_addon.log",
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/test"
+    },
+    {
+      "target": "test/test_lane_addon_sources.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-owned-test_lane_addon_sources.log",
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/test"
+    },
+    {
+      "target": "test/test_lane_addon_store_query.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-owned-test_lane_addon_store_query.log",
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/test"
+    },
+    {
+      "target": "packages/agent_core/test/test_mcp_integration.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-owned-test_mcp_integration.log",
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/packages/agent_core/test"
+    }
+  ],
+  "test_env": {
+    "MASC_BASE_PATH": "",
+    "ZAI_API_KEY": "",
+    "TYPESAFEAI_API_KEY": "",
+    "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED": "false",
+    "MASC_KEEPER_DOCKER_PLAYGROUND": "false",
+    "DUNE_SOURCEROOT": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005"
+  },
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "2c4f198e26879753c0a5d52b3dd946fd71352b387ea2b95570f6a1a52823f7a1",
+    "lib/server/server_runtime_bootstrap.ml": "de15612e9df8e05013237c438579197fed741462c44cfcc6e73605917e4f7a05",
+    "lib/server/server_runtime_bootstrap.mli": "cca9cedfca2319c4adc0fcbb2d22cb6c7d9d9da7b4032ffc2998e041a57998f2",
+    "test/test_lane_addon_worker.ml": "8ff145408376b5da5f65004c5fb7091ce132decdbe2197d440442a11282d84d6",
+    "test/test_lane_addon_store_query.ml": "4f04a604f4a1ed8fcddf0d384924c50c61d2d653b0b151ec29802ab23cb0bfb4",
+    "test/test_lane_sampling_receipt_recovery.ml": "c8d2164466973e1849a41c77db9e179c16be5d04f5a537d861df7c1a51d054ad",
+    "test/test_server_lane_addon_sampling.ml": "ab6b696c049f915025892df0e057b10ed21c0f7d0b47cd3c473fdc1500cb0608",
+    "test/test_lane_addon.ml": "fc1278df8745202d2a9e581bd1b306b5a75c466802c505b349762c267bee251f",
+    "test/test_lane_addon_sources.ml": "a3bef7f17c978efc09d33bb466ee2c6bf3785a7fa3c64eeca1ecd520ac9783e2",
+    "packages/agent_core/test/test_mcp_integration.ml": "c8db73cce6287ef348931478fe37ad2b5801164b57d2bbac95a999892441c592"
+  },
+  "binary_sha256": {
+    "test/test_lane_addon_worker.exe": "cf5b48df161a497b2a9e1e57652495e6fff6db19b0442d9dbada837d2cbdc28a",
+    "test/test_server_lane_addon_sampling.exe": "3601c9aece1d4553328dcd017f3e9c60e84dfe48d4ed02ad479fc719a4c040d2",
+    "test/test_lane_sampling_receipt_recovery.exe": "b7276cb00889cc00554daf135a91bdfe09c33dc3d64d87f65ced8735f3e2b761",
+    "test/test_lane_addon.exe": "2de31b410ca7ae4f342287f6fa90450ad144c377c5ceb45e847ccda276f44c7b",
+    "test/test_lane_addon_sources.exe": "bd70826a0efce5ec48da489b4f9de7b1867ac94a6dc14f4dec4daacc4c4f6a17",
+    "test/test_lane_addon_store_query.exe": "2cf129e7fa16583c741bf3d6de7450b194cb6f7bfa14639c94c65dd3d0dfc82d",
+    "packages/agent_core/test/test_mcp_integration.exe": "ad9659c52e762dcd3d3daa5c0b2f4e5464d5554905c31b793348244a856e89b6",
+    "bin/main_stdio_eio.exe": "5156a993d3ab525673237ef32d06f1d8588e82e9fb5537cc9440a28c8efd6628"
+  },
+  "artifact_sha256": {
+    "native40961-owned-test_lane_addon_store_query.log": "48df73024e019bc66c93f56dc264c79227baa60e41d3057fbbd4df8f22cf9c23",
+    "native40961-owned-test_server_lane_addon_sampling.log": "d18891e92f76e96d1114faa90bdd74807865ba2505db1aee8fc791acd4dda67f",
+    "native40961-owned-test_lane_sampling_receipt_recovery.log": "bd842820b6a1732f02485e1a82dd072b31e79cd25ddaf74913ccba481b6051b7",
+    "native40961-owned-query-build.log": "014d8c04b336e952be9e069bec881cbece6a089e80478eba3643d08ca3253dc8",
+    "native40961-owned-test_lane_addon_worker.log": "8d08a2150e6244a639a2dd90867c92554197efee22bab4df9b3bec8a0e6ed2c2",
+    "native40961-owned-test_lane_addon_sources.log": "d750af9860e57e4c6f9a95f809f6246d3f910dd9d6654da3997e158cc8a01784",
+    "native40961-owned-build.log": "784051446c58cab92fe66ddc1b883cef3363421c658869e4834bcc7fc5481306",
+    "native40961-owned-test_lane_addon.log": "8dafd51bd11d0cd7f0d56a4cfbdbabc90001c75addea0fb33c6c5e8dede83793",
+    "native40961-owned-test_mcp_integration.log": "344658eb42242815aa838ca73afaea92bc7207bd4c7820315b97b96df3a15dcb"
+  }
+}

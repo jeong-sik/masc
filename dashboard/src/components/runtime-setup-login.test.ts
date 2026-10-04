@@ -21,7 +21,7 @@ function renderClient(integrationId: string, protocol: string) {
 beforeEach(() => {
   vi.mocked(api.discoverSetupModels).mockResolvedValue([model])
   vi.mocked(api.selectSetupAccount).mockImplementation(async integration_id => ({ integration_id, account_ref: previous }))
-  vi.mocked(api.saveSetupSelections).mockResolvedValue({ unverified: [], notRechecked: [], durability: 'durable' })
+  vi.mocked(api.saveSetupSelections).mockResolvedValue({ unverified: [], notRechecked: [], durability: 'durable', lockReleaseUnconfirmed: false })
   vi.mocked(login.streamSetupLogin).mockImplementation(async (source, emit) => {
     emit({ event: 'started', login_id: id, integration_id: source.integration_id, account_ref: account })
     emit({ event: 'complete', source: { integration_id: source.integration_id, account_ref: account }, authentication: 'authenticated' })

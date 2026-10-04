@@ -22,6 +22,8 @@ type saved =
   | Saved_durability_unconfirmed of saved
       (** The configuration is visible; its storage durability is uncertain.
           Refresh preserves this warning and does not resubmit the save. *)
+  | Saved_lock_release_unconfirmed of saved
+      (** The commit completed, but the writer's lock release was not confirmed. *)
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }

@@ -152,6 +152,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     // as they were, not verified again.
     const caveats = [
       ...outcome.durability === 'durable' ? [] : ['설정은 현재 적용됐지만 디스크 저장 내구성을 확인하지 못했습니다. 재저장하지 말고 저장소 상태를 확인하세요.'],
+      ...outcome.lockReleaseUnconfirmed ? ['설정은 저장됐지만 설정 잠금 해제를 확인하지 못했습니다. 재저장하지 말고 서버의 잠금 상태를 확인하세요.'] : [],
       ...outcome.notRechecked.length === 0 ? [] : [`기존 연결은 이번에 다시 확인하지 않았습니다: ${outcome.notRechecked.join(', ')}.`],
       ...outcome.unverified.length === 0 ? [] : [`사용 한도에 걸려 응답·도구 검증은 못 했습니다: ${outcome.unverified.map(row => `${row.runtime_id} (${row.code})`).join(', ')}.`],
     ]

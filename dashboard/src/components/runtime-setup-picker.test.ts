@@ -16,7 +16,7 @@ it('selects multiple models and default by clicking, hides key, resumes only aft
       { id: 'model-b', label: 'Model B', context: 200000, tools: true },
       { id: 'unknown', label: 'Unknown', context: null, tools: null },
     ] }
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'native-b', runtime_ids: ['native-b', 'native-a'] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'native-b', runtime_ids: ['native-b', 'native-a'] }
     return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
   })
   const saved = vi.fn()
@@ -91,7 +91,7 @@ it('invalidates discovered models when the account key changes', async () => {
 it('keeps saved success distinct when server activation fails', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'] }
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
@@ -106,7 +106,7 @@ it('keeps saved success distinct when server activation fails', async () => {
 it('keeps uncertain durability visible after activation failure without repeating the save', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'unconfirmed' }, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'unconfirmed', warnings: [] }, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'] }
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
@@ -123,10 +123,31 @@ it.each([undefined, { durability: 'unknown' }])('refuses a save receipt with mis
   await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
   expect(vi.mocked(post).mock.calls.filter(([path]) => path.endsWith('/resume'))).toHaveLength(0)
 })
+it('displays a lock release warning after the committed save without exposing server diagnostics', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [{ code: 'runtime_config_lock_release_unconfirmed', detail: 'private-server-path' }] }, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/설정 잠금 해제를 확인하지 못했습니다/)
+  expect(document.body.textContent).not.toContain('private-server-path')
+  expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
+  expect(vi.mocked(post).mock.calls.filter(([path]) => path.endsWith('/connections'))).toHaveLength(1)
+})
+it.each([undefined, [{ code: 'unknown' }]])('refuses missing or unknown lock warning metadata %j', async warnings => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockResolvedValue({ configured: true, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'], commit: { durability: 'durable', warnings } })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
+  expect(vi.mocked(post).mock.calls.filter(([path]) => path.endsWith('/resume'))).toHaveLength(0)
+})
 it('names a runtime saved without the check because of a usage limit', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
       unverified: [{ runtime_id: 'old.id', code: 'quota_exhausted' }] }
     throw new Error('activation unavailable')
   })
@@ -141,7 +162,7 @@ it('names a runtime saved without the check because of a usage limit', async () 
 it('names a bound runtime the save did not check again', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'partly_checked', runtime_id: 'old.id', runtime_ids: ['old.id'],
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'partly_checked', runtime_id: 'old.id', runtime_ids: ['old.id'],
       unverified: [], not_rechecked: ['old.id'] }
     throw new Error('activation unavailable')
   })
@@ -154,7 +175,7 @@ it('names a bound runtime the save did not check again', async () => {
 it('refuses a receipt that reports verified beside a not_rechecked list', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'], not_rechecked: ['old.id'] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'], not_rechecked: ['old.id'] }
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
@@ -164,7 +185,7 @@ it('refuses a receipt that reports verified beside a not_rechecked list', async 
 it('refuses a usage-limited receipt that does not name a saved runtime', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
       unverified: [{ runtime_id: 'other.id', code: 'quota_exhausted' }] }
     throw new Error('activation unavailable')
   })
@@ -220,7 +241,7 @@ it('imports an explicitly selected server account and keeps only its opaque refe
     if (path.endsWith('/accounts/antigravity')) return { schema: 'masc.web_setup_account.v1', account_imported: true, invocation_verified: false, account_ref,
       catalog: { models: [{ id: 'account-model', label: 'Account model', context: null, tools: null }] } }
     if (path.endsWith('/context')) return { model: 'account-model', context: 32768, tools: true }
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'native-account', runtime_ids: ['native-account'] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'native-account', runtime_ids: ['native-account'] }
     return { runtime_ready: true, exact_output_authority_available: false, model_setup: { status: 'available' } }
   })
   const initial = { ...inventory, integrations: [{ id: 'antigravity', display_name: 'Antigravity', protocol: 'antigravity-cli', setup_support: 'new_connection' }] }
@@ -285,7 +306,7 @@ it('asks no Muse input byte budget and retains account reference through verifie
     if (path.endsWith('/models')) return { source: 'muse_providerCatalog', models: [
       { id: 'muse-selected', label: 'Muse Selected', context: 8192, tools: null },
       { id: 'unknown', label: 'Muse Unknown', context: null, tools: null }] }
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'muse.selected', runtime_ids: ['muse.selected'] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'muse.selected', runtime_ids: ['muse.selected'] }
     return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
   })
   const cli = { ...inventory, integrations: [{ id: 'muse-code', display_name: 'Muse Code', protocol: 'muse-serve', setup_support: 'new_connection' }] }
@@ -311,7 +332,7 @@ it('asks no Muse input byte budget and retains account reference through verifie
 it('cancels a pending resume after save without reporting activation or calling onSaved', async () => {
   let resumeSignal: AbortSignal | undefined
   vi.mocked(postControlPlane).mockImplementation((path, _body, _headers, options) => {
-    if (path.endsWith('/connections')) return Promise.resolve({ configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'existing.model', runtime_ids: ['existing.model'] })
+    if (path.endsWith('/connections')) return Promise.resolve({ configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'existing.model', runtime_ids: ['existing.model'] })
     resumeSignal = options?.signal
     return new Promise((_resolve, reject) => resumeSignal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }))
   })
@@ -333,7 +354,7 @@ it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('uses docume
   vi.mocked(post).mockImplementation(async path => {
     if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }
     if (path.endsWith('/models')) return { models: [{ id: 'unreported', label: 'Unreported model', context: null, tools: null }] }
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'native.model', runtime_ids: ['native.model'] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'native.model', runtime_ids: ['native.model'] }
     return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
   })
   const available = { ...inventory, integrations: [{ id, display_name: id, protocol, setup_support: 'new_connection' }] }

@@ -8,7 +8,7 @@ const cases = [
   { name: 'model discovery', invoke: (signal: AbortSignal) => discoverSetupModels(source, { signal }), receipt: { models: [model] } },
   { name: 'selected context', invoke: (signal: AbortSignal) => prepareSetupModel(source, model, false, { signal }), receipt: { model: 'model', context: 1024 } },
   { name: 'account import', invoke: (signal: AbortSignal) => importAntigravityAccount('fixture', { signal }), receipt: { schema: 'masc.web_setup_account.v1', account_ref: 'a'.repeat(64), account_imported: true, invocation_verified: false, catalog: { models: [model] } } },
-  { name: 'verified model save', invoke: (signal: AbortSignal) => saveSetupSelections('revision', [{ kind: 'existing', id: 'fixture.model', label: 'Model' }], { signal }), receipt: { configured: true, commit: { durability: 'durable' }, readiness: 'verified', runtime_id: 'fixture.model', runtime_ids: ['fixture.model'] } },
+  { name: 'verified model save', invoke: (signal: AbortSignal) => saveSetupSelections('revision', [{ kind: 'existing', id: 'fixture.model', label: 'Model' }], { signal }), receipt: { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'fixture.model', runtime_ids: ['fixture.model'] } },
 ]
 for (const entry of cases) {
   it(`${entry.name} survives the ordinary POST deadline and accepts its eventual receipt`, async () => {

@@ -97,7 +97,13 @@ let test_private_key () = fixture (fun base runtime binary _net ->
   Alcotest.check Alcotest.string "response/tool verified scope" "verified" (receipt |> member "readiness" |> to_string);
   let keys=receipt |> to_assoc |> List.map fst |> List.sort String.compare in
   Alcotest.check (Alcotest.list Alcotest.string) "safe receipt fields only"
-    (List.sort String.compare ["runtime_id";"runtime_ids";"models";"configured";"validation";"readiness"]) keys)
+    (List.sort String.compare ["runtime_id";"runtime_ids";"models";"configured";"validation";"readiness";"commit"]) keys;
+  let commit = receipt |> member "commit" in
+  Alcotest.check (Alcotest.list Alcotest.string) "commit omits private source and storage details"
+    ["durability";"order";"source_revision";"warnings"]
+    (commit |> to_assoc |> List.map fst |> List.sort String.compare);
+  Alcotest.check Alcotest.bool "private credential reference stays out of receipt" false
+    (String_util.contains_substring (Yojson.Safe.to_string receipt) path))
 let test_forbidden_reference () = fixture (fun base runtime binary _net ->
   let before=In_channel.with_open_bin runtime In_channel.input_all in
   List.iter (fun fields ->

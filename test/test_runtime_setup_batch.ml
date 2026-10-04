@@ -296,6 +296,32 @@ let test_commit_failures () =
       | _, Error error -> Alcotest.fail (Batch.error_message error)
       | _, Ok _ -> Alcotest.fail "pre-rename failure reported a commit")))
     [Fs_compat.Before_rename; Fs_compat.After_rename]
+let test_lock_release_warning_reaches_receipt () = fixture (fun base runtime binary spec _original ->
+  let registry = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore registry) (fun () ->
+    fake base binary "pass";
+    let added = spec "lock-warning-account" in
+    let id = (Runtime_setup_spec.render added).runtime_id in
+    let release_failure = { File_lock_eio.lock_path=runtime ^ ".lock";
+      phase=File_lock_eio.Release_process_lock;
+      cause={File_lock_eio.error=Unix.EIO;operation="private-release-fixture";argument=runtime};
+      cleanup_failure=None } in
+    let replace_file path mode contents = Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
+      Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out contents) in
+    let receipt = get (Batch.For_testing.configure ~release_failure ~replace_file ~binary ~base_path:base
+      ~expected_revision:(get (Batch.observe ~base_path:base)) ~specs:[added]
+      ~runtime_ids:[id] ~default_runtime_id:id ~verify:false ()) in
+    Alcotest.check Alcotest.int "completed setup retains its owning lock warning" 1
+      (List.length receipt.commit.lock_warnings);
+    Alcotest.check Alcotest.bool "lock uncertainty is distinct from storage durability" true
+      (receipt.commit.durability=Runtime.Durable);
+    let json = Batch.receipt_json receipt in
+    Alcotest.check Alcotest.string "safe warning code reaches public receipt"
+      {|[{"code":"runtime_config_lock_release_unconfirmed"}]|}
+      Yojson.Safe.Util.(json |> member "commit" |> member "warnings" |> Yojson.Safe.to_string);
+    Alcotest.check Alcotest.bool "private release diagnostic is not published" false
+      (contains (Yojson.Safe.to_string json) "private-release-fixture")))
+
 let test_final_validation_refusal () = fixture (fun base runtime binary spec original ->
   fake base binary "p.write_text('invalid = [')";
   let added = spec "refused-account" in
@@ -385,5 +411,6 @@ let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "a usage limit publishes the runtime unmeasured" `Quick test_usage_limit_publishes;
   Alcotest.test_case "verification probes only what the save changes" `Quick test_probes_only_what_changes;
   Alcotest.test_case "atomic commit failure preserves visibility and durability" `Quick test_commit_failures;
+  Alcotest.test_case "observed lock release warning reaches safe setup receipt" `Quick test_lock_release_warning_reaches_receipt;
   Alcotest.test_case "final validation remains a typed refusal" `Quick test_final_validation_refusal;
   Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

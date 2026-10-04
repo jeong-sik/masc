@@ -56,14 +56,14 @@ export type Unverified = { runtime_id: string; code: string }
 // What a save left unconfirmed. Both lists empty means every selected runtime
 // answered a real check in this save. [notRechecked] names selected runtimes
 // the save did not call again; it says nothing about whether they ever passed.
-export type SaveOutcome = { unverified: Unverified[]; notRechecked: string[]; durability: 'durable' | 'unconfirmed' }
+export type SaveOutcome = { unverified: Unverified[]; notRechecked: string[]; durability: 'durable' | 'unconfirmed'; lockReleaseUnconfirmed: boolean }
 function readUnverifiedRows(rows: unknown, runtimeIds: unknown[]): Unverified[] | null {
   if (!Array.isArray(rows)) return null
   const parsed = rows.map(row => isRecord(row) && typeof row.runtime_id === 'string' && runtimeIds.includes(row.runtime_id)
     && typeof row.code === 'string' && row.code ? { runtime_id: row.runtime_id, code: row.code } : null)
   return parsed.every((row): row is Unverified => row !== null) ? parsed : null
 }
-function readSaveOutcome(response: Record<string, unknown>, runtimeIds: unknown[]): Omit<SaveOutcome, 'durability'> | null {
+function readSaveOutcome(response: Record<string, unknown>, runtimeIds: unknown[]): Omit<SaveOutcome, 'durability' | 'lockReleaseUnconfirmed'> | null {
   if (response.readiness === 'verified') {
     return response.unverified === undefined && response.not_rechecked === undefined ? { unverified: [], notRechecked: [] } : null
   }
@@ -97,7 +97,11 @@ export async function saveSetupSelections(revision: string, choices: Selection[]
   if (!isRecord(response.commit) || (response.commit.durability !== 'durable' && response.commit.durability !== 'unconfirmed')) {
     throw new Error('Unconfirmed configuration durability')
   }
-  return { ...outcome, durability: response.commit.durability }
+  const warnings = response.commit.warnings
+  if (!Array.isArray(warnings) || warnings.some(row => !isRecord(row) || row.code !== 'runtime_config_lock_release_unconfirmed')) {
+    throw new Error('Unconfirmed configuration lock warnings')
+  }
+  return { ...outcome, durability: response.commit.durability, lockReleaseUnconfirmed: warnings.length > 0 }
 }
 
 export async function prepareSetupModel(source: Source, model: Model, load: boolean, options: { signal?: AbortSignal } = {}): Promise<Model> {

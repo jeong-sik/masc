@@ -242,7 +242,7 @@ let contains text part =
    list keeps that account instead of reporting a verified save. *)
 let uncertain_durability_save () =
   let receipt durability = `Assoc ["configured",`Bool true; "readiness",`String "verified";
-    "commit",`Assoc ["durability",durability]] in
+    "commit",`Assoc ["durability",durability;"warnings",`List []]] in
   let t=Login.create "codex" in
   let saved=match Login.saved t (receipt (`String "unconfirmed")) with
     | Ok saved -> saved | Error detail -> fail detail in
@@ -255,9 +255,27 @@ let uncertain_durability_save () =
   List.iter (fun unknown -> check bool "missing or unknown durability is not durable" true
     (Result.is_error (Login.saved (Login.create "codex") (receipt unknown))))
     [`Null; `String "unknown"; `Bool true]
+let uncertain_lock_release_save () =
+  let warning = `Assoc ["code",`String "runtime_config_lock_release_unconfirmed";
+    "detail",`String "private-server-path"] in
+  let receipt warnings = `Assoc ["configured",`Bool true;"readiness",`String "verified";
+    "commit",`Assoc ["durability",`String "unconfirmed";"warnings",warnings]] in
+  let t=Login.create "codex" in
+  let saved=match Login.saved t (receipt (`List [warning])) with Ok saved -> saved | Error detail -> fail detail in
+  check bool "both storage and lock uncertainty are retained" true
+    (saved=Login.Saved_durability_unconfirmed (Login.Saved_lock_release_unconfirmed Login.Saved_verified));
+  Login.refresh_saved t saved (Error "offline");
+  let rows = Login.lines t |> List.map Login.row_text |> String.concat " " in
+  check bool "lock warning is visible after refresh failure" true (contains rows "잠금 해제");
+  check bool "backend diagnostic is not displayed" false (contains rows "private-server-path");
+  check bool "r only retries the read" true (Login.key t "r"=Login.Refresh_saved saved);
+  List.iter (fun warnings -> check bool "unknown warning cannot claim a clean save" true
+    (Result.is_error (Login.saved (Login.create "codex") (receipt warnings))))
+    [`Null;`List [`Assoc ["code",`String "unknown"]]]
+
 let usage_limited_save () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  let receipt ?(selected=["codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]) rows = `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable"];
+  let receipt ?(selected=["codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]) rows = `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable";"warnings",`List []];
     "readiness",`String "usage_limited";"runtime_ids",`List (List.map (fun id -> `String id) selected);"unverified",`List rows] in
   let row id code = `Assoc ["runtime_id",`String id;"code",`String code] in
   let saved = match Login.saved t (receipt [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"]) with
@@ -280,7 +298,7 @@ let usage_limited_save () =
       "an unmeasured row without a code is unreadable", receipt [`Assoc ["runtime_id",`String "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]];
       "an unmeasured runtime the save did not select is unreadable", receipt ~selected:["other"] [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"];
       "a verified receipt with an unmeasured list is unreadable",
-        `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable"];"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
+        `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable";"warnings",`List []];"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
 (* A save that left selected runtimes uncalled is neither verified nor
    usage-limited. The screen summarizes retained connections, and a receipt that
    claims verified beside a not_rechecked list is unreadable rather than shown
@@ -289,7 +307,7 @@ let partly_checked_save () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   let kept = "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" and added = "codex_1a2b3c4d.gpt-6-luna_1a2b3c4d" in
   let receipt ?(readiness="partly_checked") ?(unverified=`List []) ?(rechecked=`List [`String kept]) () =
-    `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable"];"readiness",`String readiness;
+    `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable";"warnings",`List []];"readiness",`String readiness;
       "runtime_ids",`List [`String added;`String kept];"unverified",unverified;"not_rechecked",rechecked] in
   let saved = match Login.saved t (receipt ()) with
     | Ok saved -> saved | Error message -> fail message in
@@ -744,6 +762,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
   test_case "visible save preserves durability uncertainty without resubmitting" `Quick uncertain_durability_save;
+  test_case "lock warning survives refresh without exposing diagnostics" `Quick uncertain_lock_release_save;
   test_case "a partly checked save summarizes retained connections and names failures" `Quick partly_checked_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;

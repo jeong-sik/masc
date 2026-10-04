@@ -85,11 +85,11 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             # This is a test stimulus, not a product timeout.
             time.sleep(11)
         if usage_limited_save:
-            return 200, {"configured": True, "commit": {"durability": "durable"}, "validation": "passed", "readiness": "usage_limited",
+            return 200, {"configured": True, "commit": {"durability": "durable", "warnings": []}, "validation": "passed", "readiness": "usage_limited",
                          "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"],
                          "unverified": [{"runtime_id": "new-runtime", "code": "quota_exhausted",
                                          "message": "fixture quota", "detail": None}]}
-        return 200, {"configured": True, "commit": {"durability": "durable"}, "readiness": "verified", "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"]}
+        return 200, {"configured": True, "commit": {"durability": "durable", "warnings": []}, "readiness": "verified", "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"]}
 
     fixtures["/api/v1/setup/connections"] = _keyboard_harness.RequestHttpResponse(verify)
 

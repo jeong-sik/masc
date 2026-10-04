@@ -80,14 +80,18 @@ val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?
     owner activation or sandbox readiness. Pending credentials are retained
     after visible publication in the same cancellation-protected phase. *)
 val receipt_json : receipt -> Yojson.Safe.t
+(** [commit.warnings] carries public warning codes only, never private lock paths
+    or exception diagnostics. An empty list means the owning lock reported none. *)
 
 module For_testing : sig
   val configure :
+    ?release_failure:File_lock_eio.durable_lock_error ->
     replace_file:(string -> int -> string -> (unit,Fs_compat.atomic_replace_failure) result) ->
     ?pending_credentials:Runtime_setup_credentials.pending list -> ?default_lane_id:string ->
     binary:string -> base_path:string -> expected_revision:revision ->
     specs:Runtime_setup_spec.t list -> runtime_ids:string list ->
     default_runtime_id:string -> verify:bool -> unit -> (receipt,error) result
   (** Runs the complete setup transaction with an injected final replacement
-      edge. Stage validation and the runtime commit are the production path. *)
+      edge and optional observed release failure. Stage validation, commit,
+      lock acquisition and actual release are the production path. *)
 end

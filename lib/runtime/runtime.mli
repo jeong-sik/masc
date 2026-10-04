@@ -421,6 +421,11 @@ module For_testing : sig
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
 
+  val with_config_lock_observed_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error -> runtime_config_path:string ->
+    (unit -> 'a) -> ('a config_lock_receipt, string) result
+  (** Real writer lock and journal admission, with an injected release result. *)
+
   val with_config_lock_with_journal_sync_parent :
     sync_parent:(string -> unit) -> runtime_config_path:string ->
     (unit -> unit) -> (unit, string) result
@@ -1101,6 +1106,13 @@ val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) resul
 (** Serialize an owner configuration activation with the existing file writers.
     Reject an unresolved configuration journal before invoking the action.
     The action must not recursively invoke a config writer. *)
+
+val with_config_lock_observed : runtime_config_path:string -> (unit -> 'a) ->
+  ('a config_lock_receipt, string) result
+(** The same writer admission, retaining completed action values and lock-release
+    warnings separately. The action must not recursively invoke a config writer. *)
+val attach_lock_warnings : config_lock_warning list -> config_commit_receipt -> config_commit_receipt
+(** Attach the owning lock's observed release warnings to its completed commit. *)
 
 val with_manifest_config_lock :
   runtime_config_path:string -> manifest_path:string ->

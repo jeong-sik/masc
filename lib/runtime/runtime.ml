@@ -2232,10 +2232,15 @@ let attach_lock_warnings warnings receipt =
   { receipt with lock_warnings = receipt.lock_warnings @ warnings }
 ;;
 
-let with_config_lock ~runtime_config_path action =
+let with_config_lock_observed ~runtime_config_path action =
   let* locked = with_runtime_config_write_lock runtime_config_path action in
   List.iter (function Config_lock_release_unconfirmed detail ->
     Log.Misc.warn "runtime activation lock release unconfirmed: %s" detail) locked.warnings;
+  Ok locked
+;;
+
+let with_config_lock ~runtime_config_path action =
+  let* locked = with_config_lock_observed ~runtime_config_path action in
   locked.value
 ;;
 
@@ -3086,6 +3091,11 @@ module For_testing = struct
 
   let snapshot () = runtime_state ()
   let restore snapshot = Atomic.set loaded_state_ref snapshot
+  let with_config_lock_observed_with_release_failure ~release_failure ~runtime_config_path action =
+    with_runtime_config_write_lock_using
+      (File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure ~release_failure)
+      runtime_config_path action
+  ;;
   let with_config_lock_with_journal_sync_parent ~sync_parent ~runtime_config_path action =
     with_runtime_config_write_lock_using
       ~require_resolved:(Keeper_config_journal.For_testing.require_resolved_with_sync_parent ~sync_parent)

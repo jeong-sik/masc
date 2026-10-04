@@ -271,7 +271,7 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
     let runtime_id = match default_lane_id with Some lane_id -> lane_id | None -> primary in
     Ok {runtime_id;runtime_ids=selected;
       models=List.map Runtime_setup_spec.model_id specs; readiness; commit}
-let configure_with_replace_file ~replace_file ?(pending_credentials=[]) ?default_lane_id ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
+let configure_with_replace_file ~with_lock ~replace_file ?(pending_credentials=[]) ?default_lane_id ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
   if runtime_ids=[] || not (List.for_all safe_id runtime_ids)
      || not (List.mem default_runtime_id runtime_ids) then Error Invalid_selection else
   io (fun () ->
@@ -279,12 +279,15 @@ let configure_with_replace_file ~replace_file ?(pending_credentials=[]) ?default
     let _,runtime = paths base in
     let selected = default_runtime_id :: List.filter ((<>) default_runtime_id) (unique runtime_ids) in
     (* Keep typed operation failures separate from the lock's string diagnostics. *)
-    match Runtime.with_config_lock ~runtime_config_path:runtime (fun () ->
-      Ok (configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify)) with
-    | Ok result -> result | Error _ -> Error Lock_unavailable)
+    match with_lock ~runtime_config_path:runtime (fun () ->
+      configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify) with
+    | Ok {Runtime.value=Ok receipt; warnings} ->
+        Ok {receipt with commit=Runtime.attach_lock_warnings warnings receipt.commit}
+    | Ok {Runtime.value=Error error; _} -> Error error
+    | Error _ -> Error Lock_unavailable)
 let configure ?pending_credentials ?default_lane_id ~binary ~base_path ~expected_revision
     ~specs ~runtime_ids ~default_runtime_id ~verify () =
-  configure_with_replace_file ~replace_file:write ?pending_credentials ?default_lane_id
+  configure_with_replace_file ~with_lock:Runtime.with_config_lock_observed ~replace_file:write ?pending_credentials ?default_lane_id
     ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify ()
 let usage_limited_json (row : usage_limited) = `Assoc [
   "runtime_id",`String row.runtime_id;"code",`String row.code]
@@ -297,7 +300,8 @@ let receipt_json receipt = `Assoc ([
     "source_revision",`String (Runtime.config_source_revision_to_string receipt.commit.observation.source_revision);
     "order",`String (Runtime.config_commit_order_to_string receipt.commit.order);
     "durability",`String (match receipt.commit.durability with Runtime.Durable -> "durable" | Durability_unconfirmed _ -> "unconfirmed");
-    "warnings",`List (List.map Runtime.config_lock_warning_to_yojson receipt.commit.lock_warnings)]]
+    "warnings",`List (List.map (function Runtime.Config_lock_release_unconfirmed _ ->
+      `Assoc ["code",`String "runtime_config_lock_release_unconfirmed"]) receipt.commit.lock_warnings)]]
   @ match receipt.readiness with
     | Verified -> ["readiness",`String "verified"]
     | Not_probed -> ["readiness",`String "not_probed"]
@@ -308,5 +312,11 @@ let receipt_json receipt = `Assoc ([
         "unverified",`List (List.map usage_limited_json (first :: rest))])
 
 module For_testing = struct
-  let configure = configure_with_replace_file
+  let configure ?release_failure ~replace_file ?pending_credentials ?default_lane_id
+      ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
+    let with_lock = match release_failure with
+      | None -> Runtime.with_config_lock_observed
+      | Some release_failure -> Runtime.For_testing.with_config_lock_observed_with_release_failure ~release_failure in
+    configure_with_replace_file ~with_lock ~replace_file ?pending_credentials ?default_lane_id
+      ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify ()
 end

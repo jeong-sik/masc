@@ -3,7 +3,9 @@ import os
 import re
 import sys
 import unicodedata
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_workspace as _keyboard_workspace
 
 
 AUTHOR = "author-" + "a" * 120 + "AUTHORTAIL"
@@ -33,21 +35,21 @@ def from_cell(text, boundary):
 
 
 def completed(output):
-    end = output.rfind(h.FRAME_END)
+    end = output.rfind(_keyboard_harness.FRAME_END)
     assert end >= 0, "No completed redraw"
-    return bytes(output[:end + len(h.FRAME_END)])
+    return bytes(output[:end + len(_keyboard_harness.FRAME_END)])
 
 
 def resize(process, fd, output, **kwargs):
-    h.read_available(fd, output)
+    _keyboard_harness.read_available(fd, output)
     start = len(output)
-    h.resize_and_wait(process, fd, output, **kwargs)
-    h.wait_for_output(process, fd, output, h.FRAME_END,
-                      start=h.end_of_needle(output, kwargs["needle"], start), timeout=3)
+    _keyboard_harness.resize_and_wait(process, fd, output, **kwargs)
+    _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END,
+                      start=_keyboard_harness.end_of_needle(output, kwargs["needle"], start), timeout=3)
 
 
 def window(output, columns):
-    rows = h.screen_rows(completed(output))
+    rows = _keyboard_harness.screen_rows(completed(output))
     position, match = next((index, WINDOW.search(text.decode("utf-8")))
         for index, text in sorted(rows.items()) if WINDOW.search(text.decode("utf-8")))
     first, last, total = map(int, match.groups())
@@ -77,36 +79,36 @@ def window(output, columns):
 
 
 def run(executable, columns, no_color, hide_recent=True):
-    fixtures = h.code_memo_fixtures()
+    fixtures = _keyboard_workspace.code_memo_fixtures()
     literal_memos = "".join(f"-- masc(literal-{index}): {body}\n"
                             for index, body in enumerate(LITERAL_BODIES))
-    fixtures[h.CODE_MEMO_FILE_PATH] = (200, {"ok": True, "content":
+    fixtures[_keyboard_workspace.CODE_MEMO_FILE_PATH] = (200, {"ok": True, "content":
         f"local lock = 1\n-- masc({AUTHOR}) decision: {BODY}\n"
         f"-- masc(beta): {SECOND}\n" + literal_memos
         + "local function read() return lock end\n"})
 
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go code", b"init.lua")
-        h.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
+        _keyboard_harness.palette_go(process, fd, output, b"go code", b"init.lua")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
         # Hide the default Recent pane at a width that permits its complete
         # narrow -> wide -> hidden cycle. Physical widths then equal the Code
         # surface widths used by the split-pane and wrapping assertions.
         if hide_recent:
             resize(process, fd, output, rows=18,
-                              columns=h.ACTING_PANE_CYCLE_COLUMNS,
-                              needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
-            h.send_and_wait(process, fd, output, b"\x0c", b"[Recent]")
-            assert h.acting_pane_header_cell(output) == (
-                h.ACTING_PANE_CYCLE_COLUMNS - h.ACTING_PANE_WIDE_COLUMNS + 1)
-            h.send_and_wait(process, fd, output, b"\x0c", b"local lock = 1")
-            assert h.acting_pane_header_cell(output) == -1
+                              columns=_keyboard_harness.ACTING_PANE_CYCLE_COLUMNS,
+                              needle=b"local lock = 1", controls=(_keyboard_harness.FULL_REDRAW,))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x0c", b"[Recent]")
+            assert _keyboard_keepers.acting_pane_header_cell(output) == (
+                _keyboard_harness.ACTING_PANE_CYCLE_COLUMNS - _keyboard_harness.ACTING_PANE_WIDE_COLUMNS + 1)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x0c", b"local lock = 1")
+            assert _keyboard_keepers.acting_pane_header_cell(output) == -1
         # Resize while the file is open; the fixture starts at 100 columns.
         resize(process, fd, output, rows=18, columns=columns,
-                          needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
+                          needle=b"local lock = 1", controls=(_keyboard_harness.FULL_REDRAW,))
         if hide_recent:
-            assert h.acting_pane_header_cell(output) == -1
-        h.send_and_wait(process, fd, output, b"m", b"rows 1-")
-        screen = h.screen_text(completed(output)).decode("utf-8")
+            assert _keyboard_keepers.acting_pane_header_cell(output) == -1
+        _keyboard_harness.send_and_wait(process, fd, output, b"m", b"rows 1-")
+        screen = _keyboard_harness.screen_text(completed(output)).decode("utf-8")
         assert "Esc:back" in screen, (columns, no_color, screen)
         captured = {}
         while True:
@@ -116,31 +118,31 @@ def run(executable, columns, no_color, hide_recent=True):
                 break
             height = last - first + 1
             next_first = min(total - height + 1, first + max(1, height - 1))
-            h.send_and_wait(process, fd, output, b"\x1b[6~", f"rows {next_first}-".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[6~", f"rows {next_first}-".encode())
         compact = "".join("".join(captured[index].split()) for index in sorted(captured))
         for field in (AUTHOR, BODY, SECOND, "L2", "(decision)", "L3"):
             assert "".join(field.split()) in compact, (columns, field, compact)
         for index, body in enumerate(LITERAL_BODIES):
             literal = f"literal-{index}" + "".join(body.split())
             assert literal in compact, (columns, literal, compact)
-        h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
         first, last, total, _ = window(output, columns)
         height = last - first + 1
-        h.send_and_wait(process, fd, output, b"\x1b[F", f"rows {max(1, total-height+1)}-".encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", f"rows {max(1, total-height+1)}-".encode())
         assert window(output, columns)[1] == total
         resized_columns = 160 if columns != 160 else 40
         resize(process, fd, output, rows=18, columns=resized_columns,
-                          needle=b"notes: init.lua", controls=(h.FULL_REDRAW,))
+                          needle=b"notes: init.lua", controls=(_keyboard_harness.FULL_REDRAW,))
         shown_first = window(output, resized_columns)[0]
         expected_first = max(1, shown_first - 1)
-        h.send_and_wait(process, fd, output, b"k", f"rows {expected_first}-".encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"k", f"rows {expected_first}-".encode())
         assert window(output, resized_columns)[0] == expected_first
-        h.send_and_wait(process, fd, output, b"m", b"local lock = 1")
-        h.send_and_wait(process, fd, output, b"m", b"rows 1-")
+        _keyboard_harness.send_and_wait(process, fd, output, b"m", b"local lock = 1")
+        _keyboard_harness.send_and_wait(process, fd, output, b"m", b"rows 1-")
         assert window(output, resized_columns)[0] == 1
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
         description=f"Code memo full text {columns} columns NO_COLOR={no_color} hide_recent={hide_recent}",
         interact=interact, http_fixtures=fixtures,
         extra_env={"NO_COLOR": "1"} if no_color else {})

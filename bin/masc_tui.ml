@@ -3547,7 +3547,13 @@ let keeper_item_revision state keeper_name =
   | Keeper_control.Present runtime -> runtime.kr_candle_account_revision
   | Unobserved | Invalid _ | Absent -> Error "Keeper account revision is not observed in the current roster"
 
-let launch_keeper_items state ~mailbox keeper_name =
+let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_name =
+  let observed_account =
+    match state.item_account with
+    | Some (name, _) as account when keep_observed_account
+        && String.equal name keeper_name -> account
+    | _ -> None
+  in
   withdraw_keeper_items state;
   match state.workspace_identity, state.server_identity with
   | (Workspace_identity_unread | Workspace_identity_mismatch _), _
@@ -3555,7 +3561,26 @@ let launch_keeper_items state ~mailbox keeper_name =
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
+  | Workspace_identity_match, Some _
+    when state.keeper_roster = Keeper_control.Roster_unobserved ->
+    state.item_account_error <- Some "Keeper roster authority is unavailable"
   | Workspace_identity_match, Some identity ->
+  (* The read-state Item endpoint owns account authority. Public roster
+     currency observations require CanAdmin and may legitimately be absent;
+     the roster itself must have been successfully observed before this read.
+     A partial roster's silence is not absence: past the cap the roster says
+     nothing about a locally known Keeper, and [Unobserved] is exactly that
+     silence -- the authoritative read proceeds and the endpoint itself
+     answers for a Keeper that is truly gone. A complete roster's [Absent]
+     and this Keeper's own decode failure remain refusals. *)
+  match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+  | Invalid _ | Absent ->
+    state.item_account_error <- Some "Keeper is not observed in the current roster"
+  | Present _ | Unobserved ->
+  (* A cadence read under unchanged authority refreshes an observed account
+     without blanking it while the request is pending. Refusals above and a
+     failed endpoint response still withdraw it. *)
+  state.item_account <- observed_account;
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -3586,15 +3611,29 @@ let visible_item_revision state =
 
 let refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous =
   let current = visible_item_revision state in
+  (* A capped roster can stop reporting this Keeper's public revision without
+     changing the authority of its private account or pending Item read. *)
+  let partial_same_authority =
+    match previous, current with
+    | Some (previous_keeper, _, _, previous_workspace),
+      Some (keeper, _, _, workspace) ->
+        roster_refreshed && String.equal previous_keeper keeper
+        && previous_workspace = workspace
+        && Keeper_control.liveness_of_roster state.keeper_roster keeper = Unobserved
+    | None, _ | _, None -> false
+  in
+  let revision_changed = current <> previous && not partial_same_authority in
   let read_pending =
     List.exists (fun request -> request.drr_tab = Detail_items) state.detail_reads
   in
   let retry_settled_failure =
     Option.is_some state.item_account_error && not read_pending
   in
-  if current <> previous || retry_settled_failure || (roster_refreshed && not read_pending) then
+  if revision_changed || retry_settled_failure || (roster_refreshed && not read_pending) then
     match current with
-    | Some (keeper_name, _, _, _) -> launch_keeper_items state ~mailbox keeper_name
+    | Some (keeper_name, _, _, _) ->
+        launch_keeper_items ~keep_observed_account:(not revision_changed)
+          state ~mailbox keeper_name
     | None -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
@@ -5631,7 +5670,11 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
   (* The lane editor's line belongs to the view that drew it. *)
-  if destination <> state.view then Masc_tui_types.dismiss_runtime_lane_notice state;
+  if destination <> state.view then begin
+    Masc_tui_types.dismiss_runtime_lane_notice state;
+    state.slot_editor <- None;
+    state.runtime_lane_pick <- None
+  end;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
    | Clients -> launch_clients_load state ~mailbox
@@ -6656,12 +6699,15 @@ let handle_slot_edit state ~mailbox edit =
             Error "the slot editor built a write its target does not take")
 
 let launch_runtime_catalog_load state ~mailbox =
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  let generation = state.runtime_catalog_generation in
+  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Runtime_catalog_loaded result))
+      enqueue_async mailbox (Runtime_catalog_loaded (generation, result)))
     (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
 
 (* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
@@ -9662,8 +9708,8 @@ let apply_keeper_roster_load state result =
        | None -> ()
        | Some (keeper_name, _) ->
          (match Keeper_control.liveness_of_roster roster keeper_name with
-          | Keeper_control.Present _ -> ()
-          | Unobserved | Invalid _ | Absent -> withdraw_keeper_items state))
+          | Keeper_control.Present _ | Unobserved -> ()
+          | Invalid _ | Absent -> withdraw_keeper_items state))
   | Error failure ->
       (* The last good roster is dropped rather than kept: a stale one reports
          fibers as running after the reading that said so stopped arriving,
@@ -10145,7 +10191,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
   state.runtime_catalog <- [];
-  state.runtime_catalog_error <- None;
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_unread;
   state.runtime_assignments <- [];
   state.runtime_lanes <- [];
   state.keeper_yolo_names <- [];
@@ -13802,7 +13849,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
-         && item_authority_ready state then
+         && item_authority_ready state
+         && state.keeper_roster <> Keeper_control.Roster_unobserved
+         (* The same reading the dispatch guard makes: a partial roster's
+            silence is not absence, so a read this TUI legitimately launched
+            for an Unobserved Keeper is accepted here too. A complete
+            roster's Absent and this Keeper's own decode failure still
+            refuse their answers. *)
+         && (match Keeper_control.liveness_of_roster state.keeper_roster request.drr_keeper with
+             | Present _ | Unobserved -> true
+             | Invalid _ | Absent -> false) then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
@@ -15431,14 +15487,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 launch_runtime_surface_load state ~mailbox ~force:true
             | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
        | Error _ -> ())
-  | Runtime_catalog_loaded result -> (
+  | Runtime_catalog_loaded (generation, result) -> (
+      if generation = state.runtime_catalog_generation then
       match result with
       | Ok (runtimes, lanes, assignments) ->
           state.runtime_catalog <- runtimes;
           state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None
-      | Error detail -> state.runtime_catalog_error <- Some detail)
+          state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_read
+      | Error detail -> state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_failed detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
       | Ok write ->
@@ -19620,20 +19677,25 @@ and is loaded on demand through keeper_skill.
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if not (String.equal name "") then begin
-                   state.runtime_lane_name_draft <- None;
-                   Masc_tui_types.dismiss_runtime_lane_notice state;
                    match entry with
-                   | Masc_tui_types.Naming_new_lane _ ->
-                     (* A lane is its candidates, so it comes to exist with
-                        one: the picker that opens here declares it. *)
-                     Masc_tui_types.open_runtime_lane_pick state
-                       (Masc_tui_types.Pick_new_lane name)
-                   | Masc_tui_types.Renaming_lane { lane; _ } ->
-                     (* The rename lands in one write, references and all, so
-                        there is nothing to pick and nothing to follow. *)
-                     launch_runtime_lane_write state ~mailbox:async_messages
-                       ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
-                       Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
+                   | Masc_tui_types.Renaming_lane _
+                     when Masc_tui_types.runtime_lane_write_busy state ->
+                       state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+                   | _ ->
+                     state.runtime_lane_name_draft <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
+                     match entry with
+                     | Masc_tui_types.Naming_new_lane _ ->
+                       (* A lane is its candidates, so it comes to exist with
+                          one: the picker that opens here declares it. *)
+                       Masc_tui_types.open_runtime_lane_pick state
+                         (Masc_tui_types.Pick_new_lane name)
+                     | Masc_tui_types.Renaming_lane { lane; _ } ->
+                       (* The rename lands in one write, references and all, so
+                          there is nothing to pick and nothing to follow. *)
+                       launch_runtime_lane_write state ~mailbox:async_messages
+                         ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+                         Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
                  end
                | "\127" | "\b" | "backspace" ->
                  let length = String.length draft in
@@ -21074,8 +21136,13 @@ and is loaded on demand through keeper_skill.
           one, J/K move it, and Esc closes. *)
        | Some "r"
          when (state.view = Lanes || state.view = Runtime)
-              && Option.is_some state.slot_editor
+              && (match state.slot_editor with
+                  | Some { se_target = Masc_tui_types.Exact_lane_slots _; _ } -> true
+                  | Some { se_target = Masc_tui_types.Media_failover_slots; _ } | None -> false)
               && Option.is_none state.runtime_lane_pick ->
+           if Masc_tui_types.runtime_lane_write_busy state then
+             state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+           else
            (match state.slot_editor, Masc_tui_types.slot_editor_cursor_row state with
             | Some { se_target = Masc_tui_types.Exact_lane_slots lane; _ }, Some row ->
                 let group = match row.Masc_tui_types.sr_kind with
@@ -21084,6 +21151,7 @@ and is loaded on demand through keeper_skill.
                   | Masc_tui_types.Media_route_slot -> Tui_decode.Exact_output_unsupported in
                 Masc_tui_types.open_runtime_lane_pick state
                   (Masc_tui_types.Pick_exact_lane_replacement (lane, row.sr_slot, group));
+                launch_runtime_catalog_load state ~mailbox:async_messages;
                 Masc_tui_types.dismiss_runtime_lane_notice state
             | _ -> ())
        | Some ("j" | "k" | "up" | "down" | "wheel-up" | "wheel-down" | "x" | "J" | "K" | "1" | "esc")

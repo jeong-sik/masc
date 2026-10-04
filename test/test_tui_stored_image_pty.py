@@ -8,7 +8,8 @@ from pathlib import Path
 import threading
 import time
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
 
 
 MODES = ("success", "refused", "malformed", "wrong-digest", "wrong-bytes",
@@ -31,16 +32,16 @@ def run(executable, *, mode, evidence_dir=None):
     delayed_history = mode in ("delayed-history", "delayed-history-clock-skew")
     clock_skew = mode in ("queued-clock-skew", "delayed-history-clock-skew")
     settled_history = mode == "settled-history"
-    queue = h.AtomicChatFixture(hold_first_acceptance=True) if queued else None
+    queue = _keyboard_chat.AtomicChatFixture(hold_first_acceptance=True) if queued else None
     fixtures = queue.fixtures if queue is not None else {}
-    history = h.GatedHttpResponse((200, []), hold_seconds=15)
+    history = _keyboard_harness.GatedHttpResponse((200, []), hold_seconds=15)
     image = []
     request_count = []
     submitted = []
 
     def prepare(base_path):
-        h.seed_image_workspace(base_path)
-        png = Path(base_path, h.IMAGE_NAME).read_bytes()
+        _keyboard_chat.seed_image_workspace(base_path)
+        png = Path(base_path, _keyboard_chat.IMAGE_NAME).read_bytes()
         image.append(png)
         Path(base_path, STAGED_NAME).write_bytes(png)
         payload = base64.b64encode(png).decode()
@@ -71,9 +72,9 @@ def run(executable, *, mode, evidence_dir=None):
                         "mime_type": "image/png", "data": marker,
                     }],
                 }])
-                return h.keeper_chat_succeeded_response(body)
+                return _keyboard_chat.keeper_chat_succeeded_response(body)
 
-            fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(complete_local_image)
+            fixtures["/api/v1/keepers/chat/stream"] = _keyboard_harness.RequestHttpResponse(complete_local_image)
 
         def fetch():
             request_count.append(sha)
@@ -106,37 +107,37 @@ def run(executable, *, mode, evidence_dir=None):
             name = mode + ("-" + suffix if suffix else "")
             (evidence_dir / (name + ".ansi")).write_bytes(raw)
             (evidence_dir / (name + ".txt")).write_text(
-                "\n".join(line.rstrip() for line in h.screen_text(raw).decode(errors="replace").splitlines()) + "\n")
+                "\n".join(line.rstrip() for line in _keyboard_harness.screen_text(raw).decode(errors="replace").splitlines()) + "\n")
 
     def stage(process, fd, output, base_path):
         command = f"/attach {Path(base_path, STAGED_NAME)}\r".encode()
-        h.send_and_wait(process, fd, output, command, b"attached " + STAGED_NAME.encode())
+        _keyboard_harness.send_and_wait(process, fd, output, command, b"attached " + STAGED_NAME.encode())
 
     def wait_for_image(process, fd, output, *, start, title):
-        h.wait_for_output(process, fd, output, b"a=T", start=start, timeout=5)
+        _keyboard_harness.wait_for_output(process, fd, output, b"a=T", start=start, timeout=5)
         # The first PTY read may contain only the graphics header. This tiny
         # fixture fits one Kitty chunk; require its payload and terminator.
-        h.wait_for_output(process, fd, output, base64.b64encode(image[0]) + b"\x1b\\", start=start, timeout=5)
+        _keyboard_harness.wait_for_output(process, fd, output, base64.b64encode(image[0]) + b"\x1b\\", start=start, timeout=5)
         if b"\x1b[1;1H" + title not in output[start:]:
             raise AssertionError("Ctrl-O displayed a different image source")
 
     def dismiss_image(process, fd, output):
         dismissed = len(output)
         os.write(fd, b" ")
-        h.wait_for_output(process, fd, output, b"a=d", start=dismissed, timeout=5)
-        h.wait_for_output(process, fd, output, CHAT, start=dismissed, timeout=5)
-        title_end = h.end_of_needle(output, CHAT, dismissed)
-        h.wait_for_output(process, fd, output, h.FRAME_END, start=title_end, timeout=5)
+        _keyboard_harness.wait_for_output(process, fd, output, b"a=d", start=dismissed, timeout=5)
+        _keyboard_harness.wait_for_output(process, fd, output, CHAT, start=dismissed, timeout=5)
+        title_end = _keyboard_harness.end_of_needle(output, CHAT, dismissed)
+        _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=title_end, timeout=5)
 
     def wait_for_artifact_error(process, fd, output, *, start, reason):
         # The notice shares a 100-column footer with key hints. Its reason may
         # be truncated; require the visible reason and artifact label together
         # on one row of the completed retained frame instead of its hidden tail.
-        h.wait_for_output(process, fd, output, reason, start=start, timeout=5)
-        reason_end = h.end_of_needle(output, reason, start)
-        h.wait_for_output(process, fd, output, h.FRAME_END, start=reason_end, timeout=5)
-        frame_end = output.find(h.FRAME_END, reason_end) + len(h.FRAME_END)
-        rows = h.screen_rows(bytes(output[:frame_end]))
+        _keyboard_harness.wait_for_output(process, fd, output, reason, start=start, timeout=5)
+        reason_end = _keyboard_harness.end_of_needle(output, reason, start)
+        _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=reason_end, timeout=5)
+        frame_end = output.find(_keyboard_harness.FRAME_END, reason_end) + len(_keyboard_harness.FRAME_END)
+        rows = _keyboard_harness.screen_rows(bytes(output[:frame_end]))
         target = b"sent image ../../label-only.png:"
         if not any(target in row and reason in row for row in rows.values()):
             raise AssertionError("artifact label and rejection reason were not visible in the same completed frame")
@@ -147,51 +148,51 @@ def run(executable, *, mode, evidence_dir=None):
     def interact(process, fd, _slave, output, base_path):
         try:
             if queue is not None:
-                h.open_atomic_chat(process, fd, output)
-                h.wait_for_output(process, fd, output, b"retained-image-ready", start=0, timeout=5)
-                h.send_and_wait(process, fd, output, b"held-turn", h.composer_showing(b"held-turn"))
+                _keyboard_chat.open_atomic_chat(process, fd, output)
+                _keyboard_harness.wait_for_output(process, fd, output, b"retained-image-ready", start=0, timeout=5)
+                _keyboard_harness.send_and_wait(process, fd, output, b"held-turn", _keyboard_harness.composer_showing(b"held-turn"))
                 os.write(fd, b"\r")
-                if not h.wait_for_fixture_event(process, fd, output, queue.first_post_received, timeout=5):
+                if not _keyboard_harness.wait_for_fixture_event(process, fd, output, queue.first_post_received, timeout=5):
                     raise AssertionError("first admission was not held")
                 stage(process, fd, output, base_path)
-                h.send_and_wait(process, fd, output, b"queued-image", h.composer_showing(b"queued-image"))
-                h.send_and_wait(process, fd, output, b"\r", "내 메시지 2건 대기".encode())
+                _keyboard_harness.send_and_wait(process, fd, output, b"queued-image", _keyboard_harness.composer_showing(b"queued-image"))
+                _keyboard_harness.send_and_wait(process, fd, output, b"\r", "내 메시지 2건 대기".encode())
                 if len(queue.received) != 1:
                     raise AssertionError("image request was not waiting locally behind the first admission")
             else:
-                h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-                h.select_keeper_row(process, fd, output, b"alpha")
-                h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
-                h.send_and_wait(process, fd, output, b"m", CHAT if delayed_history else b"retained-image-ready")
+                _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+                _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+                _keyboard_harness.send_and_wait(process, fd, output, b"m", CHAT if delayed_history else b"retained-image-ready")
                 if delayed_history:
-                    if not h.wait_for_fixture_event(process, fd, output, history.requested, timeout=5):
+                    if not _keyboard_harness.wait_for_fixture_event(process, fd, output, history.requested, timeout=5):
                         raise AssertionError("initial history load did not reach its gate")
                     stage(process, fd, output, base_path)
                     loaded_from = len(output)
                     history.release.set()
-                    h.wait_for_output(process, fd, output, b"retained-image-ready", start=loaded_from, timeout=5)
-                    loaded_end = h.end_of_needle(output, b"retained-image-ready", loaded_from)
-                    h.wait_for_output(process, fd, output, h.FRAME_END, start=loaded_end, timeout=5)
+                    _keyboard_harness.wait_for_output(process, fd, output, b"retained-image-ready", start=loaded_from, timeout=5)
+                    loaded_end = _keyboard_harness.end_of_needle(output, b"retained-image-ready", loaded_from)
+                    _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=loaded_end, timeout=5)
 
             if settled_history:
                 stage(process, fd, output, base_path)
-                h.send_and_wait(process, fd, output, b"settled-local-image", h.composer_showing(b"settled-local-image"))
+                _keyboard_harness.send_and_wait(process, fd, output, b"settled-local-image", _keyboard_harness.composer_showing(b"settled-local-image"))
                 sent_from = len(output)
                 os.write(fd, b"\r")
-                h.wait_for_output(process, fd, output, b"reply-settled-local-image", start=sent_from, timeout=5)
-                h.wait_for_output(process, fd, output, b"bounded-tail-image-ready", start=sent_from, timeout=5)
+                _keyboard_harness.wait_for_output(process, fd, output, b"reply-settled-local-image", start=sent_from, timeout=5)
+                _keyboard_harness.wait_for_output(process, fd, output, b"bounded-tail-image-ready", start=sent_from, timeout=5)
 
                 def settled_frame():
-                    end = output.rfind(h.FRAME_END)
+                    end = output.rfind(_keyboard_harness.FRAME_END)
                     if end < sent_from:
                         return False
-                    screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                    screen = _keyboard_harness.screen_text(bytes(output[:end + len(_keyboard_harness.FRAME_END)]))
                     return (b"reply-settled-local-image" in screen
                             and b"bounded-tail-image-ready" in screen
                             and b"IN PROGRESS" not in screen and "내 메시지".encode() not in screen
                             and b"stream ended; settling" not in screen)
 
-                if not h.wait_for_fixture_state(process, fd, output, settled_frame, timeout=5):
+                if not _keyboard_harness.wait_for_fixture_state(process, fd, output, settled_frame, timeout=5):
                     raise AssertionError("new bounded history was not drawn after the image turn settled")
                 if len(submitted) != 1 or len(submitted[0].get("attachments", [])) != 1:
                     raise AssertionError("local image turn did not submit its attachment")
@@ -206,7 +207,7 @@ def run(executable, *, mode, evidence_dir=None):
                 dismiss_image(process, fd, output)
                 if queue is not None:
                     queue.release_first_acceptance.set()
-                    h.wait_for_atomic_admissions(process, fd, output, queue, 2)
+                    _keyboard_chat.wait_for_atomic_admissions(process, fd, output, queue, 2)
                     sent = queue.submitted[1]
                     attachments = sent.get("attachments", [])
                     if sent["message"] != "queued-image" or len(attachments) != 1:
@@ -214,25 +215,25 @@ def run(executable, *, mode, evidence_dir=None):
                     if attachments[0].get("data") != base64.b64encode(image[0]).decode():
                         raise AssertionError("queued preview changed the image payload before dispatch")
                     queue.release.set()
-                    h.wait_for_output(process, fd, output, b"reply-queued-image", start=start, timeout=10)
-            elif not h.wait_for_fixture_event(process, fd, output, fetched, timeout=5):
+                    _keyboard_harness.wait_for_output(process, fd, output, b"reply-queued-image", start=start, timeout=10)
+            elif not _keyboard_harness.wait_for_fixture_event(process, fd, output, fetched, timeout=5):
                 capture(output)
                 raise AssertionError("Ctrl-O did not fetch the displayed retained attachment")
             elif mode == "cancel":
-                h.send_and_wait(process, fd, output, b"cancelled-preview", h.composer_showing(b"cancelled-preview"))
+                _keyboard_harness.send_and_wait(process, fd, output, b"cancelled-preview", _keyboard_harness.composer_showing(b"cancelled-preview"))
                 released.set()
-                if not h.wait_for_fixture_event(process, fd, output, response_ready, timeout=5):
+                if not _keyboard_harness.wait_for_fixture_event(process, fd, output, response_ready, timeout=5):
                     raise AssertionError("held artifact response was not released")
                 # response_ready is server-side, before the socket write. A
                 # discarded Sent_image_ready has no client receipt on this
                 # surface, so this is only a bounded negative observation.
-                if h.poll_for_output(process, fd, output, b"a=T", start=start,
+                if _keyboard_harness.poll_for_output(process, fd, output, b"a=T", start=start,
                                      timeout=CANCELLATION_OBSERVATION_SECONDS):
                     raise AssertionError("an image opened during the cancellation observation window")
-                h.send_and_wait(process, fd, output, b"-still-chat", h.composer_showing(b"cancelled-preview-still-chat"))
+                _keyboard_harness.send_and_wait(process, fd, output, b"-still-chat", _keyboard_harness.composer_showing(b"cancelled-preview-still-chat"))
                 if b"a=T" in output[start:]:
                     raise AssertionError("an image opened before the post-cancellation draft edit")
-                h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x15", _keyboard_harness.composer_showing(b""))
                 print(f"Cancellation observation: no image transfer for {CANCELLATION_OBSERVATION_SECONDS}s "
                       "after fixture release; client completion is unobserved")
             elif mode in ("success", "settled-history"):
@@ -250,15 +251,15 @@ def run(executable, *, mode, evidence_dir=None):
                 else:
                     reason = b"HTTP 503: fixture artifact"
                 wait_for_artifact_error(process, fd, output, start=start, reason=reason)
-                h.send_and_wait(process, fd, output, b"still-alive", h.composer_showing(b"still-alive"))
-                h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
+                _keyboard_harness.send_and_wait(process, fd, output, b"still-alive", _keyboard_harness.composer_showing(b"still-alive"))
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x15", _keyboard_harness.composer_showing(b""))
                 if b"a=T" in output[start:]:
                     raise AssertionError("a rejected artifact emitted image bytes before the next draft edit")
             if not (queued or delayed_history) and len(request_count) != 1:
                 raise AssertionError("one preview made duplicate artifact requests")
             capture(output)
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             released.set()
@@ -268,13 +269,13 @@ def run(executable, *, mode, evidence_dir=None):
                 queue.release_interrupt.set()
                 queue.release.set()
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Stored image preview: " + mode,
         interact=interact,
         http_fixtures=fixtures,
         prepare_workspace=prepare,
-        preload_input=h.GRAPHICS_SUPPORTED_REPLY,
+        preload_input=_keyboard_chat.GRAPHICS_SUPPORTED_REPLY,
         refresh=0.2,
     )
 

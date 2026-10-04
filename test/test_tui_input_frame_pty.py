@@ -8,14 +8,15 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import resource
 import select
 import sys
 import time
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
 
 
@@ -35,7 +36,7 @@ def nonnegative_int(value: str) -> int:
 
 
 def input_fixtures(retained_channels: int):
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     if retained_channels == 0:
         return fixtures, None
     bindings = [{"channel_id": str(100000 + i), "keeper_name": "alpha"}
@@ -73,15 +74,15 @@ def input_fixtures(retained_channels: int):
             "next_after_id": page[-1]["id"] if has_more else None, "mappings": page,
         }
 
-    fixtures[h.CONNECTORS_PATH] = (200, connectors)
-    fixtures[h.CONNECTOR_NAMES_PATH] = h.PathHttpResponse(directory)
+    fixtures[_keyboard_keepers.CONNECTORS_PATH] = (200, connectors)
+    fixtures[_keyboard_keepers.CONNECTOR_NAMES_PATH] = _keyboard_harness.PathHttpResponse(directory)
     fixture_hash = hashlib.sha256(
         json.dumps([connectors, names], sort_keys=True).encode()).hexdigest()
     return fixtures, fixture_hash
 
 
 def workspace_metadata(path: Path | None) -> dict:
-    metadata = ({name: h.keeper_metadata(name) for name in ("alpha", "beta")}
+    metadata = ({name: _keyboard_harness.keeper_metadata(name) for name in ("alpha", "beta")}
                 if path is None else json.loads(path.read_text()))
     if (not isinstance(metadata, dict) or set(metadata) != {"alpha", "beta"}
             or any(not isinstance(value, dict) or value.get("name") != name
@@ -125,20 +126,20 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
             # acknowledge this transition.
             # Read without a settling sleep: the preceding acknowledged
             # frame makes the next key exercise the recent-frame deadline.
-            h.read_available(master_fd, output)
-            completed = output.rfind(h.FRAME_END) + len(h.FRAME_END)
-            rows = h.screen_rows(bytes(output[:completed]), preserve_styles=True)
-            if any(h.find_needle(row, needle) >= 0 for row in rows.values()):
+            _keyboard_harness.read_available(master_fd, output)
+            completed = output.rfind(_keyboard_harness.FRAME_END) + len(_keyboard_harness.FRAME_END)
+            rows = _keyboard_harness.screen_rows(bytes(output[:completed]), preserve_styles=True)
+            if any(_keyboard_harness.find_needle(row, needle) >= 0 for row in rows.values()):
                 raise AssertionError(f"{label}: target was already visible")
             start = len(output)
             started = time.perf_counter_ns()
-            h.write_all(master_fd, output, data)
+            _keyboard_harness.write_all(master_fd, output, data)
             deadline = time.monotonic() + 3.0
             while True:
-                found = h.find_needle(output, needle, start)
+                found = _keyboard_harness.find_needle(output, needle, start)
                 if found >= 0:
-                    needle_end = h.end_of_needle(output, needle, start)
-                    if output.find(h.FRAME_END, needle_end) >= 0:
+                    needle_end = _keyboard_harness.end_of_needle(output, needle, start)
+                    if output.find(_keyboard_harness.FRAME_END, needle_end) >= 0:
                         break
                 if process.poll() is not None:
                     raise AssertionError(f"{label}: TUI exited before expected frame")
@@ -149,7 +150,7 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
                 # The general polling helper sleeps after reading a match,
                 # which adds its polling interval to a latency observation.
                 select.select([master_fd], [], [], remaining)
-                h.read_available(master_fd, output)
+                _keyboard_harness.read_available(master_fd, output)
             acknowledged = time.perf_counter_ns()
             elapsed = (acknowledged - started) / 1e6
             gap_ms = None if previous_ack_ns is None else (started - previous_ack_ns) / 1e6
@@ -158,9 +159,9 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
                             "complete_frame_ms": elapsed})
             previous_ack_ns = acknowledged
 
-        h.wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        _keyboard_harness.wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
         stage = "prepare roster"
-        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         # This benchmark measures input against a loaded snapshot. Request
         # that snapshot explicitly before measuring, equally for both binaries.
         # A previous run stalled here before its first sample; retain that
@@ -168,9 +169,9 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
         # Differential redraw may omit an unchanged alpha row. The selector
         # below reconstructs the current completed screen instead of requiring
         # those bytes to be emitted again after refresh.
-        h.write_all(master_fd, output, b"r")
-        h.select_keeper_row(process, master_fd, output, b"beta")
-        h.select_keeper_row(process, master_fd, output, b"alpha")
+        _keyboard_harness.write_all(master_fd, output, b"r")
+        _keyboard_harness.select_keeper_row(process, master_fd, output, b"beta")
+        _keyboard_harness.select_keeper_row(process, master_fd, output, b"alpha")
         preflight["visible_keepers"] = ["alpha", "beta"]
         for cycle in range(1, cycles + 1):
             for label, down, up in (
@@ -178,53 +179,53 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
                 ("wheel", b"\x1b[<65;5;5M", b"\x1b[<64;5;5M"),
                 ("page", b"\x1b[6~", b"\x1b[5~"),
             ):
-                transition(cycle, label + " down", down, h.keeper_row_selected(b"beta"))
-                transition(cycle, label + " up", up, h.keeper_row_selected(b"alpha"))
+                transition(cycle, label + " down", down, _keyboard_harness.keeper_row_selected(b"beta"))
+                transition(cycle, label + " up", up, _keyboard_harness.keeper_row_selected(b"alpha"))
 
         # Every byte contributes to the final draft. An alternating cursor
         # burst could lose pairs of keys while keeping the same final row.
         draft = b"frame-burst-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         title = b"Keepers \xe2\x96\xb8 \x1b[1malpha"
         stage = "prepare draft"
-        h.send_and_wait(process, master_fd, output, b"\r", title)
-        h.send_and_wait(process, master_fd, output, b"m",
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\r", title)
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"m",
                         b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         stage = "draft burst"
-        h.send_and_wait(process, master_fd, output, draft, draft)
-        h.drain_until_quiet(process, master_fd, output)
-        if draft not in h.screen_text(bytes(output)):
+        _keyboard_harness.send_and_wait(process, master_fd, output, draft, draft)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        if draft not in _keyboard_harness.screen_text(bytes(output)):
             raise AssertionError("buffered input lost part of the draft")
         # Chat opened from detail, so Escape must acknowledge that return
         # destination. A quiet PTY does not prove which view owns the input.
         stage = "prepare detail"
-        h.send_and_wait(process, master_fd, output, b"\x15\x1b", title)
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\x15\x1b", title)
         if retained_channels:
             stage = "load retained Channels snapshot"
             for tab in (b"Runs", b"Automation", b"Channels"):
-                h.send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8" + tab)
+                _keyboard_harness.send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8" + tab)
             count_text = f"{retained_channels} here / {retained_channels + 1} total"
 
             def channels_loaded():
-                end = output.rfind(h.FRAME_END)
+                end = output.rfind(_keyboard_harness.FRAME_END)
                 if end < 0:
                     return False
-                screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                screen = _keyboard_harness.screen_text(bytes(output[:end + len(_keyboard_harness.FRAME_END)]))
                 return (count_text.encode() in screen
                         and b"fixture-channel-0000" in screen)
 
-            if not h.wait_for_fixture_state(process, master_fd, output,
+            if not _keyboard_harness.wait_for_fixture_state(process, master_fd, output,
                                            channels_loaded, timeout=5.0):
                 raise AssertionError("Channels bindings and name directory were not rendered")
-            h.send_and_wait(process, master_fd, output, b"]]]", b"\xe2\x96\xb8Info")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"]]]", b"\xe2\x96\xb8Info")
             preflight["retained_channels"] = {
                 "count": retained_channels, "fixture_sha256": channels_hash,
                 "loaded_header": count_text, "returned_tab": "Info",
             }
         stage = "prepare detail scroll window"
-        frame = h.resize_and_wait(process, master_fd, output, rows=16, columns=100,
-                                  needle=title, controls=(h.FULL_REDRAW,),
+        frame = _keyboard_harness.resize_and_wait(process, master_fd, output, rows=16, columns=100,
+                                  needle=title, controls=(_keyboard_harness.FULL_REDRAW,),
                                   final_cursor=b"\x1b[?25l")
-        windows = h.WINDOW_TEXT_RE.findall(h.CSI_RE.sub(b"", frame))
+        windows = _keyboard_harness.WINDOW_TEXT_RE.findall(_keyboard_harness.CSI_RE.sub(b"", frame))
         if not windows:
             raise AssertionError("detail has no scroll window")
         first, last, total = map(int, windows[-1])
@@ -251,7 +252,7 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
     session_started = time.perf_counter_ns()
     try:
-        h.run_terminal_scenario(executable,
+        _keyboard_harness.run_terminal_scenario(executable,
             description="Input bursts and scroll keys present their resulting frame",
             interact=interact, http_fixtures=fixtures,
             prepare_workspace=prepare_workspace)

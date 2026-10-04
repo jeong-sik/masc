@@ -9327,3 +9327,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_runtime_config_draft_pty)))
+
+(test
+ (name test_tui_lane_inventory)
+ (modules test_tui_lane_inventory)
+ (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory alcotest yojson))

@@ -508,6 +508,12 @@
  (libraries masc.fs_compat yojson unix))
 
 (library
+ (name masc_tui_lane_inventory)
+ (wrapped false)
+ (modules masc_tui_lane_inventory)
+ (libraries masc yojson))
+
+(library
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)

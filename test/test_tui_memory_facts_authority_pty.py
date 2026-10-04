@@ -29,7 +29,12 @@ def facts_payload(claim: str):
     fixture = fixtures["/api/v1/keepers/alpha/memory-facts"]
     assert isinstance(fixture, tuple) and isinstance(fixture[1], dict)
     body = fixture[1]
-    facts = body["facts"]
+    # The snapshot nests each store's facts under its own key; the claim is
+    # the field the pane renders, so rewriting it makes the authority leak --
+    # A's rows landing in B's browser -- visible as a byte on the screen.
+    ordinary = body["ordinary"]
+    assert isinstance(ordinary, dict) and ordinary.get("present") is True
+    facts = ordinary["facts"]
     assert isinstance(facts, list) and isinstance(facts[0], dict)
     facts[0]["claim"] = claim
     return 200, body
@@ -75,10 +80,21 @@ def run(executable: str) -> None:
         wire.publish("b")
 
         def b_observed():
+            # Two B-phase health observations: the first is the fixture
+            # being called mid-pass, before the reading has applied; the
+            # second proves the pass completed, the identity applied, and
+            # the workspace authority advanced -- the boundary the late A
+            # response must be dropped at, and the one the fresh B read has
+            # to be launched under to survive its own delivery.
             with wire.lock:
-                return any(
-                    str(event.get("phase", "")).startswith("b")
-                    for event in wire.events
+                return (
+                    sum(
+                        1
+                        for event in wire.events
+                        if event.get("event") == "health"
+                        and str(event.get("phase", "")).startswith("b")
+                    )
+                    >= 2
                 )
 
         assert _keyboard_harness.wait_for_fixture_state(
@@ -114,6 +130,11 @@ def run(executable: str) -> None:
         assert _keyboard_harness.wait_for_fixture_state(
             process, fd, output, b_read_after_release, timeout=10
         ), f"workspace B never ran its own facts read after A's release; reads={facts_reads!r}"
+        # Rejection of A is half the contract; acceptance of B is the other.
+        # The fresh completion must reach the browser, not merely start;
+        # wait_for_output raises on timeout, so a bare call is the check.
+        _keyboard_harness.wait_for_output(
+            process, fd, output, B_CLAIM, start=start, timeout=10)
         _keyboard_harness.drain_until_quiet(process, fd, output, cap=1)
         folded = _keyboard_harness.screen_text(bytes(output))
         if A_CLAIM in folded:

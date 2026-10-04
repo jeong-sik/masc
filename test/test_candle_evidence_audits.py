@@ -184,6 +184,13 @@ class CandleEvidenceAudits(unittest.TestCase):
                      'prepared provider destination disagrees with frozen measurement'),
                     ('"protocol" = "openai-compatible-http"', '"protocol" = "messages-http"',
                      'prepared provider destination disagrees with frozen measurement'),
+                    ('"connect-timeout-s" = 1200.0', '"connect-timeout-s" = 1.0',
+                     'prepared transport controls disagree with frozen measurement'),
+                    ('"connect-timeout-s" = 1200.0', '"connect-timeout-s" = 1200',
+                     'prepared transport controls disagree with frozen measurement'),
+                    ('"connect-timeout-s" = 1200.0',
+                     '"connect-timeout-s" = 1200.0\n"headers" = {"X-Fixture-Route" = "alternate"}',
+                     'prepared transport controls disagree with frozen measurement'),
                     *((('"api-name" = "glm-5.3-flash"',
                          '"api-name" = "glm-5.3-flash"\n' + setting,
                          'prepared model settings disagree with frozen measurement')

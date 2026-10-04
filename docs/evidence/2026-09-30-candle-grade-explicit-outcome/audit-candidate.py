@@ -145,6 +145,9 @@ def validate_runtime(raw, plan):
     require(provider.get('protocol') == 'openai-compatible-http'
             and provider.get('endpoint') == 'https://api.z.ai/api/coding/paas/v4',
             'prepared provider destination disagrees with frozen measurement')
+    require(same_json(provider.get('connect-timeout-s'), 1200.0)
+            and 'headers' not in provider,
+            'prepared transport controls disagree with frozen measurement')
     require(config['models'][model_id]['api-name'] == model_id,
             'prepared API model disagrees with declared runtime')
     # Bind the complete frozen model declaration, including absent controls.

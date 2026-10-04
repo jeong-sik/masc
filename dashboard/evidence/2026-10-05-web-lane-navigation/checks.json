@@ -1,0 +1,55 @@
+{
+  "direct_base": "9f26f8fba211112ff10a8d481fa8bd9e35f96468",
+  "final_source_identity": "manifest.json hashes; final source commit follows this evidence preparation",
+  "regressions": [
+    {
+      "product": "543b080c268ada1d9f96346bd5b0b92406baa250",
+      "test": "regression-initial.test.ts.txt",
+      "log": "regression-initial.txt.gz",
+      "failed": 3,
+      "scope": "Actual components and mock API; real router for filter/declaration, receiver props for Exact focus",
+      "source_sha256": {
+        "dashboard/src/components/internal-agents-monitor.ts": "695431651f9fcaf85bb0462dea34c08f5b8f98df92fd1a504863aa385f664b31",
+        "dashboard/src/components/lane-addons-panel.ts": "0424e3602b156c0926dabc5c7afa5aee01f3a7076c3eb4cbcf082bc37ad6e4a1",
+        "dashboard/src/components/lane-inventory-panel.ts": "30eac95b6aaa86a80bc5d15ffe3bc45b1159cd9f9cd348a5a3cc4348d7c5ec6b",
+        "dashboard/src/components/runtime-exact-lane-editor.ts": "3653b9201dcc51e346bc9c2a02c9c051c3ddf5e8c463e208e24cb8efbf8ada99",
+        "dashboard/src/components/runtime-panel.ts": "3ca37042339eae4a4f7fe4912b3e774baaab7e48245defe6a92055f54375b9e5",
+        "dashboard/src/components/runtime-toml-editor.ts": "66976e244484a619bf26fae789e23c1fb515f78766bc989740f098e90259893b",
+        "dashboard/src/config/navigation.ts": "e9fbb40aa27699e13b1f4c9c5dac6becc7299cfd8955a6ca7971f1013083672d",
+        "dashboard/src/components/lane-navigation.ts": "6f726f9739d138cab428d1c0de7f5336b5171982de624e67020bcb9b91686f6a",
+        "dashboard/src/lib/lane-navigation.ts": "14b027b198b3aea028c8a3b6c92d319766d1d009253ff2c3fcf651fdec6f907c"
+      }
+    },
+    {
+      "product": "722479ac16ec6ef99fb4abc72f0bbc581de95cfa",
+      "test": "regression-review.test.ts.txt",
+      "log": "regression-review.txt.gz",
+      "failed": 4,
+      "passed": 5
+    },
+    {
+      "product": "b17a1e5f9781fb106e95d65a20d6bc47ca0405d9",
+      "test": "regression-show-all.test.ts.txt",
+      "log": "regression-show-all.txt.gz",
+      "failed": 1,
+      "skipped": 9
+    }
+  ],
+  "final_tests": {
+    "files": 10,
+    "passed": 252,
+    "failed": 0,
+    "log": "focused.txt"
+  },
+  "typecheck_exit": 0,
+  "scoped_lint_exit": 0,
+  "browser": {
+    "flows": 13,
+    "reads": 32,
+    "writes": 0,
+    "page_errors": 0,
+    "unexpected_routes": 0,
+    "result": "browser-result.json"
+  },
+  "limits": "Synthetic HTTP and mocked API values, not a real backend, actual worker/provider, native TUI, full SPA bootstrap, CI, main integration or release. F8 continuous application tracking is separate."
+}

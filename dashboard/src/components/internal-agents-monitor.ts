@@ -796,7 +796,7 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
   return html`
     <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
       ${target && html`<p role="status">Selected Lane: ${target.lane}. The run list is limited to this Lane; other Lane observations remain visible in the matrix.
-        <button type="button" onClick=${clearLaneNavigation}>Show all Lane runs</button></p>`}
+        <button type="button" onClick=${() => setFilter('all')}>Show all Lane runs</button></p>`}
       ${target && laneMatrix && !laneMatrix.lanes.some(lane => lane.laneId === target.lane) && html`<p role="alert">The selected Lane is absent from this reading.</p>`}
       <div class="ia-head">
         <h3>Internal execution evidence</h3>

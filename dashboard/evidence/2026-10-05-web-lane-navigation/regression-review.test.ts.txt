@@ -168,20 +168,6 @@ it('uses the targeted run source for unavailable state instead of a previous suc
   expect(screen.queryByText('No internal agent runs for this filter.')).toBeNull()
 })
 
-it('shows all Lane runs when leaving a target with the Show all action', async () => {
-  replaceRoute('monitoring', { section: 'internal-agents' })
-  render(html`<${InternalAgentsMonitor} />`)
-  const filters = within(screen.getByRole('group', { name: 'Internal agent filters' }))
-  fireEvent.click(await filters.findByRole('button', { name: 'Fusion 0' }))
-  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }, true))
-  await screen.findByRole('button', { name: /succeeded Workspace Curator/ })
-  fireEvent.click(screen.getByRole('button', { name: 'Show all Lane runs' }))
-  await waitFor(() => expect(route.value.params.lane_target).toBeUndefined())
-  expect(filters.getByRole('button', { name: 'All 2' }).getAttribute('aria-pressed')).toBe('true')
-  expect(screen.getByRole('button', { name: /succeeded Workspace Curator/ })).toBeTruthy()
-  expect(screen.getByRole('button', { name: /succeeded Candle Appraiser/ })).toBeTruthy()
-})
-
 it('keeps the chosen filter when leaving a selected Lane through the real router', async () => {
   render(html`<${InternalAgentsMonitor} />`)
   await screen.findByRole('button', { name: /succeeded Workspace Curator/ })

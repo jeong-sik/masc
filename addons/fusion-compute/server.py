@@ -177,7 +177,10 @@ def prepare(binding, sources):
                              " Answer in free text; identify missing evidence and failed inputs.",
                "includeContext": "none", "maxTokens": limit}
     if "temperature" in binding:
-        request["temperature"] = number(binding["temperature"], "temperature")
+        temperature = number(binding["temperature"], "temperature")
+        if not 0 <= temperature <= 2:
+            raise InvalidInput("temperature must be between 0 and 2")
+        request["temperature"] = temperature
     return analysis_id, role, request, references, statuses
 
 

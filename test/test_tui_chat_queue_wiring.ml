@@ -865,6 +865,92 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   }
 ;;
 
+let preflight_input () =
+  let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
+  let request = {entry.sent_request with
+    Keeper_chat.message = "unsent input";
+    attachments = [{Keeper_chat.attachment_id="image-1"; name="draft.png";
+      mime_type="image/png"; size=3; data="YWJj"}];
+    references = [Keeper_chat.Ref_file_id "file-1"]} in
+  let item : Masc_tui_keeper_chat_queue.item =
+    {request; submitted_at=1.; submission_seq=0;
+     intent=Masc_tui_keeper_chat_queue.Next; causal_parent_request_id=None} in
+  {entry with sent_request=request; phase=Tui_types.Turn_preflight item}, item
+;;
+
+let test_withdrawal_restores_only_input_before_the_first_post () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry, _ = preflight_input () in
+  state.msg_history <- [chat_entry ~request_id:entry.sent_request.request_id
+    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+    ~text:"unsent input" ~at:1. ()];
+  Tui_types.retain_preflight_inputs state [entry];
+  check string "editable text restored" "unsent input" (Buffer.contents state.msg_input);
+  check bool "attachment bytes retained" true
+    (state.msg_attachments = entry.sent_request.attachments);
+  check bool "references retained" true (state.msg_references = entry.sent_request.references);
+  check int "unsent local YOU row removed" 0 (List.length state.msg_history);
+  check bool "restored composer is not queued" true
+    (Masc_tui_keeper_chat_queue.is_empty state.msg_queued);
+  List.iter (fun phase ->
+    Buffer.clear state.msg_input;
+    state.msg_attachments <- []; state.msg_references <- [];
+    Tui_types.retain_preflight_inputs state [{entry with phase}];
+    check string "possibly sent input is never restored" "" (Buffer.contents state.msg_input);
+    check bool "possibly sent input is never queued" true
+      (Masc_tui_keeper_chat_queue.is_empty state.msg_queued))
+    [Tui_types.Turn_streaming; Tui_types.Turn_reconciling]
+;;
+
+let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  Buffer.add_string state.msg_input "newer composer";
+  state.msg_references <- [Keeper_chat.Ref_url "https://example.invalid/new.png"];
+  let entry, item = preflight_input () in
+  for i = 1 to Q.cap do
+    let request = Keeper_chat.create_request ~keeper_name:"alpha"
+      ~message:(Printf.sprintf "newer-%d" i) () in
+    match Q.push state.msg_queued ~submitted_at:2. request with
+    | Ok (queue, _) -> state.msg_queued <- queue
+    | Error detail -> fail detail
+  done;
+  let newer = Q.waiting state.msg_queued in
+  Tui_types.retain_preflight_inputs state [entry];
+  check string "newer composer untouched" "newer composer" (Buffer.contents state.msg_input);
+  check bool "newer reference untouched" true
+    (state.msg_references = [Keeper_chat.Ref_url "https://example.invalid/new.png"]);
+  check int "admission cap cannot discard prior accepted input" (Q.cap + 1) (Q.length state.msg_queued);
+  (match Q.waiting state.msg_queued with
+   | restored :: rest ->
+       check bool "original payload and order retained" true
+         (restored.request = item.request && rest = newer);
+       check bool "restored ordinal precedes newer input" true
+         (List.for_all (fun (next : Q.item) -> restored.submission_seq < next.submission_seq) rest)
+   | [] -> fail "previous input disappeared");
+  check bool "restored input requires explicit resume" true
+    (List.mem ("alpha", item.request.request_id, Tui_types.Retained_after_stop)
+       state.keeper_interactive_waiting);
+  (match Q.take_newest_for_keeper state.msg_queued ~keeper_name:"alpha" with
+   | Some (newest, _) -> check string "recall still chooses newest input"
+       (Printf.sprintf "newer-%d" Q.cap) newest.request.message
+   | None -> fail "newer input disappeared")
+;;
+
+let test_offscreen_preflight_recovery_retains_its_owner () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "beta";
+  let entry, item = preflight_input () in
+  Tui_types.retain_preflight_inputs state [entry];
+  check string "alpha cannot fill beta's composer" "" (Buffer.contents state.msg_input);
+  (match Q.waiting state.msg_queued with
+   | [restored] -> check bool "alpha payload remains alpha's" true (restored.request = item.request)
+   | _ -> fail "expected exactly one retained alpha input")
+;;
+
 let test_new_input_preserves_running_output () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous = Masc_tui_ansi.get_terminal_size () in
@@ -4062,7 +4148,10 @@ let () =
   run
     "tui_chat_queue_wiring"
     [ ( "status ownership",
-        [ test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
+        [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
+        ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
+        ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
+        ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal
         ; test_case "priority completions survive controls" `Quick test_priority_completion_survives_controls
         ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )

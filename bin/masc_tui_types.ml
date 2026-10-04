@@ -7372,6 +7372,8 @@ let retain_preflight_inputs (state : state) entries =
       let request = item.Masc_tui_keeper_chat_queue.request in
       if item.intent = Masc_tui_keeper_chat_queue.Next
          && state.msg_target_keeper_name = Some request.keeper_name
+         && Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+              ~keeper_name:request.keeper_name = []
          && Buffer.length state.msg_input = 0
          && state.msg_attachments = [] && state.msg_references = []
          && Option.is_none state.msg_recall_replaces
@@ -7432,19 +7434,10 @@ let keeper_chat_control_generation state keeper_name =
 
 (* These messages never paused the server. Explicit local resume authorizes
    their first POST; an actual stop still needs the server's resume receipt. *)
-let resume_preflight_keeper_input state keeper_name =
+let can_resume_preflight_keeper_input state keeper_name =
   let holds = List.filter_map (fun (name, _, intervention) ->
     if name = keeper_name then Some intervention else None) state.keeper_interactive_waiting in
-  if List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
-  then begin
-    let generation = keeper_chat_control_generation state keeper_name in
-    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-      let intervention = match intervention with
-        | Retained_before_dispatch when name = keeper_name -> Awaiting_control {generation; target=None}
-        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
-      name, id, intervention) state.keeper_interactive_waiting;
-    true
-  end else false
+  List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
 
 (* A temporary identity outage preserves existing local holds without
    converting unrelated ordinary NEXT input into a manual-resume queue. *)
@@ -7467,7 +7460,8 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
-let begin_keeper_chat_control state keeper_name =
+let begin_keeper_chat_control ?(preserve_input_holds = false) state keeper_name =
+  let previous_generation = keeper_chat_control_generation state keeper_name in
   let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
@@ -7496,8 +7490,14 @@ let begin_keeper_chat_control state keeper_name =
     (fun (name, _) -> not (String.equal name keeper_name))
     state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-    name, id, (if name = keeper_name then Retained_after_stop else intervention))
-    state.keeper_interactive_waiting;
+    let intervention =
+      if name <> keeper_name then intervention
+      else if not preserve_input_holds then Retained_after_stop
+      else match intervention with
+        | Awaiting_control held when held.generation = previous_generation ->
+            Awaiting_control {held with generation}
+        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
+    name, id, intervention) state.keeper_interactive_waiting;
   generation
 
 let keeper_run_next_receipt_provisional state request =
@@ -7566,9 +7566,13 @@ let finish_keeper_chat_control state keeper_name ~generation =
   end
 
 let release_retained_keeper_input state keeper_name =
-  state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
-    name <> keeper_name || match intervention with
-    | Retained_after_stop | Retained_before_dispatch -> false | Awaiting_control _ -> true)
+  let generation = keeper_chat_control_generation state keeper_name in
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    let intervention = match intervention with
+      | Retained_after_stop | Retained_before_dispatch when name = keeper_name ->
+          Awaiting_control {generation; target=None}
+      | Retained_after_stop | Retained_before_dispatch | Awaiting_control _ -> intervention in
+    name, id, intervention)
     state.keeper_interactive_waiting
 
 (* A receipt callback finishes control before its outcome arrives, advancing
@@ -7973,23 +7977,22 @@ let composing_for_keeper (state : state) keeper_name =
   && Buffer.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
-(* The first local item owns dispatch order even while it is retained. *)
+(* A fresh Enter may bypass input held by an explicit stop. A refused
+   preflight keeps its place until local resume; unmarked input remains owned
+   by the generic drainer and its composer/recall checks. *)
 let next_authorized_keeper_input state keeper_name =
-  match Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name with
-  | [] -> None
-  | item :: _ ->
-    match List.find_opt (fun (name, id, _) ->
-      name = keeper_name && id = item.request.request_id) state.keeper_interactive_waiting with
-    | Some (_, _, Awaiting_control held)
-      when held.generation = keeper_chat_control_generation state keeper_name ->
-        Some (item, held.target)
-    | Some (_, _, (Awaiting_control _ | Retained_after_stop | Retained_before_dispatch)) -> None
-    | None ->
-      let being_recalled = Option.exists (fun editing ->
-        String.equal editing.Masc_tui_keeper_chat_queue.request.keeper_name keeper_name)
-        state.msg_recall_replaces in
-      if composing_for_keeper state keeper_name || being_recalled then None
-      else Some (item, None)
+  let rec ready = function
+    | [] -> None
+    | (item : Masc_tui_keeper_chat_queue.item) :: rest ->
+      match List.find_opt (fun (name, id, _) ->
+        name = keeper_name && id = item.request.request_id) state.keeper_interactive_waiting with
+      | Some (_, _, Awaiting_control held)
+        when held.generation = keeper_chat_control_generation state keeper_name ->
+          Some (item, held.target)
+      | Some (_, _, Retained_before_dispatch) -> None
+      | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
+  in
+  ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that

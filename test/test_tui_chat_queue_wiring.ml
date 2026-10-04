@@ -671,7 +671,9 @@ let test_stop_ack_releases_only_input_after_that_stop () =
   Tui_types.release_retained_keeper_input state "alpha";
   check bool "explicit resume releases only stopped input for its keeper" true
     (state.keeper_interactive_waiting =
-      ["beta", "other-stopped", Tui_types.Retained_after_stop;
+      ["alpha", "after-stop", Tui_types.Awaiting_control {
+         generation=Tui_types.keeper_chat_control_generation state "alpha"; target=None};
+       "beta", "other-stopped", Tui_types.Retained_after_stop;
        "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}])
 ;;
 
@@ -865,7 +867,7 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   }
 ;;
 
-let preflight_input () =
+let preflight_input ?(submission_seq = 0) () =
   let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
   let request = {entry.sent_request with
     Keeper_chat.message = "unsent input";
@@ -873,7 +875,7 @@ let preflight_input () =
       mime_type="image/png"; size=3; data="YWJj"}];
     references = [Keeper_chat.Ref_file_id "file-1"]} in
   let item : Masc_tui_keeper_chat_queue.item =
-    {request; submitted_at=1.; submission_seq=0;
+    {request; submitted_at=1.; submission_seq;
      intent=Masc_tui_keeper_chat_queue.Next; causal_parent_request_id=None} in
   {entry with sent_request=request; phase=Tui_types.Turn_preflight item}, item
 ;;
@@ -910,6 +912,9 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
   Buffer.add_string state.msg_input "newer composer";
   state.msg_references <- [Keeper_chat.Ref_url "https://example.invalid/new.png"];
   let entry, item = preflight_input () in
+  let staged = Q.restore_unsent Q.empty item in
+  state.msg_queued <- (match Q.take staged ~request_id:item.request.request_id with
+    | Some (_, rest) -> rest | None -> fail "preflight did not own its staged request");
   for i = 1 to Q.cap do
     let request = Keeper_chat.create_request ~keeper_name:"alpha"
       ~message:(Printf.sprintf "newer-%d" i) () in
@@ -950,7 +955,7 @@ let test_preflight_recovery_preserves_order_and_steer_intent () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_target_keeper_name <- Some "alpha";
   let older, older_item = preflight_input () in
-  let newer, newer_item = preflight_input () in
+  let newer, newer_item = preflight_input ~submission_seq:1 () in
   let steer_item = {newer_item with Q.intent=Q.Steer_after_interrupt;
     causal_parent_request_id=Some older_item.request.request_id; submission_seq=1} in
   let steer = {newer with Tui_types.phase=Tui_types.Turn_preflight steer_item} in
@@ -991,19 +996,35 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
     Tui_types.Awaiting_control {generation=0; target=None}) :: state.keeper_interactive_waiting;
   check bool "later Enter cannot bypass retained first input" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  check bool "operator can resume never-posted input locally" true
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+  check bool "never-posted input needs a current owner reading" true
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
+  check bool "checking eligibility preserves the queued input hold" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  let resume = Tui_types.begin_keeper_chat_control ~preserve_input_holds:true state "alpha" in
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume);
+  check bool "a failed owner reading can retry the local resume" true
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
+  check bool "a failed owner reading does not release input" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  Tui_types.release_retained_keeper_input state "alpha";
   (match Tui_types.next_authorized_keeper_input state "alpha" with
    | Some (first, _) -> check string "resume dispatches original input first"
        item.request.request_id first.request.request_id
    | None -> fail "local resume still blocked");
+  (match Q.take state.msg_queued ~request_id:item.request.request_id with
+   | Some (_, queue) -> state.msg_queued <- queue
+   | None -> fail "resumed input disappeared");
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (next, _) -> check string "later Enter follows the resumed input"
+       later.request_id next.request.request_id
+   | None -> fail "later Enter lost its control generation");
   check bool "local resume does not manufacture a server control token" true
     (state.keeper_chat_control_tokens = [] && state.keeper_chat_control_pending = []);
   state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
     Tui_types.Retained_before_dispatch];
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   check bool "a real stop still requires its server resume receipt" false
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "server-stopped input remains held" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
@@ -1023,9 +1044,8 @@ let test_identity_outage_retains_only_existing_local_holds () =
   check bool "recovered alpha remains held" true
     (List.mem ("alpha", item.request.request_id, Tui_types.Retained_before_dispatch)
        state.keeper_interactive_waiting);
-  (match Tui_types.next_authorized_keeper_input state "beta" with
-   | Some (ready, _) -> check string "unrelated NEXT resumes normally" other.request_id ready.request.request_id
-   | None -> fail "unrelated NEXT was converted into a manual hold")
+  check bool "unrelated NEXT remains available to the normal drainer" false
+    (List.exists (fun (name, _, _) -> name = "beta") state.keeper_interactive_waiting)
 ;;
 
 let test_workspace_suspension_preserves_real_stop_ownership () =
@@ -1036,13 +1056,13 @@ let test_workspace_suspension_preserves_real_stop_ownership () =
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state local;
   check bool "workspace return permits explicit local preflight resume" true
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   let stopped = Tui_types.suspend_keeper_input state in
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state stopped;
   check bool "workspace return never converts a real stop to local resume" false
-    (Tui_types.resume_preflight_keeper_input state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "real stopped input remains undispatchable" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
@@ -1067,6 +1087,72 @@ let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
     Tui_types.Awaiting_control {generation=0; target=None}];
   check bool "explicit Enter authorization still dispatches its accepted input" true
     (Option.is_some (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
+let test_new_enter_can_bypass_an_explicitly_stopped_input () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let _, item = preflight_input () in
+  state.msg_queued <- Q.restore_unsent Q.empty item;
+  let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"explicit followup" () in
+  (match Q.push state.msg_queued ~submitted_at:2. later with
+   | Ok (queue, _) -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  state.keeper_interactive_waiting <-
+    ["alpha", item.request.request_id, Tui_types.Retained_after_stop;
+     "alpha", later.request_id, Tui_types.Awaiting_control {generation=0; target=None}];
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (ready, _) -> check string "new Enter retains its separate authorization"
+       later.request_id ready.request.request_id
+   | None -> fail "Esc-retained input blocked a new Enter");
+  check bool "older stopped input remains retained" true
+    (Option.is_some (Q.find state.msg_queued ~request_id:item.request.request_id))
+;;
+
+let test_empty_composer_cannot_reverse_already_queued_input () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry, item = preflight_input () in
+  let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later queued Enter" () in
+  (match Q.push state.msg_queued ~submitted_at:2. later with
+   | Ok (queue, _) -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  Tui_types.retain_preflight_inputs state [entry];
+  check string "older input cannot move behind newer queue through the composer"
+    "" (Buffer.contents state.msg_input);
+  check bool "original input is retained ahead of newer input" true
+    (List.map (fun (held : Q.item) -> held.request.request_id) (Q.waiting state.msg_queued)
+      = [item.request.request_id; later.request_id]);
+  check bool "neither input can auto-dispatch after recovery" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
+let test_preflight_restoration_preserves_submission_chronology () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let push queue message =
+    let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message () in
+    match Q.push queue ~submitted_at:1. request with
+    | Ok (queue, _) -> queue, request
+    | Error detail -> fail detail in
+  let take queue request = match Q.take queue ~request_id:request.Keeper_chat.request_id with
+    | Some pair -> pair | None -> fail "staged input disappeared" in
+  let queue, _older = push Q.empty "older stopped input" in
+  let queue, newer = push queue "newer preflight" in
+  let preflight, held = take queue newer in
+  let restored = Q.restore_unsent held preflight in
+  (match Q.take_newest_for_keeper restored ~keeper_name:"alpha" with
+   | Some (latest, _) -> check string "Ctrl-P/Ctrl-K select the newer refused input"
+       newer.request_id latest.request.request_id
+   | None -> fail "restored input disappeared");
+  let queue, first = push Q.empty "first preflight" in
+  let preflight, empty_after_take = take queue first in
+  let queue, later = push empty_after_take "later input" in
+  let restored = Q.restore_unsent queue preflight in
+  (match Q.take_newest_for_keeper restored ~keeper_name:"alpha" with
+   | Some (latest, _) -> check string "extracting the last item does not restart chronology"
+       later.request_id latest.request.request_id
+   | None -> fail "later input disappeared")
 ;;
 
 let test_offscreen_preflight_recovery_retains_its_owner () =
@@ -4285,6 +4371,9 @@ let () =
         ; test_case "identity outage preserves unrelated NEXT authorization" `Quick test_identity_outage_retains_only_existing_local_holds
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
+        ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
+        ; test_case "empty composer preserves already queued input order" `Quick test_empty_composer_cannot_reverse_already_queued_input
+        ; test_case "preflight restoration preserves submission chronology" `Quick test_preflight_restoration_preserves_submission_chronology
         ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal

@@ -388,7 +388,7 @@ def scoped_roster_authority(binary: str) -> None:
         refresh=30.0, terminal_cols=80)
 
 
-def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
+def queued_workspace_inputs(binary: str, *, root_only=False, paused_before_resume=False) -> None:
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1], root_only=root_only)
     queued = b"retained-workspace-a-queued-payload"
@@ -399,7 +399,14 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             self.release_admission = threading.Event()
             self.held_once = False
             self.phases = []
+            self.directives = []
+            self.protocol = []
+        def directive(self, body):
+            self.directives.append(json.loads(body))
+            self.protocol.append("resume")
+            return super().directive(body)
         def stream(self, body):
+            self.protocol.append("admission")
             with wire.lock:
                 self.phases.append(wire.phase)
             if not self.held_once:
@@ -408,8 +415,23 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                 assert self.release_admission.wait(timeout=30), "admission fixture was not released"
             return super().stream(body)
     admission = HeldAdmission()
+    pause_published = threading.Event()
+    release_roster = threading.Event()
+    def roster():
+        response = wire.roster()
+        if pause_published.is_set():
+            # Keep the client's cached active row until it handles /queue
+            # resume. A live read must discover the other client's pause.
+            assert release_roster.wait(timeout=30), "paused roster was not released"
+            payload = response[1]
+            assert isinstance(payload, dict)
+            for row in payload["keepers"]:
+                if row["name"] == "alpha":
+                    row["paused"] = admission.paused
+                    row["meta"]["paused"] = admission.paused
+        return response
     fixtures.update(admission.fixtures)
-    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+    fixtures.update({ROSTER_PATH: roster, "/health": wire.health,
                      "/health?full=1": wire.health, HISTORY_PATH: wire.history,
                      MEMORY_PATH: wire.memory})
     def interact(process, fd, _slave, output, _base):
@@ -446,23 +468,39 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
             h.send_and_wait(process, fd, output, b"/queue resume", h.composer_showing(b"/queue resume"))
-            h.send_and_wait(process, fd, output, b"\r", b"Server confirmed queue resume")
+            if paused_before_resume:
+                admission.paused = True
+                pause_published.set()
+            os.write(fd, b"\r")
+            if paused_before_resume:
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"Reading server queue" in screen(output)
+                        or len(admission.phases) == 2,
+                    timeout=WAIT_SECONDS), "resume was not handled"
+                release_roster.set()
             h.wait_for_atomic_admissions(process, fd, output, admission, 2)
+            assert admission.protocol == (["admission", "resume", "admission"]
+                if paused_before_resume else ["admission", "admission"]), admission.protocol
             assert admission.phases == ["a", "a-returned"], admission.phases
+            assert admission.submitted[0]["message"] == "first-workspace-a-request"
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
             h.escape_to_keeper_detail(process, fd, output, name=b"alpha",
                                       destination=b"MASC Keepers")
             os.write(fd, b"q")
         finally:
+            release_roster.set()
             admission.release_admission.set()
             admission.release.set()
             admission.release_interrupt.set()
     h.run_terminal_scenario(binary,
         description=("MASC-root-only change" if root_only else "workspace change")
-            + " suspends complete unsent inputs until explicit resume in A",
+            + " suspends complete unsent inputs until explicit resume in A"
+            + (" after another client pauses" if paused_before_resume else ""),
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
+    assert [request["action"] for request in admission.directives] == (
+        ["resume"] if paused_before_resume else []), admission.directives
 
 
 def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
@@ -1718,8 +1756,9 @@ def runtime_parameter_workspace_withdrawal(binary: str) -> None:
 
 
 def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None = None) -> None:
-    # No refresh after readiness: the client retains A while the same endpoint
-    # reports B only to the dispatch-time health probe.
+    # A dispatch probe and outstanding navigation refreshes share /health.
+    # Keep chat identity unread until the draft is checked, then explicitly
+    # confirm B so both authority transitions have observable barriers.
     for operation in ("chat", "pause", "boot-recovery"):
         fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         if operation == "boot-recovery":
@@ -1728,11 +1767,14 @@ def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None =
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         probes = threading.Event()
         armed = threading.Event()
+        confirm_b = threading.Event()
         writes = []
         def health():
             reply = wire.health()
             if armed.is_set():
                 probes.set()
+                if operation == "chat" and not confirm_b.is_set():
+                    return 503, {"error": "workspace identity temporarily unavailable"}
             return reply
         def post(path, body):
             writes.append((path, body))
@@ -1785,6 +1827,14 @@ def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None =
                 h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                 assert "▸ chat".encode() not in screen(output), screen(output)
                 assert writes == [], "leaving the refused draft dispatched chat"
+                confirm_b.set()
+                os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"MISMATCH local " in screen(output),
+                    timeout=WAIT_SECONDS), "replacement workspace was not confirmed"
+                assert b"private-A-message" not in screen(output), \
+                    "original workspace draft leaked into the replacement workspace"
+                capture(output, "b-confirmed")
                 wire.publish("a-returned")
                 os.write(fd, b"r")
                 assert h.wait_for_fixture_state(process, fd, output,
@@ -1837,6 +1887,7 @@ if __name__ == "__main__":
     run(binary, captures)
     queued_workspace_inputs(binary)
     queued_workspace_inputs(binary, root_only=True)
+    queued_workspace_inputs(binary, paused_before_resume=True)
     scoped_roster_authority(binary)
     staged_payload_workspace_inputs(binary)
     staged_payload_workspace_inputs(binary, root_only=True)

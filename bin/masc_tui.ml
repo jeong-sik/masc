@@ -7530,18 +7530,24 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   if List.mem keeper_name state.keeper_queue_inflight then
     chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
       "A queue request is pending; wait for its result before the next change"
-  else if action = Inbox.Resume
-          && state.workspace_identity = Workspace_identity_match
-          && keeper_available_for_new_message state keeper_name
-          && resume_preflight_keeper_input state keeper_name then begin
-    launch_waiting_keeper_input state ~mailbox ~keeper_name;
-    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-      "Resumed locally retained input"
-  end else begin
+  else begin
+  let local_resume = action = Inbox.Resume
+    && state.workspace_identity = Workspace_identity_match
+    && keeper_available_for_new_message state keeper_name
+    && can_resume_preflight_keeper_input state keeper_name in
+  let expected_workspace = Option.map
+    (fun identity -> canonical_path identity.Tui_decode.sid_base_path) state.server_identity in
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
   let control_generation = match action with
-    | Inbox.Pause | Inbox.Resume -> Some (begin_keeper_chat_control state keeper_name)
+    | Inbox.Pause | Inbox.Resume ->
+        Some (begin_keeper_chat_control ~preserve_input_holds:local_resume state keeper_name)
     | _ -> None in
+  let check_control () =
+    Result.bind (check_authority ()) (fun () ->
+      match control_generation with
+      | Some generation when generation <> keeper_chat_control_generation state keeper_name ->
+          Error "A newer Keeper control superseded this queue request"
+      | Some _ | None -> Ok ()) in
   let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
   let host = server_peer_host and port = state.port in
   let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
@@ -7553,11 +7559,26 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          Printf.sprintf "  %s\n    %s" item.request.request_id item.request.message) pending in
   let perform () =
     let ( let* ) = Result.bind in
-    let* () = check_authority () in
+    let* () = check_control () in
     let* receipt = match action with
       | Inbox.Inspect -> Ok []
       | Inbox.Pause | Inbox.Resume ->
         let verb = if action = Inbox.Pause then "pause" else "resume" in
+        let* owner_paused =
+          if not local_resume then Ok true else
+          match expected_workspace with
+          | None -> Error "Workspace identity is unavailable; input remains retained"
+          | Some expected_workspace ->
+            (match Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace with
+             | Error failure -> Error (Keeper_control.roster_failure_message
+                 ~credential_sent:(Masc_tui_http.operator_token_present ()) failure)
+             | Ok (roster, _) ->
+               match Keeper_control.liveness_of_roster roster keeper_name with
+               | Keeper_control.Present runtime -> Ok runtime.kr_paused
+               | Unobserved | Invalid _ | Absent ->
+                 Error "Keeper pause state is unavailable; input remains retained") in
+        let* () = check_control () in
+        if not owner_paused then Ok ["Server confirmed the Keeper is active"] else
         let* status, body = Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
           ~action:verb ~operator_operation_id in
         (match Keeper_control.classify_response ~status ~body with
@@ -13025,7 +13046,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | None -> false in
       (match action, result with
        | Masc_tui_queue_inspection.Resume, Ok _ when current_control ->
-         release_retained_keeper_input state keeper_name
+         release_retained_keeper_input state keeper_name;
+         launch_waiting_keeper_input state ~mailbox ~keeper_name
        | (Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _), (Ok _ | Error _) -> ());
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
       launch_keeper_turns_load state ~mailbox;

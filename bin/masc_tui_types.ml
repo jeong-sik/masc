@@ -9983,6 +9983,13 @@ let prev_memory_category (current : memory_category_filter)
       in
       before rev
 
+(* The decoder retains the account identity from the same response as this
+   runtime row. Catalogue and surface refreshes cannot cross-join ordinals. *)
+let runtime_account_label (runtime : Tui_decode.runtime_option) =
+  match runtime.ro_account_scope_id with
+  | Some scope_id -> scope_id
+  | None -> "unknown (Usage account identity unavailable)"
+
 type runtime_picker_projection = {
   rlp_lane : string;
   rlp_pick : runtime_lane_pick;
@@ -10769,6 +10776,38 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 
+let runtime_quota_label (runtime : Tui_decode.runtime_option) =
+  if not runtime.ro_quota_exhausted then None
+  else Some (match runtime.ro_quota_resets_at with
+    | Some at -> let tm = Unix.localtime at in
+        Printf.sprintf "quota exhausted (resets %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
+    | None -> "quota exhausted (no reset stated)")
+
+let runtime_rate_limit_label (runtime : Tui_decode.runtime_option) =
+  if not runtime.ro_rate_limited then None
+  else Some (match runtime.ro_rate_limit_resets_at with
+    | Some at -> let tm = Unix.localtime at in
+        Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
+    | None -> "rate limited")
+
+let runtime_usage_label state runtime =
+  match state.runtime_surface with
+  | None -> Some "usage unknown"
+  | Some snapshot ->
+      match runtime_spent_usage snapshot.rss_resolved runtime with
+      | Error _ -> Some "usage unknown"
+      | Ok [] -> None
+      | Ok (_ :: _) -> Some "account limit spent"
+
+let runtime_route_probe_text state runtime probe =
+  let route = match List.filter_map Fun.id
+      [ runtime_quota_label runtime; runtime_rate_limit_label runtime; runtime_usage_label state runtime ] with
+    | [] -> "no refusal"
+    | parts -> String.concat " " parts in
+  route ^ " / " ^ (match probe with
+    | None -> "unobserved"
+    | Some probe -> runtime_probe_status_label probe.Masc.Tui_decode_runtime_probe.rpp_status)
+
 let runtime_pick_facts = function
   | Pick_lane (lane, candidates) ->
     let hops =
@@ -11105,7 +11144,30 @@ let runtime_authority_rows ~cols (state : state) : string list =
   Masc_tui_message_layout.pack_clauses ~max_cells:room clauses
   |> List.map (fun line -> indent ^ line)
 
-let runtime_surface_listing_chrome ~cols state =
+let runtime_selection_summary_lines ~cols state =
+  let selected = match state.runtime_surface, state.runtime_mode with
+    | None, _ -> None
+    | Some snapshot, Runtime_lanes ->
+        List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor
+        |> Option.map (fun row -> row.Tui_decode.rcr_runtime, row.rcr_probe)
+    | Some snapshot, Runtime_all ->
+        List.nth_opt snapshot.Tui_decode.rss_resolved.rrs_runtimes state.runtime_cursor
+        |> Option.map (fun runtime -> runtime,
+            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.ro_id) in
+  match selected with
+  | None -> []
+  | Some (runtime, probe) ->
+      let width = max 1 (Masc_tui_frame.inner_width ~cols - 2) in
+      [ "Selected " ^ runtime.ro_id ^ " · Account " ^ runtime_account_label runtime
+          ^ " · Connection " ^ runtime.ro_provider_id
+          ^ " · " ^ runtime.ro_provider ^ " / " ^ runtime.ro_model
+      ; runtime_route_probe_text state runtime probe ]
+      |> List.concat_map (fun line ->
+          Masc_tui_message_layout.wrap_words ~max_cells:width
+            (Masc.Tui_terminal_text.sanitize_terminal_text line))
+      |> List.map (fun line -> "  " ^ line)
+
+let runtime_surface_base_chrome ~cols state =
   runtime_listing_chrome
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
     ~error:state.runtime_surface_error
@@ -11128,8 +11190,22 @@ let runtime_surface_listing_chrome ~cols state =
       (runtime_picker_projection state))
     ()
 
-(* The Runtime listing's bound. Its chrome depends on the terminal width, so
-   the caller passes the width it drew at and the keys move through the same
+(* The selected row must keep a place in the list. Full account/status facts
+   remain in Enter's detail reading when a short viewport cannot fit both. *)
+let runtime_selection_summary_for_viewport ~rows ~cols state =
+  let lines = runtime_selection_summary_lines ~cols state in
+  let spare = rows - runtime_surface_base_chrome ~cols state - 1 in
+  if lines = [] || List.length lines + 1 <= spare then lines
+  else if spare >= 2 then ["  Enter: full account and status details"]
+  else []
+
+let runtime_surface_listing_chrome ~rows ~cols state =
+  let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
+  runtime_surface_base_chrome ~cols state
+  + (if selection_rows = [] then 0 else List.length selection_rows + 1)
+
+(* The Runtime listing's bound. Its chrome depends on the viewport size, so
+   the caller passes the dimensions it drew at and the keys move through the same
    count the frame drew with. *)
 (* Enter/Right opens a listing row once. A detail has its own stable identity;
    a refresh can reorder the hidden listing without changing that identity. *)
@@ -11159,7 +11235,7 @@ let open_runtime_row_detail (state : state) =
         target
 ;;
 
-let runtime_scrolled ~cols (state : state) : scrolled option =
+let runtime_scrolled ~rows ~cols (state : state) : scrolled option =
   if Option.is_some state.runtime_detail_target then None
   else
     Some
@@ -11172,7 +11248,7 @@ let runtime_scrolled ~cols (state : state) : scrolled option =
            | Some s, Runtime_lanes -> List.length s.Tui_decode.rss_candidates
            | Some s, Runtime_all ->
                List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
-      ; sc_chrome = runtime_surface_listing_chrome ~cols state
+      ; sc_chrome = runtime_surface_listing_chrome ~rows ~cols state
       ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }

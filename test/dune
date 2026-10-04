@@ -1,4 +1,5 @@
 (include stanzas/test_tui_usage_studio_pty.inc)
+(include stanzas/test_tui_runtime_status_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
 
 (test

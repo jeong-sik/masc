@@ -80,8 +80,9 @@ let scrolled_surface state surface =
   (* Runtime's authority row wraps to the terminal width too, so its bound is
      read at that width for the same reason the Memory overview's is. *)
   | Runtime ->
-      let _, cols = get_terminal_size () in
-      Masc_tui_types.runtime_scrolled ~cols state
+      let terminal_rows, cols = get_terminal_size () in
+      let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+      Masc_tui_types.runtime_scrolled ~rows ~cols state
   | _ -> Masc_tui_types.scrolled_surface state surface
 ;;
 

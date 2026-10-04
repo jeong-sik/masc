@@ -886,9 +886,17 @@ let commit_verdict_r
                ; committed_at = now
                } :: pending_completion_rejections
            in
+           let pending_completion_approvals =
+             match verdict with
+             | Masc_domain.Verdict_rejected _ -> backlog.pending_completion_approvals
+             | Masc_domain.Verdict_approved ->
+               { Masc_domain.task_id; verification_id; producer; authority; committed_at = now }
+               :: backlog.pending_completion_approvals
+           in
            let new_backlog =
              { backlog with
                pending_completion_rejections;
+               pending_completion_approvals;
                tasks =
                  List.map
                    (fun (t : task) ->
@@ -1129,13 +1137,13 @@ let commit_verdict_r
   |> Workspace_task_verification.flatten_lock_result
   |> fun result ->
   (match result, verdict with
-   | Ok _, Masc_domain.Verdict_rejected _ ->
+   | Ok _, (Masc_domain.Verdict_rejected _ | Masc_domain.Verdict_approved) ->
      (try (Atomic.get Workspace_hooks.rejection_delivery_requested_fn) config with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.TaskState.error
-          "rejection delivery signal failed; durable obligation remains task_id=%s detail=%s"
+          "verdict delivery signal failed; durable obligation remains task_id=%s detail=%s"
           task_id (Printexc.to_string exn))
-   | Ok _, Masc_domain.Verdict_approved | Error _, _ -> ());
+   | Error _, _ -> ());
   result
 ;;

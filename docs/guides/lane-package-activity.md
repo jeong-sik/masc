@@ -55,6 +55,18 @@ valid off request; the configuration reports that cleanup awaits a complete
 reading. The observed worker remains visible. Malformed or duplicate declarations
 keep the last applied worker; invalid input is never interpreted as off.
 
+New Skill publications exclude workers that are stopping, including those whose
+cleanup failed and will retry. A complete declaration reading also withdraws
+Skills for an explicitly disabled owner. The worker row, retained observations,
+evidence and document ownership remain available for cleanup and inspection;
+already captured Skill readers keep their existing snapshot.
+
+An ordinary observation failure does not withdraw a non-stopping worker's Skills.
+An incomplete or unobserved declaration reading is not interpreted as off, and
+active manual attachments keep their own Skill sources. Re-enabling an owner
+does not republish its stopping incarnation; publication resumes for its
+replacement after cleanup is confirmed.
+
 A disabled declaration still preserves its document privacy owner. Metadata
 update failure is reported separately and does not prevent cleanup once the
 inventory is complete. Disabling does not require an available package image or

@@ -1,0 +1,70 @@
+Testing `Lane package Skill workflow'.
+This run has ID `Y91NWNPN'.
+
+> [FAIL]        declaration to existing reader          0   disabled cleanup ...
+  [SKIP]        declaration to existing reader          1   non-stopping fail...
+  [SKIP]        declaration to existing reader          2   catalog, exact bo...
+  [SKIP]        declaration to existing reader          3   invalid and detac...
+  [SKIP]        declaration to existing reader          4   missing read poli...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        declaration to existing reader          0   disabled clean...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-04 22:58:55] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-skill-workflow-da19bf (no git root found)
+[2026-10-04 22:58:55] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/Users/dancer/me for requested path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-skill-workflow-da19bf
+[2026-10-04 22:58:55] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-skill-workflow-da19bf for test executable test_lane_addon_skills.exe
+[2026-10-04 22:58:55] [INFO] [Server] Skill snapshot ready: skills=1 rejections=0 (file: /fixture/runtime.toml) snapshot_revision=bcbb835d532caf9f88db9535c08b81d7cc8e8a8a707603638fcc01ea49ea9a37 catalog_revision=5971680907d0c484cd179aa9bd3d677091476c1280441b2e0a180f8fe7890962
+[2026-10-04 22:58:55] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-04 22:58:55] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT off withdraws discovery before cleanup finishes
+File "test/test_lane_addon_skills.ml", line 290, character 6:
+FAIL off withdraws discovery before cleanup finishes
+
+   Expected: `false'
+   Received: `true'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_lane_addon_skills.test_disabled_cleanup_withdraws_skill_until_re in file "test/test_lane_addon_skills.ml", line 290, characters 6-99
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Dune__exe__Test_lane_addon_skills.test_disabled_cleanup_withdraws_skill_until_re in file "test/test_lane_addon_skills.ml", lines 287-304, characters 4-105
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio__core__Fiber.any_gen.(fun).wrap in file "lib_eio/core/fiber.ml", line 113, characters 16-20
+Re-raised at Eio__core__Fiber.any_gen in file "lib_eio/core/fiber.ml", line 155, characters 25-60
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41135-skill-withdrawal-20261004/_build/_tests/Lane package Skill workflow/declaration to existing reader.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41135-skill-withdrawal-20261004/_build/_tests/Lane package Skill workflow'.
+1 failure! in 0.010s. 1 test run.

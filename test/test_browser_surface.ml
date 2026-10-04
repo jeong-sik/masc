@@ -280,6 +280,27 @@ let test_off_precedes_client_guidance () =
       Lane.install_activity_observer (Some (fun _ -> !current));
       Eio.Switch.on_release sw (fun () ->
         Lane.install_activity_observer (Some (fun _ -> Lane.Enabled)));
+      let backend_calls = ref 0 in
+      Lane.install_automation_executor (Some (fun _ ->
+        incr backend_calls; Lane.Refused "backend refused after admission"));
+      Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+      let run_session () = Tools.handle_session ~tool_name:"BrowserSession"
+        ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "automation";"action",`String "open"]) in
+      let run_goto () = Tools.handle_goto ~tool_name:"BrowserGoto"
+        ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "automation";"url",`String "https://example.org/"]) in
+      List.iter (fun run ->
+        match run () with
+        | Tool_result.Failed (failure : Tool_result.failure_payload) -> check bool "off effect is proven pre-effect" true
+            (failure.effect_disposition = Tool_result.Proven_pre_effect)
+        | _ -> fail "off effect was accepted") [run_session; run_goto];
+      check int "off effects never reach backend" 0 !backend_calls;
+      current := Lane.Enabled;
+      (match run_session () with
+       | Tool_result.Failed (failure : Tool_result.failure_payload) -> check bool "backend refusal remains effect-unknown" true
+           (failure.effect_disposition = Tool_result.Effect_outcome_unknown)
+       | _ -> fail "backend refusal was accepted");
+      check int "admitted request reaches backend" 1 !backend_calls;
+      current := Lane.Disabled;
       let info n : Lane.client_info =
         let raw = Printf.sprintf "50000000-0000-4000-8000-%012d" n in
         let client_id = match Lane.client_id_of_string raw with

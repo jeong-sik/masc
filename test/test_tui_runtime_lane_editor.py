@@ -110,6 +110,7 @@ class LaneStore:
 
     def __init__(self) -> None:
         _status, body = _keyboard_runtime.runtime_resolved_response()
+        assert isinstance(body, dict)
         self.body = body
         self.lanes = [dict(lane) for lane in body["lanes"]]
         self.revision = 1
@@ -1129,21 +1130,22 @@ def run_default_route(executable: str) -> None:
     """The default route picker can keep a declared failover lane intact."""
     store = LaneStore()
     store.body["default_route"] = "primary"
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    requests: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=b"MASC System", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
-        h.send_and_wait(process, fd, output, b"f", b"Enter replace")
-        frame = h.screen_text(bytes(output))
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC System", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"f", b"primary   lane")
+        frame = _keyboard_harness.screen_text(bytes(output))
+        assert b"Enter replace" in frame, frame
         assert b"primary   lane" in frame, frame
         os.write(fd, b"\r")
-        assert h.wait_for_fixture_state(process, fd, output,
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
             lambda: any(path == ROUTING_PATH for path, _ in requests), timeout=3)
         posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
         assert posted == [{"lane": "default", "runtime_id": "primary"}], posted
@@ -1151,7 +1153,7 @@ def run_default_route(executable: str) -> None:
         assert store.body["default_runtime"]["id"] == "runtime-a"
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable,
+    _keyboard_harness.run_terminal_scenario(executable,
         description="Runtime default route picker preserves a declared lane",
         interact=interact, http_fixtures=fixtures, http_requests=requests)
 

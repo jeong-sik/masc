@@ -7,6 +7,7 @@ import { ensureDevToken } from './dev-token'
 vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => undefined) }))
 
 const revision = 'a'.repeat(64)
+const saveOptions = { expectedSourcePath: '/synthetic/runtime.toml' }
 const current = { source_path: '/synthetic/runtime.toml', source_text: '# other writer\n', source_revision: 'b'.repeat(64) }
 const conflict = { error: 'runtime.toml changed', code: 'revision_conflict', current }
 
@@ -23,21 +24,21 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 describe('raw runtime.toml revision-checked write', () => {
   it.each([401, 403])('classifies structured raw-save authorization status %s as pre-handler refusal', async status => {
     const fetchMock = reply({ error: 'authorization rejected', auth_error_code: status === 401 ? 'token_expired' : 'insufficient_role' }, status)
-    await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.toMatchObject({ name: 'RuntimeTomlSaveRejected' })
+    await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toMatchObject({ name: 'RuntimeTomlSaveRejected' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
   it.each([401, 403])('does not invent a typed auth refusal from unstructured status %s', async status => {
     reply({ error: 'unrecognized gateway refusal' }, status)
-    await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.toBeInstanceOf(ApiRequestError)
+    await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toBeInstanceOf(ApiRequestError)
   })
   it.each([401, 403])('keeps ambiguous authorization status %s unknown', async status => {
     reply({ error: 'authorization-like failure after application', config_applied: true }, status)
-    await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.toBeInstanceOf(ApiRequestError)
+    await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toBeInstanceOf(ApiRequestError)
   })
 
   it.each([
     ['read', (options: RuntimeTomlRequestOptions) => fetchRuntimeTomlConfig(options)],
-    ['raw save', (options: RuntimeTomlRequestOptions) => saveRuntimeTomlConfig('# draft', revision, options)],
+    ['raw save', (options: RuntimeTomlRequestOptions) => saveRuntimeTomlConfig('# draft', revision, { ...options, ...saveOptions })],
     ['routing', (options: RuntimeTomlRequestOptions) => patchRuntimeRouting('default', 'fixture.model', options)],
     ['exact slot', (options: RuntimeTomlRequestOptions) => patchRuntimeExactSlot('judge', 'append', 'fixture.model', undefined, options)],
     ['assignment', (options: RuntimeTomlRequestOptions) => patchRuntimeAssignment('keeper', 'fixture.model', {
@@ -57,7 +58,7 @@ describe('raw runtime.toml revision-checked write', () => {
 
   it('sends the read revision with the draft and exposes the 409 current source without retrying', async () => {
     const fetchMock = reply(conflict)
-    await expect(saveRuntimeTomlConfig('# draft\n', revision)).rejects.toMatchObject({
+    await expect(saveRuntimeTomlConfig('# draft\n', revision, saveOptions)).rejects.toMatchObject({
       name: 'RuntimeTomlRevisionConflict', current,
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -65,13 +66,19 @@ describe('raw runtime.toml revision-checked write', () => {
     expect(path).toBe('/api/v1/runtime/config/raw')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      source_text: '# draft\n', expected_source_revision: revision,
+      source_text: '# draft\n', expected_source_revision: revision, expected_source_path: saveOptions.expectedSourcePath,
     })
+  })
+
+  it.each(['', '\0'])('rejects invalid write path before POST: %s', async path => {
+    const fetchMock = reply(conflict)
+    await expect(saveRuntimeTomlConfig('# draft', revision, { expectedSourcePath: path })).rejects.toThrow('저장 기준 path')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it.each(['', 'not-a-revision', 'A'.repeat(64)])('rejects invalid write revision %s before POST', async invalid => {
     const fetchMock = reply(conflict)
-    await expect(saveRuntimeTomlConfig('# draft\n', invalid)).rejects.toThrow('저장 기준 revision')
+    await expect(saveRuntimeTomlConfig('# draft\n', invalid, saveOptions)).rejects.toThrow('저장 기준 revision')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -82,7 +89,7 @@ describe('raw runtime.toml revision-checked write', () => {
     { ...conflict, code: 'io_error' },
   ])('does not authorize a malformed or unrelated failure as a usable conflict', async body => {
     reply(body)
-    const error = await saveRuntimeTomlConfig('# draft\n', revision).catch(error => error)
+    const error = await saveRuntimeTomlConfig('# draft\n', revision, saveOptions).catch(error => error)
     expect(error).toBeInstanceOf(ApiRequestError)
     expect(error).not.toBeInstanceOf(RuntimeTomlRevisionConflict)
   })
@@ -92,7 +99,7 @@ describe('raw runtime.toml revision-checked write', () => {
     { ok: false, error: 'runtime value rejected', validation: { valid: false, issues: [] } },
   ])('classifies the raw route structured 400 as a definite precommit refusal', async body => {
     const fetchMock = reply(body, 400)
-    await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.toMatchObject({ name: 'RuntimeTomlSaveRejected' })
+    await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toMatchObject({ name: 'RuntimeTomlSaveRejected' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -104,13 +111,13 @@ describe('raw runtime.toml revision-checked write', () => {
     [400, { error: 'read required', authoritative_reload_required: true }],
   ])('does not turn status %s or an ambiguous error into a definite rejection', async (status, body) => {
     reply(body, status as number)
-    const error = await saveRuntimeTomlConfig('# draft', revision).catch(error => error)
+    const error = await saveRuntimeTomlConfig('# draft', revision, saveOptions).catch(error => error)
     expect(error).toBeInstanceOf(ApiRequestError)
   })
 
   it('keeps a network failure indeterminate instead of inventing a current revision', async () => {
     const failure = new TypeError('connection lost')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure))
-    await expect(saveRuntimeTomlConfig('# draft\n', revision)).rejects.toBe(failure)
+    await expect(saveRuntimeTomlConfig('# draft\n', revision, saveOptions)).rejects.toBe(failure)
   })
 })

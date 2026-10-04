@@ -1365,7 +1365,7 @@ describe('RuntimeTomlEditor', () => {
       fireEvent.input(textarea, { target: { value: corrected } }); fireEvent.click(save)
       await waitFor(() => expect(coreApi.postControlPlane).toHaveBeenCalledTimes(1))
       expect(fetchMock).toHaveBeenCalledTimes(2)
-      expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual({ source_text: corrected, expected_source_revision: baseConfig.source_revision })
+      expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual({ source_text: corrected, expected_source_revision: baseConfig.source_revision, expected_source_path: baseConfig.path })
       expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     } finally { vi.unstubAllGlobals() }
   })

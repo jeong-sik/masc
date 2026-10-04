@@ -421,8 +421,8 @@ let disconnect_client ~client_id =
 (* A browser whose lease ended after its target was resolved is the same
    selection failure as naming it when it had already gone, so the caller
    answers both from one place. *)
-let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
-  match activity_refusal Lane_name.Live verb with
+let issue_live_with ~activity_check ?(only_if_idle = false) client ~verb ~timeout_sec =
+  match activity_check verb with
   | Some refusal -> Ok refusal
   | None -> if not (connected client) then
     Error (Selected_client_disconnected client.info.client_id)
@@ -433,7 +433,7 @@ let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in
       let accepted = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-        match activity_refusal Lane_name.Live verb with
+        match activity_check verb with
         | Some refusal -> Error refusal
         | None -> if only_if_idle &&
            (Hashtbl.length client.waiters <> 0 || Eio.Stream.length client.commands <> 0)
@@ -447,6 +447,8 @@ let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
         (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
           Answered (Eio.Promise.await promise))
         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))
+let issue_live ?only_if_idle client ~verb ~timeout_sec =
+  issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?only_if_idle client ~verb ~timeout_sec
 (* The port this process serves the browser-lane routes on: the port its HTTP
    listener actually bound, installed once it is bound and withdrawn when that
    listener's switch ends. Before that, and in a process that serves no
@@ -460,15 +462,17 @@ let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_automation_executor executor = Atomic.set automation_executor executor
 let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
 let install_automation_document_observer observer = Atomic.set automation_document_observer observer
-let issue_automation ~verb ~timeout_sec =
+let issue_automation_with ~activity_check ~verb ~timeout_sec =
   if not (verb_allowed_on_automation verb) then
     Rejected_before_effect sentence_verbs_refused
-  else match activity_refusal Lane_name.Automation verb with
+  else match activity_check verb with
   | Some refusal -> refusal
   | None -> match Atomic.get automation_executor with
   | None -> Lane_absent
   | Some execute -> Watched_work.run (fun () -> execute verb)
       ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
+let issue_automation ~verb ~timeout_sec =
+  issue_automation_with ~activity_check:(activity_refusal Lane_name.Automation) ~verb ~timeout_sec
 let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
 type backend_observation = Live_clients of int | Executor_registered of bool
@@ -482,10 +486,10 @@ let inventory_observation lane =
   | Lane_name.Automation -> Executor_registered (Option.is_some (Atomic.get automation_executor))
   | Lane_name.Stagehand -> Executor_registered (Option.is_some (Atomic.get stagehand_executor))
   in { activity; backend }
-let issue_stagehand ~verb ~timeout_sec =
+let issue_stagehand_with ~activity_check ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
     Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb)
-  else match activity_refusal Lane_name.Stagehand verb with
+  else match activity_check verb with
   | Some refusal -> refusal
   | None -> match Atomic.get stagehand_executor with
   | None -> Lane_absent
@@ -494,6 +498,8 @@ let issue_stagehand ~verb ~timeout_sec =
      | None -> execute verb
      | Some timeout_sec -> Watched_work.run (fun () -> execute verb)
          ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
+let issue_stagehand ~verb ~timeout_sec =
+  issue_stagehand_with ~activity_check:(activity_refusal Lane_name.Stagehand) ~verb ~timeout_sec
 (* The lanes whose browser the server owns; sessions and navigation belong
    to them, and the live browser belongs to the operator. *)
 type server_lane = Server_automation | Server_stagehand
@@ -565,6 +571,31 @@ let issue_for ~target ~verb ~timeout_sec =
   | Live_client client -> issue_live client ~verb ~timeout_sec
   | Automation -> Ok (issue_automation ~verb ~timeout_sec)
   | Stagehand -> Ok (issue_stagehand ~verb ~timeout_sec:(Some timeout_sec))
+
+(* A compound surface read owns one admission and one selected browser.
+   The closed command type cannot authorize navigation or a new request. *)
+module Read_admission : sig
+  type t
+  type command = Tabs | Page of {tab_id:int; max_chars:int option} | Capture of {tab_id:int}
+  val acquire : route -> (t, selection_error) result
+  val target : t -> target
+  val issue : t -> command -> timeout_sec:float -> (answer, selection_error) result
+end = struct
+  type t = target
+  type command = Tabs | Page of {tab_id:int; max_chars:int option} | Capture of {tab_id:int}
+  let acquire route = resolve_target ~verb:Tabs_list route
+  let target admitted = admitted
+  let issue admitted command ~timeout_sec =
+    let verb = match command with
+      | Tabs -> Tabs_list
+      | Page {tab_id;max_chars} -> Page_read {tab_id=Some tab_id;max_chars}
+      | Capture {tab_id} -> Page_capture {tab_id} in
+    let activity_check _ = None in
+    match admitted with
+    | Live_client client -> issue_live_with ~activity_check client ~verb ~timeout_sec
+    | Automation -> Ok (issue_automation_with ~activity_check ~verb ~timeout_sec)
+    | Stagehand -> Ok (issue_stagehand_with ~activity_check ~verb ~timeout_sec:(Some timeout_sec))
+end
 
 (** Additional observations never queue behind an existing browser command.
     Busy or missing browsers leave this optional source unavailable. The caller

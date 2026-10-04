@@ -54,6 +54,21 @@ structured output. MASC must not guess these features from model-name strings.
 
 ### Context window precedence
 
+HTTP providers may declare `request-path` as an endpoint-relative absolute
+path, for example `/responses` or `/v1/responses`. It cannot contain an origin,
+query, fragment or whitespace. An absent declaration uses the provider catalog
+or protocol default. Setup preserves the catalog's request surface on generated
+account providers; an OpenAI-compatible Responses surface selects the Responses
+request and response codec. The path is part of connection identity, so chat and
+Responses endpoints cannot accidentally reuse each other's provider.
+
+Setup reuses an enabled configured provider only when its transport, credential
+reference, account home and HTTP surface match. It does not enable disabled
+providers. The terminal renderer's `--base-path` prepares model identities against
+that workspace before selection, and the batch writer repeats the match while
+checking the source revision. Operator-owned provider IDs and settings survive a
+new model or context variant; ambiguous matching accounts are refused.
+
 `max-context` is an optional positive integer on a binding (`[provider.model]`),
 a provider (`[providers.provider]`) or a model (`[models.model]`). The binding
 wins, then the provider, then the model default; without a declaration, a known

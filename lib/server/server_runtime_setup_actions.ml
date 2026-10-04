@@ -1,10 +1,11 @@
-type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection
+type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection | Disabled_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
 let error_message = function
   | Invalid_request -> "Choose a connection and models with reported context metadata."
   | Configuration_unavailable -> "The workspace configuration could not be read."
   | Network_unavailable -> "The server has no network capability for discovery."
+  | Disabled_connection -> "This provider is disabled. Enable it in runtime.toml before adding models."
   | Unsupported_connection -> "This connection needs its native account setup before web discovery."
   | Credential_unavailable -> "The selected connection's credential could not be prepared."
   | Discovery_failed error -> Runtime_model_discovery.error_message error
@@ -13,7 +14,7 @@ let error_message = function
    moved under the request. 502: the runtime or server behind the connection
    answered badly. 503: this server cannot serve the request right now. *)
 let status_of_error : error -> Httpun.Status.t = function
-  | Invalid_request | Unsupported_connection | Credential_unavailable -> `Bad_request
+  | Invalid_request | Unsupported_connection | Disabled_connection | Credential_unavailable -> `Bad_request
   | Configuration_unavailable | Network_unavailable -> `Service_unavailable
   | Discovery_failed (Runtime_model_discovery.Invalid_connection
       | Runtime_model_discovery.Credential_unavailable) -> `Bad_request
@@ -97,7 +98,7 @@ let source_template ~sw ~pending ~workspace config request =
   let endpoint_val = match endpoint with Some v -> v | None -> `Null in
   let transport = if http then ["endpoint", endpoint_val]
     else ["command",value "command" selected] in
-  let metadata = if http then List.filter (fun (key,_) -> List.mem key ["provider_kind";"request_path"]) selected else [] in
+  let metadata = if http then List.filter (fun (key,_) -> key="provider_kind" || key="request_path") selected else [] in
   let* account = match List.assoc_opt "account_ref" request with
     | None -> Ok None
     | Some (`String reference) when not http && not (List.mem_assoc "api_key" request) ->
@@ -107,6 +108,20 @@ let source_template ~sw ~pending ~workspace config request =
         |> Result.map_error (fun _ -> Credential_unavailable) in
       Ok (Some binding)
     | Some _ -> Error Invalid_request in
+  let* () = match declared_provider config id with
+    | Some provider when not provider.enabled ->
+      (* A disabled connection can still be the client template for an explicit
+         new login. Its old account must remain disabled; only a changed account
+         reference (or an explicitly supplied HTTP key) creates a new provider. *)
+      (match account, List.assoc_opt "api_key" request with
+       | Some (Runtime_setup_accounts.Native_home selected), None
+         when not (Runtime_setup_spec.account_home_matches choice provider.account_home
+           (Some selected.account_home)) -> Ok ()
+       | Some (Runtime_setup_accounts.Antigravity_account selected), None
+         when provider.credentials <> Some (Runtime_schema.File selected.credential_file) -> Ok ()
+       | None, Some (`String _) when http -> Ok ()
+       | _ -> Error Disabled_connection)
+    | Some _ | None -> Ok () in
   let* credentials = match account,List.assoc_opt "api_key" request with
     | Some (Runtime_setup_accounts.Antigravity_account account),None
       when choice=Runtime_setup_spec.Antigravity -> Ok ["credential_file",`String account.credential_file]
@@ -463,7 +478,7 @@ let save ~binary ~base_path request =
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,provider_id,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let* reported_models=match choice with
@@ -472,7 +487,14 @@ let save ~binary ~base_path request =
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
           | Claude_code | Codex | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
-          let* spec=model_spec ~reported_models template model in let* tail=specs tail in Ok (spec::tail) in
+          let* spec=model_spec ~reported_models template model in
+          let spec = match declared_provider config provider_id with
+            | None -> spec
+            | Some provider ->
+              (match Runtime_setup_spec.for_provider spec provider with Some spec -> spec | None -> spec) in
+          let* spec = Runtime_setup_spec.resolve_provider spec config.providers
+            |> Result.map_error (fun _ -> Unsupported_connection) in
+          let* tail=specs tail in Ok (spec::tail) in
         let* models=specs models in
         let* tail=prepare tail in Ok (models::tail) in
     let* prepared=prepare connections in

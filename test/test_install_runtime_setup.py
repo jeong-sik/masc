@@ -431,6 +431,44 @@ class RuntimeSetupAdapter(unittest.TestCase):
             SETUP.configure('/fixture/masc', self.base, spec())
         self.assertEqual(self.transports, ['runtime-setup-inventory', 'runtime-setup-render', 'runtime-setup-batch'])
 
+    def test_existing_account_is_resolved_before_terminal_selection_and_batch(self):
+        original = self.native
+        def native(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[1] == 'runtime-setup-render' and '--base-path' in argv:
+                self.assertEqual(argv[argv.index('--base-path') + 1], str(self.base))
+                payload = json.loads(Path(argv[-1]).read_text())
+                result.stdout = json.dumps(dict(runtime_id='operator_account.' + payload['model'], runtime_toml='prepared'))
+            return result
+        source = dict(choice='codex', command='codex', account_home='/fixture/account', credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account')
+        with patch.object(SETUP.subprocess, 'run', side_effect=native), \
+             patch.object(SETUP, 'catalog_models', return_value=[]):
+            identity, selected = SETUP.resolve_model_spec(source, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+            self.assertEqual(identity, 'operator_account.new-model')
+            self.assertEqual(selected['existing_provider_id'], 'operator_account')
+            result = SETUP.configure_many('/fixture/masc', self.base, [selected], [identity],
+                expected_revision=self.revision)
+        self.assertEqual(self.requests[-1][1]['runtime_ids'], ['operator_account.new-model'])
+        self.assertEqual(result['runtime_id'], identity)
+
+    def test_prepared_implicit_native_home_retains_selected_provider(self):
+        source = dict(choice='codex', command='codex', account_home=None, credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account', label='Codex')
+        selected_home = str(self.base / 'codex-home')
+        with patch.dict(os.environ, {'CODEX_HOME': selected_home}), \
+             patch.object(SETUP, 'official_client_path', return_value='/located/codex'), \
+             patch.object(SETUP, 'pick', return_value=[0]), \
+             patch.object(SETUP, 'catalog_models', return_value=[]), \
+             patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            prepared = SETUP.prepare_connection('/fixture/masc', source, None)
+            _, selected = SETUP.resolve_model_spec(prepared, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+        self.assertEqual(selected['existing_provider_id'], 'operator_account')
+        self.assertEqual(selected['command'], 'codex')
+        self.assertEqual(selected['account_home'], selected_home)
+
     def test_native_verification_failure_identifies_connection_without_raw_diagnostics(self):
         response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error',
                         failure=dict(code='client_not_authenticated',
@@ -1529,7 +1567,7 @@ class MultipleSelection(unittest.TestCase):
                                                             binary='/fixture/masc')
         native.assert_called_once_with('/fixture/masc', source, 'owned-qwen', 10, load=True)
         self.assertEqual(configured['max_context'], 16384)
-        self.renderer.assert_called_once_with(configured, '/fixture/masc')
+        self.renderer.assert_called_once_with(configured, '/fixture/masc', base_path=None)
         self.assertEqual(identity, 'fixture.native-model')
 
     def test_wizard_ollama_context_uses_native_private_reference(self):

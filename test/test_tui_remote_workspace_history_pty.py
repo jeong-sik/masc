@@ -567,8 +567,9 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
     """Same schedule ID on B needs a fresh arm; the old runtime picker closes."""
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    roster = fixtures[ROSTER_PATH]
     fixtures.update(_keyboard_schedule.schedule_detail_http_fixtures())
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(roster[1])
     schedule_template = fixtures[_keyboard_schedule.SCHEDULES_PATH][1]
     unknown_health = threading.Event()
     cancel_requests = []
@@ -606,15 +607,14 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
                      and b"reaction:matched_consumed_ack" in text,
                      "B identity did not withdraw A's cancel arm and apply its list")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"workspace-b-schedule-owner")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers / Schedules")
         _keyboard_harness.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
         assert cancel_requests == [], "A's first press authorized a POST on B"
         os.write(fd, b"x")
         assert _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: len(cancel_requests) == 1,
             timeout=WAIT_SECONDS), "the explicit B confirmation did not send"
         assert cancel_requests[0][0] == "b" and cancel_requests[0][1]["schedule_id"] == "schedule-proof-701"
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
-        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
         await_screen(lambda text: b"b.current" in text, "B roster was not applied")
         _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
         _keyboard_harness.send_and_wait(process, fd, output, b"u", "Keepers ▸ alpha ▸ runtime".encode())

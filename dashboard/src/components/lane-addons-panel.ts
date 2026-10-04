@@ -10,8 +10,9 @@ import {
 import { isRecord } from './common/normalize'
 import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 import { LaneAddonReadings } from './lane-addon-readings'
-import { LaneDeclarationEditor, type LaneDeclarationEditorTarget } from './lane-declaration-editor'
-import type { LaneDeclarationDocument } from '../api/lane-declarations'
+import { LaneDeclarationEditor } from './lane-declaration-editor'
+import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
+import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
@@ -143,10 +144,12 @@ function LaneAddonActions({ instances }: { instances: readonly LaneAddonInstance
 
 /** This component owns its reads. A slow package never joins the fleet refresh. */
 export function LaneAddonsPanel() {
-  const [editor, setEditor] = useState<LaneDeclarationEditorTarget | null>(null)
-  const [newEditorKey, setNewEditorKey] = useState(() => crypto.randomUUID())
+  const authority = executionWorkspaceAuthority.value
+  const [recoveringAuthority, setRecoveringAuthority] = useState(false)
+  const [authorityError, setAuthorityError] = useState<string | null>(null)
+  const [snapshotAuthority, setSnapshotAuthority] = useState<ExecutionWorkspaceAuthority | null>(null)
   function editToml(sourcePath: string | null) {
-    setEditor({ key: sourcePath ?? newEditorKey, sourcePath })
+    if (session && authority) session.open(sourcePath, authority)
   }
   const [snapshot, setSnapshot] = useState<LaneAddonSnapshot | null>(null)
   const [slice, setSlice] = useState<LaneAddonSlice | null>(null)
@@ -167,6 +170,8 @@ export function LaneAddonsPanel() {
   const mounted = useRef(true)
 
   async function refresh() {
+    if (!mounted.current) return
+    const requestedAuthority = executionWorkspaceAuthority.peek()
     reads.current?.abort()
     const controller = new AbortController()
     reads.current = controller
@@ -174,18 +179,32 @@ export function LaneAddonsPanel() {
     setError(null)
     try {
       const result = await fetchLaneAddons(controller.signal)
-      if (!controller.signal.aborted && mounted.current) setSnapshot(result)
+      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) {
+        setSnapshot(result)
+        setSnapshotAuthority(requestedAuthority)
+      }
     } catch (err) {
-      if (!controller.signal.aborted && mounted.current) setError(message(err))
+      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setError(message(err))
     } finally {
-      if (!controller.signal.aborted && mounted.current) setReading(false)
+      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setReading(false)
     }
   }
   useEffect(() => {
     mounted.current = true
     void refresh()
     return () => { mounted.current = false; reads.current?.abort() }
-  }, [])
+  }, [authority])
+
+  async function recoverAuthority() {
+    if (recoveringAuthority) return
+    const requestedAuthority = executionWorkspaceAuthority.peek()
+    setRecoveringAuthority(true)
+    setAuthorityError(null)
+    try { await refreshExecution({ force: true }) }
+    catch (err) {
+      if (mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setAuthorityError(message(err))
+    } finally { if (mounted.current) setRecoveringAuthority(false) }
+  }
 
   async function act(action: () => Promise<unknown>) {
     setError(null)
@@ -221,6 +240,8 @@ export function LaneAddonsPanel() {
     }
   }
   const configuration = snapshot?.configuration ?? null
+  const session = authority !== null && snapshotAuthority === authority && configuration !== null
+    ? laneDeclarationSessionFor(authority, configuration.directory) : null
   const rows = slice?.rows ?? snapshot?.rows ?? []
   const selectionOwned = instance !== '' && selected.length > 0 && selected.every(id =>
     rows.some(row => row.id === id && row.lane_id.startsWith(`${instance}/`)))
@@ -230,7 +251,7 @@ export function LaneAddonsPanel() {
     <header class="flex items-center justify-between gap-4">
       <div><h2 class="text-lg font-semibold">Lane Add-ons</h2>
         <p>Optional observations and relationships. Keeper work continues independently.</p></div>
-      <div class="flex gap-2"><button class=${buttonClass} onClick=${() => editToml(null)}>New TOML</button>
+      <div class="flex gap-2"><button class=${buttonClass} disabled=${session === null} onClick=${() => editToml(null)}>New TOML</button>
       <button class=${buttonClass} onClick=${refresh}>Refresh</button></div>
     </header>
     ${reading && html`<p role="status">Reading retained observations…</p>`}
@@ -267,14 +288,14 @@ export function LaneAddonsPanel() {
           <p>Configuration read: ${configuration.complete ? 'complete' : 'incomplete'}</p>
           ${configuration.issues.map((issue, index) => html`<p key=${index} role="alert" class="text-red-400 break-all">
             <strong>${issue.source_path}</strong>${issue.id !== null && html` · ${issue.id}`} — ${issue.message}
-            ${isDeclarationFile(configuration.directory, issue.source_path) && html`<button type="button" class=${buttonClass}
+            ${isDeclarationFile(configuration.directory, issue.source_path) && html`<button type="button" class=${buttonClass} disabled=${session === null}
               onClick=${() => editToml(issue.source_path)} aria-label=${`Edit TOML ${issue.source_path}`}>Edit TOML</button>`}
           </p>`)}
           <div class="overflow-x-auto"><table class="w-full text-left" aria-label="TOML declarations"><thead><tr>
             <th>Declaration / file</th><th>Desired revision</th><th>Applied revision / instance</th><th>Configuration status</th>
           </tr></thead><tbody>${configuration.declarations.map(declaration => html`<tr key=${declaration.id}>
             <td>${declaration.id}<div class="break-all">${declaration.source_path}</div>
-              <button type="button" class=${buttonClass} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button></td>
+              <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
             <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
             <td>${declaration.applied_revision === null ? 'Not yet applied'
@@ -283,11 +304,16 @@ export function LaneAddonsPanel() {
           ${configuration.declarations.length === 0 && html`<p>No readable TOML declarations.</p>`}
           <p>Configuration status tracks installed revisions. Observation status is shown per instance below.</p>`}
     </section>`}
-    <${LaneDeclarationEditor} target=${editor} onClose=${() => setEditor(null)} onSaved=${(key: string, document: LaneDeclarationDocument) => {
-      setEditor(current => current?.key === key ? { key: document.source_path, sourcePath: document.source_path } : current)
-      setNewEditorKey(current => current === key ? crypto.randomUUID() : current)
-      void refresh()
-    }} />
+    ${authority === null ? html`<div class="space-y-2">
+      <p role="status">Workspace authority is being verified. TOML editing is unavailable until the workspace is confirmed; your retained drafts are unchanged.</p>
+      <button type="button" class=${buttonClass} disabled=${recoveringAuthority} onClick=${recoverAuthority}>${recoveringAuthority ? 'Checking workspace…' : 'Verify workspace'}</button>
+      ${authorityError && html`<p role="alert">${authorityError} Workspace verification can be retried.</p>`}
+    </div>` : session === null && html`<p role="status">${reading
+      ? 'Reading the current workspace’s TOML configuration before opening retained drafts…'
+      : 'Current workspace TOML configuration is unavailable. Refresh to retry; your retained drafts are unchanged.'}</p>`}
+    ${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSaved=${() => {
+      if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
+    }} />`}
     <details><summary>Attach a package</summary>
       <form class="flex flex-wrap gap-2 py-2" onSubmit=${(event: Event) => {
         event.preventDefault()
@@ -310,7 +336,7 @@ export function LaneAddonsPanel() {
         onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
         ${item.configuration === null ? html`<p>Not managed by TOML</p>` : html`<div class="break-all" aria-label=${`Configuration for ${item.instance_id}`}>
           <p>TOML: ${item.configuration.id}</p><p>${item.configuration.source_path}</p><p>Installed configuration: ${item.configuration.revision}</p>
-          ${hasCurrentDeclaration(configuration, item) && html`<button type="button" class=${buttonClass}
+          ${hasCurrentDeclaration(configuration, item) && html`<button type="button" class=${buttonClass} disabled=${session === null}
             onClick=${() => { if (item.configuration !== null) editToml(item.configuration.source_path) }} aria-label=${`Edit TOML for ${item.instance_id}`}>Edit TOML</button>`}
         </div>`}
         ${item.package.presentation.description !== null && html`<p>${item.package.presentation.description}</p>`}

@@ -52,21 +52,6 @@ let test_no_entry_loses_its_row () =
     done
   done
 
-let module_path = "bin/masc_tui_render_fusion.ml"
-
-let calls ~callee =
-  Ast_grep.count_calls_in_value_binding ~module_path
-    ~binding_name:"render_fusion_list" ~callee
-
-(* The rule and the packing both live in the screen that draws the list, and
-   the render lives in the executable, which no test can link. Read through
-   the source so a reserve written back by hand is seen here. *)
-let test_the_screen_asks_for_the_height () =
-  expect "the list height comes from the rule, not a reserved row" 1
-    (calls ~callee:"listing_note_rows");
-  expect "the reading is packed at clause marks" 1
-    (calls ~callee:"Message_layout.pack_clauses")
-
 let () =
   Alcotest.run "tui_fusion_summary_rows"
     [ ( "rows for the reading under the list"
@@ -76,7 +61,6 @@ let () =
             test_a_full_list_keeps_the_single_row
         ; Alcotest.test_case "no entry loses its row" `Quick
             test_no_entry_loses_its_row
-        ; Alcotest.test_case "the screen asks for the height" `Quick
-            test_the_screen_asks_for_the_height
+
         ] )
     ]

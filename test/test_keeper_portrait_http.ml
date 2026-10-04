@@ -244,9 +244,9 @@ let test_expected_equipment_precedes_tags_and_cache () =
 let test_account_revision_binds_facts_not_decay_clock () =
   let at0 = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
   let at1 = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:01Z") in
-  let payment name owner = require_ok Fun.id (Candle_payment.make
+  let payment name owner = require_ok Fun.id (Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
     ~identity:{goal_id=name;request_id=name ^ "-request";verification_run_id=name ^ "-run"}
-    ~grade:Candle_grade.Trivial ~total_milli:1000
+    ~grade:(Option.get (Candle_grade.of_string "trivial")) ~total_milli:1000
     ~grade_trace:{run_id="grade";slot_id="appraiser"}
     ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="appraiser"}}]
     ~weights_trace:{run_id="weights";slot_id="appraiser"}
@@ -256,6 +256,15 @@ let test_account_revision_binds_facts_not_decay_clock () =
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 1000
@@ -654,6 +663,15 @@ max-concurrent = 1
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 1000
@@ -667,9 +685,9 @@ beanie = %d
     Fs_compat.save_file policy_path (policy_text 200);
     let owner = require_ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
     let at = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
-    let payment = require_ok Fun.id (Candle_payment.make
+    let payment = require_ok Fun.id (Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
       ~identity:{goal_id="portrait-goal";request_id="proof-request";verification_run_id="proof-run"}
-      ~grade:Candle_grade.Trivial ~total_milli:1000
+      ~grade:(Option.get (Candle_grade.of_string "trivial")) ~total_milli:1000
       ~grade_trace:{run_id="grade";slot_id="appraiser"}
       ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="appraiser"}}]
       ~weights_trace:{run_id="weights";slot_id="appraiser"}

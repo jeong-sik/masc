@@ -149,6 +149,12 @@ val load_or_materialize_boot_meta :
     be made ([Config_invalid]) or whose container image does not resolve on
     this host ([Sandbox_image_unresolved]). *)
 
+module For_testing : sig
+  val park_unreadable_meta_before_rematerialization :
+    now:float -> Workspace.config -> string -> unit
+  (** Run the production parking path at a fixed observation time. *)
+end
+
 (** {1 Supervisor sweep state} *)
 
 val start_supervisor_sweep :

@@ -5,8 +5,17 @@
  (deps
   test_tui_region_baseline_pty.py
   tui_region_harness.py
-  test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_observer.py
+  tui_keyboard_repositories.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_workspace.py)
  (action
   (run python3 %{dep:test_tui_region_baseline_pty.py} %{dep:../bin/masc_tui.exe})))
 

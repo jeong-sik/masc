@@ -1461,26 +1461,57 @@ let test_buckets_sparse () =
     check bool "sparse → 2 distinct buckets (10min apart, 5min width)"
       true (List.length m.mb_buckets >= 2))
 
-let test_buckets_cache_hit_ratio_zero_denom () =
+let test_buckets_cache_hit_ratio_uses_inclusive_input () =
+  List.iter (fun (input_tokens, cache_read, expected) ->
+    let dir = test_dir () in
+    let path = make_keeper_dir dir "cache_ratio" in
+    write_decisions path [
+      success_entry_with_cache ~model:"kimi-k2.6" ~ts:(now_unix ())
+        ~input_tokens ~cache_read ();
+    ];
+    Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+      let result =
+        M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60
+        |> bucket_models
+      in
+      let bucket = (List.hd result).mb_buckets |> List.hd in
+      check (option (float 0.001)) "cached input is part of reported input"
+        expected bucket.b_cache_hit_ratio))
+    [1000, 900, Some 0.9; 1000, 0, Some 0.0; 0, 0, None]
+
+let test_paired_cache_aggregate_excludes_missing_reports () =
   let dir = test_dir () in
-  let path = make_keeper_dir dir "cache_zero" in
-  let now = now_unix () in
-  write_decisions path [
-    success_entry_with_cache ~model:"kimi-k2.6" ~ts:now ~input_tokens:0 ~cache_read:0 ();
-  ];
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
-    let result =
-      M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60
-      |> bucket_models
-    in
-    check int "one model" 1 (List.length result);
-    let m = List.hd result in
-    let b = List.hd m.mb_buckets in
-    check bool "cache_hit_ratio present" true (Option.is_some b.b_cache_hit_ratio);
-    check bool "cache_hit_ratio not NaN" true
-      (not (Float.is_nan (Option.value ~default:0.0 b.b_cache_hit_ratio)));
-    check (option (float 0.001)) "cache_hit_ratio = 0.0 when both tokens=0"
-      (Some 0.0) b.b_cache_hit_ratio)
+    let path = make_keeper_dir dir "paired_cache" in
+    let now = now_unix () in
+    let without_field field = function
+      | `Assoc fields -> `Assoc (List.map (function
+          | "telemetry", `Assoc telemetry ->
+            "telemetry", `Assoc (List.remove_assoc field telemetry)
+          | other -> other) fields)
+      | other -> other in
+    write_decisions path [
+      success_entry ~model:"paired" ~ts:now ~input_tokens:1000 ~cache_read_tokens:900 ();
+      success_entry ~model:"paired" ~ts:(now -. 1.) ~input_tokens:1000 ()
+        |> without_field "cache_read_tokens";
+      success_entry ~model:"paired" ~ts:(now -. 2.) ~cache_read_tokens:50 ()
+        |> without_field "input_tokens";
+    ];
+    let aggregate = M.compute_with_buckets ~base_path:dir ~window_minutes:60 ~bucket_minutes:60 in
+    let stats = List.hd aggregate.models in
+    check (option int) "standalone input total" (Some 2000) stats.total_input_tokens;
+    check (option int) "standalone cache total" (Some 950) stats.total_cache_read_tokens;
+    (match stats.cached_input with
+     | None -> fail "paired report missing"
+     | Some paired ->
+       check int "paired input" 1000 paired.ci_input_tokens;
+       check int "paired cache" 900 paired.ci_cache_read_tokens;
+       check int "paired sample count" 1 paired.ci_sample_count);
+    let open Yojson.Safe.Util in
+    let paired_json = M.to_json aggregate |> member "models" |> to_list |> List.hd |> member "cached_input" in
+    check int "JSON paired input" 1000 (paired_json |> member "input_tokens" |> to_int);
+    check int "JSON paired cache" 900 (paired_json |> member "cache_read_tokens" |> to_int);
+    check int "JSON sample coverage" 1 (paired_json |> member "sample_count" |> to_int))
 
 let test_buckets_with_compute () =
   let dir = test_dir () in
@@ -1525,6 +1556,7 @@ let zero_model_stats (model_id : string) ~entry_count
     total_input_tokens = None;
     total_output_tokens = None;
     total_cache_read_tokens = None;
+    cached_input = None;
     total_cache_creation_tokens = None;
     total_reasoning_tokens = None;
     usage_sample_count = entry_count;
@@ -1738,7 +1770,8 @@ let () =
       test_case "empty dir → no buckets" `Quick test_buckets_empty_dir;
       test_case "single bucket window" `Quick test_buckets_single_bucket;
       test_case "sparse entries → distinct buckets" `Quick test_buckets_sparse;
-      test_case "cache_hit_ratio zero denom" `Quick test_buckets_cache_hit_ratio_zero_denom;
+      test_case "paired cache reports survive aggregation and JSON" `Quick test_paired_cache_aggregate_excludes_missing_reports;
+      test_case "cache share of inclusive input" `Quick test_buckets_cache_hit_ratio_uses_inclusive_input;
       test_case "compute_with_buckets integration" `Quick test_buckets_with_compute;
     ];
     "prompt_feedback", [

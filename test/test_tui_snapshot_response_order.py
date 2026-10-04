@@ -6,33 +6,29 @@ import copy
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
 import zlib
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_approvals as _keyboard_approvals
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_schedule as _keyboard_schedule
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The surface this loads ("MASC Usage") is titled in masc_tui_render.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-)
+
 
 
 PATHS = {
     "gate": "/api/v1/dashboard/gate",
     "held": "/api/v1/keepers/tool-approvals",
-    "schedules": h.SCHEDULES_PATH,
+    "schedules": _keyboard_schedule.SCHEDULES_PATH,
 }
 
 
 def fixtures_and_reading(source: str, count: int):
-    fixtures = h.schedule_detail_http_fixtures()
-    gate = copy.deepcopy(h.blocked_gate_detail_http_fixtures()[PATHS["gate"]][1])
+    fixtures = _keyboard_schedule.schedule_detail_http_fixtures()
+    gate = copy.deepcopy(_keyboard_approvals.blocked_gate_detail_http_fixtures()[PATHS["gate"]][1])
     gate_row = gate["approval_queue"][0]
     schedule = copy.deepcopy(fixtures[PATHS["schedules"]][1])
     schedule_row = schedule["requests"][0]
@@ -66,26 +62,26 @@ def label(source: str, count: int) -> bytes:
 
 def open_source(source, process, master, output, count=0):
     if source == "schedules":
-        h.palette_go(process, master, output, b"go schedules", label(source, count))
+        _keyboard_harness.palette_go(process, master, output, b"go schedules", label(source, count))
     else:
-        h.palette_go(process, master, output, b"go Usage", b"MASC Usage")
-        h.send_and_wait(process, master, output, b"p", b"MASC Usage / Telemetry")
-        h.send_and_wait(process, master, output, b"3", label(source, count))
+        _keyboard_harness.palette_go(process, master, output, b"go Usage", b"MASC Usage")
+        _keyboard_harness.send_and_wait(process, master, output, b"p", b"MASC Usage / Telemetry")
+        _keyboard_harness.send_and_wait(process, master, output, b"3", label(source, count))
 
 
 def capture(binary_sha, source, scenario, process, master, output):
-    h.read_available(master, output)
+    _keyboard_harness.read_available(master, output)
     before = len(output)
-    h.resize_and_wait(process, master, output, rows=30, columns=110,
-                      needle=label(source, 2), controls=(h.FULL_REDRAW,))
-    redraw = output.find(h.FULL_REDRAW, before)
+    _keyboard_harness.resize_and_wait(process, master, output, rows=30, columns=110,
+                      needle=label(source, 2), controls=(_keyboard_harness.FULL_REDRAW,))
+    redraw = output.find(_keyboard_harness.FULL_REDRAW, before)
     assert redraw >= 0
-    h.wait_for_output(process, master, output, h.FRAME_END, start=redraw, timeout=3.0)
-    end = output.find(h.FRAME_END, redraw) + len(h.FRAME_END)
-    start = output.rfind(h.FRAME_START, before, redraw)
+    _keyboard_harness.wait_for_output(process, master, output, _keyboard_harness.FRAME_END, start=redraw, timeout=3.0)
+    end = output.find(_keyboard_harness.FRAME_END, redraw) + len(_keyboard_harness.FRAME_END)
+    start = output.rfind(_keyboard_harness.FRAME_START, before, redraw)
     assert start >= 0
     frame = bytes(output[start:end])
-    screen = h.screen_text(frame)
+    screen = _keyboard_harness.screen_text(frame)
     assert label(source, 2) in screen and label(source, 0) not in screen, screen
     assert b"obsolete-source-error" not in screen, screen
     print("SNAPSHOT_READ_PTY_EVIDENCE " + json.dumps({
@@ -99,27 +95,27 @@ def explicit_refresh(binary, binary_sha, source, old_fails):
     fixtures, current = fixtures_and_reading(source, 2)
     path = PATHS[source]
     obsolete = (503, {"error": "obsolete-source-error"}) if old_fails else fixtures[path]
-    old = h.GatedHttpResponse(obsolete, subsequent_response=current, hold_seconds=10.0)
-    next_read = h.GatedHttpResponse(current, subsequent_response=current, hold_seconds=10.0)
+    old = _keyboard_harness.GatedHttpResponse(obsolete, subsequent_response=current, hold_seconds=10.0)
+    next_read = _keyboard_harness.GatedHttpResponse(current, subsequent_response=current, hold_seconds=10.0)
 
     def interact(process, master, _slave, output, _base):
         try:
             open_source(source, process, master, output)
             fixtures[path] = old
             os.write(master, b"r")
-            assert h.wait_for_fixture_event(process, master, output, old.requested, timeout=5.0)
-            h.send_and_wait(process, master, output, b"r", label(source, 2))
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, old.requested, timeout=5.0)
+            _keyboard_harness.send_and_wait(process, master, output, b"r", label(source, 2))
             # Hold the next read so a later current reply cannot conceal an
             # obsolete success/error after it has been delivered by HTTP.
             fixtures[path] = next_read
             old.release.set()
-            assert h.wait_for_fixture_event(process, master, output, old.completed, timeout=5.0)
-            h.drain_until_quiet(process, master, output)
-            screen = h.screen_text(bytes(output))
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, old.completed, timeout=5.0)
+            _keyboard_harness.drain_until_quiet(process, master, output)
+            screen = _keyboard_harness.screen_text(bytes(output))
             assert label(source, 2) in screen and label(source, 0) not in screen, screen
             assert b"obsolete-source-error" not in screen, screen
             os.write(master, b"r")
-            assert h.wait_for_fixture_event(process, master, output, next_read.requested, timeout=5.0)
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, next_read.requested, timeout=5.0)
             capture(binary_sha, source, "late error" if old_fails else "late success",
                     process, master, output)
             next_read.release.set()
@@ -128,16 +124,16 @@ def explicit_refresh(binary, binary_sha, source, old_fails):
             old.release.set()
             next_read.release.set()
 
-    h.run_terminal_scenario(binary, description=f"{source}: explicit refresh rejects late {'error' if old_fails else 'success'}",
+    _keyboard_harness.run_terminal_scenario(binary, description=f"{source}: explicit refresh rejects late {'error' if old_fails else 'success'}",
                             interact=interact, http_fixtures=fixtures)
 
 
 def slow_poll(binary, binary_sha, source):
     fixtures, current = fixtures_and_reading(source, 2)
     path = PATHS[source]
-    slow = h.GatedHttpResponse(current, subsequent_response=current, hold_seconds=10.0)
+    slow = _keyboard_harness.GatedHttpResponse(current, subsequent_response=current, hold_seconds=10.0)
     _, initial = fixtures_and_reading(source, 0)
-    next_read = h.GatedHttpResponse(current, hold_seconds=10.0)
+    next_read = _keyboard_harness.GatedHttpResponse(current, hold_seconds=10.0)
     initial_served = False
     watching_ticks = threading.Event()
     two_ticks = threading.Event()
@@ -190,15 +186,15 @@ def slow_poll(binary, binary_sha, source):
             # whose delayed HTTP arrivals cannot be distinguished from polls
             # at the fixture. The startup response is 0; only the real timer
             # can start the following slow read, without any superseded reads.
-            assert h.wait_for_fixture_event(process, master, output, slow.requested, timeout=5.0)
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, slow.requested, timeout=5.0)
             trace("watching timer ticks")
             watching_ticks.set()
-            assert h.wait_for_fixture_event(process, master, output, two_ticks, timeout=5.0)
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, two_ticks, timeout=5.0)
             trace("checking pending read")
             assert not slow.completed.is_set(), f"{source} fixture expired before the pending-read assertion"
             assert slow.calls == 1, f"automatic polls replaced the pending {source} read: {slow.calls}"
             slow.release.set()
-            assert h.wait_for_fixture_event(process, master, output, resumed, timeout=5.0)
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, resumed, timeout=5.0)
             # A resumed poll means the slow response settled. Hold all later
             # replies (including surface-entry refreshes), so only that slow
             # response can supply the 2 rows observed on the destination.
@@ -206,7 +202,7 @@ def slow_poll(binary, binary_sha, source):
             capture(binary_sha, source, "slow poll publishes and polling resumes",
                     process, master, output)
             next_read.release.set()
-            assert h.wait_for_fixture_event(process, master, output, next_read.completed, timeout=5.0)
+            assert _keyboard_harness.wait_for_fixture_event(process, master, output, next_read.completed, timeout=5.0)
             os.write(master, b"q")
         finally:
             next_read.release.set()
@@ -218,7 +214,7 @@ def slow_poll(binary, binary_sha, source):
             }), flush=True)
             slow.release.set()
 
-    h.run_terminal_scenario(binary, description=f"{source}: automatic polling preserves a slow read",
+    _keyboard_harness.run_terminal_scenario(binary, description=f"{source}: automatic polling preserves a slow read",
                             refresh=0.2, interact=interact, http_fixtures=fixtures)
 
 

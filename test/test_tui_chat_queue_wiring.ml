@@ -918,7 +918,13 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
     | Error detail -> fail detail
   done;
   let newer = Q.waiting state.msg_queued in
+  state.msg_history <- [chat_entry ~request_id:item.request.request_id
+    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+    ~text:item.request.message ~at:1. ()];
   Tui_types.retain_preflight_inputs state [entry];
+  check bool "retained queued input remains in recall history" true
+    (List.exists (fun (row : Tui_types.msg_entry) -> row.me_request_id = item.request.request_id)
+       state.msg_history);
   check string "newer composer untouched" "newer composer" (Buffer.contents state.msg_input);
   check bool "newer reference untouched" true
     (state.msg_references = [Keeper_chat.Ref_url "https://example.invalid/new.png"]);
@@ -931,7 +937,7 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
          (List.for_all (fun (next : Q.item) -> restored.submission_seq < next.submission_seq) rest)
    | [] -> fail "previous input disappeared");
   check bool "restored input requires explicit resume" true
-    (List.mem ("alpha", item.request.request_id, Tui_types.Retained_after_stop)
+    (List.mem ("alpha", item.request.request_id, Tui_types.Retained_before_dispatch)
        state.keeper_interactive_waiting);
   (match Q.take_newest_for_keeper state.msg_queued ~keeper_name:"alpha" with
    | Some (newest, _) -> check string "recall still chooses newest input"
@@ -968,6 +974,58 @@ let test_preflight_recovery_preserves_order_and_steer_intent () =
        check bool "recall order agrees with submission order" true
          (first.submission_seq < second.submission_seq)
    | _ -> fail "expected both preflight inputs")
+;;
+
+let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  Buffer.add_string state.msg_input "newer draft";
+  let entry, item = preflight_input () in
+  Tui_types.retain_preflight_inputs state [entry];
+  let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later Enter" () in
+  (match Q.push state.msg_queued ~submitted_at:2. later with
+   | Ok (queue, _) -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  state.keeper_interactive_waiting <- ("alpha", later.request_id,
+    Tui_types.Awaiting_control {generation=0; target=None}) :: state.keeper_interactive_waiting;
+  check bool "later Enter cannot bypass retained first input" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  check bool "operator can resume never-posted input locally" true
+    (Tui_types.resume_preflight_keeper_input state "alpha");
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (first, _) -> check string "resume dispatches original input first"
+       item.request.request_id first.request.request_id
+   | None -> fail "local resume still blocked");
+  check bool "local resume does not manufacture a server control token" true
+    (state.keeper_chat_control_tokens = [] && state.keeper_chat_control_pending = []);
+  state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
+    Tui_types.Retained_before_dispatch];
+  ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
+  check bool "a real stop still requires its server resume receipt" false
+    (Tui_types.resume_preflight_keeper_input state "alpha");
+  check bool "server-stopped input remains held" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
+let test_identity_outage_retains_only_existing_local_holds () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let entry, item = preflight_input () in
+  Tui_types.retain_preflight_inputs state [entry];
+  let other = Keeper_chat.create_request ~keeper_name:"beta" ~message:"ordinary NEXT" () in
+  (match Q.push state.msg_queued ~submitted_at:2. other with
+   | Ok (queue, _) -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  state.keeper_interactive_waiting <- Tui_types.retained_input_markers state.msg_queued
+    (("beta", other.request_id, Tui_types.Awaiting_control {generation=0; target=None})
+     :: state.keeper_interactive_waiting);
+  check bool "recovered alpha remains held" true
+    (List.mem ("alpha", item.request.request_id, Tui_types.Retained_before_dispatch)
+       state.keeper_interactive_waiting);
+  (match Tui_types.next_authorized_keeper_input state "beta" with
+   | Some (ready, _) -> check string "unrelated NEXT resumes normally" other.request_id ready.request.request_id
+   | None -> fail "unrelated NEXT was converted into a manual hold")
 ;;
 
 let test_offscreen_preflight_recovery_retains_its_owner () =
@@ -4182,6 +4240,8 @@ let () =
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
         ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
+        ; test_case "preflight local resume preserves FIFO and server stops" `Quick test_preflight_local_resume_keeps_fifo_and_respects_server_stop
+        ; test_case "identity outage preserves unrelated NEXT authorization" `Quick test_identity_outage_retains_only_existing_local_holds
         ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal

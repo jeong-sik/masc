@@ -19,6 +19,11 @@ type removal =
   | Unremovable of string  (** Why the server will not remove it. *)
 type unverified = { runtime_id : string; code : string }
 type saved =
+  | Saved_durability_unconfirmed of saved
+      (** The configuration is visible; its storage durability is uncertain.
+          Refresh preserves this warning and does not resubmit the save. *)
+  | Saved_lock_release_unconfirmed of saved
+      (** The commit completed, but the writer's lock release was not confirmed. *)
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }
@@ -112,8 +117,8 @@ val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
 (** Refresh configuration revision and selection after an unsuccessful save,
     retaining the account and selected models for an explicit retry. *)
 val saved : t -> Yojson.Safe.t -> (saved, string) result
-(** Read a save's receipt into [Finished]. A receipt that is neither verified
-    nor a readable usage-limited list of runtimes it selected is an error. *)
+(** Read a save's verification and commit durability into [Finished]. Missing
+    or unknown durability and unreadable verification lists are errors. *)
 val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
 (** Re-read the list after a save, keeping what the save published on screen. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit

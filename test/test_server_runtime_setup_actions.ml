@@ -35,7 +35,7 @@ if args[0]=='runtime-muse-models':
     catalog_file=os.path.join(args[4],'fixture-muse-catalog.json')
     if os.path.exists(catalog_file):
         with open(catalog_file) as f: models=json.load(f)
-    else: models=[{'id':'reported-muse','label':'Reported Muse','context':8192}]
+    else: models=[{'id':'reported-muse','label':'Reported Muse','context':32768}]
     print(json.dumps({'schema':'masc.muse_models.v1','source':'providerCatalog',
       'invocation_verified':False,'account_availability_verified':False,
       'models':models}))
@@ -90,14 +90,20 @@ let test_private_key () = fixture (fun base runtime binary _net ->
   let paths=List.filter_map (fun (p:Runtime_schema.provider) -> match p.credentials with
     | Some (Runtime_schema.File path) -> Some path | _ -> None) config.providers in
   Alcotest.check Alcotest.int "one committed private key" 1 (List.length paths);
-  let path=List.hd paths in
-  Alcotest.check Alcotest.int "key remains private after request cleanup" 0o600 (Unix.stat path).st_perm;
-  Alcotest.check Alcotest.string "key material correct" "fixture-secret-key" (In_channel.with_open_bin path In_channel.input_all);
+  let key_path=List.hd paths in
+  Alcotest.check Alcotest.int "key remains private after request cleanup" 0o600 (Unix.stat key_path).st_perm;
+  Alcotest.check Alcotest.string "key material correct" "fixture-secret-key" (In_channel.with_open_bin key_path In_channel.input_all);
   let open Yojson.Safe.Util in
   Alcotest.check Alcotest.string "response/tool verified scope" "verified" (receipt |> member "readiness" |> to_string);
   let keys=receipt |> to_assoc |> List.map fst |> List.sort String.compare in
   Alcotest.check (Alcotest.list Alcotest.string) "safe receipt fields only"
-    (List.sort String.compare ["runtime_id";"runtime_ids";"models";"configured";"validation";"readiness"]) keys)
+    (List.sort String.compare ["runtime_id";"runtime_ids";"models";"configured";"validation";"readiness";"commit"]) keys;
+  let commit = receipt |> member "commit" in
+  Alcotest.check (Alcotest.list Alcotest.string) "commit omits private source and storage details"
+    ["durability";"order";"source_revision";"warnings"]
+    (commit |> to_assoc |> List.map fst |> List.sort String.compare);
+  Alcotest.check Alcotest.bool "private credential reference stays out of receipt" false
+    (String_util.contains_substring (Yojson.Safe.to_string receipt) key_path))
 let test_forbidden_reference () = fixture (fun base runtime binary _net ->
   let before=In_channel.with_open_bin runtime In_channel.input_all in
   List.iter (fun fields ->
@@ -291,7 +297,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     let request=if protocol<>"muse-serve" then request else
       (match request with `Assoc root -> `Assoc (List.map (fun (key,v) ->
         if key<>"connections" then key,v else key,`List [`Assoc ["source",selected;
-          "models",`List [`Assoc ["id",`String "reported-muse";"context",`Int 8192;
+          "models",`List [`Assoc ["id",`String "reported-muse";"context",`Int 32768;
             "streaming",`Bool true]]]]) root)
        | _ -> assert false) in
     let account_reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
@@ -344,7 +350,7 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
       "id",`String id;"context",`Int context;"streaming",`Bool true]]]];
     "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
   let row context=`Assoc ["id",`String "reported-muse";"context",context] in
-  let reported=row (`Int 8192) in
+  let reported=row (`Int 32768) in
   let catalog_path=Filename.concat account_home "fixture-muse-catalog.json" in
   List.iter (fun (name,models,id,context) ->
     save catalog_path (Yojson.Safe.to_string (`List models));
@@ -358,14 +364,14 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
     Alcotest.check Alcotest.bool (name ^ " leaves account lease reusable") true
       (Result.is_ok (Runtime_setup_accounts.resolve ~workspace:base
         ~integration_id:"muse" ~cli_path:"muse" reference)))
-    ["unreported ID",[reported],"invented-muse",8192;
-     "tampered context",[reported],"reported-muse",16384;
-     "catalog lost after discovery",[],"reported-muse",8192;
-     "context absent",[row `Null],"reported-muse",8192;
-     "context nonpositive",[row (`Int 0)],"reported-muse",8192;
-     "ambiguous catalog ID",[reported;reported],"reported-muse",8192];
+    ["unreported ID",[reported],"invented-muse",32768;
+     "tampered context",[reported],"reported-muse",65536;
+     "catalog lost after discovery",[],"reported-muse",32768;
+     "context absent",[row `Null],"reported-muse",32768;
+     "context nonpositive",[row (`Int 0)],"reported-muse",32768;
+     "ambiguous catalog ID",[reported;reported],"reported-muse",32768];
   save catalog_path (Yojson.Safe.to_string (`List [reported]));
-  ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" 8192)));
+  ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" 32768)));
   Alcotest.check Alcotest.bool "matching fresh metadata reaches native verification" true
     (Sys.file_exists (Filename.concat base "save-calls")))
 
@@ -432,6 +438,8 @@ let test_bound_models_follow_account_home () = fixture (fun base runtime binary 
 let test_status_of_error () =
   let check name expected error =
     Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
+  check "commit storage failure is 503" `Service_unavailable (Actions.Save_failed (Runtime_setup_batch.Write_failed "disk full"));
+  check "commit validation refusal is 400" `Bad_request (Actions.Save_failed (Runtime_setup_batch.Commit_refused "invalid source"));
   check "missing net is 503" `Service_unavailable Actions.Network_unavailable;
   check "unreadable configuration is 503" `Service_unavailable Actions.Configuration_unavailable;
   check "wrong body is 400" `Bad_request Actions.Invalid_request;

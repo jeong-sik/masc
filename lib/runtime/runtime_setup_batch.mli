@@ -14,6 +14,11 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Validation_failed of { exit : Unix.process_status; stderr : string }
       (** The native stage validator ran and did not exit 0. Carries how it
           ended and what it wrote to stderr. *)
+  | Commit_refused of string
+      (** The commit that publishes the saved text refused it: the final
+          in-process validation disagreed with what the staged child accepted.
+          The string is the commit's refusal, several lines at most, carried
+          whole by {!error_detail} rather than the one-line summary. *)
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
       (** The runtime's own verification report says it is not verified, for
           a reason other than a spent quota or a rate limit ({!Usage_limited}).
@@ -22,7 +27,10 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
       (** The verification child produced no report this module can read, or
           a verified report with a failing exit. *)
-  | Write_failed | Rollback_failed | Lock_unavailable
+  | Write_failed of string
+      (** Storage failed before rename. The prior configuration remains visible;
+          the diagnostic is for the operator's terminal, never an HTTP error. *)
+  | Lock_unavailable
 type usage_limited = { runtime_id : string; code : string }
 (** A runtime whose provider declined the verification for the account's
     usage: a spent quota or a rate limit. It is published without a
@@ -43,18 +51,17 @@ type readiness =
     what was called and published unmeasured, and may be empty. A caller
     must not report the save as verified. *)
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
-                 readiness:readiness }
+                 readiness:readiness; commit:Runtime.config_commit_receipt }
 val error_message : error -> string
 (** One line: how the step ended and why, never a child's log. *)
 val error_detail : error -> string option
-(** The stderr of the stage validator or verification child, when one ran and
-    wrote something. A diagnostic for the operator's own terminal, not for
-    HTTP responses. *)
+(** Child stderr, final validation detail, or the filesystem failure diagnostic.
+    For the operator's own terminal, not for HTTP responses. *)
 val revision_to_string : revision -> string
 val revision_of_string : string -> (revision,error) result
 val observe : base_path:string -> (revision,error) result
 val observe_inventory : base_path:string -> (revision * Runtime.config_observation,error) result
-(** One paired-file observation supplies both the private runtime text and its
+(** One file observation supplies both the private runtime text and its
     setup revision, so a menu cannot join stale rows to a newer revision. *)
 (** Must run inside an Eio scope, like the server and native setup CLI. *)
 val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?default_lane_id:string -> binary:string -> base_path:string -> expected_revision:revision ->
@@ -64,21 +71,27 @@ val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?
     the current declared default lane, replacing only its ordered candidates;
     unrelated lanes and Keeper assignments remain unchanged. The receipt names
     that lane as [runtime_id], with concrete candidates in [runtime_ids].
-    Existing provider and unrelated
-    settings bytes are retained. Both files are compared again after stage
-    validation under the existing runtime writer lock. Publication replaces the
-    overlay dependency before runtime.toml; each replacement is atomic, the pair
-    is not a filesystem transaction. Reported failures restore prior bytes;
-    [Rollback_failed] requires operator inspection. Successful save is not owner
-    activation or sandbox readiness. Pending credential handles are retained
-    immediately after publication in the same cancellation-protected phase,
-    before config-lock settlement can interrupt the caller. *)
+    Existing provider and unrelated settings bytes are retained. The source is
+    compared again after stage validation under the runtime writer lock.
+    Publication validates and atomically replaces runtime.toml through the
+    runtime commit path. Before-rename failure preserves the prior file and
+    registry. After-rename durability uncertainty keeps the visible file and
+    published registry and is carried by [commit] in the receipt. A save is not
+    owner activation or sandbox readiness. Pending credentials are retained
+    after visible publication in the same cancellation-protected phase. *)
 val receipt_json : receipt -> Yojson.Safe.t
+(** [commit.warnings] carries public warning codes only, never private lock paths
+    or exception diagnostics. An empty list means the owning lock reported none. *)
 
 module For_testing : sig
-  val publish :
-    replace:(string -> int -> string -> (unit,Fs_compat.atomic_replace_failure) result) ->
-    files:(string * string) list -> (unit,error) result
-  (** Fault injection at the filesystem replacement edge; uses the same
-      publication/rollback implementation and real original-file snapshots. *)
+  val configure :
+    ?release_failure:File_lock_eio.durable_lock_error ->
+    replace_file:(string -> int -> string -> (unit,Fs_compat.atomic_replace_failure) result) ->
+    ?pending_credentials:Runtime_setup_credentials.pending list -> ?default_lane_id:string ->
+    binary:string -> base_path:string -> expected_revision:revision ->
+    specs:Runtime_setup_spec.t list -> runtime_ids:string list ->
+    default_runtime_id:string -> verify:bool -> unit -> (receipt,error) result
+  (** Runs the complete setup transaction with an injected final replacement
+      edge and optional observed release failure. Stage validation, commit,
+      lock acquisition and actual release are the production path. *)
 end

@@ -334,6 +334,18 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
                 and unmeasured is None and kept is None)
             or (('unverified' in result or 'not_rechecked' in result) and unmeasured is None and kept is None)):
         raise SetupError('MASC did not confirm the selected configuration. Inspect the workspace before retrying.')
+    commit = result.get('commit')
+    if not isinstance(commit, dict) or commit.get('durability') not in ('durable', 'unconfirmed'):
+        raise SetupError('MASC did not report configuration durability. Inspect the workspace before retrying.')
+    if commit['durability'] == 'unconfirmed':
+        print(paint('! Configuration is visible, but disk durability is unconfirmed. ', 'warn')
+              + 'Do not repeat setup; inspect the workspace storage before restarting.', file=sys.stderr)
+    warnings = commit.get('warnings')
+    if not isinstance(warnings, list) or any(not isinstance(row, dict) or row.get('code') != 'runtime_config_lock_release_unconfirmed' for row in warnings):
+        raise SetupError('MASC did not report readable configuration lock warnings. Inspect the workspace before retrying.')
+    if warnings:
+        print(paint('! Configuration is saved, but configuration lock release is unconfirmed. ', 'warn')
+              + 'Do not repeat setup; inspect the server lock state.', file=sys.stderr)
     if kept is not None:
         print(paint('! Saved without checking these again: ', 'warn') + ', '.join(terminal_text(name) for name in kept[0])
               + '. They stay as they were.', file=sys.stderr)

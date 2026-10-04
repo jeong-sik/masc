@@ -3,7 +3,11 @@
 ; conflict whatever else they touch (#36385).
 (rule
  (alias runtest-test_tui_schedules_empty_row_names_its_key)
- (deps test_tui_schedules_empty_row_names_its_key.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_schedules_empty_row_names_its_key.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_schedule.py)
  (action
   (run python3 %{dep:test_tui_schedules_empty_row_names_its_key.py} %{dep:../bin/masc_tui.exe})))
 

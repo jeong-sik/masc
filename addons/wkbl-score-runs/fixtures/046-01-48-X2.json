@@ -1,0 +1,449 @@
+{
+  "source_id": "wkbl-pbp",
+  "incarnation": "046-01-48-X2-20260929",
+  "cursor": "046-01-48/X2/45",
+  "complete": true,
+  "detail": null,
+  "observations": [
+    {
+      "id": "046-01-48/X2",
+      "kind": "wkbl_pbp_period",
+      "observed_at": 1790701497.118,
+      "actor": null,
+      "evidence": [
+        {
+          "uri": "https://wkbl.win/boxscore/046-01-48/pbp?period=X2",
+          "sha256": null
+        }
+      ],
+      "game_id": "046-01-48",
+      "period_code": "X2",
+      "team1": "BNK 썸",
+      "team2": "신한은행",
+      "initial_score": [
+        72,
+        72
+      ],
+      "final_score": [
+        79,
+        85
+      ],
+      "rows": [
+        {
+          "id": 1435247,
+          "event_index": 0,
+          "team_side": 2,
+          "clock": "05:00",
+          "description": "쿼터시작",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435248,
+          "event_index": 1,
+          "team_side": 2,
+          "clock": "04:51",
+          "description": "신지현 페인트존2점슛성공",
+          "team1_score": 72,
+          "team2_score": 74
+        },
+        {
+          "id": 1435249,
+          "event_index": 2,
+          "team_side": 1,
+          "clock": "04:27",
+          "description": "김소니아 3점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435250,
+          "event_index": 3,
+          "team_side": 2,
+          "clock": "04:27",
+          "description": "신지현 수비리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435251,
+          "event_index": 4,
+          "team_side": 2,
+          "clock": "04:14",
+          "description": "신지현 3점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435252,
+          "event_index": 5,
+          "team_side": 1,
+          "clock": "04:14",
+          "description": "김소니아 수비리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435253,
+          "event_index": 6,
+          "team_side": 1,
+          "clock": "03:54",
+          "description": "박혜진 2점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435254,
+          "event_index": 7,
+          "team_side": 1,
+          "clock": "03:54",
+          "description": "박혜진 공격리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435255,
+          "event_index": 8,
+          "team_side": 1,
+          "clock": "03:51",
+          "description": "박혜진 2점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435256,
+          "event_index": 9,
+          "team_side": 1,
+          "clock": "03:51",
+          "description": "팀공격리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435257,
+          "event_index": 10,
+          "team_side": 1,
+          "clock": "03:44",
+          "description": "박혜진 페인트존2점슛성공",
+          "team1_score": 74,
+          "team2_score": 74
+        },
+        {
+          "id": 1435258,
+          "event_index": 11,
+          "team_side": 1,
+          "clock": "03:28",
+          "description": "박혜진 파울",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435259,
+          "event_index": 12,
+          "team_side": 2,
+          "clock": "03:28",
+          "description": "미마 루이 자유투성공",
+          "team1_score": 74,
+          "team2_score": 75
+        },
+        {
+          "id": 1435260,
+          "event_index": 13,
+          "team_side": 2,
+          "clock": "03:28",
+          "description": "미마 루이 자유투실패",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435261,
+          "event_index": 14,
+          "team_side": 2,
+          "clock": "03:28",
+          "description": "김진영 공격리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435262,
+          "event_index": 15,
+          "team_side": 2,
+          "clock": "03:12",
+          "description": "미마 루이 2점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435263,
+          "event_index": 16,
+          "team_side": 1,
+          "clock": "03:12",
+          "description": "이소희 수비리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435264,
+          "event_index": 17,
+          "team_side": 1,
+          "clock": "02:47",
+          "description": "팀턴오버",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435265,
+          "event_index": 18,
+          "team_side": 2,
+          "clock": "02:24",
+          "description": "김진영 페인트존2점슛성공",
+          "team1_score": 74,
+          "team2_score": 77
+        },
+        {
+          "id": 1435266,
+          "event_index": 19,
+          "team_side": 1,
+          "clock": "02:10",
+          "description": "김소니아 2점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435267,
+          "event_index": 20,
+          "team_side": 2,
+          "clock": "02:10",
+          "description": "김진영 수비리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435268,
+          "event_index": 21,
+          "team_side": 2,
+          "clock": "02:01",
+          "description": "미마 루이 페인트존2점슛성공",
+          "team1_score": 74,
+          "team2_score": 79
+        },
+        {
+          "id": 1435269,
+          "event_index": 22,
+          "team_side": 2,
+          "clock": "02:01",
+          "description": "신이슬 어시스트",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435270,
+          "event_index": 23,
+          "team_side": 1,
+          "clock": "01:59",
+          "description": "정규작전타임",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435271,
+          "event_index": 24,
+          "team_side": 1,
+          "clock": "01:51",
+          "description": "안혜지 3점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435272,
+          "event_index": 25,
+          "team_side": 2,
+          "clock": "01:51",
+          "description": "미마 루이 수비리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435273,
+          "event_index": 26,
+          "team_side": 2,
+          "clock": "01:26",
+          "description": "미마 루이 페인트존2점슛성공",
+          "team1_score": 74,
+          "team2_score": 81
+        },
+        {
+          "id": 1435274,
+          "event_index": 27,
+          "team_side": 2,
+          "clock": "01:26",
+          "description": "김지영 어시스트",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435275,
+          "event_index": 28,
+          "team_side": 1,
+          "clock": "01:11",
+          "description": "변소정 페인트존2점슛성공",
+          "team1_score": 76,
+          "team2_score": 81
+        },
+        {
+          "id": 1435276,
+          "event_index": 29,
+          "team_side": 1,
+          "clock": "01:11",
+          "description": "안혜지 어시스트",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435277,
+          "event_index": 30,
+          "team_side": 2,
+          "clock": "00:48",
+          "description": "김진영 2점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435278,
+          "event_index": 31,
+          "team_side": 1,
+          "clock": "00:48",
+          "description": "박혜진 수비리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435279,
+          "event_index": 32,
+          "team_side": 1,
+          "clock": "00:32",
+          "description": "이소희 3점슛성공",
+          "team1_score": 79,
+          "team2_score": 81
+        },
+        {
+          "id": 1435280,
+          "event_index": 33,
+          "team_side": 2,
+          "clock": "00:32",
+          "description": "정규작전타임",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435281,
+          "event_index": 34,
+          "team_side": 1,
+          "clock": "00:16",
+          "description": "이소희 파울",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435282,
+          "event_index": 35,
+          "team_side": 1,
+          "clock": "00:16",
+          "description": "김정은 교체(IN)",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435283,
+          "event_index": 36,
+          "team_side": 1,
+          "clock": "00:16",
+          "description": "이소희 교체(OUT)",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435284,
+          "event_index": 37,
+          "team_side": 2,
+          "clock": "00:16",
+          "description": "신지현 자유투성공",
+          "team1_score": 79,
+          "team2_score": 83
+        },
+        {
+          "id": 1435285,
+          "event_index": 38,
+          "team_side": 2,
+          "clock": "00:16",
+          "description": "신지현 자유투성공",
+          "team1_score": 79,
+          "team2_score": 83
+        },
+        {
+          "id": 1435286,
+          "event_index": 39,
+          "team_side": 1,
+          "clock": "00:08",
+          "description": "박혜진 3점슛시도",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435287,
+          "event_index": 40,
+          "team_side": 2,
+          "clock": "00:08",
+          "description": "팀수비리바운드",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435288,
+          "event_index": 41,
+          "team_side": 1,
+          "clock": "00:03",
+          "description": "김정은 파울",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435289,
+          "event_index": 42,
+          "team_side": 2,
+          "clock": "00:03",
+          "description": "신지현 자유투성공",
+          "team1_score": 79,
+          "team2_score": 85
+        },
+        {
+          "id": 1435290,
+          "event_index": 43,
+          "team_side": 2,
+          "clock": "00:03",
+          "description": "신지현 자유투성공",
+          "team1_score": 79,
+          "team2_score": 85
+        },
+        {
+          "id": 1435291,
+          "event_index": 44,
+          "team_side": 2,
+          "clock": "00:00",
+          "description": "쿼터종료",
+          "team1_score": null,
+          "team2_score": null
+        },
+        {
+          "id": 1435292,
+          "event_index": 45,
+          "team_side": 2,
+          "clock": "00:00",
+          "description": "게임종료",
+          "team1_score": null,
+          "team2_score": null
+        }
+      ]
+    }
+  ]
+}

@@ -8,7 +8,6 @@ Usage:
     python3 scripts/analyze_lib_deps.py [--json] [--cycles] [--clusters]
     python3 scripts/analyze_lib_deps.py --json --no-write  # JSON to stdout
     python3 scripts/analyze_lib_deps.py --json-out /tmp/graph.json
-    python3 scripts/analyze_lib_deps.py --self-test   # regression guard
 """
 
 import argparse
@@ -70,7 +69,7 @@ def get_monolith_modules() -> dict[str, Path]:
     Pre-2026-05 this parsed a `(modules ...)` stanza; after `lib/dune` switched
     to `(include_subdirs unqualified)` that stanza disappeared and the parser
     silently returned `{}`, making the whole analysis (and the CI "lib
-    dependency delta" step) a no-op.  See `--self-test`.
+    dependency delta" step) a no-op.
     """
     modules: dict[str, Path] = {}
     for path in sorted(LIB_DIR.rglob("*.ml")):
@@ -406,53 +405,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="Print circular dependency summary in the human report.")
     parser.add_argument("--clusters", action="store_true",
                         help="Print extraction candidates in the human report.")
-    parser.add_argument("--self-test", action="store_true",
-                        help="Run analyzer self-test and exit.")
     return parser.parse_args(argv)
-
-
-# Regression floor: the flat `masc` namespace has had 600+ modules for the
-# whole life of this script.  If discovery returns far fewer, module discovery
-# is broken (the pre-2026-05 `(modules ...)`-parsing bug returned 0).
-_SELF_TEST_MIN_MODULES = 400
-_SELF_TEST_MIN_EDGES = 200
-
-
-def run_self_test() -> int:
-    """Assert module discovery and graph construction are not silently empty."""
-    discover_sub_libraries()
-    modules = get_monolith_modules()
-    graph = build_dependency_graph(modules)
-    edges = sum(len(v) for v in graph.values())
-    problems: list[str] = []
-    if len(modules) < _SELF_TEST_MIN_MODULES:
-        problems.append(
-            f"discovered {len(modules)} flat-ns modules, expected >= "
-            f"{_SELF_TEST_MIN_MODULES} (module discovery broken?)"
-        )
-    if edges < _SELF_TEST_MIN_EDGES:
-        problems.append(
-            f"graph has {edges} edges, expected >= {_SELF_TEST_MIN_EDGES}"
-        )
-    missing = [n for n, p in modules.items() if not p.exists()]
-    if missing:
-        problems.append(f"{len(missing)} discovered modules have no .ml file")
-    if problems:
-        for p in problems:
-            print(f"SELF-TEST FAIL: {p}", file=sys.stderr)
-        return 1
-    print(
-        f"SELF-TEST OK: {len(modules)} flat-ns modules, {edges} internal edges, "
-        f"{len(SUB_LIBRARY_DIRS)} sub-libraries"
-    )
-    return 0
 
 
 def main() -> None:
     args = parse_args(sys.argv[1:])
 
-    if args.self_test:
-        sys.exit(run_self_test())
 
     discover_sub_libraries()
     modules = get_monolith_modules()

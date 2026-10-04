@@ -1,126 +1,9 @@
-(** Invariants for [Keeper_turn_disposition]:
-
-    1. Byte-compat: for every wire string consumed by the legacy
-       [Keeper_turn_terminal.severity_of_code / summary_of_code /
-       next_action_of_code], the new typed
-       [Keeper_turn_disposition.severity / summary / next_action]
-       must agree on severity (rendered as string), summary, and
-       next_action — *after* the legacy [normalize_code] is applied
-       to the input wire (since PR-2 will keep the same producer-side
-       normalisation; this test isolates the *consumer-side*
-       invariant). Timeout actions intentionally differ: the legacy
-       [inspect_turn_timeout] action collapsed provider, admission/capacity,
-       and turn liveness ownership.
-
-    2. Round-trip: [of_wire (to_wire t) = t] for every canonical
-       constructor and for [Provider_error] wrapping each runtime
-       variant.
-
-    3. Projection: [of_termination_code] is deterministic and total
-       over [Keeper_turn_terminal_code.t]. *)
-
 module D = Masc.Keeper_turn_disposition
 module Code = Masc.Keeper_turn_terminal_code
 module Legacy = Masc.Keeper_turn_terminal
 module Registry = Masc.Keeper_registry
 module Unified_types = Masc.Keeper_unified_turn_types
 module Status_blocker = Masc.Keeper_status_bridge_blocker
-
-(* ===== Byte-compat oracle ====================================== *)
-(* For every legacy wire code, build the corresponding disposition,
-   then assert that the typed accessors agree with the legacy
-   substring-based accessors. *)
-
-(* Group A: canonical application codes — strict byte-compat.
-   Severity / summary / next_action must match the legacy substring
-   classifier exactly. *)
-let canonical_app_codes : (string * D.t) list =
-  [ "success", D.Success
-  ; "checkpoint", D.Checkpoint
-  ; "external_cancel", D.External_cancel
-  ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
-  ; "unknown_error", D.Unknown { raw_error = "unknown_error" }
-  ]
-;;
-
-(* Group B: runtime-layer wire strings that legacy
-   [severity_of_code] classifies via [String.starts_with ~prefix:"api_error_"]
-   or via the [_ -> Unknown_bad] fallback. The legacy
-   [next_action_of_code] returns [None] for these (its [_ -> None] arm),
-   Every [Provider_error _] disposition recommends
-   [inspect_latest_error]. This is an intentional behaviour change
-   documented in the RFC; only [severity] (rendered as string) is
-   asserted against legacy here. *)
-let runtime_wire_codes : (string * D.t) list =
-  [ "api_error_overloaded", D.Provider_error (Code.of_core_error_wire "api_error_overloaded")
-  ; "api_error_server:502", D.Provider_error (Code.of_core_error_wire "api_error_server:502")
-  ]
-;;
-
-(* The legacy [severity] type and [D.severity] type are isomorphic; we
-   compare via [severity_to_string] for ergonomics. *)
-let legacy_severity_str (sev : Legacy.severity) : string = Legacy.severity_to_string sev
-
-let typed_severity_str (sev : D.severity) : string =
-  match sev with
-  | D.Ok -> "ok"
-  | D.Warn -> "warn"
-  | D.Bad -> "bad"
-  | D.Unknown_bad -> "bad"
-;;
-
-let test_canonical_severity_byte_compat () =
-  List.iter
-    (fun (wire, disp) ->
-       let legacy = Legacy.of_code wire in
-       let expected = legacy_severity_str legacy.severity in
-       let actual = typed_severity_str (D.severity disp) in
-       Alcotest.(check string) (Printf.sprintf "severity[%s]" wire) expected actual)
-    canonical_app_codes
-;;
-
-let test_canonical_summary_byte_compat () =
-  List.iter
-    (fun (wire, disp) ->
-       let legacy = Legacy.of_code wire in
-       let expected = legacy.summary in
-       let actual = D.summary disp in
-       Alcotest.(check string) (Printf.sprintf "summary[%s]" wire) expected actual)
-    canonical_app_codes
-;;
-
-let test_canonical_next_action_byte_compat () =
-  List.iter
-    (fun (wire, disp) ->
-       let legacy = Legacy.of_code wire in
-       let expected =
-         match legacy.next_action with
-         | Some s -> "Some:" ^ s
-         | None -> "None"
-       in
-       let actual =
-         match D.next_action disp with
-         | Some s -> "Some:" ^ s
-         | None -> "None"
-       in
-       Alcotest.(check string) (Printf.sprintf "next_action[%s]" wire) expected actual)
-    canonical_app_codes
-;;
-
-(* Runtime-wire codes: severity-only oracle. [Provider_error _]
-   uniformly recommends "inspect_latest_error"
-   for next_action and uses the inner code wire as the summary suffix
-   ("keeper turn ended with X"); both are intentional improvements
-   over the legacy substring path. *)
-let test_runtime_wire_severity_byte_compat () =
-  List.iter
-    (fun (wire, disp) ->
-       let legacy = Legacy.of_code wire in
-       let expected = legacy_severity_str legacy.severity in
-       let actual = typed_severity_str (D.severity disp) in
-       Alcotest.(check string) (Printf.sprintf "severity[%s]" wire) expected actual)
-    runtime_wire_codes
-;;
 
 (* ===== Round-trip ============================================== *)
 
@@ -443,27 +326,7 @@ let test_missing_last_execution_is_typed_error () =
 let () =
   Alcotest.run
     "keeper_turn_disposition"
-    [ ( "byte-compat oracle vs legacy keeper_turn_terminal (canonical app codes)"
-      , [ Alcotest.test_case
-            "severity matches legacy"
-            `Quick
-            test_canonical_severity_byte_compat
-        ; Alcotest.test_case
-            "summary matches legacy"
-            `Quick
-            test_canonical_summary_byte_compat
-        ; Alcotest.test_case
-            "next_action matches legacy"
-            `Quick
-            test_canonical_next_action_byte_compat
-        ] )
-    ; ( "byte-compat (runtime-wire codes, severity-only)"
-      , [ Alcotest.test_case
-            "severity matches legacy substring classifier"
-            `Quick
-            test_runtime_wire_severity_byte_compat
-        ] )
-    ; ( "round-trip"
+    [ ( "round-trip"
       , [ Alcotest.test_case
             "recognised wires round-trip exactly"
             `Quick

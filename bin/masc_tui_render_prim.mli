@@ -341,7 +341,6 @@ val lexed_span : string * String.t -> string
 
 val keeper_lane_idle_text : int -> string
 
-
 val selected_ask_question :
   Masc_tui_types.state -> Masc.Tui_decode_asks.ask_question option
 
@@ -384,7 +383,7 @@ val board_read_title :
     reply count.
 
     [id] and [hearth] arrive terminal-safe. The Board pane sanitizes them where
-    it reads the post, which is where [test_tui_http_ast] looks for it. *)
+    it reads the post. *)
 
 val magnitude_tone : Magnitude.band -> string
 
@@ -411,7 +410,6 @@ val transport_attention_item :
 (** The one Overview Attention item about the transport: a warning while the
     outbound queue's pressure is [Watch], bad while it is [High], and nothing
     when it is [Steady] or unread. The readings themselves are on Metrics. *)
-
 
 val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per
@@ -592,6 +590,7 @@ val context_split_width : int -> int
     estimated token figure; the serialized request led by the provider's
     token count; history reach; recent turns. *)
 val context_composition_lines :
+  ?runtime_details:(string -> string list) ->
   cols:int ->
   turn_back:int ->
   forecast:(Masc_tui_context_inspector.forecast, string) result ->

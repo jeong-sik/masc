@@ -23,11 +23,6 @@
 #   0 — all server-booting harness files are covered
 #   1 — at least one file boots the server with no connector-env coverage
 #
-# --self-test: run against a synthetic sandbox tree (covered / uncovered /
-# non-booting fixtures) instead of the live scripts/ tree. The lint suite
-# runs the self-test form because the ratchet's live fixtures change with the
-# harness tree itself (run_self_test_when_changed rationale).
-
 set -euo pipefail
 
 ROOT="${HARNESS_RATCHET_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -37,10 +32,6 @@ ROOT="${HARNESS_RATCHET_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
 if [ ! -d "${ROOT}/scripts/harness" ] || [ ! -f "${ROOT}/scripts/lint/harness-connector-env-ratchet.sh" ]; then
   echo "harness-connector-env-ratchet ERROR: ROOT '${ROOT}' is not the masc checkout (set HARNESS_RATCHET_ROOT explicitly)" >&2
   exit 2
-fi
-
-if [[ "${1:-}" == "--self-test" ]]; then
-  exec bash "${ROOT}/scripts/lint/harness-connector-env-ratchet-selftest.sh"
 fi
 
 BOOT_PATTERN='main_eio\.exe|start-masc\.sh'

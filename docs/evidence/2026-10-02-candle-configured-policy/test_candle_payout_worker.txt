@@ -1,0 +1,14 @@
+Testing `candle_payout_worker'.
+This run has ID `GZ1LYX1H'.
+
+  [OK]          worker          0   unreadable contributor waits for repair.
+  [OK]          worker          1   the worker settles a waiting payout when ...
+  [OK]          worker          2   a wake makes the worker look again.
+  [OK]          worker          3   the worker does nothing while candle is off.
+  [OK]          worker          4   a payout with a keeper to pay gets candid...
+  [OK]          worker          5   a start while a worker runs is refused.
+  [OK]          worker          6   a worker can start again once its switch ...
+  [OK]          worker          7   a wake with no worker running does nothing.
+
+Full test results in `<worktree>/_build/default/test/_build/_tests/candle_payout_worker'.
+Test Successful in 1.040s. 8 tests run.

@@ -1023,9 +1023,8 @@ let test_identity_outage_retains_only_existing_local_holds () =
   check bool "recovered alpha remains held" true
     (List.mem ("alpha", item.request.request_id, Tui_types.Retained_before_dispatch)
        state.keeper_interactive_waiting);
-  (match Tui_types.next_authorized_keeper_input state "beta" with
-   | Some (ready, _) -> check string "unrelated NEXT resumes normally" other.request_id ready.request.request_id
-   | None -> fail "unrelated NEXT was converted into a manual hold")
+  check bool "unrelated NEXT remains available to the normal drainer" false
+    (List.exists (fun (name, _, _) -> name = "beta") state.keeper_interactive_waiting)
 ;;
 
 let test_workspace_suspension_preserves_real_stop_ownership () =
@@ -1067,6 +1066,26 @@ let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
     Tui_types.Awaiting_control {generation=0; target=None}];
   check bool "explicit Enter authorization still dispatches its accepted input" true
     (Option.is_some (Tui_types.next_authorized_keeper_input state "alpha"))
+;;
+
+let test_new_enter_can_bypass_an_explicitly_stopped_input () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let _, item = preflight_input () in
+  state.msg_queued <- Q.restore_unsent Q.empty item;
+  let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"explicit followup" () in
+  (match Q.push state.msg_queued ~submitted_at:2. later with
+   | Ok (queue, _) -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  state.keeper_interactive_waiting <-
+    ["alpha", item.request.request_id, Tui_types.Retained_after_stop;
+     "alpha", later.request_id, Tui_types.Awaiting_control {generation=0; target=None}];
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (ready, _) -> check string "new Enter retains its separate authorization"
+       later.request_id ready.request.request_id
+   | None -> fail "Esc-retained input blocked a new Enter");
+  check bool "older stopped input remains retained" true
+    (Option.is_some (Q.find state.msg_queued ~request_id:item.request.request_id))
 ;;
 
 let test_offscreen_preflight_recovery_retains_its_owner () =
@@ -4285,6 +4304,7 @@ let () =
         ; test_case "identity outage preserves unrelated NEXT authorization" `Quick test_identity_outage_retains_only_existing_local_holds
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
+        ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
         ; test_case "offscreen preflight recovery retains its owner" `Quick test_offscreen_preflight_recovery_retains_its_owner
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal

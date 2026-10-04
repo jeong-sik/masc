@@ -1,0 +1,42 @@
+{
+  "original_checkpoint": "be11419be81d5aa238c55788c499399323505681",
+  "response_checkpoint": "db0e3350f0eb009c9baa66918e80025b01303277",
+  "integrated_parent": "7edd8bf77a870400643976b6637d3594821eb075",
+  "build_exit": 0,
+  "runtime": {
+    "exit": 0,
+    "passed": 25,
+    "total": 25
+  },
+  "worker": {
+    "exit": 1,
+    "passed": 48,
+    "total": 49,
+    "known_failure": "receipt projection reads shared outcomes: sampling receipts exceed aggregate read envelope; lower query gap owned by #41126"
+  },
+  "sources_sha256": {
+    "lib/lane_addon/lane_addon_runtime.ml": "48669f437271586e0aac45e4f5bbbbf22d8da3bb031d5ab16f52cfd67301d7af",
+    "lib/lane_addon/lane_addon_store.ml": "721f9394eca26bb8e7aa078a195d4c8eb3b73febb17261f6d249fc0028833451",
+    "lib/lane_addon/lane_addon_store.mli": "ee41dbe6d9bb23e90c65c5c9db0179e39a54bcc8ddefc3bfe90076bdfa10243a",
+    "test/test_lane_addon.ml": "dc28145f961532d253ca769276807c0deb3d10564726f5e13b927e1b6e1b9189",
+    "test/test_lane_addon_worker.ml": "6a977d2fdf4aec6b6b2783d640d318512f55b0187ec9b95d5b7f0609fa09cd25"
+  },
+  "binaries_sha256": {
+    "_build/default/test/test_lane_addon.exe": "558bf5420e1e2a039fc8c14bd1ba3dc171929a2561fbce9ca7301bf54d51b54e",
+    "_build/default/test/test_lane_addon_worker.exe": "fa16e3139b65b65e0c115732d7dc7a3d683ebb99b4b4395f9d871b9f294bb824"
+  },
+  "raw_sha256": {
+    "pr41033-per-instance-worker-green.log": "f14ffa4b9d6cb9e7cb4a653502edaf681326a5c78f4be4d9ad6fd1fdf37bb545",
+    "pr41033-per-instance-green-build.log": "ab8dbe209c285d79dc902519819dc9ae4b4030572b59bcb1746b16795a3d0440",
+    "red-identities.json": "324c8ba67f9c84379f787b88fd59773214b01099897a1d4a3ad1ebe0c4a62429",
+    "pr41033-per-instance-runtime-red-case1.log": "57f3e3b02afd5520c46e9551fd7514f18ff07dd55e68a4bb3e325f84a35e2dee",
+    "pr41033-per-instance-integrated-build.log": "ab8dbe209c285d79dc902519819dc9ae4b4030572b59bcb1746b16795a3d0440",
+    "pr41033-per-instance-runtime-red-case0.log": "a9a276bd8031bf6b6773a53b15d6216634e5696398eeb9727b2719e110fc0552",
+    "pr41033-per-instance-loop-red.log": "3e183862815106999448c1a45286630b1b4436dfaf7822274373bd67dba74346",
+    "pr41033-per-instance-integrated-worker.log": "7de877657496bc3d52ffa3ae325778373ea1d57400ff8a6446275766815627fc",
+    "pr41033-per-instance-runtime-green.log": "87e465970ac74467aa6f1f39b2517b3aff31ab2c15748e942fa31c1b19d7c069",
+    "pr41033-per-instance-integrated-runtime.log": "144304a678aabf9f22c28e5a67f770e669c0f2245223608707fa84437ad2abbd",
+    "pr41033-per-instance-runtime-red.log": "d2850c66ca69fafe079c67554a7cb41056ce344fcd8792b550f1c58f02c6b7a1",
+    "pr41033-per-instance-red-build.log": "ab8dbe209c285d79dc902519819dc9ae4b4030572b59bcb1746b16795a3d0440"
+  }
+}

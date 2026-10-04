@@ -1762,6 +1762,193 @@ let test_sampling_blob_read_preserves_canonical_failure () = with_fixture (fun _
     check bool "unreadable canonical parent returns an error without recovery" true
       (Result.is_error (Store.read_blob store reference))))
 
+let sampling_require = function Ok value -> value | Error detail -> fail detail
+
+let sampling_retry_case store ~instance_id ~request_id answer =
+  let module Store = Masc.Lane_addon_store in
+  let request = sampling_require (Store.write_blob store ("request:" ^ request_id)) in
+  let bytes = Yojson.Safe.to_string (`Assoc [
+    "kind", `String "model_outcome"; "instance_id", `String instance_id;
+    "request", Types.evidence_to_json request; "status", `String "answered";
+    "response", `Assoc ["role", `String "assistant"; "model", `String "retained";
+      "content", `Assoc ["type", `String "text"; "text", `String answer]]]) in
+  let outcome = Store.blob_reference bytes in
+  let fields = ["instance_id", `String instance_id; "request_id", `String request_id;
+    "state", `String "finished"; "request", Types.evidence_to_json request;
+    "outcome", Types.evidence_to_json outcome] in
+  `Assoc (("outcome_bytes", `String bytes)::fields), `Assoc fields, outcome, bytes
+
+let sampling_retry_path store instance_id request_id =
+  let module Store = Masc.Lane_addon_store in
+  Filename.concat (Store.root store)
+    ("sampling-recovery/" ^ Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json")
+
+let test_sampling_retry_two_stores_and_concurrent_writer () = with_fixture (fun _ sw dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "retry-store") in
+  let second = Store.create ~root:(Store.root store) in
+  let instance_id = "shared-instance" in
+  let old, _, _, _ = sampling_retry_case store ~instance_id ~request_id:"old" "completed history" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"old" old);
+  sampling_require (Store.recover_sampling_requests store ~instance_id ~max_reply_bytes:65536);
+  let reads = ref [] in
+  let retry () = Store.For_testing.retry_sampling_requests
+    ~on_read:(fun path -> reads := path :: !reads) store ~instance_id ~max_reply_bytes:65536 in
+  sampling_require (retry ());
+  check int "steady retry does not read completed history" 0 (List.length !reads);
+  let terminal, _, outcome, bytes = sampling_retry_case second ~instance_id ~request_id:"new" "concurrent result" in
+  let marked, marked_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let writer = Eio.Fiber.fork_promise ~sw (fun () ->
+    Store.For_testing.save_sampling_request second ~instance_id ~request_id:"new" terminal
+      ~after_marker:(fun () -> Eio.Promise.resolve marked_u (); Eio.Promise.await release)) in
+  Eio.Promise.await marked;
+  let retry_started, retry_started_u = Eio.Promise.create () in
+  let recovery = Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Promise.resolve retry_started_u (); retry ()) in
+  Eio.Promise.await retry_started;
+  Eio.Fiber.yield ();
+  check bool "recovery waits for the same request writer lock" true
+    (Option.is_none (Eio.Promise.peek recovery));
+  Eio.Promise.resolve release_u ();
+  sampling_require (Eio.Promise.await_exn writer);
+  sampling_require (Eio.Promise.await_exn recovery);
+  check string "another Store's complete result survives" bytes (sampling_require (Store.read_blob store outcome));
+  check bool "recovery never reads unrelated completed request" false
+    (List.exists (fun path -> Filename.basename path = Store.digest "old" ^ ".json") !reads);
+  check bool "completed marker retired" false
+    (Sys.file_exists (sampling_retry_path store instance_id "new")))
+
+let test_sampling_retry_crash_and_failed_write_orphans () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "orphan-store") in
+  let instance_id = "orphan-instance" in
+  let terminal, _, _, _ = sampling_retry_case store ~instance_id ~request_id:"crash" "never journaled" in
+  check bool "interruption after durable marker is explicit" true (Result.is_error
+    (Store.For_testing.save_sampling_request ~after_marker:(fun () -> raise (Sys_error "interrupted before journal"))
+      store ~instance_id ~request_id:"crash" terminal));
+  check bool "crash leaves a durable marker" true
+    (Sys.file_exists (sampling_retry_path store instance_id "crash"));
+  sampling_require (Store.retry_sampling_requests (Store.create ~root:(Store.root store))
+    ~instance_id ~max_reply_bytes:65536);
+  check bool "known absent journals retire orphan" false
+    (Sys.file_exists (sampling_retry_path store instance_id "crash"));
+  let primary = Filename.concat (Store.root store) "sampling" in
+  write primary "blocked namespace";
+  check bool "failed journal write retains marker" true (Result.is_error
+    (Store.save_sampling_request store ~instance_id ~request_id:"failed" terminal));
+  check bool "unread namespace cannot authorize orphan removal" true (Result.is_error
+    (Store.retry_sampling_requests store ~instance_id ~max_reply_bytes:65536));
+  check bool "uncertain orphan remains" true
+    (Sys.file_exists (sampling_retry_path store instance_id "failed"));
+  Unix.unlink primary;
+  sampling_require (Store.retry_sampling_requests store ~instance_id ~max_reply_bytes:65536);
+  check bool "repaired absent namespace permits cleanup" false
+    (Sys.file_exists (sampling_retry_path store instance_id "failed")))
+
+let test_sampling_retry_preserves_other_namespace_and_unread_records () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "both-store") in
+  let instance_id = "both-instance" and request_id = "both" in
+  let terminal, _, outcome, bytes = sampling_retry_case store ~instance_id ~request_id "original result" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id terminal);
+  sampling_require (Store.save_sampling_outcome store ~instance_id ~request_id terminal);
+  ignore (sampling_require (Store.load_sampling_request_bounded ~budget:(Store.read_budget ~max_bytes:65536)
+    store ~instance_id ~request_id |> Result.map_error (function Store.Read_failed e -> e | Store.Read_limit_exceeded -> "limit")));
+  check bool "cold compaction does not retire the other namespace" true
+    (Sys.file_exists (sampling_retry_path store instance_id request_id));
+  let primary = Filename.concat (Store.root store)
+    ("sampling/" ^ Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json") in
+  let original = Fs_compat.load_file primary in
+  Unix.unlink primary; Unix.mkdir primary 0o700;
+  check bool "unread primary remains explicit despite compact outcome" true
+    (Result.is_error (Store.retry_sampling_requests store ~instance_id ~max_reply_bytes:65536));
+  check bool "unread primary retains marker" true
+    (Sys.file_exists (sampling_retry_path store instance_id request_id));
+  Unix.rmdir primary; write primary original;
+  sampling_require (Store.retry_sampling_requests (Store.create ~root:(Store.root store)) ~instance_id ~max_reply_bytes:65536);
+  check bool "both namespaces compacted before marker removal" true
+    (Yojson.Safe.Util.member "outcome_bytes" (Yojson.Safe.from_file primary) = `Null);
+  check string "recovery preserves exact original bytes" bytes (sampling_require (Store.read_blob store outcome));
+  check bool "marker removed only after both complete" false
+    (Sys.file_exists (sampling_retry_path store instance_id request_id)))
+
+let test_sampling_discovery_separates_record_error_and_enumeration () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "discovery-store") in
+  let instance_id = "discovery-instance" in
+  let good, _, _, _ = sampling_retry_case store ~instance_id ~request_id:"good" "healthy" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"good" good);
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"broken" `Null);
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "record failure does not undo completed enumeration" true report.discovery_complete;
+  check bool "broken record remains explicit" true (Result.is_error report.outcome);
+  let reads = ref [] in
+  ignore (Store.For_testing.retry_sampling_requests ~on_read:(fun path -> reads := path :: !reads)
+    store ~instance_id ~max_reply_bytes:65536);
+  check bool "retry skips healthy completed history even with a broken sibling" false
+    (List.exists (fun p -> Filename.basename p = Store.digest "good" ^ ".json") !reads);
+  let marker = sampling_retry_path store instance_id "broken" in
+  write marker "malformed marker";
+  check bool "malformed marker refuses retry" true (Result.is_error
+    (Store.retry_sampling_requests store ~instance_id ~max_reply_bytes:65536));
+  check string "malformed marker is preserved" "malformed marker" (Fs_compat.load_file marker);
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "failed marker seed keeps discovery pending" false report.discovery_complete;
+  check string "discovery does not overwrite malformed marker" "malformed marker" (Fs_compat.load_file marker))
+
+let test_sampling_pending_discovery_resumes_after_namespace_repair () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "unfinished-discovery") in
+  let instance_id = "legacy-instance" and request_id = "legacy" in
+  let terminal, _, outcome, bytes = sampling_retry_case store ~instance_id ~request_id "legacy result" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id terminal);
+  (* Model a pre-index journal: startup discovery must find it without a marker. *)
+  Unix.unlink (sampling_retry_path store instance_id request_id);
+  let namespace = Filename.concat (Store.root store) ("sampling/" ^ Store.digest instance_id) in
+  let saved = namespace ^ ".saved" in
+  Unix.rename namespace saved; write namespace "temporarily unreadable namespace";
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "incomplete enumeration remains pending" false report.discovery_complete;
+  check bool "enumeration failure is explicit" true (Result.is_error report.outcome);
+  Unix.unlink namespace; Unix.rename saved namespace;
+  sampling_require (Store.retry_sampling_requests (Store.create ~root:(Store.root store))
+    ~instance_id ~max_reply_bytes:65536);
+  check string "pending-only entry resumes interrupted legacy discovery" bytes
+    (sampling_require (Store.read_blob store outcome));
+  let marker_dir = Filename.dirname (sampling_retry_path store instance_id request_id) in
+  check bool "completed discovery sentinel is retired" false
+    (Sys.file_exists (Filename.concat marker_dir ".discovery"));
+  let next, _, next_outcome, next_bytes = sampling_retry_case store ~instance_id ~request_id:"next" "known pending result" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"next" next);
+  write (Filename.concat marker_dir ".discovery") "invalid discovery marker";
+  check bool "malformed discovery stays an error" true (Result.is_error
+    (Store.retry_sampling_requests store ~instance_id ~max_reply_bytes:65536));
+  check string "malformed discovery does not starve known pending work" next_bytes
+    (sampling_require (Store.read_blob store next_outcome));
+  check string "malformed discovery evidence preserved" "invalid discovery marker"
+    (Fs_compat.load_file (Filename.concat marker_dir ".discovery")))
+
+let test_sampling_cold_read_keeps_optional_compaction () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "optional-compaction") in
+  let instance_id = "cold-instance" and request_id = "cold" in
+  let terminal, _, outcome, bytes = sampling_retry_case store ~instance_id ~request_id "verified answer" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id terminal);
+  let retry_dir = Filename.dirname (sampling_retry_path store instance_id request_id) in
+  let saved = retry_dir ^ ".saved" in
+  Unix.rename retry_dir saved; write retry_dir "unwritable retry namespace";
+  Fun.protect ~finally:(fun () -> Unix.unlink retry_dir; Unix.rename saved retry_dir) (fun () ->
+    let before = Yojson.Safe.to_string terminal in
+    let result = Store.load_sampling_request_bounded ~budget:(Store.read_budget ~max_bytes:65536)
+      store ~instance_id ~request_id in
+    check bool "verified cold result remains available when optional compaction cannot mark" true
+      (Result.is_ok result);
+    check string "verified answer is retained" bytes (sampling_require (Store.read_blob store outcome));
+    let primary = Filename.concat (Store.root store)
+      ("sampling/" ^ Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json") in
+    check string "failed marker publication cannot mutate the journal" before (Fs_compat.load_file primary)))
+
 let test_sampling_publication_requires_readable_address () = with_fixture (fun _ _ dir _ ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "publication-address") in
@@ -1827,6 +2014,17 @@ let test_sampling_fallback_rejects_external_links name link () =
         (Result.is_error (Store.read_blob_bounded ~budget:(Store.read_budget ~max_bytes:4096) store reference)))))
     [false; true]
 
+let test_sampling_bounded_root_loop_is_error () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let link = Filename.concat dir "bounded-root-loop" in
+  Unix.symlink "bounded-root-loop" link;
+  Fun.protect ~finally:(fun () -> Unix.unlink link) (fun () ->
+    let store = Store.create ~root:(Filename.concat link "retained") in
+    match Store.load_sampling_request_bounded ~budget:(Store.read_budget ~max_bytes:4096)
+        store ~instance_id:"loop-instance" ~request_id:"loop-request" with
+    | Error (Store.Read_failed _) -> ()
+    | Error Store.Read_limit_exceeded | Ok _ -> fail "root loop must return a bounded read error"))
+
 let test_canonical_parent_owns_recovery ~journal ~directory () =
   with_fixture (fun _ _ dir _ ->
     let module Store = Masc.Lane_addon_store in
@@ -1888,6 +2086,13 @@ let test_relative_store_root ~sequence () =
         (require (Store.read_blob (Store.create ~root) reference))))
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "bounded sampling root loop returns error" `Quick test_sampling_bounded_root_loop_is_error;
+  test_case "cold read preserves optional marked compaction" `Quick test_sampling_cold_read_keeps_optional_compaction;
+  test_case "pending discovery resumes after namespace repair" `Quick test_sampling_pending_discovery_resumes_after_namespace_repair;
+  test_case "pending recovery sees two Stores and concurrent writer" `Quick test_sampling_retry_two_stores_and_concurrent_writer;
+  test_case "pending recovery handles crash and failed write orphans" `Quick test_sampling_retry_crash_and_failed_write_orphans;
+  test_case "pending recovery preserves other namespace and unread records" `Quick test_sampling_retry_preserves_other_namespace_and_unread_records;
+  test_case "pending discovery separates record and enumeration errors" `Quick test_sampling_discovery_separates_record_error_and_enumeration;
   test_case "canonical missing under external parent refuses public read" `Quick
     (test_canonical_parent_owns_recovery ~journal:false ~directory:false);
   test_case "canonical directory under external parent refuses public read" `Quick

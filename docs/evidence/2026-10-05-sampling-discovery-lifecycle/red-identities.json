@@ -1,0 +1,16 @@
+{
+  "head": "be11419be81d5aa238c55788c499399323505681",
+  "product_sha256": {
+    "lib/lane_addon/lane_addon_runtime.ml": "b4cf162cf42cf6a923284aee1bac3b999b8922805ed6e5003c78e283c3967616",
+    "lib/lane_addon/lane_addon_store.ml": "480360ae63d687953b73cffe512e01d80b3e25a55ad283102cb61c327b98cf9d"
+  },
+  "test_sha256": {
+    "test/test_lane_addon.ml": "dc28145f961532d253ca769276807c0deb3d10564726f5e13b927e1b6e1b9189",
+    "test/test_lane_addon_worker.ml": "54bbd15bfe10baef5cf96633684c4ad43203148c32d069d03d5a4ac412c1fa9c"
+  },
+  "binary_sha256": {
+    "test_lane_addon.exe": "25a2caef705e593040afe76602e611001ed25181488e71d087613484b51f44c8",
+    "test_lane_addon_worker.exe": "5770da23714b30344dcb2f97c77a755accdd330d7b0a6ed636d47643c3924cfb"
+  },
+  "actual_red_cases": 3
+}

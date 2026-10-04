@@ -1,0 +1,44 @@
+[2026-10-05 05:44:08] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-runtime-96dcbd.fixture (no git root found)
+[2026-10-05 05:44:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-runtime-96dcbd.fixture for test executable test_lane_addon.exe
+[2026-10-05 05:44:08] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-05 05:44:08] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-05 05:44:08] [WARN] [Misc] Lane sampling recovery incomplete: expected an object
+ASSERT bad binding is reported
+ASSERT healthy instance discovery succeeds independently
+[2026-10-05 05:44:08] [WARN] [Misc] Lane sampling recovery incomplete: 01a108a8-e4d3-7000-8fff-d86d259e6df4: invalid sampling recovery record
+[2026-10-05 05:44:08] [WARN] [Misc] Lane sampling recovery incomplete: expected an object
+ASSERT bad binding remains explicit on another pulse
+[2026-10-05 05:44:08] [WARN] [Misc] Lane sampling recovery incomplete: 01a108a8-e4d3-7000-8fff-d86d259e6df4: invalid sampling recovery record
+ASSERT 01a108a8-e4d3-7000-8fff-d86d259e6df4: invalid sampling recovery record
+FAIL 01a108a8-e4d3-7000-8fff-d86d259e6df4: invalid sampling recovery record
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_lane_addon.test_sampling_discovery_is_per_instance.(fun) in file "test/test_lane_addon.ml", line 1572, characters 2-53
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio__core__Fiber.any_gen.(fun).wrap in file "lib_eio/core/fiber.ml", line 113, characters 16-20
+Re-raised at Eio__core__Fiber.any_gen in file "lib_eio/core/fiber.ml", line 155, characters 25-60
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+

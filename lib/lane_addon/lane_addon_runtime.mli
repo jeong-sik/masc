@@ -31,7 +31,8 @@ val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ 
 val recover_sampling : config:Workspace.config -> (unit, string) result
 (** Recover and compact journaled outcomes for retained instances without
     starting observers or invoking providers. Called before configuration startup
-    and by the existing maintenance pulse. Uses each persisted producer limit;
+    to seed durable pending markers. Maintenance uses pending-only retry after
+    complete discovery; incomplete discovery is retried. Uses each persisted producer limit;
     it does not enlarge or replenish any query's aggregate read allowance.
     One failed instance is reported without preventing recovery of the others. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access ->
@@ -85,6 +86,7 @@ val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock -> unit
 
 module For_testing : sig
+  val retry_sampling : config:Workspace.config -> (unit, string) result
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;

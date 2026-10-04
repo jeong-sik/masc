@@ -64,7 +64,7 @@ type entry = {
   action_queue : Lane_addon_action.receipt Queue.t;
   mutable current_action : Lane_addon_action.receipt option;
 }
-type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
+type manager = { sampling_discovered : (string, unit) Hashtbl.t; store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, unit) Hashtbl.t;
   configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
   fleet_journals : (string, unit) Hashtbl.t;
@@ -725,7 +725,7 @@ let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
   | Some m -> m
-  | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
+  | None -> let m = { sampling_discovered = Hashtbl.create 8; store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
                      action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
                      fleet_journals=Hashtbl.create 8;
@@ -755,7 +755,7 @@ let find m args = let* id = text args "instance_id" in
 let read_retained_bindings m =
   let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
   normalized_retained_bindings bindings
-let recover_sampling ~config = Eio_context.run_on_owner_domain (fun () ->
+let recover_sampling_with ~startup ~config = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
   let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
   List.fold_left (fun previous binding ->
@@ -770,13 +770,20 @@ let recover_sampling ~config = Eio_context.run_on_owner_domain (fun () ->
       let* max_reply_bytes = match List.assoc_opt "max_reply_bytes" resources with
         | Some (`Int value) when value > 0 -> Ok value
         | _ -> Error "missing positive persisted sampling reply bound" in
-      offload (fun () -> Lane_addon_store.recover_sampling_requests m.store
-        ~instance_id ~max_reply_bytes)
-      |> Result.map_error (fun detail -> instance_id ^ ": " ^ detail) in
+      let discover = startup || not (Hashtbl.mem m.sampling_discovered instance_id) in
+      let report = offload (fun () ->
+        if discover then Lane_addon_store.discover_sampling_requests m.store
+          ~instance_id ~max_reply_bytes
+        else {Lane_addon_store.discovery_complete=true;
+          outcome=Lane_addon_store.retry_sampling_requests m.store ~instance_id ~max_reply_bytes}) in
+      if report.discovery_complete then Hashtbl.replace m.sampling_discovered instance_id ();
+      Result.map_error (fun detail -> instance_id ^ ": " ^ detail) report.outcome in
     (match result with
      | Ok () -> ()
      | Error detail -> Log.Misc.warn "Lane sampling recovery incomplete: %s" detail);
     match previous with Error _ -> previous | Ok () -> result) (Ok ()) bindings)
+let recover_sampling ~config = recover_sampling_with ~startup:true ~config
+let retry_sampling ~config = recover_sampling_with ~startup:false ~config
 let without_live_bindings m bindings =
   List.filter (function
     | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
@@ -1855,7 +1862,7 @@ let start_configuration_service ~config ~sw ~clock =
       let name = "lane-addon-configuration"
       let should_act _ = !active
       let on_beat _ =
-        let recovery = recover_sampling ~config in
+        let recovery = retry_sampling ~config in
         let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
         let configuration = match resolution.status with
         | Config_dir_resolver.Invalid_env_status ->
@@ -1885,6 +1892,7 @@ let start_configuration_service ~config ~sw ~clock =
     Pulse.run ~sw pulse)
 
 module For_testing = struct
+  let retry_sampling = retry_sampling
   let with_declaration_writer writer f = Eio.Fiber.with_binding declaration_writer_key writer f
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;

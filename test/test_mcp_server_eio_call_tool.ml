@@ -935,6 +935,7 @@ let test_canonical_keeper_retention ?(rebind = false) ~bearer ~fail_audit () =
       Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
       if rebind then Masc.Keeper_registry.For_testing.unregister ~base_path original_name;
       Masc.Keeper_tool_call_log.reset_for_testing ();
+      Browser_lane.install_activity_observer None;
       Browser_lane.install_automation_executor None;
       Masc.Client_registry_eio.unregister_mcp_session session_id;
       Time_compat.clear_clock ()) (fun () ->
@@ -954,6 +955,7 @@ let test_canonical_keeper_retention ?(rebind = false) ~bearer ~fail_audit () =
         "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
         "chars",`Int 0; "truncated",`Bool false; "nodes",`List []] in
       let dispatch_count = ref 0 in
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_scene { tab_id = 7; view = Content; scope = None; _ } ->
           incr dispatch_count;

@@ -23,6 +23,7 @@ type press_target =
   | Press_standalone_lanes
   | Press_context_tab of Masc_tui_context_inspector.tab
   | Press_keeper_row of string  (** a Keepers list row, by Keeper name *)
+  | Press_lane_row of string  (** an inventory row, by its stable row id *)
 
 val press_changes_the_surface : press_target -> bool
 (** Whether a press changes what the surface shows. Only the Context

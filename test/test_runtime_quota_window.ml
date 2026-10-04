@@ -299,6 +299,22 @@ let test_explicit_claude_path_spelling_remains_login_identity () =
        (Q.scope_of_claude_code_home (Some alias)))
 ;;
 
+let test_public_scope_id_preserves_history_and_location () =
+  let first = Q.scope_of_muse_home "/fixture/first" in
+  let same_location = Q.scope_of_muse_home "/fixture/first" in
+  let different_location = Q.scope_of_muse_home "/fixture/second" in
+  Alcotest.(check string) "existing history IDs stay byte-identical"
+    (Digest.to_hex (Digest.string (Q.scope_to_string first))) (Q.scope_id first);
+  Alcotest.(check string) "same credential location shares scope"
+    (Q.scope_id first) (Q.scope_id same_location);
+  Alcotest.(check bool) "different credential locations have distinct labels"
+    false (String.equal (Q.scope_id first) (Q.scope_id different_location));
+  let secret_before = Q.scope_of_credential ~provider_id:"inline" (Some (Runtime_schema.Inline "before")) in
+  let secret_after = Q.scope_of_credential ~provider_id:"inline" (Some (Runtime_schema.Inline "after")) in
+  Alcotest.(check string) "secret rotation at same fallback row is not a new account identity"
+    (Q.scope_id secret_before) (Q.scope_id secret_after)
+
+
 let () =
   Alcotest.run
     "runtime_quota_window"
@@ -341,7 +357,9 @@ let () =
             test_an_observed_scope_is_demoted_not_excluded
         ] )
     ; ( "scope"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "public scope IDs preserve history and credential location" `Quick
+            test_public_scope_id_preserves_history_and_location
+        ; Alcotest.test_case
             "scope kinds do not collide"
             `Quick
             test_scope_kinds_do_not_collide

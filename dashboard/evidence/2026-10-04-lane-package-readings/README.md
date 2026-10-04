@@ -12,3 +12,18 @@ The actual package JSON already includes `binding_schema` and `presentation`; th
 - Desktop and 390px mobile screenshots were inspected: `readings.png`, `readings-mobile.png`. The fixture and driver are included. The driver URL can be overridden with `LANE_READINGS_FIXTURE_URL`.
 
 `manifest.json` identifies the measured source bytes. No actual backend/native TUI, Docker worker, production endpoint, CI, merge or deployment was exercised. Independent source review and final-stack readback remain separate evidence.
+
+## Parent integration and unsafe-integer repair
+
+The evidence above is historical. Integration onto parent
+`1e2a84ff85337b2c6e441b52b37177ae99c788ff` was clean. A new component regression
+parses raw JSON integers `9007199254740993` and `-9007199254740993`; before the
+repair it failed because rounded values were displayed. Unsafe integer readings
+now show Unavailable, while both safe-integer boundaries, zero and `1.25` remain
+values. This does not recover precision already lost during JSON parsing.
+
+Current local checks: 46 tests passed across `lane-addons-panel.test.ts`,
+`lane-declaration-editor.test.ts` and `api/lane-declarations.test.ts`; TypeScript
+and the four changed-file ESLint targets passed. No new browser capture,
+native build, backend execution or deployment was performed. The historical
+manifest and screenshots retain their original source scope.

@@ -517,7 +517,7 @@ let test_returning_to_an_earlier_disposition_posts_again () =
 let test_goal_stalled_projection_names_its_forward_path () =
   let content =
     VP.For_testing.stalled_board_content
-      ~subject:(VP.Goal_review { goal_id = "goal-201"; request_id = "req-201" })
+      ~subject:(VP.Goal_review { goal_id = "goal-201"; request_id = "req-201" ; disposition = VP.No_retry_armed })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
   in
@@ -536,7 +536,7 @@ let test_goal_stalled_metadata_names_its_subject () =
   let metadata =
     VP.For_testing.stalled_metadata
       ~authority:stall_authority_for_decoding
-      ~subject:(VP.Goal_review { goal_id = "goal-202"; request_id = "req-202" })
+      ~subject:(VP.Goal_review { goal_id = "goal-202"; request_id = "req-202" ; disposition = VP.No_retry_armed })
       ~gate:"Commit_refused"
       ~detail:"verdict does not match the pending request"
   in
@@ -580,7 +580,7 @@ let test_the_same_goal_stall_is_posted_once () =
   Masc.Board_dispatch.reset_for_test ();
   let notify ~request_id =
     VP.notify_stalled_verification ~authority:stall_authority
-      ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id })
+      ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id ; disposition = VP.No_retry_armed })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
   in
@@ -603,7 +603,7 @@ let test_a_task_stall_does_not_silence_a_goal_stall () =
     ~gate:"evaluator_unavailable"
     ~detail:"requested runtime or lane not found";
   VP.notify_stalled_verification ~authority:stall_authority
-    ~subject:(VP.Goal_review { goal_id = "shared-301"; request_id = "shared-req-301" })
+    ~subject:(VP.Goal_review { goal_id = "shared-301"; request_id = "shared-req-301" ; disposition = VP.No_retry_armed })
     ~gate:"evaluator_unavailable"
     ~detail:"requested runtime or lane not found";
   Alcotest.(check int) "the Task stall posted" 1
@@ -742,17 +742,25 @@ let test_system_llm_authority_helpers_are_typed () =
    that rest would send the whole review to a slot that just refused it. The
    pulse stays the shortest wait. *)
 let test_retry_waits_out_a_resting_slot () =
-  let delay = CA.For_testing.retry_delay_of_path_rest ~retry_interval_sec:60.0 ~now:1000.0 in
+  let delay = CA.For_testing.retry_delay_of_paths ~retry_interval_sec:60.0 ~now:1000.0 in
   Alcotest.(check (float 0.0)) "a serving slot waits the pulse" 60.0
-    (delay Masc.Keeper_turn_driver.Path_serving);
+    (delay [Masc.Keeper_turn_driver.Path_serving]);
   Alcotest.(check (float 0.0)) "a slot resting past the pulse is waited out" 300.0
     (delay
-       (Masc.Keeper_turn_driver.Path_resting
-          { release_at = 1300.0; walk_promotes_at_release = true }));
+       [Masc.Keeper_turn_driver.Path_resting
+          { release_at = 1300.0; walk_promotes_at_release = true }]);
   Alcotest.(check (float 0.0)) "a rest shorter than the pulse still waits the pulse" 60.0
     (delay
-       (Masc.Keeper_turn_driver.Path_resting
-          { release_at = 1010.0; walk_promotes_at_release = false }))
+       [Masc.Keeper_turn_driver.Path_resting
+          { release_at = 1010.0; walk_promotes_at_release = false }]);
+  let resting release_at = Masc.Keeper_turn_driver.Path_resting
+      { release_at; walk_promotes_at_release = false } in
+  Alcotest.(check (float 0.0)) "a final quota refusal cannot hold an earlier candidate for 33 hours" 60.0
+    (delay [resting 1060.0; resting 121000.0]);
+  Alcotest.(check (float 0.0)) "rest order does not change the earliest retry" 60.0
+    (delay [resting 121000.0; resting 1060.0]);
+  Alcotest.(check (float 0.0)) "all resting candidates wait until the first can serve" 300.0
+    (delay [resting 121000.0; resting 1300.0])
 
 (* Audit U2 (2026-09-12) and its Codex review: the Board sentence is
    projected from the scheduler's answer, not from the attempt's request. A
@@ -812,6 +820,7 @@ let not_reviewed_stop ~retry =
     { gate = "evaluator_unavailable"
     ; detail = "Payment required"
     ; evaluator_runtime = "ollama_cloud.deepseek"
+    ; retryable_runtimes = ["ollama_cloud.deepseek"]
     ; retry
     }
 ;;
@@ -1313,7 +1322,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; generator_runtime = None
     ; gate = Masc.Task.Anti_rationalization.Structured_tool
     ; fallback_reason = None
-    ; evaluator_error_retryable = None
+    ; retryable_runtimes = []; evaluator_error_retryable = None
     }
   in
   let notes =
@@ -1757,7 +1766,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
     let previous_lane_slots =
-      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
     in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
@@ -1773,7 +1782,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
           previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
@@ -1788,8 +1797,8 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            verifier_exact lane; the default runtime hook above no longer
            reaches it. *)
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
-          (fun () -> Ok [ "test-system-evaluator" ]);
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
+          (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-system-evaluator" ]));
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
@@ -1817,7 +1826,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  Eio.Promise.resolve resolve_run_completed ()
                | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
                on_tool_result
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
@@ -2024,7 +2033,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
     let previous_lane_slots =
-      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
     in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
@@ -2037,7 +2046,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
           previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
@@ -2046,14 +2055,14 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
         Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
-          (fun () -> Ok [ "test-system-evaluator" ]);
+          Workspace_hooks.get_verifier_exact_lane_slots_fn
+          (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-system-evaluator" ]));
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
@@ -4351,7 +4360,7 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
         ; generator_runtime = None
         ; gate = Masc.Task.Anti_rationalization.Structured_tool
         ; fallback_reason = None
-        ; evaluator_error_retryable = None
+        ; retryable_runtimes = []; evaluator_error_retryable = None
         }
       in
       let notes =

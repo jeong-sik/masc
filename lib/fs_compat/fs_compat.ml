@@ -1359,6 +1359,21 @@ let rename_if_exists ~src ~dst =
       | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false)
 ;;
 
+let unlink_if_exists path =
+  test_exec_home_guard ~op:"unlink_if_exists" path;
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      try Unix.unlink path; true with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> false
+      | Unix.Unix_error (code, operation, argument) ->
+        raise (Sys_error
+          (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message code))))
+    (fun fs ->
+      try Eio.Path.unlink Eio.Path.(fs / path); true with
+      | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false)
+;;
+
 let remove_tree_unix (path : string) : unit =
   let rec remove path =
     match Unix.lstat path with

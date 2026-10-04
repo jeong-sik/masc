@@ -229,16 +229,24 @@ let activity lane = match Atomic.get activity_observer with
   | None -> Unobserved
   | Some observe -> observe lane
 
-let activity_refusal lane = function
+type activity_rejection = Lane_off of Lane_name.t | Activity_unavailable
+let activity_rejection_message = function
+  | Lane_off lane -> "browser." ^ Lane_name.to_wire lane ^ " is off; enable it before issuing new browser work"
+  | Activity_unavailable -> "Browser activity configuration is unavailable"
+
+let activity_rejection lane = function
   | Session_close | Session_status -> None
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
   | Page_scene _ | Page_interact _ | Session_open _ | Page_goto _ | Page_elements _
   | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ ->
     match activity lane with
     | Enabled -> None
-    | Disabled -> Some (Rejected_before_effect
-        ("browser." ^ Lane_name.to_wire lane ^ " is off; enable it before issuing new browser work"))
-    | Unobserved -> Some (Rejected_before_effect "Browser activity configuration is unavailable")
+    | Disabled -> Some (Lane_off lane)
+    | Unobserved -> Some Activity_unavailable
+
+let activity_refusal lane verb =
+  Option.map (fun rejection -> Rejected_before_effect (activity_rejection_message rejection))
+    (activity_rejection lane verb)
 
 type browser = Firefox | Zen
 let browser_name = function Firefox -> "firefox" | Zen -> "zen"
@@ -320,16 +328,28 @@ let lane_absent_message = function
    a different next step: a browser has to connect, or the caller has to
    choose one of several. No command is dispatched in any of them. *)
 type selection_error =
+  | Activity_rejected of activity_rejection
   | No_live_client
   | Selected_client_disconnected of client_id
   | Ambiguous_clients of client_id list
 
 let selection_error_code = function
+  | Activity_rejected (Lane_off _) -> "browser_lane_off"
+  | Activity_rejected Activity_unavailable -> "browser_activity_unavailable"
   | No_live_client -> "no_live_client"
   | Selected_client_disconnected _ -> "selected_client_disconnected"
   | Ambiguous_clients _ -> "ambiguous_browser_clients"
 
-let resolve_target = function
+let selection_error_message = function
+  | Activity_rejected rejection -> activity_rejection_message rejection
+  | error -> selection_error_code error
+
+(* Check activity before offering connection/selection remedies. Dispatch still
+   checks again so a target resolved while on cannot admit new work after off. *)
+let resolve_target ~verb route =
+  match activity_rejection (route_lane_name route) verb with
+  | Some rejection -> Error (Activity_rejected rejection)
+  | None -> match route with
   | Automation_route -> Ok Automation
   | Stagehand_route -> Ok Stagehand
   | Live_route selected ->
@@ -402,7 +422,9 @@ let disconnect_client ~client_id =
    selection failure as naming it when it had already gone, so the caller
    answers both from one place. *)
 let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
-  if not (connected client) then
+  match activity_refusal Lane_name.Live verb with
+  | Some refusal -> Ok refusal
+  | None -> if not (connected client) then
     Error (Selected_client_disconnected client.info.client_id)
   else if not (verb_allowed_on_live verb) then
     Ok (Rejected_before_effect "session ownership, direct navigation and sentence verbs belong to the server's lanes")

@@ -61,17 +61,26 @@ type fixture = {
   runtime_config : string;
   package : string;
   stops : int ref;
+  starts : int ref;
+  cleanup_available : bool ref;
+  observation_available : bool ref;
 }
 
-let backend stops : Lane.For_testing.backend = {
+let backend fixture : Lane.For_testing.backend = {
   start = (fun ~sw:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
+    incr fixture.starts;
     let stopped = ref false in
     let connection : Lane.For_testing.connection = {
       container_id = digest instance_id;
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");
-      observe = (fun ~binding:_ ~sources:_ -> Ok { Lane_addon_types.rows = []; coverage = [] });
-      stop = (fun () -> if not !stopped then (stopped := true; incr stops); Ok ());
+      observe = (fun ~binding:_ ~sources:_ ->
+        if !(fixture.observation_available)
+        then Ok { Lane_addon_types.rows = []; coverage = [] }
+        else Error "fixture observation unavailable");
+      stop = (fun () ->
+        if not !(fixture.cleanup_available) then Error "fixture cleanup unavailable"
+        else (if not !stopped then (stopped := true; incr fixture.stops); Ok ()));
     } in
     on_created connection;
     Ok connection);
@@ -173,10 +182,11 @@ sources = [{source_id = "machine", kind = "msx_capture"}]
                   let workspace = Service.workspace_of_base_path ~base_path:root |> get in
                   Fun.protect ~finally:(fun () -> Service.retire ~workspace) (fun () ->
                     let fixture = { config=Workspace.default_config root; workspace; declarations;
-                      declaration; runtime_config; package; stops=ref 0 } in
+                      declaration; runtime_config; package; stops=ref 0; starts=ref 0;
+                      cleanup_available=ref true; observation_available=ref true } in
                     ignore (refresh_base fixture);
                     Lane.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
-                    Lane.For_testing.with_backend (backend fixture.stops)
+                    Lane.For_testing.with_backend (backend fixture)
                       (fun () -> f (Eio.Stdenv.clock env) fixture)))))))))
 
 let test_declaration_catalog_and_resources () = with_fixture (fun clock fixture ->
@@ -255,8 +265,97 @@ let test_missing_read_policy_remains_an_optional_export_diagnostic () =
     check int "optional export rejection does not remove the observer" 0 !(fixture.stops);
     detach clock fixture)
 
+let has_source fixture owner =
+  let id = Lane.skill_source_id owner in
+  Snapshot.sources (snapshot fixture) |> List.exists (fun (scan : Snapshot.source_scan) ->
+    Skill_source_config.source_id_to_string scan.source.source.id = id)
+
+let instance fixture id =
+  inspect fixture |> values "instances"
+  |> List.find (fun row -> json_string "instance_id" row = id)
+
+let test_disabled_cleanup_withdraws_skill_until_replacement () =
+  with_fixture (fun clock fixture ->
+    ignore (reconcile fixture);
+    await_observer clock fixture;
+    let id = installed fixture |> json_string "instance_id" in
+    let source = read fixture.declaration in
+    let owner = Lane.Declaration "msx-installation" in
+    let original = skill (snapshot fixture) "msx-observation-rows" in
+    let frozen_reader = tool fixture in
+    fixture.cleanup_available := false;
+    Fun.protect ~finally:(fun () -> fixture.cleanup_available := true) (fun () ->
+      write fixture.declaration ("enabled = false\n" ^ source);
+      ignore (reconcile fixture);
+      check bool "off withdraws discovery before cleanup finishes" false (has_source fixture owner);
+      await clock (fun () -> instance fixture id |> member "phase" |> json_string "kind" = "failed");
+      ignore (reconcile fixture);
+      check bool "failed cleanup does not republish the Skill" false (has_source fixture owner);
+      check bool "new readers cannot discover the stopped package" true
+        (absent (snapshot fixture) "msx-observation-rows");
+      check string "off keeps the declaration" ("enabled = false\n" ^ source) (read fixture.declaration);
+      check bool "ordinary Skill survives failed optional cleanup" false
+        (absent (snapshot fixture) "ordinary-guide");
+      checked_read frozen_reader "frozen-turn-after-disable"
+        (Skill_reference.to_yojson (Snapshot.entry_reference original)) original.document.body;
+      write fixture.declaration source;
+      ignore (reconcile fixture);
+      check int "reenable does not overlap failed cleanup" 1 !(fixture.starts);
+      check bool "reenable does not republish the stopping incarnation" false (has_source fixture owner));
+    ignore (reconcile fixture);
+    await clock (fun () -> instance fixture id |> member "phase" |> json_string "kind" = "detached");
+    ignore (reconcile fixture);
+    let replacement = inspect fixture |> values "instances" |> List.find (fun row ->
+      json_string "instance_id" row <> id
+      && (member "phase" row |> json_string "kind") <> "detached") in
+    let replacement_id = json_string "instance_id" replacement in
+    await clock (fun () -> instance fixture replacement_id |> member "observation_seq" |> Yojson.Safe.Util.to_int |> fun n -> n > 0);
+    ignore (reconcile fixture);
+    check int "one replacement after confirmed cleanup" 2 !(fixture.starts);
+    check bool "replacement restores discovery" true (has_source fixture owner);
+    check bool "retired incarnation remains inspectable" true
+      (instance fixture id |> member "phase" |> json_string "kind" = "detached");
+    ignore (dispatch fixture Lane.Detach ["instance_id", `String replacement_id]);
+    await clock (fun () -> instance fixture replacement_id |> member "phase" |> json_string "kind" = "detached"))
+
+let test_failed_observation_and_manual_sources_remain_exported () =
+  with_fixture (fun clock fixture ->
+    ignore (reconcile fixture);
+    await_observer clock fixture;
+    let id = installed fixture |> json_string "instance_id" in
+    let source = read fixture.declaration in
+    let owner = Lane.Declaration "msx-installation" in
+    fixture.observation_available := false;
+    ignore (dispatch fixture Lane.Observe ["instance_id", `String id]);
+    await clock (fun () -> instance fixture id |> member "phase" |> json_string "kind" = "failed");
+    ignore (reconcile fixture);
+    check bool "ordinary failed observation retains its Skill" true (has_source fixture owner);
+    write fixture.declaration ("enabled = false\n" ^ source);
+    let unreadable = Filename.concat fixture.declarations "unreadable.toml" in
+    Unix.mkdir unreadable 0o700;
+    let status = reconcile fixture in
+    check bool "incomplete inventory is not off authority" false
+      (member "complete" status |> Yojson.Safe.Util.to_bool);
+    check bool "incomplete inventory preserves the non-stopping source" true (has_source fixture owner);
+    check int "incomplete inventory did not stop the worker" 0 !(fixture.stops);
+    Unix.rmdir unreadable;
+    fixture.observation_available := true;
+    let manual = dispatch fixture Lane.Attach ["manifest_path", `String (Filename.concat fixture.package "lane.toml");
+      "run_id", `String "manual-world"; "binding", `Assoc ["machine_id", `String "workspace-msx";
+        "sources", `List [`Assoc ["source_id", `String "machine"; "kind", `String "msx_capture"]]]]
+      |> json_string "instance_id" in
+    await clock (fun () -> instance fixture manual |> member "observation_seq" |> Yojson.Safe.Util.to_int |> fun n -> n > 0);
+    ignore (reconcile fixture);
+    check bool "off removes only the declared source" false (has_source fixture owner);
+    check bool "active manual source remains published" true (has_source fixture (Lane.Instance manual));
+    await clock (fun () -> instance fixture id |> member "phase" |> json_string "kind" = "detached");
+    ignore (dispatch fixture Lane.Detach ["instance_id", `String manual]);
+    await clock (fun () -> instance fixture manual |> member "phase" |> json_string "kind" = "detached"))
+
 let () = run "Lane package Skill workflow"
   ["declaration to existing reader", [
+    test_case "disabled cleanup withdraws discovery until replacement" `Quick test_disabled_cleanup_withdraws_skill_until_replacement;
+    test_case "non-stopping failures and manual sources remain available" `Quick test_failed_observation_and_manual_sources_remain_exported;
     test_case "catalog, exact body/resource bytes and existing controls" `Quick test_declaration_catalog_and_resources;
     test_case "invalid and detached exports preserve ordinary frozen turns" `Quick test_invalid_document_and_detach_preserve_ordinary_work;
     test_case "missing read policy remains local" `Quick test_missing_read_policy_remains_an_optional_export_diagnostic;

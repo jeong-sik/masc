@@ -1592,12 +1592,14 @@ export function SettingsSurface() {
   // Raw editor writes finish independently of navigation. Observe its final
   // projection publication even after that editor has unmounted.
   const rawProjection = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).state.value.projectionRevision : 0
+  const commit = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).committed.value : null
+  const runtimeCommit = commit?.authority === runtimeAuthority && commit?.generation === sourceGeneration ? commit : null
   useLayoutEffect(() => runtimeSession?.attach(), [runtimeSession])
   useEffect(() => {
     // This writer refreshes after setup resume; its own file notification must
     // not race that final reading. Other writes refresh an idle Settings view.
-    void runtimeSession?.refreshOnObservation().catch(() => {})
-  }, [runtimeSession, sourceGeneration, rawProjection, runtimeObservation])
+    void runtimeSession?.refreshOnObservation(runtimeCommit !== null).catch(() => {})
+  }, [runtimeSession, sourceGeneration, rawProjection, runtimeObservation, runtimeCommit])
   useEffect(() => {
     if (sec === 'routing' && runtimeSession?.state.peek().source.status !== 'loading') void runtimeSession?.readSource().catch(() => {})
   }, [runtimeSession, sec])

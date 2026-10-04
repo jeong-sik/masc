@@ -94,6 +94,25 @@ let sampling_stop_reason = function
   | L.PauseTurn | L.Compaction | L.ContextWindowExceeded | L.UnmatchedToolCalls
   | L.Unknown _ -> None
 
+let response_content (response : L.api_response) =
+  let text = L.visible_text_of_response response in
+  if String.trim text <> "" then Ok (S.Text {type_="text";text})
+  else
+    let content = List.filter (function
+      | L.Text text -> String.trim text <> ""
+      | L.Thinking _ | L.ReasoningDetails _ | L.RedactedThinking _ -> false
+      | L.Image _ | L.Audio _ | L.Document _ | L.ToolUse _ | L.ToolResult _ -> true)
+      response.content in
+    match content with
+    | [L.Image {media_type;data;source_type=L.Base64}] ->
+        (match Base64.decode data with
+         | Ok bytes when bytes <> "" -> Ok (S.Image {type_="image";data;mime_type=media_type})
+         | Ok _ | Error _ -> Error (Invalid_response "MCP sampling image must contain valid nonempty base64"))
+    | [L.Image _] -> Error (Invalid_response "MCP sampling requires a base64 image response")
+    | _ :: _ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
+    | [] -> Error (Provider_error (Llm_provider.Http_client.empty_completion_error
+        ~stop_reason:response.stop_reason))
+
 let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
   let controls = unsupported_common params in
   let* () = if controls=[] then Ok () else Error (Unsupported_controls controls) in
@@ -118,14 +137,10 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
   let* response = Llm_provider.Complete.complete ~sw ~net ~clock ~config
     ~messages:(native_messages params) ~model_identity:Llm_provider.Complete.Reported_model ?body_timeout_s ()
     |> Result.map_error (fun error -> Provider_error error) in
-  let text = L.visible_text_of_response response in
-  let* () = if String.trim text = "" then
-      Error (Provider_error (Llm_provider.Http_client.empty_completion_error
-        ~stop_reason:response.stop_reason))
-    else Ok () in
+  let* content = response_content response in
   let* () = if String.trim response.model = "" then
       Error (Invalid_response "host response has no model identity") else Ok () in
-  Ok {S.role=S.Assistant;content=S.Text {type_="text";text};
+  Ok {S.role=S.Assistant;content;
     model=response.model;stop_reason=sampling_stop_reason response.stop_reason;
     _meta=Some (`Assoc ["masc.lane_provider",`Assoc ["stop_reason",
       `String (L.stop_reason_to_string response.stop_reason)]])}
@@ -184,3 +199,7 @@ let create_handler ~config ~net ~sw ~store ~instance_id ~package ~binding =
 let register ~config ~net =
   Lane_addon_runtime.register_sampling_factory
     (create_handler ~config ~net)
+
+module For_testing = struct
+  let response_content response = response_content response |> Result.map_error failure_detail
+end

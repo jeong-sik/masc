@@ -481,6 +481,23 @@ let test_trend_is_built_from_the_answer () =
       (Masc_tui_message_layout.display_width line <= width))
     (Masc_tui_usage_trend.plot ~width trend row)) [1; 20; 60]
 
+let test_plan_history_preserves_out_of_range_reports () =
+  let open Masc.Tui_decode_usage in
+  let point observed_at value : provider_usage_history_point =
+    { puhp_scope_id = "out-of-range"; puhp_kind = "five_hour"; puhp_limit_id = None;
+      puhp_unit = value; puhp_observed_at = observed_at } in
+  let history : provider_usage_history =
+    { puh_days = 3; puh_generated_at = now; puh_unreadable_reports = 0;
+      puh_reported_no_windows = [];
+      puh_points = [point (now -. 172800.) (Utilization_fraction (-0.2));
+        point (now -. 86400.) (Utilization_percent 140);
+        point now (Utilization_fraction 0.)] } in
+  let trend = Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history in
+  let row = List.hd trend.rows in
+  check string "Plan keeps below-zero and above-limit history distinct" "↓↑0" row.marks;
+  check bool "compact Trend shares the Plan markers" true
+    (contains ~affix:row.marks (String.concat "" (Masc_tui_usage_trend.plot ~width:10 trend row)))
+
 let test_empty_history_report_reaches_trend () =
   let module Decode = Masc.Tui_decode_usage in
   let now = 1780000000. in
@@ -559,7 +576,10 @@ let test_plan_history_joins_exact_quota_window () =
   check bool "a window without matching history stays unreported" true
     (contains ~affix:"Trend 7 UTC days · no reports" text);
   check bool "catalogue absence is not reported as no blocked accounts" true
-    (contains ~affix:"Blocked (observed) unknown" text)
+    (contains ~affix:"Blocked (observed) unknown" text);
+  List.iter (fun symbol ->
+    check bool ("Plan explains history symbol " ^ symbol) true (contains ~affix:symbol text))
+    ["○ reported no windows"; "$ uncapped USD use"; "↓ below zero"; "↑ above limit"]
 
 let test_plan_preserves_unknown_reports () =
   let open Masc.Tui_decode_usage in
@@ -596,7 +616,13 @@ let test_plan_preserves_unknown_reports () =
       (contains ~affix:"░" (String.concat "\n"
         (String.split_on_char '\n' (draw (limit Role_gates_model_calls share))
          |> List.filter (fun line -> contains ~affix:meter_open line)))))
-    [ -0.5; Float.nan; Float.neg_infinity ]
+    [ -0.5; Float.nan; Float.neg_infinity; Float.infinity ];
+  List.iter (fun share ->
+    check string "nonfinite reports do not draw a used meter" "    "
+      (Providers.meter ~cells:4 share);
+    check bool "nonfinite reports do not count as at limit" true
+      (contains ~affix:"At limit (reported) 0" (draw (limit Role_gates_model_calls share))))
+    [Float.nan; Float.neg_infinity; Float.infinity]
 
 let test_usd_cards_do_not_invent_a_percentage () =
   let json = Yojson.Safe.from_string
@@ -629,7 +655,8 @@ let test_usd_cards_do_not_invent_a_percentage () =
 let () =
   run "tui_overview_providers"
     [ ( "providers"
-      , [ test_case "unknown report evidence" `Quick test_plan_preserves_unknown_reports;
+      , [ test_case "out-of-range Plan history" `Quick test_plan_history_preserves_out_of_range_reports;
+          test_case "unknown report evidence" `Quick test_plan_preserves_unknown_reports;
           test_case "exact quota window history join" `Quick test_plan_history_joins_exact_quota_window;
           test_case "account summary and reported gauges" `Quick test_section_draws_three_line_shapes
         ; test_case "eighth-block meter" `Quick test_meter_uses_eighth_blocks

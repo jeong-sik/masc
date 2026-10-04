@@ -1413,7 +1413,14 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             os.write(fd, b"\r")
             chat = _keyboard_harness.wait_for_http_request(process, fd, output, requests,
                 path="/api/v1/keepers/chat/stream")
-            assert created == [("a-returned", {"title": "workspace-a-fresh-task"})], created
+            assert wire.local_base is not None
+            assert created == [("a-returned", {
+                "expected_workspace": {
+                    "base_path": wire.local_base,
+                    "masc_root": str(Path(wire.local_base, ".masc")),
+                },
+                "title": "workspace-a-fresh-task",
+            })], created
             assert json.loads(chat)["message"] == "[task-9] workspace-a-fresh-task"
             os.write(fd, b"q")
         finally:

@@ -64,8 +64,7 @@ type entry = {
   action_queue : Lane_addon_action.receipt Queue.t;
   mutable current_action : Lane_addon_action.receipt option;
 }
-type sampling_discovery_phase = Sampling_discovery_pending | Sampling_retry_only
-type manager = { mutable sampling_discovery : sampling_discovery_phase; store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
+type manager = { sampling_discovered : (string, unit) Hashtbl.t; store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, unit) Hashtbl.t;
   configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
   fleet_journals : (string, unit) Hashtbl.t;
@@ -726,7 +725,7 @@ let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
   | Some m -> m
-  | None -> let m = { sampling_discovery = Sampling_discovery_pending; store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
+  | None -> let m = { sampling_discovered = Hashtbl.create 8; store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
                      action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
                      fleet_journals=Hashtbl.create 8;
@@ -759,9 +758,7 @@ let read_retained_bindings m =
 let recover_sampling_with ~startup ~config = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
   let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
-  let discover = startup || m.sampling_discovery = Sampling_discovery_pending in
-  let discovery_complete = ref true in
-  let outcome = List.fold_left (fun previous binding ->
+  List.fold_left (fun previous binding ->
     let result =
       let* binding = normalize_retained_binding ~bindings binding in
       let* fields = object_ binding in
@@ -773,22 +770,18 @@ let recover_sampling_with ~startup ~config = Eio_context.run_on_owner_domain (fu
       let* max_reply_bytes = match List.assoc_opt "max_reply_bytes" resources with
         | Some (`Int value) when value > 0 -> Ok value
         | _ -> Error "missing positive persisted sampling reply bound" in
+      let discover = startup || not (Hashtbl.mem m.sampling_discovered instance_id) in
       let report = offload (fun () ->
         if discover then Lane_addon_store.discover_sampling_requests m.store
           ~instance_id ~max_reply_bytes
         else {Lane_addon_store.discovery_complete=true;
           outcome=Lane_addon_store.retry_sampling_requests m.store ~instance_id ~max_reply_bytes}) in
-      if not report.discovery_complete then discovery_complete := false;
-      Ok (Result.map_error (fun detail -> instance_id ^ ": " ^ detail) report.outcome) in
-    let result = match result with
-      | Ok outcome -> outcome
-      | Error detail -> discovery_complete := false; Error detail in
+      if report.discovery_complete then Hashtbl.replace m.sampling_discovered instance_id ();
+      Result.map_error (fun detail -> instance_id ^ ": " ^ detail) report.outcome in
     (match result with
      | Ok () -> ()
      | Error detail -> Log.Misc.warn "Lane sampling recovery incomplete: %s" detail);
-    match previous with Error _ -> previous | Ok () -> result) (Ok ()) bindings in
-  if !discovery_complete then m.sampling_discovery <- Sampling_retry_only;
-  outcome)
+    match previous with Error _ -> previous | Ok () -> result) (Ok ()) bindings)
 let recover_sampling ~config = recover_sampling_with ~startup:true ~config
 let retry_sampling ~config = recover_sampling_with ~startup:false ~config
 let without_live_bindings m bindings =

@@ -734,7 +734,7 @@ let load_sampling_request_bounded_unlocked ~sync_file ~sync_parent ~budget t ~in
       (* Return the inline bytes from this read even after compaction. The
          caller can share them with other references without rereading them. *)
       Ok (Some json))
-let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id =
+let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id = bounded_protect (fun () ->
   match Fs_compat.exact_path_kind ~follow:false t.root with
   | Fs_compat.Exact_missing -> Ok None
   | _ ->
@@ -743,7 +743,7 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
           ~sync_file ~sync_parent ~budget t ~instance_id ~request_id)) in
       match result with
       | Ok result -> result
-      | Error detail -> Error (Read_failed detail)
+      | Error detail -> Error (Read_failed detail))
 let load_sampling_request_bounded =
   load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 

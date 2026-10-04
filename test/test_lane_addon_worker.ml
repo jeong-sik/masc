@@ -2014,7 +2014,19 @@ let test_sampling_fallback_rejects_external_links name link () =
         (Result.is_error (Store.read_blob_bounded ~budget:(Store.read_budget ~max_bytes:4096) store reference)))))
     [false; true]
 
+let test_sampling_bounded_root_loop_is_error () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let link = Filename.concat dir "bounded-root-loop" in
+  Unix.symlink "bounded-root-loop" link;
+  Fun.protect ~finally:(fun () -> Unix.unlink link) (fun () ->
+    let store = Store.create ~root:(Filename.concat link "retained") in
+    match Store.load_sampling_request_bounded ~budget:(Store.read_budget ~max_bytes:4096)
+        store ~instance_id:"loop-instance" ~request_id:"loop-request" with
+    | Error (Store.Read_failed _) -> ()
+    | Error Store.Read_limit_exceeded | Ok _ -> fail "root loop must return a bounded read error"))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "bounded sampling root loop returns error" `Quick test_sampling_bounded_root_loop_is_error;
   test_case "cold read preserves optional marked compaction" `Quick test_sampling_cold_read_keeps_optional_compaction;
   test_case "pending discovery resumes after namespace repair" `Quick test_sampling_pending_discovery_resumes_after_namespace_repair;
   test_case "pending recovery sees two Stores and concurrent writer" `Quick test_sampling_retry_two_stores_and_concurrent_writer;

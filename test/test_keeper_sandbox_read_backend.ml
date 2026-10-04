@@ -1392,6 +1392,57 @@ sandbox_profile = "remote_ssh"
     Alcotest.(check bool) "the tree refusal follows" true
       (contains ~needle:"(the keeper's tree also refused the path: path_outside_sandbox" message)
 
+(* Exercise the public result producers through real endpoint dispatch, with
+   the existing SSH shim fixture and an Apple-container CLI fixture. *)
+let test_read_and_grep_report_the_endpoint_profile () =
+  let check_results ~config ~meta ~expected =
+    let check tool body_field expected_body (result : Masc.Keeper_tool_execution.t) =
+      let json = Yojson.Safe.from_string result.raw_output in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool) (tool ^ " succeeds") true
+        (json |> member "ok" |> to_bool);
+      Alcotest.(check string) (tool ^ " backend") expected
+        (json |> member "via" |> to_string);
+      Alcotest.(check bool) (tool ^ " endpoint output") true
+        (member body_field json = expected_body)
+    in
+    check "Read" "content" (`String "remote-file-content")
+      (Masc.Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+         ~turn_sandbox_factory:None ~config ~meta
+         ~args:(`Assoc [ "path", `String "read-target.txt" ]));
+    match
+      Masc.Keeper_workspace_read_ops.try_handle_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta ~op:"rg" ~raw_path:"."
+        ~args:(`Assoc [ "path", `String "."; "pattern", `String "remote" ])
+    with
+    | None -> Alcotest.fail "Grep was not dispatched"
+    | Some result ->
+      check "Grep" "matches" (`List [ `String "remote-file-content" ]) result
+  in
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_fake_ssh fake_ssh_success_script (fun () ->
+    check_results ~config ~meta ~expected:"remote_ssh");
+  let meta =
+    { meta with
+      sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
+      microvm_backend = Some Masc.Keeper_microvm_backend.Apple_container }
+  in
+  write_file (Filename.concat base ".masc/config/keepers/remote-reader.toml")
+    {|[keeper]
+instructions = "microvm read test"
+sandbox_profile = "microvm"
+|};
+  let cli_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir cli_dir) @@ fun () ->
+  let cli_path = Filename.concat cli_dir "container" in
+  write_file cli_path fake_ssh_success_script;
+  Unix.chmod cli_path 0o755;
+  let path = cli_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  with_env "PATH" path (fun () ->
+    check_results ~config ~meta ~expected:"microvm")
+
 let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
   let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -3061,6 +3112,8 @@ let run_tests ~clock () =
             test_unresolved_endpoint_leads_and_keeps_the_tree_refusal;
           Alcotest.test_case "own tree translates even under a declared root" `Quick
             test_own_tree_translates_even_under_a_declared_root;
+          Alcotest.test_case "Read and Grep report the endpoint profile" `Quick
+            test_read_and_grep_report_the_endpoint_profile;
           Alcotest.test_case "read of a declared path asks the endpoint for that path"
             `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
           Alcotest.test_case "raw prefix keeps remote bytes that spell the workspace root"

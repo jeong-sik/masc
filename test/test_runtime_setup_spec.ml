@@ -377,7 +377,65 @@ let test_cli_reuse_requires_non_interactive () =
      "antigravity", ["credential_file", `String "/fixture/oauth.json"; "timeout_s", `Int 60];
      "muse", ["account_home", `String "/fixture/muse"]]
 
+let test_existing_inline_selection () =
+  let parse extra = Runtime_setup_spec.of_json (`Assoc (["choice",`String "openai_compatible";
+    "endpoint",`String "https://fixture.invalid/v1";"request_path",`String "/responses";
+    "model",`String "fixture-model";"max_context",`Int 8192;"tools",`Bool true;"streaming",`Bool true] @ extra))
+    |> Result.get_ok in
+  let spec=parse [] in
+  let config=Runtime_setup_spec.render spec |> fun row -> Runtime_toml.parse_string row.runtime_toml |> Result.get_ok in
+  let provider={ (List.hd config.Runtime_schema.providers) with
+    id="operator_account";credentials=Some (Runtime_schema.Inline "fixture-inline-secret")} in
+  Alcotest.(check bool) "an ordinary anonymous spec cannot reuse inline credentials" true
+    (Option.is_none (Runtime_setup_spec.for_provider spec provider));
+  let bound=Runtime_setup_spec.for_existing_inline_provider spec provider |> Option.get in
+  let rechecked=Runtime_setup_spec.resolve_provider bound [provider;{provider with id="same-secret-sibling"}] |> Result.get_ok in
+  Alcotest.(check string) "explicit inline selection survives locked account resolution"
+    provider.id (Runtime_setup_spec.provider_id rechecked);
+  List.iter (fun changed -> Alcotest.(check bool) "locked selection refuses changed credential or connection" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider bound [changed])))
+    [{provider with credentials=Some (Runtime_schema.Inline "replacement")};
+     {provider with credentials=Some (Runtime_schema.File "/fixture/arbitrary-carrier")};
+     {provider with enabled=false};{provider with request_path=Some "/chat/completions"}];
+  List.iter (fun fields -> Alcotest.(check bool) "replacement references cannot claim inline provenance" true
+    (Option.is_none (Runtime_setup_spec.for_existing_inline_provider (parse fields) provider)))
+    [["credential_file",`String "/fixture/arbitrary-carrier"];["api_key_env",`String "NEW_API_KEY"];
+     ["existing_provider_id",`String "some-other-provider"]];
+  let rendered=Runtime_setup_spec.render bound in
+  let parsed=Otoml.Parser.from_string_result rendered.runtime_toml |> Result.get_ok in
+  Alcotest.(check bool) "inline rendering never rewrites the configured provider" true
+    (Otoml.find_opt parsed Otoml.get_table ["providers"]=None);
+  Alcotest.(check bool) "inline secret never enters rendered fragments" false
+    (String_util.contains_substring rendered.runtime_toml "fixture-inline-secret");
+  let repeated=Runtime_setup_spec.for_existing_inline_provider (parse []) provider |> Option.get |> Runtime_setup_spec.render in
+  Alcotest.(check string) "repeated explicit selection has stable runtime identity" rendered.runtime_id repeated.runtime_id
+
+let test_antigravity_inventory_keeps_declared_timeout () =
+  let config = Runtime_toml.parse_string {|
+[providers.saved]
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 824.5
+[providers.saved.credentials]
+type = "file"
+path = "/fixture/oauth"
+[models.existing]
+api-name = "existing"
+max-context = 8192
+[saved.existing]
+|} |> Result.get_ok in
+  let open Yojson.Safe.Util in
+  let inventory = Runtime_wizard_inventory.to_json ~include_credential_references:true config in
+  let provider = inventory |> member "integrations" |> to_list
+    |> List.find (fun row -> (row |> member "id") = `String "saved") in
+  let runtime = inventory |> member "runtimes" |> to_list |> List.hd in
+  List.iter (fun row -> Alcotest.(check (float 0.)) "declared transport timeout is projected" 824.5
+    (row |> member "provider_timeout_s" |> to_float)) [provider; runtime]
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
+  Alcotest.test_case "existing inline account selection is revalidated without exporting secrets" `Quick test_existing_inline_selection;
+  Alcotest.test_case "Antigravity inventory preserves declared timeout" `Quick test_antigravity_inventory_keeps_declared_timeout;
   Alcotest.test_case "CLI reuse follows actual execution eligibility" `Quick test_cli_reuse_requires_non_interactive;
   Alcotest.test_case "HTTP request surface survives setup" `Quick test_http_request_surface;
   Alcotest.test_case "existing and disabled account identity" `Quick test_configured_account_resolution;

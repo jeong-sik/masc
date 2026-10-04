@@ -1,23 +1,6 @@
 open Alcotest
 
-(* Exercise the SCM_RIGHTS stub in a disposable child: the child opens a
-   file and hands the descriptor to the parent over a unix-domain socket,
-   and the parent reads the same bytes through the received descriptor.
-   This is the fd-passing primitive task-1571 (phase 2) needs to move a
-   SECCOMP_FILTER_FLAG_NEW_LISTENER fd from the child (where the filter is
-   installed) to the shim (which polls it).
 
-   Single-close discipline: the parent closes [a] exactly once (in the
-   body), [b] exactly once (in the finally).  The child closes its own
-   copies — fork gives it a separate descriptor table, so its closes do
-   not touch the parent's.  The child reports failure through its exit
-   status so a dead child cannot masquerade as a short read.
-
-   scripts/ci/run-edited-tests.sh selects a suite for an edited source by
-   an exact quoted path match, not by directory: this suite exercises
-   "lib/exec_shim/fdpass_stub.c" and "lib/exec_shim/shim_fdpass.ml"
-   directly, so both are named here to stay selected when either changes
-   (review 5198897765 on PR #36319, observation 3). *)
 
 let child_exit_ok = 0
 let child_exit_send_failed = 3

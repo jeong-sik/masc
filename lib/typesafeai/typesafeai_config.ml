@@ -14,6 +14,7 @@ type unavailable_reason =
   | Board_attention_disabled
   | Context_review_disabled
   | Skill_applicability_disabled
+  | Librarian_preflight_disabled
   | Keeper_excluded
 
 let unavailable_reason_to_string = function
@@ -23,6 +24,7 @@ let unavailable_reason_to_string = function
   | Board_attention_disabled -> "board_attention_disabled"
   | Context_review_disabled -> "context_review_disabled"
   | Skill_applicability_disabled -> "skill_applicability_disabled"
+  | Librarian_preflight_disabled -> "librarian_preflight_disabled"
   | Keeper_excluded -> "keeper_excluded"
 ;;
 
@@ -125,6 +127,12 @@ let skill_applicability_destinations ~keeper_id =
 ;;
 
 let is_board_attention_enabled () = is_enabled () && (policy ()).Runtime_schema.board_attention
+let librarian_preflight_destinations ~keeper_id =
+  gate_destinations ~keeper_id
+    ~switched_on:(policy ()).Runtime_schema.librarian_preflight
+    ~off:Librarian_preflight_disabled
+;;
+
 let is_absorb_gate_enabled () = is_enabled () && (policy ()).Runtime_schema.absorb_gate
 
 (* The names that exclude nobody: a keeper is excluded by its name, so a
@@ -146,7 +154,7 @@ let readiness () =
     | Error (Lane_disabled | No_armed_destination) -> Off
     | Error
         ( Absorb_gate_disabled | Board_attention_disabled | Context_review_disabled
-        | Skill_applicability_disabled | Keeper_excluded ) ->
+        | Skill_applicability_disabled | Librarian_preflight_disabled | Keeper_excluded ) ->
       (* [lane_destinations] answers only about the lane and its keys. *)
       Off
     | Ok (first, rest) ->

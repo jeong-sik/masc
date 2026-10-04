@@ -874,7 +874,7 @@ let test_admission_context_survives_task_and_goal_changes () =
         execution_links = Masc_domain.no_execution_links; do_not_reclaim_reason = None; skills = [] }
     in
     Workspace_backlog.write_backlog config
-      { tasks = [task]; task_deletion_receipts = []; pending_completion_rejections = [];
+      { tasks = [task]; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
         last_updated = "2026-10-02T00:00:00Z"; version = 1 }
   in
   let goal target_value =

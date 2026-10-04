@@ -7,10 +7,7 @@
     - {!Mcp_server_eio_helpers.mcp_exn_level_and_tag} — the MCP exception logger.
       An [UNEXPECTED]-tagged exception was previously emitted at [Info].
 
-    The taxonomy is enforced structurally by
-    [scripts/ci/check-log-severity-anti-patterns.sh] (rule L6); these tests pin
-    the {e mapping} itself so a future edit cannot silently demote an error back
-    to [Info] while still satisfying the regex lint. *)
+    These tests check the mapping so an unexpected error keeps its severity. *)
 
 open Masc
 

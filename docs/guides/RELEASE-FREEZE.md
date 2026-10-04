@@ -1,7 +1,7 @@
 # Release freeze and candidate repair
 
 Release preparation has a finite scope. Freeze a version's source and included
-changes before its full RC; keep developing the next version on main.
+changes before complete candidate verification; keep developing the next version on main.
 
 ## Freeze
 
@@ -13,10 +13,17 @@ unrelated code, or import unrelated test cleanup into a frozen release.
 
 The release PR and its candidate ledger own the selected SHA, admitted repairs,
 run and result. Read that record before preparing a repair or assessing evidence;
-this runbook does not carry a second current-candidate identity. For v0.49.0,
-follow the ledger in [the release repair PR](https://github.com/jeong-sik/masc/pull/41018).
+this runbook does not carry a second current-candidate identity.
 An initial freeze, a replacement candidate and a successful verification are
 separate entries; none is inferred from the others.
+
+During the v0.49.0 preparation, the operator explicitly stopped main inflow.
+Historical candidate `1123d7bebf45983f6222caeb171896e8469335a6` and RC
+[37136996120](https://github.com/jeong-sik/masc/actions/runs/37136996120) identify
+that earlier selected scope, not the published candidate or a successful result.
+[v0.49.0](https://github.com/jeong-sik/masc/releases/tag/v0.49.0) has since been
+published. Keep each candidate and its evidence separate; this policy change
+belongs to its own main-targeted PR and does not alter published release assets.
 
 ## Admit only release blockers
 
@@ -68,9 +75,14 @@ Changing this verification architecture is a separate next-version change.
 
 ## Publish the verified candidate
 
-Require independent review of the final candidate and successful exact-SHA full
-RC. A source approval, partial pass, cancelled run or old candidate is not full
-verification. Release tags and published assets identify that verified commit;
+Require independent review of the final candidate and successful exact-SHA
+verification of every declared candidate stage. The current implementation uses
+full root `@runtest`; a reviewed versioned essential profile may replace that
+behavior selection for a later release while retaining full type/compile and
+four-platform install checks. Its exact profile identity belongs in the receipt.
+A source approval, partial pass, cancelled run or old candidate is not complete
+verification. Production-ready additionally requires every quantitative gate in
+[Production readiness](../PRODUCTION-READINESS-GATES.md). Release tags and published assets identify that verified commit;
 publish its existing RC assets with `rc_run_id`, without a fresh rebuild.
 
 Integration back into main is a separate obligation. Moving main does not

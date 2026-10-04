@@ -24,6 +24,7 @@ let make_post ~id ~created_at ~votes_up ~votes_down ~reply_count () : Board.post
   ; post_kind = Board.Human_post
   ; meta_json = None
   ; visibility = Board.Public
+  ; audience = None
   ; created_at
   ; content_updated_at = created_at
   ; updated_at = created_at

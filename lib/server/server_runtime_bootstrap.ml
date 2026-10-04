@@ -1388,8 +1388,8 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
    same post-readiness lane as the task completion authority — the stage-2
    gate is illegal to merge without it (a gate no one calls wedges every goal
    that enters [Verifying]). *)
-let start_goal_verifier ~sw (state : Mcp_server.server_state) =
-  Goal_verification_agent.start ~sw ~config:(Mcp_server.workspace_config state)
+let start_goal_verifier ~sw ~clock (state : Mcp_server.server_state) =
+  Goal_verification_agent.start ~sw ~clock ~config:(Mcp_server.workspace_config state)
 
 let resume_model_configuration () =
   match Runtime.config_path () with
@@ -1474,7 +1474,7 @@ let start_post_ready_owner_lanes
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
-    start_goal_verifier ~sw state;
+    start_goal_verifier ~sw ~clock state;
     Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
       ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ())
       ~appraise:(Server_candle_appraiser.run ~base_path:(Mcp_server.workspace_config state).base_path) ();

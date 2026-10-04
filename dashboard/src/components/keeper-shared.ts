@@ -30,6 +30,7 @@ import {
 } from '../keeper-actions'
 import {
   keeperActionErrors,
+  keeperChatHistoryErrors,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
@@ -690,7 +691,10 @@ export function KeeperConversationPanel({
   // Loading vs empty: until the first chat-history hydration settles, an empty
   // thread is a hard-refresh artifact, not an authoritative absence (#26276).
   const historyPending = isKeeperChatHistoryPending(keeperName)
-  const error = keeperActionErrors.value[keeperName]
+  const errorState = keeperActionErrors.value[keeperName] != null
+    ? keeperActionErrors
+    : keeperChatHistoryErrors
+  const error = errorState.value[keeperName]
   const renderError = (extraClass = 'mt-2') => {
     if (!error) return null
     return html`
@@ -701,7 +705,7 @@ export function KeeperConversationPanel({
           aria-label="에러 메시지 닫기"
           class="shrink-0 text-[var(--bad-light)] opacity-70 hover:opacity-100 transition-opacity ml-1 cursor-pointer font-bold select-none"
           title="에러 메시지 닫기"
-          onClick=${() => setRecordValue(keeperActionErrors, keeperName, null)}
+          onClick=${() => setRecordValue(errorState, keeperName, null)}
         >
           ✕
         </button>

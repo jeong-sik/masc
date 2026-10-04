@@ -19480,7 +19480,7 @@ and is loaded on demand through keeper_skill.
         && not state.help_open
         && (let terminal_rows, _ = get_terminal_size () in
             match Masc_tui_render.frame_choice state ~terminal_rows with
-            | `Surface | `Too_small _ -> true
+            | `Surface -> true
             | _ -> false)
       in
       let browser_activity_on_screen () =
@@ -19488,7 +19488,7 @@ and is loaded on demand through keeper_skill.
         && not state.help_open
         && (let terminal_rows, _ = get_terminal_size () in
             match Masc_tui_render.frame_choice state ~terminal_rows with
-            | `Surface | `Too_small _ -> true
+            | `Surface -> true
             | _ -> false)
       in
       let exact_activity_on_screen () =
@@ -19496,7 +19496,7 @@ and is loaded on demand through keeper_skill.
         && not state.help_open
         && (let terminal_rows, _ = get_terminal_size () in
             match Masc_tui_render.frame_choice state ~terminal_rows with
-            | `Surface | `Too_small _ -> true
+            | `Surface -> true
             | _ -> false)
       in
       (* What a press lands on in the frame on screen. Only marks the

@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { OnboardingSettings } from './onboarding-settings'
 import { get, post } from '../api/core'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
-vi.mock('../api/core', () => { const post = vi.fn(); return { get: vi.fn(), post, postControlPlane: vi.fn((path, body) => post(path, body)) } })
+vi.mock('../api/core', async original => { const post = vi.fn(); return { ...await original<typeof import('../api/core')>(), get: vi.fn(), post, postControlPlane: vi.fn((path, body) => post(path, body)) } })
 vi.mock('../api/setup-login', () => ({ streamSetupLogin: vi.fn(), sendLoginInput: vi.fn(), cancelSetupLogin: vi.fn(), fetchLoginReceipt: vi.fn() }))
 import { streamSetupLogin } from '../api/setup-login'
 afterEach(() => { cleanup(); vi.resetAllMocks(); modelSetupResumeState.value = { kind: 'idle' } })

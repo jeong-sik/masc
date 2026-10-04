@@ -5,9 +5,7 @@
     that must handle it: [Keeper_schema.schema_for] and both dispatchers in
     [Keeper_tool_surface].
 
-    It lives outside [lib/tool] because keeper names are keeper-owned —
-    [scripts/lint/masc-domain-boundary-ratchet.sh] holds [lib/tool] at zero
-    [Keeper_*] identifiers. *)
+    It lives outside [lib/tool] because keeper names are keeper-owned. *)
 
 type t =
   | Keeper_audit

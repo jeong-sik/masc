@@ -11,10 +11,7 @@ import time
 import test_tui_keyboard_input as h
 import test_tui_home_journey_pty as home
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_editor.ml",
-    "bin/masc_tui_http.ml", "bin/masc_cli_keeper_create.ml",
-)
+
 CREATE_PATH = "/api/v1/keepers/gamma/up"
 MALFORMED = '{"name": "gamma",'
 DECLARATION = json.dumps({

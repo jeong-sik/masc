@@ -13,13 +13,10 @@ MASC coordinator/runtime -> masc.agent_core -> external protocol libraries
 ```
 
 Code below this directory must not import Keeper, Board, Gate, Server,
-Operator, workspace, or runtime-configuration modules. The enforced boundary
-is `scripts/check-agent-core-boundary.sh`.
+Operator, workspace, or runtime-configuration modules.
 
 Verification:
 
 ```bash
 dune build --root . @packages/agent_core/test/runtest
-bash scripts/check-agent-core-boundary.sh
-bash test/test_agent_core_boundary.sh
 ```

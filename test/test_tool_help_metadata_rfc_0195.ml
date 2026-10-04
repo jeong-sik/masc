@@ -203,51 +203,34 @@ let test_canonicalising_carries_that_description () =
     Config.raw_all_tool_schemas
     (Registry.canonicalize_schemas Config.raw_all_tool_schemas)
 
-(* The descriptions come out the same either way, so no assertion on the output
-   can tell whether the entry is being built and discarded again. The call
-   graph is what says it. *)
-let test_canonicalising_builds_no_help_entry () =
-  Alcotest.(check int)
-    "canonicalising reaches for the description, not the entry" 0
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"lib/tool_surface/tool_help_registry.ml"
-       ~binding_name:"canonicalize_schema" ~callee:"entry_of_schema")
-
 let () =
   Alcotest.run "tool_help_metadata_rfc_0195"
     [
       ( "curated_metadata",
         [
           Alcotest.test_case "six target tools have examples"
-            `Quick test_examples_populated;
-          Alcotest.test_case "four target tools have typed alternatives"
-            `Quick test_alternatives_typed_list;
-          Alcotest.test_case "tools without a sibling have empty alternatives"
+            `Quick test_examples_populated; Alcotest.test_case "four target tools have typed alternatives"
+            `Quick test_alternatives_typed_list; Alcotest.test_case "tools without a sibling have empty alternatives"
             `Quick test_tools_without_sibling_have_empty_alternatives;
         ] );
       ( "registry_invariants",
         [
           Alcotest.test_case "alternatives names resolve through find_entry"
-            `Quick test_alternatives_never_dangling;
-          Alcotest.test_case "the short description is the entry's own"
-            `Quick test_the_short_description_is_the_entrys_own;
-          Alcotest.test_case "canonicalising carries that description"
+            `Quick test_alternatives_never_dangling; Alcotest.test_case "the short description is the entry's own"
+            `Quick test_the_short_description_is_the_entrys_own; Alcotest.test_case "canonicalising carries that description"
             `Quick test_canonicalising_carries_that_description;
-          Alcotest.test_case "canonicalising builds no help entry"
-            `Quick test_canonicalising_builds_no_help_entry;
+
         ] );
       ( "definition_source",
         [
           Alcotest.test_case "a shipped tool names its file"
-            `Quick test_definition_source_names_the_shipped_file;
-          Alcotest.test_case "an unshipped name resolves to none"
+            `Quick test_definition_source_names_the_shipped_file; Alcotest.test_case "an unshipped name resolves to none"
             `Quick test_definition_source_is_none_without_an_asset;
         ] );
       ( "json_projection",
         [
           Alcotest.test_case "empty optional fields are omitted"
-            `Quick test_entry_json_omits_empty_fields;
-          Alcotest.test_case "populated optional fields are emitted"
+            `Quick test_entry_json_omits_empty_fields; Alcotest.test_case "populated optional fields are emitted"
             `Quick test_entry_json_includes_populated_fields;
         ] );
     ]

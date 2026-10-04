@@ -10,18 +10,18 @@ scenario to unwind its own PTY cleanup. SIGKILL or runner loss can interrupt
 cleanup and artifact upload; only output already written to disk is retained.
 """
 import argparse
-from datetime import datetime, timezone
+import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import platform
 import signal
 import statistics
 import subprocess
 import sys
 import time
-
+from datetime import datetime, timezone
+from pathlib import Path
 
 from linux_probe_artifact import digest, fetch
 
@@ -171,8 +171,11 @@ def main():
         parser.error('baseline and candidate must name different source commits')
     root = Path(__file__).resolve().parents[3]
     scenario = root / 'test/test_tui_input_frame_pty.py'
-    helper = root / 'test/test_tui_keyboard_input.py'
-    scenario_hash, helper_hash = digest(scenario), digest(helper)
+    helpers = [root / 'test' / name for name in (
+        'tui_keyboard_harness.py', 'tui_keyboard_keepers.py', 'tui_keyboard_runtime.py')]
+    scenario_hash = digest(scenario)
+    helper_hashes = {helper.name: digest(helper) for helper in helpers}
+    helper_hash = hashlib.sha256(json.dumps(helper_hashes, sort_keys=True).encode()).hexdigest()
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=False)
     metadata_path = None
@@ -222,7 +225,8 @@ def main():
             if (observation['binary_sha256'] != binary_hash
                     or observation['script_sha256'] != scenario_hash
                     or digest(binary) != binary_hash
-                    or digest(scenario) != scenario_hash or digest(helper) != helper_hash):
+                    or digest(scenario) != scenario_hash
+                    or {helper.name: digest(helper) for helper in helpers} != helper_hashes):
                 raise ValueError(f'{name}: observed identity changed')
             inputs, action_inputs = validate_observation(
                 observation, cycles=args.input_cycles, retained_channels=args.retained_channels)
@@ -250,7 +254,7 @@ def main():
                          'min_ms': min(values), 'max_ms': max(values)}
         rows.append(row)
     goal_ms = 0.1
-    summary = {
+    summary: dict[str, object] = {
         'experiment_commit': os.environ.get('GITHUB_SHA'),
         'run_id': os.environ.get('GITHUB_RUN_ID'),
         'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
@@ -258,6 +262,7 @@ def main():
         'platform': platform.platform(), 'python': sys.version,
         'perf_counter': vars(time.get_clock_info('perf_counter')),
         'scenario_sha256': scenario_hash, 'helper_sha256': helper_hash,
+        'helper_files_sha256': helper_hashes,
         'input_cycles': args.input_cycles,
         'retained_channels': args.retained_channels,
         'preflight': expected_preflight,

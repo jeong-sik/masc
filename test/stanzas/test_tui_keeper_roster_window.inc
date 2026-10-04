@@ -3,7 +3,10 @@
 ; conflict whatever else they touch (#36385).
 (rule
  (alias runtest-test_tui_keeper_roster_window)
- (deps test_tui_keeper_roster_window.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_keeper_roster_window.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run python3 %{dep:test_tui_keeper_roster_window.py} %{dep:../bin/masc_tui.exe})))
 

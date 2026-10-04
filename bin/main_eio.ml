@@ -3593,7 +3593,7 @@ let wizard_model_entries client catalog =
         entry.id_prefix
     | _ -> false)
 
-let wizard_model_context ?(prefer_bare = false) model entries =
+let wizard_exact_model_entries ~prefer_bare model entries =
   let exact_entries = entries
     |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
       String.equal
@@ -3610,7 +3610,23 @@ let wizard_model_context ?(prefer_bare = false) model entries =
       | bare -> bare
     else exact_entries
   in
-  let contexts = entries
+  entries
+
+let wizard_model_image_input ~prefer_bare model entries =
+  let values = wizard_exact_model_entries ~prefer_bare model entries
+    |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+         match entry.supports_image_input with
+         | Some _ as declared -> declared
+         | None ->
+           Option.bind entry.base_label (fun base ->
+             Option.map
+               (fun (caps : Llm_provider.Capabilities.capabilities) -> caps.supports_image_input)
+               (Llm_provider.Capabilities.capabilities_for_provider_label base)))
+    |> List.sort_uniq (Option.compare Bool.compare) in
+  match values with [Some value] -> Some value | _ -> None
+
+let wizard_model_context ?(prefer_bare = false) model entries =
+  let contexts = wizard_exact_model_entries ~prefer_bare model entries
     |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
       match entry.max_context_tokens with
       | Some context when context > 0 -> Some context
@@ -3650,6 +3666,9 @@ let runtime_model_list_cmd =
                      Option.map (fun context -> `Assoc [ "id", `String model
                                                        ; "label", `String model
                                                        ; "max_context", `Int context
+                                                       ; "supports_image_input", (match wizard_model_image_input
+                                                           ~prefer_bare:(match client with Wizard_codex -> true | Wizard_claude_code -> false)
+                                                           model entries with Some value -> `Bool value | None -> `Null)
                                                        ; "release", Model_release_evidence.default_model_json
                                                            ~publisher:(match client with Wizard_claude_code -> "anthropic" | Wizard_codex -> "openai")
                                                            ~model_id:model ])
@@ -3728,8 +3747,10 @@ let runtime_account_login_cmd =
 
 let runtime_setup_render_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in
+  let workspace = Arg.(value & opt (some string) None & info ["base-path"]
+    ~doc:"Resolve an existing account from this workspace before rendering its model identity.") in
   Cmd.v (Cmd.info "runtime-setup-render" ~doc:"Render a native runtime specification for local setup.")
-    Term.(const (fun spec_path -> Masc_cli_runtime_setup.render ~spec_path) $ spec)
+    Term.(const (fun base_path spec_path -> Masc_cli_runtime_setup.render ~base_path ~spec_path) $ workspace $ spec)
 
 let runtime_setup_inventory_cmd =
   Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read local setup choices and their configuration revision together.")

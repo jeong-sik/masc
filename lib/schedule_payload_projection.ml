@@ -294,6 +294,26 @@ let creation_keeper_wake_target ~payload =
   | _ -> Error "payload must be a JSON object"
 ;;
 
+let keeper_participants (request : Schedule_domain.schedule_request) =
+  let creators =
+    match request.scheduled_by.kind with
+    | Automated_actor -> [ request.scheduled_by.id ]
+    | Human_operator | System -> []
+  in
+  match
+    creation_keeper_wake_target
+      ~payload:(Schedule_domain.payload_to_yojson request.payload)
+  with
+  | Ok (Some target) when not (List.mem target creators) -> creators @ [ target ]
+  | Ok (Some _) | Ok None | Error _ -> creators
+;;
+
+let visible_to_keeper keeper_name request =
+  match keeper_name with
+  | None -> true
+  | Some name -> List.mem name (keeper_participants request)
+;;
+
 let dispatch_view_detailed request =
   let* view =
     payload_view request |> Result.map_error (fun msg -> Dispatch_invalid_payload msg)

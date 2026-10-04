@@ -79,13 +79,15 @@ val snapshot : keeper_name:string -> snapshot option
 
 val event_json : keeper_name:string -> Yojson.Safe.t
 (** Build the SSE payload. Returns a [no_task] event when the keeper has no
-    retained Execute output. *)
+    retained Execute output. Malformed stdout/stderr sequences are displayed
+    as U+FFFD; retained bytes and byte counters remain the process output. *)
 
 val stream_event_json : stream_event -> Yojson.Safe.t
 (** Build an SSE payload for a live tail event: [line], [task_opened] and
     [task_closed] carry their log number in [seq]; [gap] carries
     [missing_from_seq], [missing_to_seq] and [missing_count] for the numbers
-    this subscriber can no longer receive. *)
+    this subscriber can no longer receive. Output lines use the same UTF-8
+    display conversion as {!event_json}. *)
 
 val sse_frame : Yojson.Safe.t -> string
 (** Serialize one [event: output] SSE frame. *)

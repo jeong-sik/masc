@@ -19,6 +19,7 @@ type unavailable_reason =
   | Board_attention_disabled  (** [\[typesafeai\] board_attention = false] *)
   | Context_review_disabled
   | Skill_applicability_disabled
+  | Librarian_preflight_disabled
   | Keeper_excluded
       (** the keeper is named in [\[typesafeai\] excluded_keepers]: nothing of
           it reaches the vendor, whichever gate asks *)
@@ -48,6 +49,10 @@ val absorb_gate_destinations : keeper_id:string -> (destinations, unavailable_re
     the keeper's exclusion. The lane defaults to on when a key is present; the
     absorb gate requires explicit opt-in because it sends the librarian's
     memories to the vendor. *)
+
+val librarian_preflight_destinations : keeper_id:string -> (destinations, unavailable_reason) result
+(** Explicit opt-in for no-change judgment. Keeper exclusions and lane
+    credentials still apply; disabled by default. *)
 
 val board_attention_destinations : keeper_id:string -> (destinations, unavailable_reason) result
 (** The same for the Board attention judgment

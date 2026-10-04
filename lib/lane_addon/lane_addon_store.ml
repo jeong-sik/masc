@@ -8,7 +8,7 @@ let create ~root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
       trim_separator (String.sub root 0 (length - 1)) else root in
-  { root = trim_separator root; root_parent_pending = false; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+  { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let protect f =
@@ -275,35 +275,204 @@ let sampling_inline_outcome = function
            else Ok (Some (expected, bytes))
        | Some _ -> Error "sampling outcome bytes must be a string")
   | _ -> Ok None
-let iter_sampling_requests t ~instance_id ~max_bytes ~f =
+let verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected path =
+  let read () =
+    let* contents = Fs_compat.load_owned_regular_file_range
+      ~ownership_root:t.root ~offset:0 ~max_bytes path
+      |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+    match contents with
+    | None -> Error "sampling outcome blob disappeared during recovery"
+    | Some contents when contents.snapshot.file_size > max_bytes ->
+        Error "sampling outcome blob exceeds recovery byte envelope"
+    | Some contents -> Ok contents in
+  let* before = read () in
+  if blob_reference before.content <> expected then Error "sampling outcome blob digest mismatch"
+  else protect (fun () ->
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let stat = Unix.fstat fd in
+      if stat.Unix.st_kind <> Unix.S_REG
+         || stat.Unix.st_nlink <> 1
+         || stat.Unix.st_dev <> before.snapshot.device
+         || stat.Unix.st_ino <> before.snapshot.inode then
+        Error "sampling outcome blob changed before sync"
+      else
+        let parent = Filename.dirname path in
+        let parent_fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+        Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
+          let parent_stat = Unix.fstat parent_fd in
+          if parent_stat.Unix.st_kind <> Unix.S_DIR then
+            Error "sampling outcome parent is not a directory"
+          else (
+            sync_file fd;
+            sync_parent parent_fd;
+            let* after = read () in
+            let parent_now = Unix.lstat parent in
+            if (Unix.fstat fd).Unix.st_nlink <> 1
+               || not (Fs_compat.equal_owned_regular_file_snapshot before.snapshot after.snapshot)
+               || before.content <> after.content
+               || parent_now.Unix.st_kind <> Unix.S_DIR
+               || parent_stat.Unix.st_dev <> parent_now.Unix.st_dev
+               || parent_stat.Unix.st_ino <> parent_now.Unix.st_ino then
+              Error "sampling outcome blob changed during sync"
+            else Ok ()))))
+let retain_sampling_inline ~sync_file ~sync_parent ~repair_corrupt t ~expected bytes =
+  let hash = digest bytes in
+  let retain relative =
+    let path = Filename.concat t.root relative in
+    match Fs_compat.exact_path_kind ~follow:false path with
+    | Fs_compat.Exact_missing -> write t relative bytes
+    | Fs_compat.Exact_kind Unix.S_REG ->
+        let* existing = Fs_compat.load_owned_regular_file_range
+          ~ownership_root:t.root ~offset:0 ~max_bytes:(String.length bytes) path
+          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+        (match existing with
+         | None -> Error "sampling outcome disappeared during recovery"
+         | Some contents when contents.snapshot.file_size > String.length bytes ->
+             if repair_corrupt then write t relative bytes
+             else Error "sampling outcome blob exceeds recovery byte envelope"
+         | Some contents when blob_reference contents.content <> expected ->
+             if repair_corrupt then write t relative bytes
+             else Error "sampling outcome blob digest mismatch"
+         | Some _ -> verify_sampling_blob ~sync_file ~sync_parent t
+             ~max_bytes:(String.length bytes) ~expected path)
+    | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+        Error "sampling outcome blob is not a regular file" in
+  let canonical = blob_path hash and fallback = recovery_blob_path hash in
+  match Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root canonical) with
+  | Fs_compat.Exact_kind Unix.S_REG -> retain canonical
+  | Fs_compat.Exact_missing ->
+      (match Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root fallback) with
+       | Fs_compat.Exact_missing -> retain canonical
+       | _ -> retain fallback)
+  | Fs_compat.Exact_kind Unix.S_DIR -> retain fallback
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+      Error "sampling outcome blob is not a regular file"
+let sync_sampling_root ~sync_parent t snapshot = protect (fun () ->
+  match snapshot with
+  | None -> Ok ()
+  | Some (root_before, parent_before) ->
+    let parent_path = Filename.dirname t.root in
+    let parent_fd = Unix.openfile parent_path
+      [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
+      let same_directory before after =
+        before.Unix.st_kind = Unix.S_DIR && after.Unix.st_kind = Unix.S_DIR
+        && before.Unix.st_dev = after.Unix.st_dev
+        && before.Unix.st_ino = after.Unix.st_ino in
+      let verify_root () =
+        if not (same_directory root_before (Unix.lstat t.root))
+           || not (same_directory parent_before (Unix.stat parent_path))
+           || not (same_directory parent_before (Unix.fstat parent_fd)) then
+          raise (Sys_error "retained evidence root or parent changed during recovery") in
+      verify_root ();
+      sync_parent parent_fd;
+      verify_root ());
+    t.root_parent_pending <- false;
+    Ok ())
+let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_bytes ~f =
   if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
   else protect (fun () ->
     let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
-    let scan relative ~skip =
+    let open_directory relative = protect (fun () ->
       let path = Filename.concat t.root relative in
       match Fs_compat.exact_path_kind path with
-      | Fs_compat.Exact_missing -> Ok ()
-      | _ ->
-          let handle = Unix.opendir path in
-          Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
+      | Fs_compat.Exact_missing -> Ok None
+      | _ -> Ok (Some (path, Unix.opendir path))) in
+    let journal = open_directory (sampling_outcome_directory instance_id) in
+    let primary = open_directory (sampling_directory instance_id) in
+    let close = function
+      | Ok (Some (_, handle)) -> Unix.closedir handle
+      | Ok None | Error _ -> () in
+    Fun.protect ~finally:(fun () -> close journal; close primary) (fun () ->
+    let scan opened ~repair_primary ~skip =
+      match opened with
+      | Error detail -> Error detail
+      | Ok None -> Ok ()
+      | Ok (Some (path, handle)) ->
             let rec next () = match Unix.readdir handle with
               | name when Filename.check_suffix name ".json" && not (skip name) ->
+                  let pending_root =
+                    if t.root_parent_pending then
+                      Some (Unix.lstat t.root, Unix.stat (Filename.dirname t.root))
+                    else None in
                   let* bytes = bounded_file_for_sampling ~max_bytes (Filename.concat path name) in
                   let json = Yojson.Safe.from_string bytes in
+                  (* Every record depends on this root, including pending
+                     requests that have no outcome blob to verify. *)
+                  let* () = sync_sampling_root ~sync_parent t pending_root in
                   (* The first terminal write includes exact outcome bytes, so a
                      crash before blob publication is recoverable. *)
-                  let* inline = sampling_inline_outcome json in
-                  let* () = match inline with
-                    | None -> Ok ()
-                    | Some (_, bytes) -> write_sampling_blob t bytes |> Result.map (fun _ -> ()) in
+                  let* () = match json with
+                    | `Assoc fields -> (match List.assoc_opt "outcome_bytes" fields with
+                        | Some (`String bytes) ->
+                            let* expected = match List.assoc_opt "outcome" fields with
+                              | Some json -> evidence_of_json json
+                              | None -> Error "sampling outcome reference is missing" in
+                            if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
+                            else
+                              let retain relative =
+                                let path = Filename.concat t.root relative in
+                                match Fs_compat.exact_path_kind ~follow:false path with
+                                | Fs_compat.Exact_missing -> write t relative bytes
+                                | Fs_compat.Exact_kind Unix.S_REG ->
+                                    verify_sampling_blob ~sync_file ~sync_parent t
+                                      ~max_bytes ~expected path
+                                | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                                    Error "sampling outcome blob is not a regular file" in
+                              let canonical = blob_path (digest bytes) in
+                              (match Fs_compat.exact_path_kind ~follow:false
+                                      (Filename.concat t.root canonical) with
+                              | Fs_compat.Exact_kind Unix.S_REG -> retain canonical
+                              | Fs_compat.Exact_missing ->
+                                  (match Fs_compat.exact_path_kind ~follow:false
+                                           (Filename.concat t.root (recovery_blob_path (digest bytes))) with
+                                   | Fs_compat.Exact_missing -> retain canonical
+                                   | _ -> retain (recovery_blob_path (digest bytes)))
+                              | Fs_compat.Exact_kind Unix.S_DIR ->
+                                  retain (recovery_blob_path (digest bytes))
+                              | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                                  Error "sampling outcome blob is not a regular file")
+                        | _ -> Ok ())
+                    | _ -> Ok () in
+                  (* The independent outcome journal remains authoritative
+                     when primary publication failed. Once that directory is
+                     available again, restore its terminal row before visiting
+                     the request. A still-unavailable primary cannot hide the
+                     durable outcome. Only its exact stored identity can choose
+                     the repair path. *)
+                  let* () = if not repair_primary then Ok () else
+                    match json with
+                    | `Assoc fields ->
+                        (match List.assoc_opt "instance_id" fields,
+                               List.assoc_opt "request_id" fields,
+                               List.assoc_opt "state" fields with
+                         | Some (`String owner), Some (`String request_id), Some (`String "finished")
+                           when owner = instance_id && name = digest request_id ^ ".json" ->
+                             ignore (save_sampling_request t ~instance_id ~request_id json);
+                             Ok ()
+                         | _ -> Error "sampling terminal journal identity is invalid")
+                    | _ -> Error "sampling terminal journal is not an object" in
                   let* () = f json in
                   next ()
               | _ -> next ()
               | exception End_of_file -> Ok () in
-            next ()) in
-    let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
-    scan (sampling_directory instance_id) ~skip:(fun name ->
-      Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
+            next () in
+    match journal, primary with
+    | Error journal_error, Error primary_error ->
+        Error (journal_error ^ "; " ^ primary_error)
+    | Error detail, Ok None | Ok None, Error detail -> Error detail
+    | Error journal_error, Ok (Some _) ->
+        let* () = scan primary ~repair_primary:false ~skip:(fun _ -> false) in
+        Error journal_error
+    | Ok (Some _), Error primary_error ->
+        let* () = scan journal ~repair_primary:true ~skip:(fun _ -> false) in
+        Error primary_error
+    | Ok _, Ok _ ->
+      let* () = scan journal ~repair_primary:true ~skip:(fun _ -> false) in
+      scan primary ~repair_primary:false ~skip:(fun name ->
+        Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing)))
+let iter_sampling_requests = iter_sampling_requests_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable
 let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
@@ -450,7 +619,11 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
   match Fs_compat.exact_path_kind path with
   | Fs_compat.Exact_missing -> Ok None
   | _ ->
+      let pending_root = if t.root_parent_pending then
+        Some (Unix.lstat t.root, Unix.stat (Filename.dirname t.root)) else None in
       let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget path in
+      let* () = sync_sampling_root ~sync_parent t pending_root
+        |> Result.map_error (fun detail -> Read_failed detail) in
       let* json = try Ok (Yojson.Safe.from_string bytes)
         with Yojson.Json_error detail -> Error (Read_failed detail) in
       let* () = match json with
@@ -466,25 +639,12 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
       let* () = match inline with
         | None -> Ok ()
         | Some (reference, bytes) ->
-            let hash = digest bytes in
-            let missing relative = Fs_compat.exact_path_kind (Filename.concat t.root relative)
-              = Fs_compat.Exact_missing in
-            let publish () = write_sampling_blob t bytes
-              |> Result.map (fun _ -> ()) |> Result.map_error (fun detail -> Read_failed detail) in
-            let verify relative =
-              let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget
-                (Filename.concat t.root relative) in
-              if blob_reference bytes = reference then Ok ()
-              else Error (Read_failed "sampling outcome blob digest mismatch") in
-            let* () =
-              if missing (blob_path hash) && missing (recovery_blob_path hash) then publish ()
-              else match (match verify (blob_path hash) with
-                | Ok () as result -> result
-                | Error Read_limit_exceeded as result -> result
-                | Error (Read_failed _) -> verify (recovery_blob_path hash)) with
-                | Ok _ -> Ok ()
-                | Error Read_limit_exceeded as error -> error
-                | Error (Read_failed _) -> publish () in
+            (* The journal already charged these exact digest-verified bytes.
+               Verify the owned blob and its durability without charging a
+               second copy to the caller's aggregate allowance. *)
+            let* () = retain_sampling_inline ~sync_file ~sync_parent
+              ~repair_corrupt:false t ~expected:reference bytes
+              |> Result.map_error (fun detail -> Read_failed detail) in
             (* Once the blob is durable, remove the duplicate body so later
                queries can read a large outcome once. Compaction is optional:
                failure cannot discard the already durable outcome blob. *)
@@ -517,7 +677,10 @@ let recover_sampling_requests t ~instance_id ~max_reply_bytes =
     let max_record_bytes = sampling_recovery_record_limit ~max_reply_bytes in
     let recover relative name =
       let path = Filename.concat t.root (Filename.concat relative name) in
+      let pending_root = if t.root_parent_pending then
+        Some (Unix.lstat t.root, Unix.stat (Filename.dirname t.root)) else None in
       let* raw = bounded_file ~max_bytes:max_record_bytes path in
+      let* () = sync_sampling_root ~sync_parent:Unix.fsync t pending_root in
       let json = Yojson.Safe.from_string raw in
       let* fields = match json with
         | `Assoc fields -> Ok fields | _ -> Error "invalid sampling recovery record" in
@@ -548,28 +711,8 @@ let recover_sampling_requests t ~instance_id ~max_reply_bytes =
                      && List.assoc_opt "instance_id" terminal = Some (`String instance_id)
                      && List.assoc_opt "request" terminal = Some (evidence_to_json request) -> Ok ()
                  | _ -> Error "sampling outcome contradicts its recovery record" in
-               let hash = digest bytes in
-               let verify relative =
-                 let* existing = bounded_file ~max_bytes:max_reply_bytes
-                   (Filename.concat t.root relative) in
-                 if blob_reference existing = reference then Ok ()
-                 else Error "sampling outcome blob digest mismatch" in
-               let* () = match verify (blob_path hash) with
-                 | Ok () -> Ok ()
-                 | Error _ ->
-                     (* A present corrupt primary consumes the query allowance
-                        before fallback. Repair it before discarding the journal
-                        body, even when the fallback is already intact. *)
-                     (match Fs_compat.exact_path_kind (Filename.concat t.root (blob_path hash)) with
-                      | Fs_compat.Exact_kind Unix.S_REG ->
-                          write_blob t bytes |> Result.map (fun _ -> ())
-                      | Fs_compat.Exact_unknown -> Error "cannot inspect primary sampling blob"
-                      | Fs_compat.Exact_missing | Fs_compat.Exact_kind _ ->
-                          (* The reader rejects non-regular paths before charging
-                             bytes, so an intact fallback alone is sufficient. *)
-                          match verify (recovery_blob_path hash) with
-                          | Ok () -> Ok ()
-                          | Error _ -> write_sampling_blob t bytes |> Result.map (fun _ -> ())) in
+               let* () = retain_sampling_inline ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+                 ~repair_corrupt:true t ~expected:reference bytes in
                write t (Filename.concat relative name)
                  (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
       | _ -> Error "invalid sampling recovery state" in
@@ -898,6 +1041,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let iter_sampling_requests = iter_sampling_requests_with
   let write = write_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with

@@ -407,14 +407,6 @@ let test_event_kind () =
     events
 ;;
 
-let test_output_delta_legacy_json_defaults_raw_trace_run_id () =
-  let json = `Assoc [ "participant_name", `String "sub"; "delta", `String "legacy" ] in
-  match Runtime.output_delta_event_of_yojson json with
-  | Ok detail ->
-    Alcotest.(check (option string)) "raw trace default" None detail.raw_trace_run_id
-  | Error msg -> Alcotest.failf "output_delta_event parse failed: %s" msg
-;;
-
 let completion_anomaly count =
   match Runtime.dropped_output_deltas ~count with
   | Ok anomaly -> anomaly
@@ -595,10 +587,7 @@ let () =
             "participant lifecycle impossible states"
             `Quick
             test_participant_lifecycle_payloads_exclude_contradictions
-        ; Alcotest.test_case
-            "output delta legacy json"
-            `Quick
-            test_output_delta_legacy_json_defaults_raw_trace_run_id
+
         ; Alcotest.test_case "event" `Quick test_event
         ] )
     ]

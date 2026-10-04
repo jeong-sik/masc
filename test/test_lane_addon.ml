@@ -265,7 +265,7 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
   let cases = List.concat_map (fun (request_id, outcome_first) ->
     List.concat_map (fun terminal_journal ->
       List.map (fun placement -> request_id, outcome_first, terminal_journal, placement, false, false)
-        [`Missing; `Canonical; `Fallback; `Corrupt_canonical; `Blocked_canonical]) [true; false])
+        [`Missing; `Canonical; `Fallback; `Corrupt_canonical; `Oversized_corrupt_canonical; `Blocked_canonical]) [true; false])
     ["request-1", false; "request-8", true]
     @ ["request-1", true, true, `Canonical, true, false;
        "request-1", false, false, `Missing, false, true] in
@@ -316,11 +316,12 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
       let existing = match placement with
         | `Missing -> None
         | `Canonical -> ignore (unwrap (Store.write_blob store bytes)); Some canonical
-        | `Fallback | `Corrupt_canonical | `Blocked_canonical ->
+        | `Fallback | `Corrupt_canonical | `Oversized_corrupt_canonical | `Blocked_canonical ->
             Unix.mkdir canonical 0o700;
             ignore (unwrap (Store.write_sampling_blob store bytes));
             if placement <> `Blocked_canonical then Unix.rmdir canonical;
             if placement = `Corrupt_canonical then write canonical (String.make (String.length bytes) '!');
+            if placement = `Oversized_corrupt_canonical then write canonical (bytes ^ "x");
             Some (Filename.concat (Store.root store) ("sampling-evidence/" ^ hash ^ ".json")) in
       let before = Option.map Unix.stat existing in
       let damaged_records = if broken_siblings then
@@ -338,6 +339,14 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
         clock=None;actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
       (match Store.append_observation store ~instance_id ~seq:1 ~sources:(`Assoc []) output with
        | Ok () -> () | Error error -> fail (Store.observation_write_error_to_string error));
+      if placement = `Oversized_corrupt_canonical then (
+        check bool "cold query does not repair oversized owned corruption" true
+          (match Store.load_sampling_request_bounded
+            ~budget:(Store.read_budget ~max_bytes:max_reply_bytes)
+            (Store.create ~root:(Store.root store)) ~instance_id ~request_id with
+           | Error (Store.Read_failed _) -> true | Error Store.Read_limit_exceeded | Ok _ -> false);
+        check string "failed cold query preserves the oversized bytes" (bytes ^ "x")
+          (Fs_compat.load_file canonical));
       let calls_before = Hashtbl.fold (fun _ calls total -> total + calls) state.calls 0 in
       Runtime.For_testing.reset ();
       (* This is the public function wired before configuration startup and
@@ -351,7 +360,7 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
           check string "recovery preserves damaged sibling evidence" bytes (Fs_compat.load_file path)) damaged_records in
       recover ();
       check string "runtime recovery preserves exact outcome bytes" bytes (unwrap (Store.read_blob store outcome));
-      if placement = `Corrupt_canonical then
+      if placement = `Corrupt_canonical || placement = `Oversized_corrupt_canonical then
         check string "corrupt primary is repaired before journal compaction" bytes (Fs_compat.load_file canonical);
       (match existing, before with
        | Some path, Some before ->

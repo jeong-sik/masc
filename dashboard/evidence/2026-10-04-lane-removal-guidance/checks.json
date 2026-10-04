@@ -1,0 +1,18 @@
+{
+  "base": "02b1450be6f106198f9e156d8ffcb2fb7e8796f5",
+  "source_sha256": {
+    "bin/masc_tui_lane_addons.ml": "8c2f2d7af288c7632be37ac280beb6c462a80c83af18c9a4129e326fd6772599",
+    "dashboard/src/components/lane-addons-panel.test.ts": "b7d59ee79a0017406dd25d37bd8e15e1021f8421d877c7a0d6468fad1bcd2813",
+    "dashboard/src/components/lane-addons-panel.ts": "6565348098e456c13244b2b63eaa2bb469f0dd49fb5c92983d739db0f8ce1e9f",
+    "docs/guides/lane-addon-toml.md": "22db321fd8d9fdefae444d85db51d431b7fd762981d114dd77df055a213b9c49",
+    "docs/guides/lane-declaration-editor.md": "5131a62225164be1c5d4fef8774365e99fb53913df3294cc58397eaaa507fa05",
+    "docs/guides/tui-lane-addons.md": "24ecaf89bf4b6647d64493d964f659c575bcb2cf00cb70ed66983f7ef5a1ea2c",
+    "test/test_tui_lane_addons.ml": "dceab02c18d6afa5bfe784b79e9a97b401cd96e34cde0adfdfb42a81793c94b5"
+  },
+  "ocaml_parser_version": "5.5.1",
+  "ocaml_parser_files": 2,
+  "web_tests_passed": 26,
+  "native_tui_pty": "not_run",
+  "real_removal": "not_run",
+  "browser_assertions_passed": 5
+}

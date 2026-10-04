@@ -328,9 +328,9 @@ export function LaneAddonsPanel() {
       <td>${item.observation_seq} / ${item.rows_count}</td>
       <td class="space-x-2"><button class=${buttonClass} disabled=${item.phase.kind === 'detached' || item.phase.kind === 'detaching' || item.phase.kind === 'observing'} onClick=${() => act(() => observeLaneAddon(item.instance_id))}>Observe</button>
       <button class=${buttonClass} disabled=${item.phase.kind === 'detached'} onClick=${() => act(() => detachLaneAddon(item.instance_id))}>${item.configuration === null ? 'Remove worker' : 'Remove TOML + worker'}</button>
-      <p class="mt-2 text-sm">${item.configuration === null
+      <p class="mt-2 max-w-sm text-sm">${item.configuration === null
         ? 'Cleans up this worker and its owned resources. Retained observations and evidence remain.'
-        : 'Deletes the matching installation TOML from disk and cleans up its owned worker. A declaration taken over by another instance is preserved. Retained observations and evidence remain.'}</p></td>
+        : 'Deletes the matching installation TOML from disk and cleans up its worker. Retained observations and evidence remain.'}</p></td>
     </tr>`)}</tbody></table></div>
     ${snapshot?.instances.length === 0 && html`<p>No attached packages.</p>`}
     <${LaneAddonActions} instances=${snapshot?.instances ?? []} />

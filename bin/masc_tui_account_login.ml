@@ -46,6 +46,7 @@ type t = {
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
   mutable saved_scroll_max : int;
+  mutable saved_runtime_ids : string list;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -65,13 +66,14 @@ type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Ref
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
-  cursor=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  cursor=0; saved_scroll_max=0; saved_runtime_ids=[]; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
   t.provider <- Some provider;
   let previous = if existing then t.account_ref else None in
   t.login_id <- None; t.recovery <- Login_status;
+  t.saved_runtime_ids <- [];
   t.phase <- Logging; t.output <- ""; t.models <- []; t.selected_models <- []; t.connected_models <- [];
   t.draft <- ""; t.input_pending <- false;
   t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
@@ -333,7 +335,15 @@ let saved_of_json json =
   | _ -> None
 let saved t json =
   match saved_of_json json with
-  | Some saved -> t.cursor <- 0; t.phase <- Finished {saved; activation = Activating; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
+  | Some saved ->
+    t.saved_runtime_ids <- (match field "runtime_ids" json with
+      | `List ids ->
+        let parsed = List.map string ids in
+        if List.for_all Option.is_some parsed then
+          List.filter (fun id -> not (List.mem id t.existing)) (List.filter_map Fun.id parsed)
+        else []
+      | _ -> []);
+    t.cursor <- 0; t.phase <- Finished {saved; activation = Activating; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let activation_of_result = function
   | Ok json ->
@@ -352,12 +362,35 @@ let activated t saved result =
   t.phase <- Finished {saved; activation; refresh_failed = false};
   t.cursor <- 0; t.notice <- saved_notice saved;
   match activation with Active _ -> true | Activating | Activation_failed _ -> false
+let reconcile_saved_account t json =
+  match t.provider, t.saved_runtime_ids, field "runtimes" json with
+  | Some original, (_ :: _ as ids), `List runtimes ->
+    (* The save carries the selected runtime IDs; inventory owns their
+       provider relationship. Never infer an account from an ID prefix,
+       email, list order, or another account retained as a default route. *)
+    let owners = List.map (fun id ->
+      match List.filter (fun row -> string (field "id" row) = Some id) runtimes with
+      | [row] ->
+        Option.bind (string (field "provider_id" row)) (fun provider_id ->
+          List.find_opt (fun (p:provider) -> p.id=provider_id && p.origin=Configured
+            && p.client=original.client) t.providers)
+      | [] | _ :: _ :: _ -> None) ids in
+    if List.for_all Option.is_some owners then
+      (match List.sort_uniq (fun (a:provider) (b:provider) -> String.compare a.id b.id)
+          (List.filter_map Fun.id owners) with
+       | [provider] -> t.provider <- Some provider
+       | [] | _ :: _ :: _ -> ())
+  | None, _, _ | Some _, [], _ | Some _, _ :: _, _ -> ()
 let refresh_saved t saved result =
   let activation = match t.phase with
     | Finished {activation; _} -> activation
     | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ ->
       Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
-  let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
+  let refreshed = match result with
+    | Ok json -> (match inventory t json with
+        | Ok () -> reconcile_saved_account t json; Ok ()
+        | Error _ as error -> error)
+    | Error _ as error -> error in
   t.cursor <- 0;
   t.phase <- Finished {saved; activation; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
@@ -572,6 +605,7 @@ let key t key =
   | Finished {activation = Activating; _} -> Nothing
   | Finished {saved; activation = Activation_failed _; _}
     when List.mem key ["r"; "\r"; "\n"; "enter"] -> Activate_saved saved
+  | Finished {activation = Activation_failed _; _} -> Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (

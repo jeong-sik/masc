@@ -59,6 +59,9 @@ type t = {
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
   mutable saved_scroll_max : int;
+  mutable saved_runtime_ids : string list;
+  (** Runtime IDs introduced by the saved selection, excluding previously
+      selected routes. Inventory joins these IDs to the configured account. *)
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -140,7 +143,9 @@ val retain_activation : t -> t list -> t list
 val take_saved : requested:string -> t list -> t option * t list
 (** Take one matching saved view to reopen, preserving every other receipt. *)
 val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
-(** Re-read the list after a save, keeping what the save published on screen. *)
+(** Re-read the list after a save, keeping what the save published on screen.
+    Reconcile introduced runtime IDs with their explicit inventory provider IDs
+    so account-specific recovery uses the generated configured account. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit
 val models : t -> Yojson.Safe.t -> (unit, string) result
 val selected_account : t -> provider -> Yojson.Safe.t -> (unit, string) result

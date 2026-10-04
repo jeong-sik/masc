@@ -235,6 +235,63 @@ let closed_activation_accounts () =
   let second = match taken with Some view -> view | None -> fail "second account receipt lost" in
   check bool "second account keeps its usage-limited receipt" true (Login.key second "enter"=Login.Activate_saved saved_second);
   check int "reopened views are removed once" 0 (List.length rest)
+let generated_account_activation_recovery () =
+  let catalog={provider with origin=Login.Catalog} in
+  let inventory runtimes = `Assoc ["setup_revision",`String "saved-revision";
+    "default_runtime_selection",`List [`String "old.selected"];"account_emails",`List [];
+    "runtimes",`List (List.map (fun (id,owner) -> `Assoc ["id",`String id;"provider_id",`String owner]) runtimes);
+    "integrations",`List (List.map (fun id -> `Assoc ["id",`String id;"display_name",`String id;
+      "protocol",`String "codex-app-server";"origin",`String (if id="codex" then "masc_integration" else "runtime_config")])
+      ["codex";"old-account";"generated-first";"generated-second"])] in
+  let runtimes=["old.selected","old-account";"first.runtime","generated-first";"second.runtime","generated-second"] in
+  let make id =
+    let t=Login.create "codex" in
+    ignore (Login.begin_attempt t catalog ~existing:false);
+    t.existing <- ["old.selected"];
+    let saved=ok (Login.saved t (`Assoc ["configured",`Bool true;"readiness",`String "verified";
+      "commit",`Assoc ["durability",`String "durable";"warnings",`List []];
+      "runtime_ids",`List [`String "old.selected";`String id]])) in
+    ignore (Login.activated t saved (Error "activation unavailable"));
+    t,saved in
+  let first,saved_first=make "first.runtime" and second,saved_second=make "second.runtime" in
+  Login.refresh_saved first saved_first (Ok (inventory runtimes));
+  Login.refresh_saved second saved_second (Ok (inventory runtimes));
+  check (option string) "new account reconciles from explicit runtime ownership"
+    (Some "generated-first") (Option.map (fun (p:Login.provider)->p.id) first.provider);
+  let retained=Login.retain_activation first [] |> Login.retain_activation second in
+  let chosen,retained=Login.take_saved ~requested:"generated-first" retained in
+  check bool "generated account ID selects its own saved receipt" true
+    (match chosen with Some view -> view==first && Login.key view "r"=Login.Activate_saved saved_first | None -> false);
+  let chosen,_=Login.take_saved ~requested:"generated-second" retained in
+  check bool "second same-client receipt remains independently recoverable" true
+    (match chosen with Some view -> view==second && Login.key view "enter"=Login.Activate_saved saved_second | None -> false);
+  Login.refresh_saved first saved_first (Error "refresh failed");
+  check bool "later read failure retains established configured account" true
+    (Option.is_some (Login.reopen_saved ~requested:"generated-first" first));
+  let missing,saved=make "absent.runtime" in
+  Login.refresh_saved missing saved (Ok (inventory runtimes));
+  check bool "missing ownership never adopts another account" true (missing.provider=Some catalog);
+  let ambiguous,saved=make "first.runtime" in
+  Login.refresh_saved ambiguous saved (Ok (inventory (("first.runtime","generated-second")::runtimes)));
+  check bool "ambiguous ownership never picks the first account" true (ambiguous.provider=Some catalog);
+  ignore (Login.begin_attempt first catalog ~existing:false);
+  check (list string) "a new login cannot reuse a previous save's runtime ownership" [] first.saved_runtime_ids
+
+let failed_activation_blocks_login_shortcuts () =
+  let t=Login.create "codex" in t.provider <- Some provider;
+  let saved=Login.Saved_partly {unverified=[];not_rechecked=["saved.model"]} in
+  ignore (Login.activated t saved (Error "activation unavailable"));
+  let original=t.phase in
+  List.iter (fun key ->
+    check bool ("failed activation blocks "^key) true (Login.key t key=Login.Nothing);
+    check bool "blocked login preserves saved phase" true (t.phase=original)) ["n";"e"];
+  check bool "activation-only retry remains available" true (Login.key t "r"=Login.Activate_saved saved);
+  check bool "close remains available for detached recovery" true (Login.key t "esc"=Login.Close);
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready",`Bool true;
+    "exact_output_authority_available",`Bool true;"model_setup",`Assoc ["status",`String "available"]])));
+  check bool "new login is available after confirmed activation" true
+    (Login.key t "n"=Login.Start {provider;existing=false})
+
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -852,6 +909,8 @@ let () = run "TUI account login" ["workflow",[
   test_case "saved activation retry cannot repeat save or login" `Quick saved_activation_retry;
   test_case "closed activation retains its request and recovery receipt" `Quick closed_activation_recovery;
   test_case "closed activation recovery preserves multiple accounts" `Quick closed_activation_accounts;
+  test_case "generated account ID restores its saved activation" `Quick generated_account_activation_recovery;
+  test_case "failed activation cannot start another login" `Quick failed_activation_blocks_login_shortcuts;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
   test_case "visible save preserves durability uncertainty without resubmitting" `Quick uncertain_durability_save;
   test_case "lock warning survives refresh without exposing diagnostics" `Quick uncertain_lock_release_save;

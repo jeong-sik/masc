@@ -196,7 +196,34 @@ let test_temperature_round_trip () =
   check (option (float 0.)) "a distinct explicitly entered value is applied"
     (Some 0.123457) (List.hd updated.models).temperature
 
+let test_effort_replaces_uncontrolled_reasoning () =
+  let source = Toml_line_editor.edit_table_scalar source ~path:"models.\"luna.6\""
+      ~key:"reasoning-effort" ~value:None
+    |> fun source -> Toml_line_editor.edit_table_bool source ~path:"models.\"luna.6\""
+         ~key:"reasoning-uncontrolled" ~value:true in
+  let original = List.hd (config source).models in
+  check bool "fixture leaves reasoning to the provider" true original.reasoning_uncontrolled;
+  List.iter (fun mode ->
+    let unchanged = config (apply (F.create mode (row source)) source) in
+    check bool "unchanged edit or copy preserves uncontrolled reasoning" true
+      (List.for_all (fun (model:Runtime_schema.model_spec) -> model.reasoning_uncontrolled) unchanged.models);
+    let form = F.create mode (row source) in
+    let form = match mode with F.Edit -> edit form "tab" | F.Copy -> edit (edit form "tab") "tab" in
+    let updated = config (apply (set form "high") source) in
+    let name = match mode with F.Edit -> "luna.6" | F.Copy -> "luna.6-copy" in
+    let model = List.find (fun (model:Runtime_schema.model_spec) -> model.id=name) updated.models in
+    check bool "explicit effort replaces mutually exclusive uncontrolled mode" false model.reasoning_uncontrolled;
+    check bool "requested effort survives the typed parser" true
+      (model.reasoning_effort = Llm_provider.Reasoning_effort.of_string "high");
+    match mode with
+    | F.Edit -> ()
+    | F.Copy ->
+        let original = List.find (fun (model:Runtime_schema.model_spec) -> model.id="luna.6") updated.models in
+        check bool "copy preserves original model reasoning mode" true original.reasoning_uncontrolled)
+    [F.Edit;F.Copy]
+
 let () = run "Account model variants" ["model editing", [
+  test_case "explicit effort replaces uncontrolled reasoning in edit and copy" `Quick test_effort_replaces_uncontrolled_reasoning;
   test_case "copy retains account, API model and settings" `Quick test_copy_variant;
   test_case "edit context and cancel" `Quick test_edit_and_cancel;
   test_case "inline copy refusal is visible" `Quick test_inline_refusal_and_visible_error;

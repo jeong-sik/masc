@@ -62,7 +62,7 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under System", None
   ; b Act "e" "edit"
-      ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
     (* One item, because they are one action: on params [e] and [Enter] both
        open the same type-aware field ([handle_runtime_param_edit_open]
@@ -86,6 +86,8 @@ let config_bindings =
   ; b Act "X" "discard draft"
       ~help:"runtime.toml: discard only the local draft and read the current file",
       Some [ Config_runtime ]
+  ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
+  ; b Act "o" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]
@@ -1199,7 +1201,8 @@ let patch_review_bindings =
   ]
 
 let runtime_detail_bindings =
-  [ b Navigate "j/k" "scroll"
+  [ b Act "e" "model settings"
+  ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
   ; b Navigate "Home/End" "edges"
   ; b Act "Left / Esc" "list"

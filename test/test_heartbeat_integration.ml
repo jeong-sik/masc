@@ -4690,7 +4690,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; Keeper_types_support.keeper_decision_log_path config meta.name ^ ".1"
         ; Keeper_types_support.keeper_feedback_log_path config meta.name ^ ".2"
         ; Filename.concat (Keeper_fs.keeper_dir config)
-            (Masc.Keeper_runtime_root_entry.keeper_basename ~keeper_name:meta.name Tla_trace_log)
+            (Keeper_runtime_root_entry.keeper_basename ~keeper_name:meta.name Tla_trace_log)
         ]
       in
       List.iter (fun path -> write_file path "fixture") sidecar_paths;

@@ -87,8 +87,12 @@ let test_delete_retires_only_its_pending_rejections () =
     let tasks = if already_absent then
         List.filter (fun (task : Masc_domain.task) -> task.id <> target) backlog.tasks
       else backlog.tasks in
+    let approval (pending : Masc_domain.pending_completion_rejection) : Masc_domain.pending_completion_approval =
+      { task_id = pending.task_id; verification_id = pending.verification_id;
+        producer = pending.producer; authority = pending.authority; committed_at = pending.committed_at } in
     Workspace.write_backlog config
-      {backlog with tasks; pending_completion_rejections = [own; retained]};
+      {backlog with tasks; pending_completion_rejections = [own; retained];
+        pending_completion_approvals = [approval own; approval retained]};
     let revision = (Workspace.read_backlog config).version in
     (match Workspace.delete_task_r config ~task_id:target with
      | Ok Workspace.Task_deleted when not already_absent -> ()
@@ -97,6 +101,8 @@ let test_delete_retires_only_its_pending_rejections () =
     (* This is the authoritative input consumed by restart reconciliation. *)
     Alcotest.(check bool) "recovery sees only the other Task obligation" true
       (Workspace_task_rejection_outbox.pending config = Ok [retained]);
+    Alcotest.(check bool) "approval recovery also retains only the other Task"
+      true (Workspace_task_approval_outbox.pending config = Ok [approval retained]);
     let after = Workspace.read_backlog config in
     Alcotest.(check int) "deletion and acknowledgement" (revision + 2) after.version;
     Alcotest.(check (list string)) "other Task retained" [other]

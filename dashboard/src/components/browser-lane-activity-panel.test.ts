@@ -6,7 +6,7 @@ import { parseLaneInventory } from '../api/lane-inventory'
 import inventory from '../api/fixtures/lane-inventory.json'
 import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
-import { RuntimeTomlRevisionConflict, type RuntimeTomlConfig } from '../api/dashboard-runtime'
+import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
 import { readBrowserActivity, writeBrowserActivity } from '../lib/browser-lane-activity'
 import { browserLaneActivitySessionFor, resetBrowserLaneActivitySessionsForTesting } from '../lib/browser-lane-activity-session'
 import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
@@ -72,6 +72,103 @@ async function draft() {
 }
 
 describe('Browser activity operator flow', () => {
+  it('does not expose an invalid conflict document as an editable source', async () => {
+    const { authority, session } = await draft(), previous = session.state.value.draft
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlRevisionConflict(
+      'changed path', document('[broken', '/another/runtime.toml')))
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.draft).toBe(previous)
+    expect(session.ready(authority)).toBe(false)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains a known conflict at another file until explicit discard', async () => {
+    const { authority, session } = await draft(), previous = session.state.value.draft
+    const current = document(source, '/another/runtime.toml')
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlRevisionConflict('changed path', current))
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toEqual(current)
+    expect(session.state.value.draft).toBe(previous)
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    session.reapply(authority)
+    expect(session.state.value.draft).toBe(previous)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    session.discard(authority)
+    expect(session.state.value.draft?.base).toEqual(current)
+    expect(session.modified()).toBe(false)
+  })
+  it('keeps invalidation after a late preview failure without dispatching a save', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    api.previewRuntimeTomlConfig.mockImplementationOnce(async () => {
+      await pending.promise
+      throw new Error('late preview unavailable')
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.previewRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    announceRuntimeTomlWritten()
+    expect(session.state.value.current).toBeNull()
+    pending.resolve(); expect(await saving).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.ready(authority)).toBe(false)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+  it('does not adopt a conflict response superseded by another source generation', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async () => {
+      await pending.promise
+      throw new RuntimeTomlRevisionConflict('changed path', document(source, '/another/runtime.toml'))
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    announceRuntimeTomlWritten()
+    pending.resolve(); expect(await saving).toBe(false)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.ready(authority)).toBe(false)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a verified durable receipt certain when authority changes during follow-up', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    followup.refreshRuntimeConfigConsumers.mockReturnValueOnce(pending.promise)
+    const saving = session.save(authority)
+    await waitFor(() => expect(session.state.value.receipt?.commit.durability).toBe('durable'))
+    expect(session.state.value.phase).toBe('followup')
+    expect(session.ready(authority)).toBe(false)
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    await session.read(authority)
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(await session.save(authority)).toBe(false)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    workspace('/fixture/B')
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.receipt?.commit.durability).toBe('durable')
+    pending.resolve(); await saving
+    expect(session.state.value.uncertain).toBe(false)
+  })
+  it('still marks an unresolved sent save unknown when authority changes', async () => {
+    const { authority, session } = await draft(), pending = deferred<ReturnType<typeof receipt>>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async (_text, _revision, options) => {
+      options?.beforeDispatch?.(); return pending.promise
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    workspace('/fixture/B')
+    expect(session.state.value.uncertain).toBe(true)
+    pending.resolve(receipt(off)); await saving
+    expect(session.state.value.uncertain).toBe(true)
+    expect(session.state.value.receipt).toBeNull()
+  })
   it('follows a fresh file when there is no unsaved activity change', async () => {
     const authority = executionWorkspaceAuthority.peek()!, session = browserLaneActivitySessionFor(authority, lane)
     await session.read(authority)
@@ -186,6 +283,36 @@ describe('Browser activity operator flow', () => {
     response.resolve(receipt(off)); expect(await saving).toBe(false)
     expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current?.source_text).toBe(source)
     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+  })
+  it('keeps the current Browser basis retryable after a typed pre-write rejection', async () => {
+    const { session, authority } = await draft(), before = session.state.value.current
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlSaveRejected('HTTP 400: fixture admission refused'))
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.current).toBe(before)
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.state.value.draft?.enabled).toBe(false)
+    expect(session.state.value.error).toContain('저장 전에 거절')
+    expect(session.state.value.error).not.toContain('불확실')
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(await session.save(authority)).toBe(true)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(2)
+  })
+  it('does not resurrect Browser current source after an external write and late known rejection', async () => {
+    const { session, authority } = await draft(), response = deferred<void>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async () => {
+      await response.promise
+      throw new RuntimeTomlSaveRejected('HTTP 400: fixture admission refused')
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    announceRuntimeTomlWritten()
+    expect(session.state.value.current).toBeNull()
+    response.resolve()
+    expect(await saving).toBe(false)
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.ready(authority)).toBe(false)
   })
   it('requires a read after an unanswered write and does not blindly repeat it', async () => {
     const { session, authority } = await draft()

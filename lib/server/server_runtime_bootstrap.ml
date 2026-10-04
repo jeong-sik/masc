@@ -1575,6 +1575,8 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
+  Server_browser_configuration.install_activity_observer ~sw;
+  Server_machine_configuration.install_activity_observers ~sw;
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own
@@ -1606,8 +1608,6 @@ let activate_owner_state
 
 let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
     ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
-  Server_browser_configuration.install_activity_observer ~sw;
-  Server_machine_configuration.install_activity_observers ~sw;
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
     | Ok config -> config

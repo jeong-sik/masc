@@ -116,6 +116,8 @@ def run(binary):
         assert b'Activity draft: Off' in h.screen_text(bytes(output))
         assert not server.saves and server.previews == 0
         h.send_and_wait(process, fd, output, b's', b'fixture preview refused')
+        h.drain_until_quiet(process, fd, output)
+        assert b'Server activity: Off' in h.screen_text(bytes(output)), 'known preview refusal erased the last server reading'
         assert not server.saves
         with server.lock:
             server.text += '\n[providers.extra]\nvalue = "keep"\n'
@@ -151,6 +153,38 @@ def run(binary):
     h.run_terminal_scenario(binary, description='machine activity draft, conflict and ambiguous save',
                             interact=interact, http_fixtures=fixtures,
                             terminal_cols=120, terminal_rows=40)
+
+def run_unavailable_file(binary):
+    server = Server()
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[RAW] = (503, {'error': 'fixture raw file unavailable'})
+    inventory_reads = []
+    def inventory(body):
+        inventory_reads.append(True)
+        return server.inventory(body)
+    fixtures[lanes.LANE_INVENTORY_PATH] = h.RequestHttpResponse(inventory)
+    requests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b'go lanes', b'All lanes')
+        select(process, fd, output, 'msx')
+        before = len(inventory_reads)
+        h.send_and_wait(process, fd, output, b' ', b'fixture raw file unavailable')
+        h.drain_until_quiet(process, fd, output)
+        assert len(inventory_reads) > before, 'file failure prevented the independent inventory request'
+        assert b'Server activity: Off' in h.screen_text(bytes(output))
+        assert b'Current file: unverified' in h.screen_text(bytes(output))
+        h.send_and_wait(process, fd, output, b's', b'Read the current configuration')
+        assert not [path for path, _ in requests if path.startswith(RAW)], 'unverified file dispatched a write or preview'
+        assert not server.saves
+        h.send_and_wait(process, fd, output, b'q', b'All lanes')
+        os.write(fd, b'q')
+
+    h.run_terminal_scenario(binary, description='Machine observation survives unavailable file',
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        terminal_cols=120, terminal_rows=40)
+    print('Machine unavailable file / independent server activity / no save: PASS')
+
 
 def run_compact_quit(binary):
     server = Server()
@@ -188,4 +222,5 @@ def run_compact_quit(binary):
 if __name__ == '__main__':
     run(os.path.abspath(sys.argv[1]))
     run_compact_quit(os.path.abspath(sys.argv[1]))
+    run_unavailable_file(os.path.abspath(sys.argv[1]))
     print('tui machine activity: PASS')

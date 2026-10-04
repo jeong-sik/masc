@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-admission-20261005/test/test_stdio_browser_activity.py", line 118, in <module>
+    answer["result"]["structuredContent"]["error"]
+    == "browser_lane_off"
+AssertionError: {'jsonrpc': '2.0', 'id': 2, 'result': {'_meta': {'io.modelcontextprotocol/serverInfo': {'name': 'masc', 'title': 'MASC MCP Server', 'version': '0.49.0'}, 'com.github.yousleepwhen.masc/call': {'envelope': {'kind': 'tool_call', 'summary': '{"error":"browser_activity_unavailable","message":"Browser activity configuration is unavailable"}', 'status': 'error', 'tool': 'masc_browser_tabs'}, 'trace_id': '2', 'agent_id': 'agent-8c5790fb', 'tool': 'masc_browser_tabs', 'duration_ms': 0, 'attempts': 1, 'timestamp': '2026-10-04T20:35:31Z', 'failure_class': 'workflow_rejection'}}, 'resultType': 'complete', 'content': [{'type': 'text', 'text': '{"error":"browser_activity_unavailable","message":"Browser activity configuration is unavailable"}'}], 'isError': True, 'structuredContent': {'error': 'browser_activity_unavailable', 'message': 'Browser activity configuration is unavailable'}}}

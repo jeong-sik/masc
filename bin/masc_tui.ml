@@ -5088,7 +5088,7 @@ let launch_machine_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
         Machine_activity_saved (request,result))
       (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
-        ~expected_source_revision:write.expected_source_revision write.source_text)
+        ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
 let open_machine_activity state ~mailbox machine =
   match Masc_tui_types.runtime_config_workspace state with

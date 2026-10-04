@@ -16,20 +16,29 @@ let session_base_dir_ (config : Workspace.config) = Keeper_fs.session_base_dir c
 
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
-let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
+let metrics_store_cache : (string, Keeper_metrics_storage.t) Hashtbl.t = Hashtbl.create 8
 let metrics_store_mu = Eio.Mutex.create ()
 
-let keeper_metrics_store config name : Dated_jsonl.t =
+let keeper_metrics_storage config name =
   let dir = Filename.concat (keeper_dir_ config) (name ^ "/metrics") in
   let lookup () =
     match Hashtbl.find_opt metrics_store_cache dir with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:dir () in
+      let store =
+        Keeper_metrics_storage.create ~base_dir:dir
+          ~max_bytes:(Env_config_keeper.KeeperMetrics.store_max_bytes ())
+      in
       Hashtbl.replace metrics_store_cache dir store;
       store
   in
   Eio_guard.with_mutex metrics_store_mu lookup
+
+let keeper_metrics_store config name : Dated_jsonl.t =
+  Keeper_metrics_storage.read_store (keeper_metrics_storage config name)
+
+let append_keeper_metrics config name json =
+  Keeper_metrics_storage.append (keeper_metrics_storage config name) json
 
 let keeper_metrics_dir config name =
   Dated_jsonl.base_dir (keeper_metrics_store config name)

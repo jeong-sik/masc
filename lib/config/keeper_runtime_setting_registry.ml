@@ -498,6 +498,16 @@ let all =
       ~category:"metrics"
       "Auxiliary Keeper JSONL log backups retained (0 discards old versions)"
   ; setting
+      ~range:(int_range ~min:0 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.store_max_bytes ())))
+      ~env_name:"MASC_KEEPER_METRICS_STORE_MAX_BYTES"
+      ~exposure:(Toml_and_env "metrics.store_max_bytes")
+      ~value_kind:Integer
+      ~default:"0"
+      ~consumers:[ "Keeper_types_support.keeper_metrics_storage"; "Keeper_metrics_storage" ]
+      ~category:"metrics"
+      "Date-sharded Keeper metric byte target (0 keeps all; oldest completed files pruned)"
+  ; setting
       ~reload_class:Next_turn
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperMemoryOs.recall_enabled ())))
       ~env_name:"MASC_KEEPER_MEMORY_OS_RECALL"

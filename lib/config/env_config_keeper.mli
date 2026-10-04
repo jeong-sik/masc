@@ -69,6 +69,9 @@ module KeeperMetrics : sig
   val max_rotated_files_min : int
   val max_rotated_files : unit -> int
   (** Zero discards old versions at rotation; positive values retain backups. *)
+  val store_max_bytes : unit -> int
+  (** Per-Keeper date-sharded turn/heartbeat metric byte target. Zero keeps all
+      records. Captured when the store is opened; reload requires restart. *)
 end
 
 (** {1 Keeper wire capture} *)

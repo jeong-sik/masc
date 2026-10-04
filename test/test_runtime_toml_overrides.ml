@@ -1168,10 +1168,37 @@ let test_zero_retention_toml_reaches_metrics_writer () =
   check string "new metric survives" "null\n" (Fs_compat.load_file path)
 ;;
 
+let test_dated_metrics_toml_reaches_shared_writer () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_STORE_MAX_BYTES" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let row i = `Assoc ["i", `Int i] in
+  let row_bytes = String.length (Yojson.Safe.to_string (row 1)) + 1 in
+  write_toml base_path (Printf.sprintf "[metrics]\nstore_max_bytes=%d\n" (2 * row_bytes));
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "dated-store override applied" 1 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let previous = Fs_compat.get_fs_opt () in
+  Fun.protect ~finally:(fun () ->
+    match previous with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+    (fun () -> Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace_core.default_config base_path in
+      List.iter (fun i -> Keeper_types_support.append_keeper_metrics config "metrics-toml" (row i))
+        [1; 2; 3; 4];
+      let store = Keeper_types_support.keeper_metrics_store config "metrics-toml" in
+      let values = Dated_jsonl.read_recent store 10
+        |> List.map (fun json -> Yojson.Safe.Util.(json |> member "i" |> to_int)) in
+      check (list int) "shared public reader sees retained metrics" [3; 4] values)
+;;
+
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
-      , [ test_case "zero-retention TOML reaches the metrics writer" `Quick
+      , [ test_case "dated metrics TOML reaches the shared writer" `Quick
+            test_dated_metrics_toml_reaches_shared_writer
+        ; test_case "zero-retention TOML reaches the metrics writer" `Quick
             test_zero_retention_toml_reaches_metrics_writer
         ; test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides

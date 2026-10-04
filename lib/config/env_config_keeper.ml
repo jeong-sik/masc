@@ -144,6 +144,9 @@ module KeeperMetrics = struct
   let max_rotated_files () =
     Int.max max_rotated_files_min
       (get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED")
+
+  let store_max_bytes () =
+    get_int_nonneg ~default:0 "MASC_KEEPER_METRICS_STORE_MAX_BYTES"
 end
 
 (** {1 Keeper Wire Capture Configuration} *)

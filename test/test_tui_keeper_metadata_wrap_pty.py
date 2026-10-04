@@ -57,7 +57,6 @@ def scan(process, fd, output, expected):
     previous = None
     current = h.screen_text(bytes(output))
     for _ in range(80):
-        current = h.screen_text(bytes(output))
         for token in expected:
             if token in current:
                 seen.add(token)
@@ -66,6 +65,7 @@ def scan(process, fd, output, expected):
         previous = current
         h.write_all(fd, output, b"\x1b[6~")
         h.drain_until_quiet(process, fd, output)
+        current = h.screen_text(bytes(output))
     if seen != set(expected):
         raise AssertionError(f"metadata tails unreachable: {set(expected) - seen!r}; {current!r}")
     return current

@@ -16,36 +16,94 @@ open Model_inference_metrics_parser
 
 (* ── Read decisions.jsonl files ─────────────────────────── *)
 
-let read_all_decisions ~base_path ~since_unix : raw_entry list =
+type decision_read =
+  | Decisions_read
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+
+let decision_files directory =
+  let log exn = Log.Model_inference_metrics.error
+      "decisions.jsonl directory read failed: path=%s detail=%s"
+      directory (Printexc.to_string exn) in
+  let opened =
+    try Ok (Some (Unix.opendir directory)) with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | Unix.Unix_error _ as exn -> log exn; Error () in
+  match opened with
+  | Error () -> Error ()
+  | Ok None -> Ok []
+  | Ok (Some handle) ->
+      Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
+        let rec read files = match Unix.readdir handle with
+          | name -> read (name :: files)
+          | exception End_of_file -> Ok files
+          | exception (Unix.Unix_error _ as exn) -> log exn; Error () in
+        read [])
+
+(* Inventory already observed each path. Open it directly: the permissive
+   JSONL helper's existence check can hide denied stat calls and dangling
+   symlinks as an empty file. Keep streaming and propagate every open/read
+   failure to the typed decision diagnostics below. *)
+let fold_decision_file ~init ~on_malformed ~f path =
+  let line_no = ref 0 in
+  let consume acc raw =
+    let line = String.trim raw in
+    if line = "" then acc
+    else begin
+      incr line_no;
+      match Fs_compat.parse_jsonl_line ~source:path ~line_no:!line_no line with
+      | None -> on_malformed (); acc
+      | Some json -> f acc ~line_no:!line_no json
+    end in
+  match Fs_compat.get_fs_opt (), Fs_compat.execution_context () with
+  | Some fs, Fs_compat.Eio_fiber ->
+      Eio.Path.with_open_in Eio.Path.(fs / path) (fun flow ->
+        Eio.Buf_read.of_flow ~max_size:(16 * 1024 * 1024) flow
+        |> Eio.Buf_read.lines |> Seq.fold_left consume init)
+  | None, _ | Some _, Fs_compat.Non_eio ->
+      let channel = open_in path in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+        let rec read acc = match input_line channel with
+          | line -> read (consume acc line)
+          | exception End_of_file -> acc in
+        read init)
+
+let read_all_decisions ~base_path ~since_unix =
   let keeper_dir =
     Common.keepers_runtime_dir_of_base ~base_path
   in
-  if not (Sys.file_exists keeper_dir)
-  then []
-  else (
+  match decision_files keeper_dir with
+  | Error () -> [], Decision_directory_unavailable
+  | Ok files ->
+    let unreadable = ref 0 in
+    let malformed_rows = ref 0 in
+    let schema_violation_rows = ref 0 in
     let files =
-      Sys.readdir keeper_dir
-      |> Array.to_list
+      files
       |> List.filter (fun f ->
         String.length f > 16 && Filename.check_suffix f ".decisions.jsonl")
       |> List.sort String.compare
     in
-    List.concat_map
+    let entries = List.concat_map
       (fun fname ->
          let path = Filename.concat keeper_dir fname in
          try
-           Fs_compat.fold_jsonl_lines
+           fold_decision_file
              ~init:[]
+             ~on_malformed:(fun () -> incr malformed_rows)
              ~f:(fun acc ~line_no json ->
                match parse_telemetry_entry json ~since_unix with
                | Ok e -> e :: acc
                | Error err ->
                  if parse_error_is_schema_violation err
-                 then
+                 then begin
+                   incr schema_violation_rows;
                    Log.Model_inference_metrics.warn "decisions.jsonl parse drop: %s:%d reason=%s"
                      path
                      line_no
-                     (parse_error_label err);
+                     (parse_error_label err)
+                 end;
                  acc)
              path
          with
@@ -53,12 +111,20 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
            let bt = Printexc.get_raw_backtrace () in
            Printexc.raise_with_backtrace exn bt
          | exn ->
+           incr unreadable;
            Log.Model_inference_metrics.error
              "decisions.jsonl read failed: path=%s detail=%s"
              path
              (Printexc.to_string exn);
            [])
-      files)
+      files in
+    let reading =
+      if !unreadable > 0 then Decision_files_unreadable !unreadable
+      else if !malformed_rows > 0 || !schema_violation_rows > 0 then
+        Decision_rows_invalid { malformed_rows = !malformed_rows;
+          schema_violation_rows = !schema_violation_rows }
+      else Decisions_read in
+    entries, reading
 ;;
 
 let read_cost_entries_dated ~base_path ~since_unix
@@ -135,6 +201,7 @@ let value_or ~preferred ~fallback =
 
 let merge_exact_inference decision cost =
   { model = cost.model
+  ; executed_runtime_id = decision.executed_runtime_id
   ; inference_key = cost.inference_key
   ; ts_unix = cost.ts_unix
   ; outcome = decision.outcome
@@ -235,7 +302,7 @@ let merge_decision_and_cost_entries decisions costs =
 ;;
 
 let read_all_entries ~base_path ~since_unix =
-  let decisions = read_all_decisions ~base_path ~since_unix in
+  let decisions, decision_read = read_all_decisions ~base_path ~since_unix in
   match read_cost_entries ~base_path ~since_unix with
   | Ok (costs, diagnostics) ->
     let entries, identity_conflict_rows =
@@ -246,12 +313,12 @@ let read_all_entries ~base_path ~since_unix =
       Log.Model_inference_metrics.warn
         "cost ledger exact identity conflict: rows=%d action=excluded"
         identity_conflict_rows;
-    entries, Ok { diagnostics with identity_conflict_rows }
+    entries, Ok { diagnostics with identity_conflict_rows }, decision_read
   | Error error ->
     Log.Model_inference_metrics.error
       "costs/dated read failed: %s"
       (Dated_jsonl.read_error_to_string error);
-    decisions, Error error
+    decisions, Error error, decision_read
 ;;
 
 (* ── Coverage helpers (used by aggregate stage) ───────────── *)

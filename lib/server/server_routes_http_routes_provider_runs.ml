@@ -22,6 +22,7 @@ let dashboard_metrics_cache_ttl_s = 60.0
 let dashboard_metrics_cache_max_entries = 128
 let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
 let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
+let dashboard_runtime_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_costs_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_provider_history_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
@@ -29,6 +30,24 @@ let dashboard_keeper_decisions_cache : (string, dashboard_json_cache_entry) Hash
 let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 
 let cache_key parts = String.concat "\x1f" parts
+
+(* Declarations remain separate from the catalog limit and effective context.
+   Official clients do not expose an original capability catalog here. *)
+let runtime_specification_json (runtime : Runtime_instance.t) =
+  let catalog = match runtime.execution with
+    | Runtime_execution.Agent_core config ->
+      Llm_provider.Provider_config.capabilities_for_config_model
+        { config with model_capabilities_override = None }
+    | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+    | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> None in
+  `Assoc [ "runtime_id", `String runtime.id;
+    "catalog_context", Json_util.int_opt_to_json
+      (Option.bind catalog (fun caps -> caps.Llm_provider.Capabilities.max_context_tokens));
+    "catalog_max_output", Json_util.int_opt_to_json
+      (Option.bind catalog (fun caps -> caps.Llm_provider.Capabilities.max_output_tokens));
+    "model_context", Json_util.int_opt_to_json runtime.model.max_context;
+    "provider_context", Json_util.int_opt_to_json runtime.provider.max_context;
+    "binding_context", Json_util.int_opt_to_json runtime.binding.max_context ]
 
 let new_cache_entry () =
   { value = None; updated_at = 0.0; in_flight = false; last_error = None }
@@ -228,6 +247,21 @@ let add_routes ~sw router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/runtime/metrics" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state _agent req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let window_minutes = 1440 in
+         let history = cached_dashboard_json ~sw ~sync_first:false
+           ~cache:dashboard_runtime_metrics_cache ~key:base_path
+           ~placeholder:(`Assoc [ "state", `String "loading" ])
+           ~compute:(fun () -> Model_inference_metrics.compute_runtime_metrics_json
+             ~base_path ~window_minutes)
+           |> redact_provider_history_cache_error in
+         let _, _, runtimes = Runtime.get_default_route_and_runtimes () in
+         let json = `Assoc [ "history", history;
+           "specifications", `List (List.map runtime_specification_json runtimes) ] in
+         Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
        with_public_read (fun state req reqd ->
          match

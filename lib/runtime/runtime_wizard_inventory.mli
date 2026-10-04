@@ -11,7 +11,12 @@
     provider prototypes, and named CLI/local-server transports. Setup and
     verification support describe adapter capability, never account access or
     measured readiness. Unsupported protocols remain visible with null protocol
-    or unsupported status. Catalog endpoint credentials are also redacted. *)
+    or unsupported status. Catalog endpoint credentials are also redacted.
+
+    [account_groups] groups configured official-client providers by the same
+    typed quota identity their runtime uses. Its opaque [id], [integration_ids]
+    and [runtime_ids] preserve every declared provider/binding; groups are
+    presentation identities, never mutation targets or email-based guesses. *)
 val to_json : ?include_credential_references:bool -> Runtime_schema.config -> Yojson.Safe.t
 (** [include_credential_references] is for the local setup CLI only. It adds
     file references, never secret values, so new model bindings can preserve

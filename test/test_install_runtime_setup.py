@@ -400,7 +400,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
             value = dict(runtimes=[dict(id='original.model')], setup_revision=self.revision)
         elif command == 'runtime-setup-batch':
             value = dict(runtime_id=payload['default_runtime_id'], runtime_ids=payload['runtime_ids'],
-                         configured=True, validation='passed', readiness='verified' if payload['verify'] else 'not_probed')
+                         configured=True, commit=dict(durability='durable', warnings=[]), validation='passed', readiness='verified' if payload['verify'] else 'not_probed')
         else:
             self.fail('Unexpected native command: ' + command)
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), '')
@@ -430,6 +430,44 @@ class RuntimeSetupAdapter(unittest.TestCase):
         with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
             SETUP.configure('/fixture/masc', self.base, spec())
         self.assertEqual(self.transports, ['runtime-setup-inventory', 'runtime-setup-render', 'runtime-setup-batch'])
+
+    def test_existing_account_is_resolved_before_terminal_selection_and_batch(self):
+        original = self.native
+        def native(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[1] == 'runtime-setup-render' and '--base-path' in argv:
+                self.assertEqual(argv[argv.index('--base-path') + 1], str(self.base))
+                payload = json.loads(Path(argv[-1]).read_text())
+                result.stdout = json.dumps(dict(runtime_id='operator_account.' + payload['model'], runtime_toml='prepared'))
+            return result
+        source = dict(choice='codex', command='codex', account_home='/fixture/account', credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account')
+        with patch.object(SETUP.subprocess, 'run', side_effect=native), \
+             patch.object(SETUP, 'catalog_models', return_value=[]):
+            identity, selected = SETUP.resolve_model_spec(source, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+            self.assertEqual(identity, 'operator_account.new-model')
+            self.assertEqual(selected['existing_provider_id'], 'operator_account')
+            result = SETUP.configure_many('/fixture/masc', self.base, [selected], [identity],
+                expected_revision=self.revision)
+        self.assertEqual(self.requests[-1][1]['runtime_ids'], ['operator_account.new-model'])
+        self.assertEqual(result['runtime_id'], identity)
+
+    def test_prepared_implicit_native_home_retains_selected_provider(self):
+        source = dict(choice='codex', command='codex', account_home=None, credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account', label='Codex')
+        selected_home = str(self.base / 'codex-home')
+        with patch.dict(os.environ, {'CODEX_HOME': selected_home}), \
+             patch.object(SETUP, 'official_client_path', return_value='/located/codex'), \
+             patch.object(SETUP, 'pick', return_value=[0]), \
+             patch.object(SETUP, 'catalog_models', return_value=[]), \
+             patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            prepared = SETUP.prepare_connection('/fixture/masc', source, None)
+            _, selected = SETUP.resolve_model_spec(prepared, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+        self.assertEqual(selected['existing_provider_id'], 'operator_account')
+        self.assertEqual(selected['command'], 'codex')
+        self.assertEqual(selected['account_home'], selected_home)
 
     def test_native_verification_failure_identifies_connection_without_raw_diagnostics(self):
         response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error',
@@ -580,14 +618,51 @@ class RuntimeSetupAdapter(unittest.TestCase):
     def test_unjoined_success_receipt_is_refused(self):
         with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
                 patch.object(SETUP, 'native_setup_command', return_value=dict(runtime_id='wrong.model', runtime_ids=['wrong.model'],
-                    configured=True, validation='passed', readiness='verified')), self.assertRaises(SETUP.SetupError):
+                    configured=True, commit=dict(durability='durable', warnings=[]), validation='passed', readiness='verified')), self.assertRaises(SETUP.SetupError):
             SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True, expected_revision=self.revision)
+
+    def test_visible_save_reports_durability_uncertainty_without_retry(self):
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True,
+                       validation='passed', readiness='verified', commit=dict(durability='unconfirmed', warnings=[]))
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=receipt) as native, \
+                patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                             expected_revision=self.revision), receipt)
+        native.assert_called_once()
+        self.assertIn('disk durability is unconfirmed', stderr.getvalue())
+        self.assertIn('Do not repeat setup', stderr.getvalue())
+        for commit in (None, {}, dict(durability='unknown')):
+            with self.subTest(commit=commit), patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=dict(receipt, commit=commit)), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                                     expected_revision=self.revision)
+
+    def test_lock_release_warning_is_safe_and_does_not_repeat_save(self):
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True,
+                       validation='passed', readiness='verified', commit=dict(durability='durable',
+                       warnings=[dict(code='runtime_config_lock_release_unconfirmed', detail='private-server-path')]))
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=receipt) as native, \
+                patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                             expected_revision=self.revision), receipt)
+        native.assert_called_once()
+        self.assertIn('lock release is unconfirmed', stderr.getvalue())
+        self.assertNotIn('private-server-path', stderr.getvalue())
+        for warnings in (None, [dict(code='unknown')]):
+            with self.subTest(warnings=warnings), patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=dict(receipt,
+                        commit=dict(durability='durable', warnings=warnings))), self.assertRaises(SETUP.SetupError):
+                SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                                     expected_revision=self.revision)
 
     def test_usage_limited_receipt_is_accepted_and_names_the_unmeasured_runtime(self):
         # A spent quota or a rate limit publishes the runtime and the receipt
         # names it, so a published configuration is not reported as
         # unconfirmed.
-        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, validation='passed',
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, commit=dict(durability='durable', warnings=[]), validation='passed',
                        readiness='usage_limited',
                        unverified=[dict(runtime_id='native.model', code='quota_exhausted')])
         def configure(answer, verify=True):
@@ -611,7 +686,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
         # A save that left a bound runtime uncalled is neither verified nor
         # usage-limited. The receipt says which, and a verified receipt that
         # carries the same list is refused instead of read as a full check.
-        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, validation='passed',
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, commit=dict(durability='durable', warnings=[]), validation='passed',
                        readiness='partly_checked', unverified=[], not_rechecked=['native.model'])
         def configure(answer, verify=True):
             with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
@@ -1492,7 +1567,7 @@ class MultipleSelection(unittest.TestCase):
                                                             binary='/fixture/masc')
         native.assert_called_once_with('/fixture/masc', source, 'owned-qwen', 10, load=True)
         self.assertEqual(configured['max_context'], 16384)
-        self.renderer.assert_called_once_with(configured, '/fixture/masc')
+        self.renderer.assert_called_once_with(configured, '/fixture/masc', base_path=None)
         self.assertEqual(identity, 'fixture.native-model')
 
     def test_wizard_ollama_context_uses_native_private_reference(self):

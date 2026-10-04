@@ -14,6 +14,8 @@ type provider_usage_window_kind =
 type provider_usage_utilization =
   | Utilization_fraction of float  (** [0.67] is 67 %. *)
   | Utilization_percent of int
+  | Utilization_usd of { used : float; limit : float option }
+      (** A reported USD credit amount; [None] means no key cap. *)
 
 (** What a window limits, as the server's decoder classified it from the
     provider's own shape. *)
@@ -35,10 +37,10 @@ type provider_usage_window = {
   puw_observed_at : float;  (** When the server heard this report. *)
 }
 
-(** A reported account holds at least one window; an account that has not
-    reported since the server started holds none. *)
+(** A complete report with no windows is distinct from a missing report. *)
 type provider_usage_state =
   | Account_not_reported_since_start
+  | Account_reported_no_windows of { observed_at : float; source : string }
   | Account_reported of provider_usage_window * provider_usage_window list
 
 (** A provider table that bills to the account. *)

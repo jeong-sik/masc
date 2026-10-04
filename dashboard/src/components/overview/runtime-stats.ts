@@ -33,19 +33,26 @@ function usageWindowLabel(window: ProviderUsageWindow): string {
 }
 
 function usageWindowText(window: ProviderUsageWindow): string {
-  const percent = window.utilization.unit === 'fraction'
+  const utilization = window.utilization
+  const percent = utilization.unit === 'fraction'
     ? Math.trunc(window.utilization.value * 100)
     : window.utilization.value
+  const value = utilization.unit === 'usd'
+    ? `$${utilization.value.toFixed(4)} 사용${utilization.limit == null
+      ? ' · 키 한도 없음'
+      : ` / $${utilization.limit.toFixed(4)} 한도 · $${(utilization.limit - utilization.value).toFixed(4)} 남음`}`
+    : `${number(percent, '%')} 사용`
   const reset = window.resets_at == null ? ''
     : window.resets_at * 1000 <= Date.now()
       ? ' · 리셋 시각 경과, 새 보고 없음'
       : ` · 리셋 보고 ${new Date(window.resets_at * 1000).toLocaleString()}`
-  return `${usageWindowLabel(window)} ${number(percent, '%')} 사용 · 관측 ${new Date(window.observed_at * 1000).toLocaleString()}${reset}`
+  return `${usageWindowLabel(window)} ${value} · 관측 ${new Date(window.observed_at * 1000).toLocaleString()}${reset}`
 }
 
-function OfficialClientAccount({ client, usage }: { client: DashboardRuntimeProviderSnapshot; usage: UsageState }) {
+function ProviderAccount({ client, usage }: { client: DashboardRuntimeProviderSnapshot; usage: UsageState }) {
   const runtimeId = client.runtime_id ?? client.provider
   const providerId = client.provider_id ?? client.provider
+  const canProbeLogin = client.protocol === 'claude-code' || client.protocol === 'codex-app-server'
   const scope: ProviderUsageScope | undefined = usage.kind === 'ready'
     ? usage.value.provider_usage_windows?.find(row => row.providers.some(provider => provider.id === providerId))
     : undefined
@@ -81,16 +88,16 @@ function OfficialClientAccount({ client, usage }: { client: DashboardRuntimeProv
     <div class="rounded border border-border px-2 py-1 text-xs" data-testid=${`overview-client-${providerId}`}>
       <span class="font-medium">${client.provider_display_name ?? client.provider_id ?? client.provider}</span>
       <span class="ml-1 text-text-muted">(${client.provider_id ?? client.provider})</span>
-      <span class="ml-2" role="status">${measured
+      ${canProbeLogin ? html`<span class="ml-2" role="status">${measured
         ? `CLI 자체 보고: ${measured.login.status}`
         : loading ? '로그인 검사 중' : '로그인 미측정'}</span>
       <button type="button" class="ml-2 underline" disabled=${loading}
-        onClick=${() => void checkLogin()}>로그인 확인</button>
+        onClick=${() => void checkLogin()}>로그인 확인</button>` : null}
       ${measured ? html`<span class="ml-2 text-text-muted">측정 ${new Date(measured.measured_at * 1000).toLocaleString()} · 신원 미검증</span>` : null}
       ${measured?.login.detail ? html`<span class="ml-2 text-text-muted">${measured.login.detail}</span>` : null}
       ${error ? html`<span class="ml-2" role="alert">${error}</span>` : null}
       <div class="text-text-muted" data-testid=${`overview-client-usage-${providerId}`}>
-        ${scope && scope.providers.length > 1 ? html`<div>공유 Client 홈: ${scope.providers.map(provider => provider.display_name).join(', ')}</div>` : null}
+        ${scope && scope.providers.length > 1 ? html`<div>공유 사용량 계정: ${scope.providers.map(provider => provider.display_name).join(', ')}</div>` : null}
         ${usage.kind === 'loading' ? '제공자 사용량 읽는 중'
           : usage.kind === 'error' ? `제공자 사용량 조회 실패: ${usage.message}`
             : !usage.value.provider_usage_windows ? '제공자 사용량 상태 미보고'
@@ -111,8 +118,7 @@ export function OverviewRuntimeStats() {
   useEffect(() => { loadRuntimeCatalog() }, [])
   const catalog = runtimeCatalogState.value
   useEffect(() => {
-    if (catalog.status !== 'loaded' || !catalog.data.some(provider =>
-      provider.protocol === 'claude-code' || provider.protocol === 'codex-app-server')) return
+    if (catalog.status !== 'loaded' || catalog.data.length === 0) return
     const controller = new AbortController()
     let inFlight = false
     setUsage({ kind: 'loading' })
@@ -129,7 +135,7 @@ export function OverviewRuntimeStats() {
     void refresh()
     const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
     return () => { stopRefresh(); controller.abort() }
-  }, [catalog.status, generation])
+  }, [catalog, generation])
   useEffect(() => {
     const controller = new AbortController()
     let inFlight = false
@@ -154,7 +160,6 @@ export function OverviewRuntimeStats() {
   const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()
   if (catalog.status === 'loaded') {
     for (const provider of catalog.data) {
-      if (provider.protocol !== 'claude-code' && provider.protocol !== 'codex-app-server') continue
       const id = provider.provider_id ?? provider.provider
       if (!accounts.has(id)) accounts.set(id, provider)
     }
@@ -181,14 +186,14 @@ export function OverviewRuntimeStats() {
       </div>
     </div>
     <p class="text-sm text-text-muted">Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.</p>
-    ${catalog.status === 'error' ? html`<p role="alert">공식 Client 계정 목록을 읽지 못했습니다: ${catalog.message}</p>` : null}
-    ${catalog.status === 'loaded' && clients.length === 0 ? html`<p>설정된 공식 Client 런타임이 없습니다.</p>` : null}
+    ${catalog.status === 'error' ? html`<p role="alert">제공자 계정 목록을 읽지 못했습니다: ${catalog.message}</p>` : null}
+    ${catalog.status === 'loaded' && clients.length === 0 ? html`<p>설정된 제공자 런타임이 없습니다.</p>` : null}
     ${clients.length > 0 ? html`
-      <div class="flex flex-wrap gap-2" aria-label="공식 Client 계정별 런타임" data-testid="overview-official-client-accounts">
-        ${clients.map(client => html`<${OfficialClientAccount}
+      <div class="flex flex-wrap gap-2" aria-label="제공자 계정별 런타임" data-testid="overview-provider-accounts">
+        ${clients.map(client => html`<${ProviderAccount}
           key=${client.runtime_id ?? client.provider} client=${client} usage=${usage} />`)}
       </div>
-      <p class="text-xs text-text-muted">로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.</p>
+      <p class="text-xs text-text-muted">로그인 확인은 지원되는 공식 CLI 계정에만 표시하며 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.</p>
     ` : null}
     ${state.kind === 'loading' ? html`<p role="status">런타임 통계를 읽고 있습니다.</p>` : null}
     ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}

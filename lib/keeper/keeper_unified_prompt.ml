@@ -1033,18 +1033,7 @@ let format_completion_authority_rejection_observations
                 ; "reason", rejection.car_reason
                 ]
               ^ "\n")
-         | Keeper_world_observation.Task_outcome outcome ->
-           Some
-             (format_prompt_row
-                [ "post_id", event.post_id
-                ; "task_id", outcome.Keeper_event_queue.to_task_id
-                ; "verification_id", outcome.to_verification_id
-                ; ( "authority_kind"
-                  , Masc_domain.completion_authority_kind outcome.to_authority )
-                ; ( "authority_actor"
-                  , Masc_domain.completion_authority_actor outcome.to_authority )
-                ]
-              ^ "\n")
+         | Keeper_world_observation.Task_outcome _
          | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
          | Keeper_world_observation.Board_comment_added _

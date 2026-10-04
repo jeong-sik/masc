@@ -26,9 +26,10 @@ val no_report_mark : string
     report is not an idle day. *)
 
 val of_history :
-  share:(Masc.Tui_decode_usage.provider_usage_utilization -> float) ->
+  share:(Masc.Tui_decode_usage.provider_usage_utilization -> float option) ->
   Masc.Tui_decode_usage.provider_usage_history ->
   t
-(** [share] reads a reported value as a part of its full window. A point
+(** [share] reads a reported value as a part of its full window. An uncapped
+    monetary report has no share and draws [$], distinct from no report. A point
     outside the answered window keeps its row and draws no day. When one day
     holds several points for a row, the last one in the answer is drawn. *)

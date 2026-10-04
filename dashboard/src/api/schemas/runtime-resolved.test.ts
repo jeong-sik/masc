@@ -98,4 +98,14 @@ describe('runtime-resolved schema', () => {
       ...provider_usage_windows[0], state: 'available',
     }] })).toThrow(RuntimeResolvedSchemaDriftError)
   })
+
+  it.each([20, null])('retains USD usage with its reported cap %s', (limit) => {
+    const utilization = { unit: 'usd', value: 5.125, limit }
+    const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime),
+      provider_usage_windows: [{ scope: 'account:usd', providers: [{ id: 'openrouter', display_name: 'OpenRouter' }],
+        state: 'reported', windows: [{ limit_id: null, window: { kind: 'provider_label', label: 'credit usage' },
+          utilization, resets_at: null, observed_at: 1_100, source: 'openrouter.key', role: 'gates_model_calls' }] }],
+    })
+    expect(parsed.provider_usage_windows?.[0]?.windows[0]?.utilization).toEqual(utilization)
+  })
 })

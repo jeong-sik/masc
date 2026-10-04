@@ -26,7 +26,7 @@ let fake ?(verify=verified_report) base binary action =
     ["python3";"-c";"import sys;print(sys.executable)"] with
     | Ok (Unix.WEXITED 0,s,_) -> String.trim s | _ -> Alcotest.fail "Python fixture unavailable" in
   save binary (Printf.sprintf {|#!%s
-import json,os,pathlib,sys
+import json,os,pathlib,sys,tomllib
 base=pathlib.Path(%s)
 def report(runtime_id,status='verified',failure=None,model='fixture-model'):
     ok=failure is None
@@ -39,6 +39,7 @@ assert os.environ['MASC_BASE_PATH']==str(stage)
 assert os.environ['MASC_CONFIG_DIR']==str(config)
 assert stage!=base
 if a[0]=='runtime-default-set':
+    tomllib.loads((config/'runtime.toml').read_text())
     if len(a)>4: assert a[4:6]==['--setup-lanes','--setup-imp']
     (base/'selected.json').write_text(json.dumps([a[3]]+a[7::2]))
     (base/'stage-path').write_text(str(stage))
@@ -72,9 +73,84 @@ let test_batch () = fixture (fun base runtime binary spec original ->
   ignore (get (apply base binary specs ids next false));
   (* Existing identities must not append the provider/model definitions again. *)
   Alcotest.check Alcotest.string "idempotent connection definitions" (after ^ "\n# native lane writer fixture\n") (text runtime))
+let test_account_model_variants () = fixture (fun base runtime binary _spec _original ->
+  fake base binary "pass";
+  let spec home model context = Runtime_setup_spec.of_json (`Assoc [
+    "choice", `String "codex"; "command", `String "codex";
+    "account_home", `String home; "model", `String model;
+    "max_context", `Int context; "tools", `Bool true; "streaming", `Bool true])
+    |> function Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let first = spec "/fixture/account-a" "luna" 272000 in
+  let wider = spec "/fixture/account-a" "luna" 500000 in
+  let other_model = spec "/fixture/account-a" "astra" 272000 in
+  let other_account = spec "/fixture/account-b" "luna" 272000 in
+  let specs = [first; wider; other_model; other_account] in
+  let ids = List.map (fun spec -> (Runtime_setup_spec.render spec).runtime_id) specs in
+  ignore (get (apply base binary specs ids (get (Batch.observe ~base_path:base)) true));
+  let read () = match Runtime_toml.parse_file runtime with
+    | Ok config -> config | Error _ -> Alcotest.fail "saved account models must parse" in
+  let config = read () in
+  let provider = Runtime_setup_spec.provider_id first in
+  let bindings = List.filter (fun (binding:Runtime_schema.binding) -> binding.provider_id=provider) config.bindings in
+  Alcotest.check Alcotest.int "one provider holds both context variants and the other model" 3 (List.length bindings);
+  Alcotest.check Alcotest.int "one wizard default for the grouped account" 1
+    (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.wizard_default) bindings));
+  let windows = List.filter_map (fun (binding:Runtime_schema.binding) ->
+    let model = List.find (fun (model:Runtime_schema.model_spec) -> model.id=binding.model_id) config.models in
+    if model.api_name="luna" then model.max_context else None) bindings |> List.sort Int.compare in
+  Alcotest.check (Alcotest.list Alcotest.int) "same API model retains separate context windows" [272000;500000] windows;
+  Alcotest.check Alcotest.bool "another account has its own provider" true
+    (provider <> Runtime_setup_spec.provider_id other_account);
+  let inventory = Runtime_wizard_inventory.to_json config in
+  let open Yojson.Safe.Util in
+  let row = inventory |> member "integrations" |> to_list
+    |> List.find (fun row -> row |> member "id" |> to_string = provider) in
+  Alcotest.check Alcotest.int "account inventory offers all three runtime variants" 3
+    (row |> member "configured_runtime_ids" |> to_list |> List.length);
+  let before = text runtime in
+  let next = spec "/fixture/account-a" "luna" 750000 in
+  let next_id = (Runtime_setup_spec.render next).runtime_id in
+  ignore (get (apply base binary [next] (ids @ [next_id]) (get (Batch.observe ~base_path:base)) true));
+  Alcotest.check Alcotest.bool "later additions preserve all existing provider settings" true
+    (String.starts_with ~prefix:before (text runtime));
+  let after = read () in
+  Alcotest.check Alcotest.int "later save keeps exactly one provider for the account" 1
+    (List.length (List.filter (fun (row:Runtime_schema.provider) -> row.id=provider) after.providers));
+  Alcotest.check Alcotest.int "later save adds a fourth variant under that account" 4
+    (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.provider_id=provider) after.bindings)))
+let test_custom_account_new_model () = fixture (fun base runtime binary spec _original ->
+  let configured = {|
+[runtime]
+default = "operator_account.old"
+[providers.operator_account]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[models.old]
+api-name = "old-model"
+max-context = 1024
+tools-support = true
+[operator_account.old]
+wizard-default = true
+|} in
+  save runtime configured;
+  fake base binary "pass";
+  let parsed = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let raw = spec "new-model" in
+  let prepared = Runtime_setup_spec.resolve_provider raw parsed.providers |> Result.get_ok in
+  let id = (Runtime_setup_spec.render prepared).runtime_id in
+  let receipt = get (apply base binary [raw] [id] (get (Batch.observe ~base_path:base)) true) in
+  Alcotest.(check (list string)) "prepared native ID is the committed selection" [id] receipt.runtime_ids;
+  let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+  Alcotest.(check int) "batch adds a binding without duplicating account" 1 (List.length after.providers);
+  Alcotest.(check bool) "operator provider source is retained" true
+    (String.starts_with ~prefix:configured (text runtime));
+  Alcotest.(check bool) "new binding names the original provider" true
+    (List.exists (fun (binding:Runtime_schema.binding) ->
+       Runtime_schema.binding_key binding=id && binding.provider_id="operator_account") after.bindings))
 let test_named_default_lane () = fixture (fun base runtime binary spec original ->
   let first = (Runtime_setup_spec.render (spec "old-model")).runtime_id in
-  let second = Runtime_setup_spec.render (spec "old-fallback") in
+  let second = Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "old-fallback") in
   let added = spec "new-account-model" in
   let added_id = (Runtime_setup_spec.render added).runtime_id in
   let lane_id = "conversation.priority" in
@@ -139,7 +215,7 @@ let test_probes_only_what_changes () = fixture (fun base _runtime binary spec _o
   Alcotest.check (Alcotest.list Alcotest.string) "the receipt lists it" [old_id]
     Yojson.Safe.Util.(Batch.receipt_json receipt |> member "not_rechecked" |> to_list |> List.map to_string);
   Sys.remove (Filename.concat base "verified.jsonl");
-  let promoted = Runtime_setup_spec.render (spec "promoted") in
+  let promoted = Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "promoted") in
   let saved = text (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") in
   save (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") (saved ^ "\n" ^ promoted.runtime_toml);
   let revision = get (Batch.observe ~base_path:base) in
@@ -201,8 +277,8 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
     | Error (Batch.Verification_unreadable { runtime_id; exit = Unix.WEXITED 0; stderr = ""; reason = _ }) -> runtime_id = id
     | Ok _
     | Error (Batch.Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
-            | Child_not_started _ | Validation_failed _ | Verification_failed _ | Verification_unreadable _
-            | Write_failed | Rollback_failed | Lock_unavailable) -> false in
+            | Child_not_started _ | Validation_failed _ | Commit_refused _ | Verification_failed _
+            | Verification_unreadable _ | Write_failed _ | Lock_unavailable) -> false in
   Alcotest.check Alcotest.bool "verified status with a failure attached is refused" true
     (unreadable "print(report(a[3],failure={'code':'timed_out','message':'late','detail':None}))");
   Alcotest.check Alcotest.bool "a key the writer never writes is refused" true
@@ -243,7 +319,7 @@ let test_usage_limit_publishes () = fixture (fun base runtime binary spec origin
           |> List.map (fun row -> (row |> member "runtime_id" |> to_string), (row |> member "code" |> to_string)));
       Alcotest.check Alcotest.string (code ^ ": the report's code is kept") code reported;
       Alcotest.check Alcotest.bool (code ^ ": the limited runtime is published") true
-        (contains (text runtime) (Runtime_setup_spec.render (spec "limited")).runtime_toml)
+        (contains (text runtime) (Runtime_setup_spec.render ~include_provider:false ~wizard_default:false (spec "limited")).runtime_toml)
     | Ok _ -> Alcotest.fail (code ^ ": the usage limit was not reported")
     | Error error -> Alcotest.fail (code ^ ": " ^ Batch.error_message error))
     ["quota_exhausted"; "rate_limited"];
@@ -261,26 +337,76 @@ let test_usage_limit_publishes () = fixture (fun base runtime binary spec origin
      | Error (Batch.Verification_failed { runtime_id; code = "provider_rejected"; _ }) -> runtime_id = verified_id
      | Ok _ | Error _ -> false);
   Alcotest.check Alcotest.string "a refused save publishes nothing" before (text runtime))
-let test_rollback () = fixture (fun _base runtime _binary _spec original ->
-  let sibling = Filename.concat (Filename.dirname runtime) "sibling.toml" in
-  let real path mode contents = Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
-    Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out contents) in
-  List.iter (fun stage ->
-    let injected = ref false in
-    let replace path mode contents =
-      if path = runtime && not !injected then (
-        injected := true;
+let test_commit_failures () =
+  List.iter (fun stage -> fixture (fun base runtime binary spec original ->
+    let registry = Runtime.For_testing.snapshot () in
+    Fun.protect ~finally:(fun () -> Runtime.For_testing.restore registry) (fun () ->
+      fake base binary "pass";
+      let added = spec "atomic-account" in
+      let id = (Runtime_setup_spec.render added).runtime_id in
+      let revision = get (Batch.observe ~base_path:base) in
+      let before = Runtime.get_runtimes () in
+      let replace_file path mode contents =
         (match stage with Fs_compat.Before_rename -> () | Fs_compat.After_rename ->
-          (match real path mode contents with Ok () -> () | Error _ -> Alcotest.fail "fixture write failed"));
-        Error {Fs_compat.path;stage;exception_=Sys_error "fixture replacement failure";
-               backtrace=Printexc.get_callstack 0})
-      else real path mode contents in
-    Alcotest.check Alcotest.bool "reported write failure restores both files" true
-      (Batch.For_testing.publish ~replace ~files:[sibling,"new sibling";runtime,"new runtime"] = Error Batch.Write_failed);
-    Alcotest.check Alcotest.string "runtime restored even after visible failed rename" original (text runtime);
-    Alcotest.check Alcotest.bool "new sibling removed by rollback" false (Sys.file_exists sibling);
-    Alcotest.check Alcotest.int "rollback retains permissions" 0o640 (Unix.stat runtime).st_perm)
-    [Fs_compat.Before_rename;Fs_compat.After_rename])
+          match Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
+            Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out contents) with
+          | Ok () -> () | Error _ -> Alcotest.fail "fixture rename failed");
+        Error {Fs_compat.path;stage;exception_=Sys_error "fixture storage failure";
+               backtrace=Printexc.get_callstack 0} in
+      let result = Batch.For_testing.configure ~replace_file ~binary ~base_path:base
+        ~expected_revision:revision ~specs:[added] ~runtime_ids:[id]
+        ~default_runtime_id:id ~verify:false () in
+      match stage, result with
+      | Fs_compat.Before_rename, Error (Batch.Write_failed _) ->
+        Alcotest.check Alcotest.string "prior bytes preserved" original (text runtime);
+        Alcotest.check Alcotest.bool "registry unchanged before rename" true
+          (before = Runtime.get_runtimes ())
+      | Fs_compat.After_rename, Ok receipt ->
+        Alcotest.check Alcotest.bool "visible source is retained" true (text runtime <> original);
+        Alcotest.check Alcotest.bool "visible account published" true
+          (List.exists (fun (runtime:Runtime_instance.t) -> runtime.id=id) (Runtime.get_runtimes ()));
+        Alcotest.check Alcotest.string "HTTP and CLI receipt retains uncertainty" "unconfirmed"
+          Yojson.Safe.Util.(Batch.receipt_json receipt |> member "commit" |> member "durability" |> to_string);
+        Alcotest.check Alcotest.bool "typed receipt retains uncertainty" true
+          (match receipt.commit.durability with Runtime.Durability_unconfirmed _ -> true | Durable -> false)
+      | _, Error error -> Alcotest.fail (Batch.error_message error)
+      | _, Ok _ -> Alcotest.fail "pre-rename failure reported a commit")))
+    [Fs_compat.Before_rename; Fs_compat.After_rename]
+let test_lock_release_warning_reaches_receipt () = fixture (fun base runtime binary spec _original ->
+  let registry = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore registry) (fun () ->
+    fake base binary "pass";
+    let added = spec "lock-warning-account" in
+    let id = (Runtime_setup_spec.render added).runtime_id in
+    let release_failure = { File_lock_eio.lock_path=runtime ^ ".lock";
+      phase=File_lock_eio.Release_process_lock;
+      cause={File_lock_eio.error=Unix.EIO;operation="private-release-fixture";argument=runtime};
+      cleanup_failure=None } in
+    let replace_file path mode contents = Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
+      Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out contents) in
+    let receipt = get (Batch.For_testing.configure ~release_failure ~replace_file ~binary ~base_path:base
+      ~expected_revision:(get (Batch.observe ~base_path:base)) ~specs:[added]
+      ~runtime_ids:[id] ~default_runtime_id:id ~verify:false ()) in
+    Alcotest.check Alcotest.int "completed setup retains its owning lock warning" 1
+      (List.length receipt.commit.lock_warnings);
+    Alcotest.check Alcotest.bool "lock uncertainty is distinct from storage durability" true
+      (receipt.commit.durability=Runtime.Durable);
+    let json = Batch.receipt_json receipt in
+    Alcotest.check Alcotest.string "safe warning code reaches public receipt"
+      {|[{"code":"runtime_config_lock_release_unconfirmed"}]|}
+      Yojson.Safe.Util.(json |> member "commit" |> member "warnings" |> Yojson.Safe.to_string);
+    Alcotest.check Alcotest.bool "private release diagnostic is not published" false
+      (contains (Yojson.Safe.to_string json) "private-release-fixture")))
+
+let test_final_validation_refusal () = fixture (fun base runtime binary spec original ->
+  fake base binary "p.write_text('invalid = [')";
+  let added = spec "refused-account" in
+  let id = (Runtime_setup_spec.render added).runtime_id in
+  let revision = get (Batch.observe ~base_path:base) in
+  Alcotest.check Alcotest.bool "final validation remains a refusal, not storage failure" true
+    (match apply base binary [added] [id] revision false with
+     | Error (Batch.Commit_refused _) -> true | Ok _ | Error _ -> false);
+  Alcotest.check Alcotest.string "refusal retains original bytes" original (text runtime))
 let test_credential_commit_join () = fixture (fun base _runtime binary _spec _original ->
   Eio.Switch.run (fun sw ->
     let previous = Sys.getenv_opt "XDG_CONFIG_HOME" in
@@ -335,14 +461,34 @@ let test_error_summary_is_one_line () =
   Alcotest.check Alcotest.(option string) "a blank stderr is no detail" None (Batch.error_detail refused);
   Alcotest.check Alcotest.(option string) "an error with no child has no detail" None
     (Batch.error_detail Batch.Lock_unavailable)
+(* task-2054: the wizard save used to replace the file and stop there, so the
+   account it wrote stayed out of the registry the running server serves until
+   a restart. The save now commits through the same path as a routing edit,
+   and the saved binding must be callable in-process the moment it lands. *)
+let test_save_publishes_the_registry () = fixture (fun base _runtime binary spec _original ->
+  let registry = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore registry) (fun () ->
+    fake base binary "pass";
+    let added = spec "registry-account-model" in
+    let id = (Runtime_setup_spec.render added).runtime_id in
+    let ids runtime = List.map (fun (one : Runtime_instance.t) -> one.Runtime_instance.id) runtime in
+    Alcotest.check Alcotest.bool "the account is not callable before the save" false (List.mem id (ids (Runtime.get_runtimes ())));
+    let revision = get (Batch.observe ~base_path:base) in
+    ignore (get (apply base binary [added] [id] revision false));
+    Alcotest.check Alcotest.bool "the saved account is live in the published registry" true (List.mem id (ids (Runtime.get_runtimes ())))))
 let () = Alcotest.run "runtime setup batch" ["workspace",[
+  Alcotest.test_case "native batch reuses custom account" `Quick test_custom_account_new_model;
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
+  Alcotest.test_case "the saved account is live in the registry without a restart" `Quick test_save_publishes_the_registry;
+  Alcotest.test_case "account model variants survive save and inventory" `Quick test_account_model_variants;
   Alcotest.test_case "preserve named default lane and candidate order" `Quick test_named_default_lane;
   Alcotest.test_case "runtime compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;
   Alcotest.test_case "verification report is read back typed" `Quick test_verification_report;
   Alcotest.test_case "a usage limit publishes the runtime unmeasured" `Quick test_usage_limit_publishes;
   Alcotest.test_case "verification probes only what the save changes" `Quick test_probes_only_what_changes;
-  Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback;
+  Alcotest.test_case "atomic commit failure preserves visibility and durability" `Quick test_commit_failures;
+  Alcotest.test_case "observed lock release warning reaches safe setup receipt" `Quick test_lock_release_warning_reaches_receipt;
+  Alcotest.test_case "final validation remains a typed refusal" `Quick test_final_validation_refusal;
   Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

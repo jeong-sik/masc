@@ -1651,7 +1651,7 @@ let test_exact_candidate_replacement_and_first_preserve_other_slots () =
       ~slots:["catalog.only"; "openai.gpt"; "runpod_mtp.qwen"] ()
     |> lane_write_ok "declare candidates including an unadmitted slot";
     Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
-      ~lane:Runtime.Board_attention ~slot:"openai.gpt" ~replacement:"openai.small" ()
+      ~lane:Runtime.Board_attention ~slot:" openai.gpt " ~replacement:"openai.small" ()
     |> lane_write_ok "replace at the existing position";
     Alcotest.(check (list string)) "unadmitted and other candidates remain"
       ["catalog.only"; "openai.small"; "runpod_mtp.qwen"]
@@ -1662,6 +1662,10 @@ let test_exact_candidate_replacement_and_first_preserve_other_slots () =
     Alcotest.(check (list string)) "remaining candidates retain their relative order"
       ["runpod_mtp.qwen"; "catalog.only"; "openai.small"]
       (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "refuse promoting an already first candidate" ~path
+      ~names:["already first"]
+      (fun () -> Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+        ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ~move:Runtime.Move_slot_first ());
     lane_write_refused "reject a duplicate replacement" ~path ~names:["already declared"]
       (fun () -> Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
         ~lane:Runtime.Board_attention ~slot:"openai.small" ~replacement:"runpod_mtp.qwen" ()))

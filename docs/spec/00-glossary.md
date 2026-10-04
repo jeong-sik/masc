@@ -1746,7 +1746,7 @@ status: reference
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
   - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다(`Candle_config.t`). 파일 부재는 `Off`(시작 장비 유지, 기록·지급·판매 없음),
-    필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor` 및 5개 등급 금액 `grades_milli` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
+    필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor`·`share_rounding`·`remainder_tie_break`·`deduction_rounding` 및 운영자가 정한 `grades_milli`·동일 id의 `grade_criteria` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
     빈 파일이나 `half_life`·`[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.

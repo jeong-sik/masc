@@ -361,6 +361,9 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_account_scope_id : string option;
+      (** Stable opaque account identity joined from Usage in this same response.
+          [None] means no unambiguous account identity was reported. *)
   ro_rate_limited : bool;
       (** This process observed a 429 that has neither reached its provider's
           Retry-After deadline nor been cleared by a successful answer.

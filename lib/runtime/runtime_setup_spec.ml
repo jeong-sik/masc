@@ -3,11 +3,11 @@ type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
   | Http of {endpoint:string; credential:credential option;
-      kind:http_kind}
+      kind:http_kind; request_path:string option}
   | Client of {command:string; oauth:string option; timeout:float option; account_home:string option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   supports_image_input:bool option;
-  transport:transport; canonical_spec:string}
+  transport:transport; canonical_spec:string; declared_provider_id:string option; requested_provider_id:string option}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
 let ( let* ) = Result.bind
@@ -55,6 +55,15 @@ let wire_kind_name = function
   | Glm -> "glm"
   | Ollama_kind -> "ollama"
 
+let schema_kind = function
+  | Openai_compat -> Runtime_schema.OpenAI_compat | Anthropic -> Anthropic
+  | Kimi -> Kimi | Glm -> Glm | Ollama_kind -> Ollama
+let effective_path ~endpoint ~kind request_path =
+  let kind = schema_kind kind in
+  match request_path with
+  | None -> Runtime_adapter.default_http_request_path ~kind ~base_url:endpoint
+  | Some request_path -> Runtime_adapter.normalize_http_request_path ~kind ~base_url:endpoint ~request_path
+
 (* Identity comes from the parsed connection, not from the text that produced
    it. Hashing the raw field bag made a field left out and the same field
    written with its default two different connections, and the inventory fills
@@ -66,9 +75,7 @@ let wire_kind_name = function
    the other direction is worse: a field added to [t] and forgotten here would
    give two different connections one id, and an overwritten row is invisible
    where a duplicate row is not. *)
-let[@warning "+9"] canonical_spec_of
-      ({ choice; model; context; tools; streaming; supports_image_input; transport; canonical_spec = _ } : t)
-  =
+let[@warning "+9"] transport_json transport =
   let credential_json = function
     | None -> `Null
     | Some (Env_reference name) -> `List [`String "env"; `String name]
@@ -76,20 +83,27 @@ let[@warning "+9"] canonical_spec_of
   (* Destructured, not field-accessed: warning 9 fires on a record pattern and
      says nothing about [h.endpoint], so a fourth field on either constructor
      would drop out of the identity the same way a seventh on [t] would. *)
-  let transport_json = match transport with
-    | Http {endpoint; kind; credential} ->
-      `Assoc ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
+  match transport with
+    | Http {endpoint; kind; credential; request_path} ->
+      ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
               "credential", credential_json credential]
+      @ (match request_path with None -> [] | Some path -> ["request_path", `String path])
+      |> fun fields -> `Assoc fields
     | Client {command; oauth; timeout; account_home} ->
       ["command",`String command;
               "oauth",(match oauth with None -> `Null | Some path -> `String path);
               "timeout",(match timeout with None -> `Null | Some value -> `Float value)]
       @ (match account_home with None -> [] | Some home -> ["account_home", `String home])
-      |> fun fields -> `Assoc fields in
+      |> fun fields -> `Assoc fields
+
+let[@warning "+9"] canonical_spec_of
+      ({ choice; model; context; tools; streaming; supports_image_input; transport;
+         canonical_spec = _; declared_provider_id = _; requested_provider_id = _ } : t)
+  =
   Yojson.Safe.to_string (`Assoc ([
     "choice",`String (choice_name choice); "model",`String model;
     "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
-    "transport", transport_json]
+    "transport", transport_json transport]
     @ (match supports_image_input with None -> [] | Some value -> ["supports_image_input", `Bool value])))
 
 let of_json ?home_dir = function
@@ -101,11 +115,12 @@ let of_json ?home_dir = function
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
       | "muse" -> Ok Muse
       | _ -> invalid "choice" in
-    let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input"]
-      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
+    let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input";"existing_provider_id"]
+      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
       @ (match choice with Claude_code | Codex | Muse -> ["account_home"] | _ -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
+    let* requested_provider_id = optional fields "existing_provider_id" in
     let* model = required fields "model" in
     let* context = match List.assoc_opt "max_context" fields with Some (`Int value) when value > 0 -> Ok value | _ -> invalid "max_context" in
     let* tools = bool fields "tools" in let* streaming = bool fields "streaming" in
@@ -129,7 +144,21 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | _ -> invalid "provider_kind" in
-      Ok (Http {endpoint;credential;kind}))
+      let* request_path = match List.assoc_opt "request_path" fields with
+        | None -> Ok None
+        | Some (`String value) when safe_text value ->
+          let uri = Uri.of_string value in
+          if value.[0] = '/' && Uri.scheme uri = None && Uri.host uri = None
+             && Uri.query uri = [] && Uri.fragment uri = None
+             && not (String.contains value ' ')
+          then
+            let path = effective_path ~endpoint ~kind (Some value) in
+            if Llm_provider.Provider_config.request_path_targets_responses_api path
+               && kind <> Openai_compat then invalid "request_path dialect"
+            else Ok (if path = effective_path ~endpoint ~kind None then None else Some path)
+          else invalid "request_path"
+        | Some _ -> invalid "request_path" in
+      Ok (Http {endpoint;credential;kind;request_path}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
         else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | Muse -> "muse" | _ -> "agy") in
@@ -153,7 +182,8 @@ let of_json ?home_dir = function
           | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout;account_home})) in
-    let parsed = {choice;model;context;tools;streaming;supports_image_input;transport;canonical_spec=""} in
+    let parsed = {choice;model;context;tools;streaming;supports_image_input;transport;
+      canonical_spec="";declared_provider_id=None;requested_provider_id} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
@@ -179,13 +209,76 @@ type rendered = {runtime_id:string;runtime_toml:string}
    value the seed runtime.toml gives its own exact-slot providers; the
    operator narrows it in the file. *)
 let setup_exact_body_timeout_s = 1200.0
-(* Ids an operator reads: the client and the model, each followed by the same
-   short hash of the answers. The hash keeps one id per answer set (same
-   answers, same id; another account home, another id), and it stays on the
-   model key because every provider shares the [models] table. A model
+(* The provider identifies a connection/account; the model identifies a full
+   declaration, including its context window. Adding a model or a window on
+   the same account therefore adds a binding under the same provider. A model
    name keeps the characters a model id admits; any other character (a UTF-8
    sequence, not a byte) becomes one '-'. *)
 let answers_hash_length = 8
+let answers_hash answers =
+  String.sub Digestif.SHA256.(to_hex (digest_string answers)) 0 answers_hash_length
+let provider_id spec =
+  match spec.declared_provider_id with
+  | Some id -> id
+  | None ->
+    let identity = Yojson.Safe.to_string (`Assoc [
+      "choice", `String (choice_name spec.choice);
+      "transport", transport_json spec.transport]) in
+    choice_name spec.choice ^ "_" ^ answers_hash identity
+let account_home_matches choice left right =
+  let effective = match choice with
+    | Claude_code -> Runtime_claude_code.effective_account_home
+    | Codex -> Runtime_codex_app_server.effective_account_home
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Muse -> Fun.id in
+  effective left = effective right
+let connection_matches spec (provider : Runtime_schema.provider) =
+  let credential_matches expected = match expected, provider.credentials with
+    | None, None -> true
+    | Some (Env_reference name), Some (Runtime_schema.Env configured) -> name=configured
+    | Some (File_reference path), Some (Runtime_schema.File configured) -> path=configured
+    | _ -> false in
+  let connection_matches = match spec.transport, provider.transport with
+    | Client client, Runtime_schema.Cli command ->
+      client.command=command && account_home_matches spec.choice client.account_home provider.account_home
+      && credential_matches (Option.map (fun path -> File_reference path) client.oauth)
+      && (match client.timeout, provider.antigravity_cli with
+          | None, None -> true
+          | Some timeout, Some options -> timeout=options.timeout_s
+          | _ -> false)
+    | Http connection, Runtime_schema.Http endpoint ->
+      let kind = schema_kind connection.kind in
+      connection.endpoint=endpoint && credential_matches connection.credential
+      && (match Runtime_adapter.http_protocol_metadata provider with
+          | Ok (configured, path) -> configured=kind
+            && path=effective_path ~endpoint ~kind:connection.kind connection.request_path
+          | Error _ -> false)
+    | Client _, Runtime_schema.Http _ | Http _, Runtime_schema.Cli _ -> false in
+  provider.protocol=protocol spec.choice && connection_matches
+let for_provider spec (provider : Runtime_schema.provider) =
+  if provider.enabled && connection_matches spec provider
+  then Some {spec with declared_provider_id=Some provider.id} else None
+let resolve_provider spec providers =
+  let selected = match spec.declared_provider_id with
+    | Some _ as selected -> selected | None -> spec.requested_provider_id in
+  match selected with
+  | Some id ->
+    (match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) providers with
+     | Some provider -> (match for_provider spec provider with
+         | Some bound -> Ok bound | None -> invalid "selected provider is disabled or changed")
+     | None -> invalid "selected provider is absent")
+  | None ->
+    let matches = List.filter (connection_matches spec) providers in
+    let enabled = List.filter (fun (p:Runtime_schema.provider) -> p.enabled) matches in
+    let generated = provider_id spec in
+    let enabled = match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=generated) enabled with
+      | Some provider -> [provider] | None -> enabled in
+    (match enabled, matches with
+     | [provider], _ -> Ok {spec with declared_provider_id=Some provider.id}
+     | [], _ :: _ -> invalid "matching provider is disabled"
+     | _ :: _ :: _, _ -> invalid "matching providers are ambiguous"
+     | [], [] ->
+       if List.exists (fun (p:Runtime_schema.provider) -> p.id=generated) providers
+       then invalid "generated provider identity is already declared" else Ok spec)
 let model_id_character decoded =
   let c = Uchar.utf_decode_uchar decoded in
   if Uchar.is_char c then
@@ -203,18 +296,16 @@ let model_id_text model =
     end in
   copy 0;
   Buffer.contents text
-let render spec =
-  let name = choice_name spec.choice in
-  let hash =
-    String.sub Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) 0
-      answers_hash_length in
-  let provider = name ^ "_" ^ hash in
+let render ?(include_provider=true) ?(wizard_default=true) spec =
+  let provider = provider_id spec in
+  let hash = answers_hash (Yojson.Safe.to_string (`List [`String provider; `String spec.canonical_spec])) in
   let model_key = model_id_text spec.model ^ "_" ^ hash in
   let runtime_id = provider ^ "." ^ model_key in
-  let fields = ["display-name",`String (name ^ " / " ^ spec.model);"protocol",`String (protocol spec.choice)] in
+  let fields = ["display-name",`String provider;"protocol",`String (protocol spec.choice)] in
   let transport_fields,credential = match spec.transport with
     | Http h ->
       (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
+      @ (match h.request_path with None -> [] | Some path -> ["request-path", `String path])
       @ ["endpoint",`String h.endpoint;
          Runtime_schema.exact_body_timeout_s_key,`Float setup_exact_body_timeout_s],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
@@ -228,21 +319,18 @@ let render spec =
     | Some (File_reference path) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "file";"path",`String path]
     | Some (Env_reference name) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "env";"key",`String name]
     | None -> "") in
-  let runtime = runtime ^ table [Runtime_toml_namespace.(key Models);model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
+  let runtime = (if include_provider then runtime else "")
+    ^ table [Runtime_toml_namespace.(key Models);model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
     "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming])
-    (* The wizard's provider id carries a hash of the operator's answers, so no
-       catalog row can ever name it and the binding's model is one AGENT_CORE
-       has no entry for. Declaring the table is how a deployment says "these
-       are this model's capabilities, the dialect's preset where I stated
-       nothing": [Provider_config.capabilities_for_config_model] answers from
-       the declaration and never reaches the catalog, which is what keeps the
-       startup gate from rejecting the binding as catalog-missing. Nobody
-       verified this model's reasoning stream, so it is declared off rather
-       than left to the wire default. *)
+    (* Setup declares model capabilities explicitly, including on connections
+       with generated provider IDs that no catalog entry can name. Discovery
+       has not verified a reasoning stream, so it is declared off. *)
     ^ table [Runtime_toml_namespace.(key Models);model_key;"capabilities"]
         (["reasoning-streaming-format",`String "none"]
          @ (match spec.supports_image_input with None -> [] | Some value -> ["supports-image-input", `Bool value]))
-    ^ table [provider;model_key] (["wizard-default",`Bool true] @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
+    ^ table [provider;model_key] (["max-context", `Int spec.context]
+        @ (if wizard_default then ["wizard-default",`Bool true] else [])
+        @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
   {runtime_id;runtime_toml=runtime}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]
 

@@ -3462,23 +3462,37 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")));
+            let prefix = "      Account " in
+            let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+            let account_width =
+              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
-              (Printf.sprintf "      Account %s · %s context"
-                (Masc_tui_message_layout.fit_middle (max 1 (cols - 32))
-                   (Terminal_text.single_line runtime.ro_provider_id))
-                (format_context_tokens runtime.ro_effective_max_context)));
+              (prefix ^ Masc_tui_message_layout.fit_middle account_width
+                 (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
          | Some (Masc_tui_types.Runtime_choice runtime) ->
            box_line_styled buf cols ~style:(Theme.recede ())
-             ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16))
-                (Terminal_text.single_line runtime.ro_id))
+             ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6))
+                (Terminal_text.single_line ("Connection " ^ runtime.ro_provider_id ^ " · Selected " ^ runtime.ro_id)))
          | Some (Masc_tui_types.Lane_choice _) | None -> ())
       | None -> ());
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
    | None ->
+     let catalog = match state.runtime_catalog_reading with
+       | Runtime_catalog_read -> state.runtime_catalog
+       | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
+     (match state.runtime_catalog_reading with
+      | Runtime_catalog_read -> ()
+      | Runtime_catalog_unread ->
+          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue unread · showing slot IDs"
+      | Runtime_catalog_loading ->
+          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue loading · showing slot IDs"
+      | Runtime_catalog_failed detail ->
+          box_line_styled buf cols ~style:(Theme.warn ())
+            ("  runtime catalogue read failed: " ^ Terminal_text.single_line detail ^ " · showing slot IDs"));
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
@@ -3520,7 +3534,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                   (if Some index = selected_index then ">" else " ")
                   (index + 1) count kind
                   (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
-                     String.equal runtime.ro_id row.Masc_tui_types.sr_slot) state.runtime_catalog with
+                     String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog with
                    | Some runtime -> Masc_tui_types.runtime_model_picker_title runtime
                    | None -> Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
@@ -3535,18 +3549,24 @@ let render_exact_lane_provider_editor (state : state) editor =
      (match Masc_tui_types.slot_editor_cursor_row state with
       | None -> ()
       | Some row ->
-        let identity = Terminal_text.single_line row.Masc_tui_types.sr_slot in
-        (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
-           String.equal runtime.ro_id row.sr_slot) state.runtime_catalog with
+        let selected_runtime = List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
+           String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog in
+        let identity = Terminal_text.single_line
+          ((match selected_runtime with
+            | Some runtime -> "Connection " ^ runtime.ro_provider_id ^ " · "
+            | None -> "") ^ "Selected " ^ row.sr_slot) in
+        (match selected_runtime with
          | Some runtime ->
+           let prefix = "  Account " in
+           let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+           let account_width =
+             max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
-             (Printf.sprintf "  Account %s · %s context"
-                (Masc_tui_message_layout.fit_middle (max 1 (cols - 28))
-                   (Terminal_text.single_line runtime.ro_provider_id))
-                (format_context_tokens runtime.ro_effective_max_context))
+             (prefix ^ Masc_tui_message_layout.fit_middle account_width
+                (Terminal_text.single_line (runtime_account_label runtime)) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
-          ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16)) identity));
+          ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6)) identity));
      box_line_styled buf cols ~style:(Theme.recede ())
        "  arrows/j/k select · r replace model/effort · a add fallback · 1 first in group";
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -3739,9 +3759,14 @@ let render_lanes_overview (state : state) =
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
        in
+       let picker_rows =
+         match Masc_tui_types.runtime_picker_projection state with
+         | None -> 0
+         | Some picker -> 1 + max 1 (2 * List.length picker.rlp_choices)
+       in
        let available =
          max 0
-           (rows - count_frame_lines buf - action_error_rows - 3)
+           (rows - count_frame_lines buf - action_error_rows - picker_rows - 3)
        in
        if available > 0 then begin
          box_divider buf cols;
@@ -3826,16 +3851,20 @@ let render_lanes_overview (state : state) =
                 if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
               in
               let ctx =
-                Printf.sprintf " [%s ctx]"
+                Printf.sprintf " [%s context]"
                   (format_context_tokens runtime.ro_effective_max_context)
               in
               let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
                 (Printf.sprintf "  %s %s%s%s%s%s"
                    mark refusal_prefix
-                   (Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice)
+                   (Masc_tui_types.runtime_model_picker_title runtime)
                    ctx def
-                   (Ansi.dim ^ note ^ Ansi.reset)))
+                   (Ansi.dim ^ note ^ Ansi.reset));
+              box_line_styled buf cols ~style:(Theme.recede ())
+                ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                  ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
+                  ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
   for _ = 1 to max 0 (rows - used_rows - 2) do
@@ -9275,8 +9304,9 @@ type runtime_table_column =
   | Runtime_status_column
   | Runtime_detail_column
 
-let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
-  let lane_width, candidate_width, identity_width, status_width = runtime_column_widths cols in
+let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+  let lane_width, candidate_width, identity_width, minimum_status_width = runtime_column_widths cols in
+  let status_width = max minimum_status_width status_cells in
   let inner_width = max 1 (framed_inner_width cols - 2) in
   let candidate_heading =
     match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"
@@ -9435,6 +9465,8 @@ let runtime_detail_lines state target ~width =
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
+        @ runtime_detail_field ~width ~style:Ansi.reset "Account" (runtime_account_label runtime)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Connection / provider ID" runtime.ro_provider_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
         @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"
             (Printf.sprintf "%d tokens" runtime.ro_effective_max_context)
@@ -9465,17 +9497,13 @@ let runtime_detail_lines state target ~width =
         match runtime_quota_badge runtime with
         | None -> []
         | Some _ ->
-            (match runtime.ro_quota_scope with
-             | None -> []
-             | Some scope ->
-               runtime_detail_field ~width ~style:(Theme.warn ()) "Quota"
-                 (match runtime.ro_quota_resets_at with
-                  | Some resets_at ->
-                    let tm = Unix.localtime resets_at in
-                    Printf.sprintf "exhausted, resets %02d:%02d (%s)"
-                      tm.Unix.tm_hour tm.Unix.tm_min scope
-                  | None ->
-                    Printf.sprintf "exhausted, no reset stated (%s)" scope))
+            runtime_detail_field ~width ~style:(Theme.warn ()) "Quota"
+              (match runtime.ro_quota_resets_at with
+               | Some resets_at ->
+                 let tm = Unix.localtime resets_at in
+                 Printf.sprintf "exhausted, resets %02d:%02d"
+                   tm.Unix.tm_hour tm.Unix.tm_min
+               | None -> "exhausted, no reset stated")
       in
       let rate_limit =
         match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with
@@ -9559,7 +9587,7 @@ let runtime_detail_lines state target ~width =
                   (format_context_tokens tokens) cost
             in
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
-            @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
+            @ runtime_detail_field ~width ~style:Ansi.reset "Keeper lifetime" (activity_str ^ " · across all runtimes")
       in
       let usage_lines =
         match state.runtime_surface with
@@ -9583,7 +9611,14 @@ let runtime_detail_lines state target ~width =
                 runtime_detail_field ~width ~style:(Theme.warn ()) "Spent limit"
                   (limit ^ " (observed " ^ observed ^ ")")) windows
       in
-      fields @ candidate @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
+      let evidence_lines = match state.runtime_evidence with
+        | None -> runtime_detail_field ~width ~style:Ansi.dim "Runtime history" "not read"
+        | Some (Error detail) -> runtime_detail_field ~width ~style:Ansi.dim "Runtime history" detail
+        | Some (Ok evidence) ->
+          Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
+          |> List.concat_map (fun (label, value) ->
+            runtime_detail_field ~width ~style:Ansi.reset label value) in
+      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -9725,12 +9760,31 @@ let render_runtime (state : state) =
           probe_status probe_read timestamp (connection_badge state)
   in
   let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
+  let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
+  (* One measured status width for the whole reading, shared by the header and
+     every row. A report that has several independent limits can still exceed
+     the pane; full evidence stays in the selected summary or Enter's detail. *)
+  let status_cells =
+    let statuses = match state.runtime_mode with
+      | Runtime_lanes -> List.map (fun row -> runtime_route_probe_text state
+          row.Tui_decode.rcr_runtime row.rcr_probe) candidates
+      | Runtime_all -> List.map (fun (runtime, _) ->
+          let probe = Option.bind state.runtime_surface (fun snapshot ->
+            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.Tui_decode.ro_id) in
+          runtime_route_probe_text state runtime probe) all_runtimes in
+    List.fold_left (fun width text -> max width (Message_layout.display_width text)) 0 statuses in
   (* The budget counts the rows this screen draws, so it comes from the same
      call the drawing reads rather than a fixed one. *)
-  let chrome_rows = runtime_surface_listing_chrome ~cols state in
+  let chrome_rows = runtime_surface_listing_chrome ~rows ~cols state in
   let content_height = max 0 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
+  let scroll =
+    if content_height = 0 then scroll
+    else if state.runtime_cursor < scroll then max 0 state.runtime_cursor
+    else if state.runtime_cursor >= scroll + content_height
+    then min max_scroll (state.runtime_cursor - content_height + 1)
+    else scroll in
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
   let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
   let scroll_hint =
@@ -9750,6 +9804,10 @@ let render_runtime (state : state) =
   in
   List.iter (fun row -> c.push_styled ~style:authority_style row) authority_rows;
   c.push_divider ();
+  if selection_rows <> [] then begin
+    List.iter c.push selection_rows;
+    c.push_divider ()
+  end;
   (* The two routes that are not lanes. They hold runtime ids and nothing
      dispatches a keeper turn to them, so they sit above the lane table rather
      than among its rows, where the lane count and the lane-editing keys would
@@ -9801,7 +9859,7 @@ let render_runtime (state : state) =
             (runtime_column runtime_candidate_width media_text)
             (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
        c.push_divider ());
-  let table_cells = runtime_table_cells ~cols ~mode:state.runtime_mode in
+  let table_cells = runtime_table_cells ~cols ~status_cells ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row
       (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""));
@@ -9910,7 +9968,11 @@ let render_runtime (state : state) =
        else
          List.iteri (fun offset choice ->
            let mark = if picker.rlp_selected_row = Some offset then ">" else " " in
-           let label = Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
+           let label = match choice, picker.rlp_pick with
+             | Masc_tui_types.Runtime_choice runtime,
+               (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
+                 Masc_tui_types.runtime_model_picker_title runtime
+             | _ -> Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
            match choice with
            | Masc_tui_types.Lane_choice lane ->
                let note =
@@ -9923,21 +9985,35 @@ let render_runtime (state : state) =
            | Masc_tui_types.Runtime_choice runtime ->
                let note =
                  if List.exists (String.equal runtime.ro_id) picker.rlp_already
-                 then "  (current route)"
+                 then (match picker.rlp_pick with
+                   | Masc_tui_types.Pick_route_default -> "  (current route)"
+                   | _ -> "  (already a candidate)")
                  else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
                  then "  (same provider as a current candidate)"
                  else ""
                in
                let ctx =
-                 Printf.sprintf " [%s ctx]"
+                 Printf.sprintf " [%s %s]"
                    (format_context_tokens runtime.ro_effective_max_context)
+                   (match picker.rlp_pick with
+                    | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
+                    | _ -> "ctx")
                in
-               let def = if runtime.ro_is_default then " [entry runtime]" else "" in
+               let def = if runtime.ro_is_default then
+                 (match picker.rlp_pick with
+                  | Masc_tui_types.Pick_route_default -> " [entry runtime]"
+                  | _ -> " [default]") else "" in
                c.push
                  (Printf.sprintf "  %s %s%s%s%s" mark
                     label
                     ctx def
-                    (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
+                    (Ansi.dim ^ note ^ Ansi.reset));
+               (match picker.rlp_pick with
+                | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+                    c.push ("      Account " ^ Terminal_text.single_line (runtime_account_label runtime)
+                      ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
+                      ^ " · " ^ Terminal_text.single_line runtime.ro_id)
+                | _ -> ())) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
     let empty =
@@ -10770,7 +10846,7 @@ let provider_history_lines ~cols (state : state) =
         @ [ Printf.sprintf "   %s  %d/%d UTC days reported" row.marks row.reported_days days; "" ]
       in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report"
+         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report · $ means uncapped USD use"
          days
          (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
          as_of.Unix.tm_hour as_of.Unix.tm_min)
@@ -10981,10 +11057,10 @@ let render_runtime_pick (state : state) =
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())
         ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view);
-      (match state.runtime_catalog_error, Masc_tui_types.keeper_runtime_picker_empty_note view with
-       | Some err, _ -> c.push (data_unreliable_row ~cols err)
-       | None, Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
-       | None, None ->
+      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note view with
+       | Runtime_catalog_failed err, _ -> c.push (data_unreliable_row ~cols err)
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), None ->
            (* The first header cell spans badge and target, as the rows
               do. *)
            let header =
@@ -11991,8 +12067,7 @@ let config_path_note (state : state) =
    same source the runtime.toml pane shows, arranged so a missing knob is a
    column and not an absence.
 
-   Read-only. Editing lands in the runtime.toml pane next door, which already
-   has the preview-checked write path. *)
+   Structured edits and copies use the runtime.toml preview-checked writer. *)
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -12004,7 +12079,15 @@ let render_config_models (state : state) =
        state);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
-  (match state.runtime_config_view_error, state.runtime_config_view with
+  (match state.runtime_model_form with
+   | Some form ->
+       let lines = Masc_tui_model_form.rows ~width:(max 1 (cols - 6)) ~height:content_height form in
+       List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
+       for _ = List.length lines + 1 to content_height do box_empty buf cols done
+   | None when Option.is_some state.runtime_model_jump ->
+       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings… Esc cancels" ^ Ansi.reset);
+       for _ = 2 to content_height do box_empty buf cols done
+   | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols
          (Theme.bad () ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);

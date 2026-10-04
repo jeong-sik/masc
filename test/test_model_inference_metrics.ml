@@ -1663,6 +1663,7 @@ let test_prompt_feedback_is_cost_independent () =
 let test_usage_signal_uses_tokens_not_cost () =
   let entry : Model_inference_metrics_entry.raw_entry =
     { model = "runtime"
+    ; executed_runtime_id = None
     ; inference_key = None
     ; ts_unix = 0.0
     ; outcome = "success"
@@ -1703,6 +1704,147 @@ let test_usage_signal_uses_tokens_not_cost () =
     (Model_inference_metrics_reader.usage_signal_present cache_creation_only)
 
 (* ── Runner ──────────────────────────────────────── *)
+
+let test_runtime_history_keeps_account_attribution () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "runtime-history" in
+    let now = now_unix () in
+    let observed runtime json = match json with
+      | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+          "runtime_id", `String "shared-lane";
+          "executed_runtime_id", `String runtime]) :: fields)
+      | _ -> fail "fixture is not an object" in
+    write_decisions path [
+      observed "account-one.model" (success_entry ~model:"same-api-model" ~ts:(now -. 10.)
+        ~identity_seed:"first-account" ~input_tokens:100 ~cache_read_tokens:25 ());
+      observed "account-two.model" (success_entry ~model:"same-api-model" ~ts:(now -. 5.)
+        ~identity_seed:"second-account" ~input_tokens:200 ~cache_read_tokens:100 ());
+      success_entry ~model:"same-api-model" ~ts:(now -. 2.) ~input_tokens:9000 ();
+      observed "account-one.model" (success_entry ~model:"same-api-model" ~ts:(now -. 90000.) ())
+    ];
+    write_costs base [cost_entry ~model:"cost-model-name" ~ts:(now -. 10.)
+      ~identity_seed:"first-account" ~input_tokens:999 ()];
+    let open Yojson.Safe.Util in
+    let json = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    let runtimes = json |> member "runtimes" |> to_list in
+    check int "two account rows, no API-name join" 2 (List.length runtimes);
+    check int "unattributed decision remains explicit" 1 (json |> member "unattributed_entries" |> to_int);
+    let row id = List.find (fun json -> json |> member "runtime_id" = `String id) runtimes in
+    let one = row "account-one.model" and two = row "account-two.model" in
+    check int "exact cost merge preserves executed identity and one sample" 1 (one |> member "entry_count" |> to_int);
+    check int "paired usage uses normalized decision" 100 (one |> member "cached_input" |> member "input_tokens" |> to_int);
+    check int "account one cache only" 25 (one |> member "cached_input" |> member "cache_read_tokens" |> to_int);
+    check int "account two cache only" 100 (two |> member "cached_input" |> member "cache_read_tokens" |> to_int);
+    check (float 0.001) "recent success belongs to selected account"
+      (floor (now -. 10.)) (one |> member "recent_entries" |> to_list |> List.hd |> member "ts_unix" |> to_float))
+
+let test_runtime_history_unreadable_decision_file () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let good = make_keeper_dir base "readable-history" in
+    let broken = make_keeper_dir base "unreadable-history" in
+    let row = success_entry ~model:"model" ~ts:(now_unix ()) () in
+    let row = match row with
+      | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+          "executed_runtime_id", `String "account.model"]) :: fields)
+      | _ -> fail "fixture is not an object" in
+    write_decisions good [row];
+    (* A directory where a JSONL file was expected reliably fails the read,
+       including under root; chmod-based fixtures can silently remain readable. *)
+    Unix.mkdir broken 0o700;
+    let open Yojson.Safe.Util in
+    let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "one unreadable file prevents a complete history" "unavailable"
+      (failed |> member "state" |> to_string);
+    check string "file failure has a typed cause" "files_unreadable"
+      (failed |> member "decision_read" |> member "cause" |> to_string);
+    check int "unreadable file counted" 1
+      (failed |> member "decision_read" |> member "unreadable_files" |> to_int);
+    check bool "partial samples never look like complete runtime totals" true
+      (failed |> member "runtimes" = `Null);
+    Unix.rmdir broken;
+    let recovered = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "a subsequent successful read recovers" "ready"
+      (recovered |> member "state" |> to_string);
+    check int "readable account is counted after recovery" 1
+      (recovered |> member "runtimes" |> to_list |> List.hd |> member "success_count" |> to_int))
+
+let test_runtime_history_dangling_decision_file () =
+  let base = test_dir () in
+  let broken = make_keeper_dir base "dangling-history" in
+  Fun.protect ~finally:(fun () ->
+    (try Unix.unlink broken with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+    cleanup_dir base) (fun () ->
+    Unix.symlink (Filename.concat base "missing-target") broken;
+    let open Yojson.Safe.Util in
+    let check_failed () =
+      let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+      check string "enumerated broken link is not an empty readable file" "unavailable"
+        (failed |> member "state" |> to_string);
+      check string "broken link reports file failure" "files_unreadable"
+        (failed |> member "decision_read" |> member "cause" |> to_string);
+      check int "broken link is counted" 1
+        (failed |> member "decision_read" |> member "unreadable_files" |> to_int) in
+    check_failed ();
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:Fs_compat.clear_fs check_failed);
+    Unix.unlink broken;
+    let recovered = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "removed broken entry leaves a genuinely empty store" "ready"
+      (recovered |> member "state" |> to_string))
+
+let test_runtime_history_invalid_decision_rows () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "invalid-history" in
+    let now = now_unix () in
+    let valid = success_entry ~model:"model" ~ts:now () in
+    let schema_invalid = `Assoc ["ts_unix", `Float now; "telemetry", `Assoc []] in
+    let ignored = [`Assoc ["ts_unix", `Float (now -. 172800.); "telemetry", `Assoc []];
+      `Assoc ["ts_unix", `Float now; "event", `String "keeper_started"]] in
+    let open Yojson.Safe.Util in
+    let read () = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    write_decisions path (valid :: ignored);
+    check string "outside-window and valid non-inference rows do not degrade history"
+      "ready" (read () |> member "state" |> to_string);
+    let malformed = "{broken json\n" in
+    List.iter (fun (rows, raw, malformed_count, invalid_count) ->
+      write_decisions path rows;
+      Out_channel.with_open_gen [Open_append; Open_binary] 0o600 path (fun channel ->
+        output_string channel raw);
+      let history = read () in
+      check string "dropped decision evidence cannot confirm complete history"
+        "unavailable" (history |> member "state" |> to_string);
+      let diagnostics = history |> member "decision_read" in
+      check string "dropped rows have a typed cause" "rows_invalid"
+        (diagnostics |> member "cause" |> to_string);
+      check int "malformed rows counted" malformed_count
+        (diagnostics |> member "malformed_rows" |> to_int);
+      check int "schema-invalid rows counted" invalid_count
+        (diagnostics |> member "schema_violation_rows" |> to_int);
+      check bool "partial totals are not exposed as authoritative" true
+        (history |> member "runtimes" = `Null))
+      [[], malformed, 1, 0; [schema_invalid], "", 0, 1;
+       valid :: schema_invalid :: ignored, malformed, 1, 1];
+    write_decisions path [valid];
+    check string "repair restores readable history" "ready"
+      (read () |> member "state" |> to_string))
+
+let test_runtime_history_directory_read_failure () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let open Yojson.Safe.Util in
+    let empty = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "missing store is genuinely empty" "ready" (empty |> member "state" |> to_string);
+    let directory = Filename.dirname (make_keeper_dir base "unused") in
+    Unix.rmdir directory;
+    write_decisions directory [];
+    let failed = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
+    check string "unreadable directory is not empty history" "unavailable" (failed |> member "state" |> to_string);
+    check string "directory failure has a typed cause" "directory_unavailable"
+      (failed |> member "decision_read" |> member "cause" |> to_string))
 
 let () =
   run "Model_inference_metrics" [
@@ -1760,6 +1902,11 @@ let () =
         test_public_runtime_lane_label_is_stable_across_windows;
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;
+      test_case "runtime history keeps account attribution" `Quick test_runtime_history_keeps_account_attribution;
+      test_case "runtime history refuses partial decision reads and recovers" `Quick test_runtime_history_unreadable_decision_file;
+      test_case "runtime history reports dangling decision files" `Quick test_runtime_history_dangling_decision_file;
+      test_case "runtime history reports malformed and schema-invalid rows" `Quick test_runtime_history_invalid_decision_rows;
+      test_case "runtime history distinguishes missing and unreadable store" `Quick test_runtime_history_directory_read_failure;
     ];
     "thinking_fraction", [
       test_case "mixed reported yields fraction" `Quick test_thinking_fraction_mixed;

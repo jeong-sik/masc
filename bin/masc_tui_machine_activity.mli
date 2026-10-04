@@ -1,7 +1,7 @@
 (** Configuration-preserving machine activity draft. No I/O or model dispatch. *)
 type owner = { workspace : string * string; machine : Masc.Machine_lane.t }
 type document = Masc_tui_runtime_config_edit.document
-type reading = { document : document; activity : (Machine_configuration.activity, string) result }
+type reading = { document : (document, string) result; activity : (Machine_configuration.activity, string) result }
 type t
 type request
 type write = { source_text : string; expected_source_revision : string }

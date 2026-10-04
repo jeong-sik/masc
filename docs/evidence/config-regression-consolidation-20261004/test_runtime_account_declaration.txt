@@ -1,5 +1,5 @@
 Testing `runtime_account_declaration'.
-This run has ID `QSBW2TWH'.
+This run has ID `T8610KZA'.
 
   [OK]          declare          0   bases are the signed-in clients.
   [OK]          declare          1   codex copy signs in at the new home.
@@ -15,5 +15,5 @@ This run has ID `QSBW2TWH'.
   [OK]          declare         11   layouts the append cannot carry.
   [OK]          declare         12   every seed client takes a second account.
 
-Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-config-consolidation-dkwd9r1p/_build/_tests/runtime_account_declaration'.
-Test Successful in 0.669s. 13 tests run.
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-config-consolidation-j7pg3ycl/_build/_tests/runtime_account_declaration'.
+Test Successful in 3.221s. 13 tests run.

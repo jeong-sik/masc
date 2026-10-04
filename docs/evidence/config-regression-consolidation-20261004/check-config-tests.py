@@ -1,6 +1,10 @@
 from pathlib import Path
-import subprocess,tempfile,json,sys,hashlib,os
-wd=Path(sys.argv[1]).resolve();cache=Path(sys.argv[2]).resolve();out=Path(tempfile.mkdtemp(prefix='masc-config-consolidation-'))
+import subprocess,tempfile,json,sys,hashlib,os,argparse
+parser=argparse.ArgumentParser()
+parser.add_argument('checkout',type=Path);parser.add_argument('cache',type=Path)
+parser.add_argument('mode',choices=['provider','boot'])
+args=parser.parse_args();wd=args.checkout.resolve();cache=args.cache.resolve();mode=args.mode
+out=Path(tempfile.mkdtemp(prefix='masc-config-consolidation-'))
 print(f'Evidence directory: {out}',flush=True)
 paths=list((cache/'_build/default/lib').glob('**/*.cmx'))+list((cache/'_build/default/packages').glob('**/*.cmx'))
 index={p.stem[0].upper()+p.stem[1:]:p for p in paths if '/native/' in str(p)}
@@ -12,7 +16,29 @@ def run(args):
  r=subprocess.run(args,cwd=out,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
  if r.returncode:(out/'failure.txt').write_text(r.stdout);raise RuntimeError(r.stdout[-5000:])
  return r.stdout
-mode=sys.argv[3]
+boot_units=[
+ ('lib/config/env_config_keeper_supervisor','env_config_keeper_supervisor'),
+ ('lib/config/env_config_keeper','env_config_keeper'),
+ ('lib/config/keeper_runtime_setting_registry','keeper_runtime_setting_registry'),
+ ('lib/keeper_runtime/keeper_runtime_config','keeper_runtime_config'),
+ ('lib/runtime_settings','masc__Runtime_settings'),
+ ('lib/keeper/keeper_runtime_resolved','masc__Keeper_runtime_resolved'),
+ ('lib/keeper/keeper_types_support','masc__Keeper_types_support'),
+ ('lib/keeper/keeper_heartbeat_snapshot','masc__Keeper_heartbeat_snapshot')]
+verified={}
+units=boot_units if mode=='boot' else [('lib/runtime/runtime','runtime')]
+for path,unit in units:
+ for ext in ['ml','mli']:
+  relative=path+'.'+ext;current=(wd/relative).read_bytes();cached=(cache/'_build/default'/relative).read_bytes()
+  if current!=cached:raise SystemExit('cache source mismatch: '+relative)
+  verified[relative]=hashlib.sha256(current).hexdigest()
+if mode=='boot':
+ for path,unit in boot_units:
+  for ext in ['mli','ml']:(out/(unit+'.'+ext)).write_bytes((wd/(path+'.'+ext)).read_bytes())
+  name=unit[0].upper()+unit[1:]
+  (out/(unit+'.cmi')).write_bytes(index[name].parent.parent.joinpath('byte',unit+'.cmi').read_bytes())
+  run(cmd+(['-open','Masc'] if unit.startswith('masc__') else [])+['-c',unit+'.ml'])
+  index[name]=out/(unit+'.cmx')
 if mode=='provider':
  unit='runtime_toml'
  for ext in ['mli','ml']:
@@ -45,4 +71,4 @@ for name in (['test_runtime_toml_overrides'] if mode=='boot' else ['test_runtime
  build_lib=run(['opam','exec','--switch=5.5.1','--','ocamlfind','query','dune-build-info']).strip()
  run(cmd+['-linkpkg',str(build_data),str(Path(build_lib)/'build_info.cmxa')]+list(map(str,objects))+[p.with_suffix('.cmx').name,'-o',name+'.exe']+[v for q in stubs for v in ['-cclib',str(q)]])
  result=run([str(out/(name+'.exe')),'--color=never']);(out/(name+'.txt')).write_text(result);print(result,flush=True)
-(out/'manifest.json').write_text(json.dumps({'mode':mode,'scope':'complete registered suites; provider mode compiles candidate Runtime_toml against its unchanged cached public interface; boot mode uses cached product modules with matching owner/consumer source; no full server or production','cache':str(cache),'sources':{p:hashlib.sha256((wd/p).read_bytes()).hexdigest() for p in (['test/test_runtime_toml_overrides.ml'] if mode=='boot' else ['lib/runtime/runtime_toml.ml','lib/runtime/runtime_toml.mli','lib/runtime/runtime.ml','lib/runtime/runtime.mli','test/test_runtime_toml_namespace.ml','test/test_runtime_account_declaration.ml','config/runtime.toml'])}},indent=2)+'\n')
+(out/'manifest.json').write_text(json.dumps({'mode':mode,'scope':'complete registered suites; provider mode compiles candidate Runtime_toml against its unchanged cached public interface; boot mode verifies 16 source/interface files and compiles all eight candidate owners/consumers; other dependencies remain cached; no full server or production','cache':str(cache),'verified_cache_source_sha256':verified,'sources':{p:hashlib.sha256((wd/p).read_bytes()).hexdigest() for p in (['test/test_runtime_toml_overrides.ml'] if mode=='boot' else ['lib/runtime/runtime_toml.ml','lib/runtime/runtime_toml.mli','lib/runtime/runtime.ml','lib/runtime/runtime.mli','test/test_runtime_toml_namespace.ml','test/test_runtime_account_declaration.ml','config/runtime.toml'])}},indent=2)+'\n')

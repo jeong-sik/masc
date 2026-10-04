@@ -1,7 +1,11 @@
 {
   "mode": "provider",
-  "scope": "complete registered suites; provider mode compiles candidate Runtime_toml against its unchanged cached public interface; boot mode uses cached product modules with matching owner/consumer source; no full server or production",
+  "scope": "complete registered suites; provider mode compiles candidate Runtime_toml against its unchanged cached public interface; boot mode verifies 16 source/interface files and compiles all eight candidate owners/consumers; other dependencies remain cached; no full server or production",
   "cache": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/rel-41097-native",
+  "verified_cache_source_sha256": {
+    "lib/runtime/runtime.ml": "7705254b1daf98750f0b980ab21963f21d0b4832c4f53744419f9070d2619f9c",
+    "lib/runtime/runtime.mli": "3cce6f6cfc7236f5d8ca7bac32a905baa1cd69c8f176683f82c393cb25ccbd94"
+  },
   "sources": {
     "lib/runtime/runtime_toml.ml": "34ad56740a0e2b44d4f7896c26778db9649ad77a09f9350fcd77055a5810e936",
     "lib/runtime/runtime_toml.mli": "9a5b27a830407e90ed8f277a61cacc34b6c5fbdd5dc615f3ad2329133de2fe7e",

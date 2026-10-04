@@ -43,14 +43,15 @@ in #41096, and dated-store retention remains in #41111/#41125.
 
 ## Validation method
 
-`check-config-tests.py CHECKOUT CACHE_CHECKOUT provider|boot` runs isolated native
+`python3 check-config-tests.py CHECKOUT CACHE_CHECKOUT provider|boot` runs isolated native
 suites without Dune. It creates and prints its own temporary directory. Provider
 mode compiles the candidate Runtime_toml implementation against the unchanged
 cached public signature (the candidate interface differs only in documentation),
 then uses cached lower dependencies, including the source-identical Runtime loader.
-Boot mode compiles the complete candidate test suite against cached product objects;
-source copies for the configuration owners and direct consumers are checked against
-the candidate. It does not rebuild those product modules. The account suite uses
+Boot mode rejects mismatched source/interface copies for all eight configuration
+owners and direct consumers (16 files), then compiles their candidate implementations
+and the complete test suite. Other dependencies remain cached. Both modes are parsed
+with explicit choices; an unknown mode is refused before compilation. The account suite uses
 the same MASC_TEST_RUNTIME_SEED setting as its committed Dune stanza.
 
 The two modes need coherent caches for their respective source versions. Initial
@@ -59,3 +60,11 @@ and test stubs, and an omitted seed environment variable. These harness failures
 are not product failures. Full product, provider activation, CI, runtime deployment
 and independent source approval are not claimed. Prior review agents exhausted
 their session quota; this change has self-review only pending independent review.
+
+## Runner review response
+
+The corrected runner passed all 80 cases again. Boot mode checked all 16
+owner/consumer source and interface files and compiled the eight candidate
+implementations before running 53 tests. Provider mode checked the cached Runtime
+loader source/interface and passed the 14 + 13 suites. `runner-refusals.json` records
+the rejected unknown mode and deliberate source mismatch; neither reached linking.

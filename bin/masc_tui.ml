@@ -3388,15 +3388,16 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
   | `Loading pending ->
       state.runtime_config_read <- `Loading (pending || force)
   | `Idle ->
-      (* Cadence ticks share a single read. A write or explicit refresh queues
-         one follow-up so its source cannot be older than the triggering edit. *)
+      (* Cadence ticks share a single read. Only an explicit new intent or a
+         write queues another read, whose source must be newer than this one. *)
       state.runtime_config_read <- `Loading false;
       state.runtime_config_generation <- state.runtime_config_generation + 1;
       let generation = state.runtime_config_generation in
+      let requested_model = state.runtime_model_jump in
       let host = server_peer_host in
       let port = state.port in
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Runtime_config_view_loaded (generation, result))
+        ~deliver:(fun result -> Runtime_config_view_loaded (generation, requested_model, result))
         (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
 let launch_runtime_params_load state ~mailbox =
@@ -5671,6 +5672,7 @@ let enter_theme_filter state filter =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
+  state.runtime_model_jump <- None;
   state.detail_focus_recovery <- None;
   (* The browser reader owns Connectors; refocusing it keeps the reader.
      The transport-list palette hides it explicitly before arriving here.
@@ -10739,6 +10741,7 @@ let enter_keeper_detail_tab state ~mailbox tab =
    strip. Everything below is what arriving at a pane asks for; the key and
    the press differ only in which pane they name. *)
 let enter_config_pane state ~mailbox pane =
+  state.runtime_model_jump <- None;
   state.config_pane <- pane;
   state.prompts_cursor <- 0;
   state.config_scroll <- 0;
@@ -14265,7 +14268,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
            state.runtime_params_notice <- Some (true, notice);
            launch_runtime_params_load state ~mailbox)
-  | Runtime_config_view_loaded (generation, result) -> (
+  | Runtime_config_view_loaded (generation, requested_model, result) -> (
       if generation = state.runtime_config_generation then
       let pending = match state.runtime_config_read with
         | `Loading pending -> pending
@@ -14298,8 +14301,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              state.config_models_rows <- rows;
              state.config_models_cursor <- min state.config_models_cursor (max 0 (List.length rows - 1));
              state.config_models_error <- None;
-             (match state.runtime_model_jump with
-              | Some runtime_id when state.view = Config && state.config_pane = Config_models ->
+             (match requested_model with
+              | Some runtime_id when state.runtime_model_jump = requested_model
+                    && state.view = Config && state.config_pane = Config_models ->
                 (match Masc_tui_model_runtime_table.find_runtime ~runtime_id rows with
                  | Some (index, row) ->
                    state.config_models_cursor <- index;
@@ -23868,7 +23872,7 @@ and is loaded on demand through keeper_skill.
             | Tools ->
                 (* Off-ring child: back to the parent that opened it. *)
                 goto_surface state ~mailbox:async_messages Config
-            | Config -> state.view <- Overview)
+            | Config -> state.runtime_model_jump <- None; state.view <- Overview)
        | Some "left" when state.repository_changes_open ->
            if Option.is_some state.repository_changes_diff_path then
              close_repository_changes_diff state

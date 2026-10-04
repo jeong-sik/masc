@@ -19,7 +19,7 @@ let guardingUnload = false
 const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
 function syncUnloadGuard() {
   const dirty = [...sessions.values()].some(session => Object.values(session.state.peek().drafts).some(draft =>
-    draft.retainedCreateDrafts.length > 0 || draft.needsRead || (draft.document === null
+    draft.retainedCreateDrafts.length > 0 || (draft.document === null
       ? draft.fileName !== '' || draft.text !== template && draft.text !== ''
       : draft.text !== draft.document.source_text)))
   if (typeof window === 'undefined' || dirty === guardingUnload) return
@@ -105,7 +105,10 @@ export class LaneDeclarationSession {
     if (!this.admits(authority) || !draft || draft.phase !== 'idle' || draft.needsRead || draft.current !== null
       || draft.document === null && draft.sourcePath !== null) return null
     const expectedPath = draft.document?.source_path ?? this.pathFor(draft.fileName)
-    if (expectedPath === null) return null
+    if (expectedPath === null) {
+      this.update(key, value => ({ ...value, error: 'Enter a file name without path separators or NUL characters.' }))
+      return null
+    }
     const request: LaneDeclarationWrite = { file_name: draft.fileName, source_text: draft.text,
       ...(draft.document === null ? { mode: 'create' } : { mode: 'save', expected_source_revision: draft.document.source_revision }),
     }

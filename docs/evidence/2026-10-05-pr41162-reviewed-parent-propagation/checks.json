@@ -1,0 +1,56 @@
+{
+  "checkpoint": "c4d6538152ec13497ad70015deb3e74d20e702cb",
+  "parent": "e71ef39a51c0b6dad01c48d273051a75dbb82a37",
+  "response_source_unchanged": [
+    "lib/runtime/runtime_account_removal.ml",
+    "lib/runtime/runtime_exact_output_registry.ml",
+    "test/test_runtime_account_removal.ml",
+    "test/test_runtime_config_validity.ml"
+  ],
+  "build": {
+    "handle": 38330,
+    "exit": 0
+  },
+  "inventory": {
+    "handle": 30208,
+    "exit": 0,
+    "tests": 8
+  },
+  "web_tsc_eslint": {
+    "handle": 33707,
+    "exit": 0,
+    "tests": 9,
+    "suites": 2
+  },
+  "logs": {
+    "inventory-build.log": {
+      "source": "/tmp/pr41162-propagate-inventory-build.log",
+      "sha256": "0b8c246c0f916854f8e54c85100524773b9c08ab79ec4c258042e7151c3c7290"
+    },
+    "inventory-tests.log": {
+      "source": "/tmp/pr41162-propagate-inventory-tests.log",
+      "sha256": "c2243c592d2d9d01d226f1689971c03e701a9a473bac07d21917d6fa9d2052ef"
+    },
+    "web-setup-failure.log": {
+      "source": "/tmp/pr41162-propagate-web.log",
+      "sha256": "58a4e09d05c36d8ec3c98eb9cb81742cca2483b70f0a617f9a004443cd4db34c"
+    },
+    "install.log": {
+      "source": "/tmp/pr41162-propagate-install.log",
+      "sha256": "42e58e1aec367249df373fb2f8267eb64d980feebc1fe101188900ebf562c4ca"
+    },
+    "web.log": {
+      "source": "/tmp/pr41162-propagate-web-final.log",
+      "sha256": "a0c04e69d1d6b9d8a517bd85d44cfa5e83ceaf2a55afdd8ba25f51d63abf69a5"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41162-propagate-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41162-propagate-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "inventory_binary_sha256": "e1df7a33598f82a71c3c57c8ec1ab998ab1b84a1aca2a66a82d18ebe6635a051"
+}

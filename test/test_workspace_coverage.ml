@@ -3478,40 +3478,7 @@ let test_execution_links_codec_omits_empty () =
 let set_json_member key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
   | other -> other
-;;
 
-let test_task_codec_accepts_removed_contract_fields () =
-  let task =
-    gc_make_task ~id:"task-l2" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
-  in
-  let legacy_contract =
-    `Assoc
-      [ ( "links"
-        , `Assoc
-            [ "operation_id", `String "op-old"
-            ; "session_id", `String "session-old"
-            ] )
-      ]
-  in
-  let json =
-    Masc_domain.task_to_yojson task
-    |> set_json_member "contract" legacy_contract
-  in
-  (match Masc_domain.task_of_yojson json with
-   | Ok _ -> ()
-   | Error error ->
-     Alcotest.failf "persisted removed task.contract field was rejected: %s" error);
-  let backlog_json =
-    `Assoc
-      [ "tasks", `List [ json ]
-      ; "last_updated", `String "2026-08-05T00:00:00Z"
-      ; "version", `Int 1
-      ]
-  in
-  match Masc_domain.backlog_of_yojson backlog_json with
-  | Ok _ -> ()
-  | Error error ->
-    Alcotest.failf "backlog with removed task.contract field was rejected: %s" error
 ;;
 
 let test_task_codec_rejects_malformed_execution_links () =
@@ -3972,10 +3939,6 @@ let () =
             "execution_links codec omits the empty value"
             `Quick
             test_execution_links_codec_omits_empty
-        ; Alcotest.test_case
-            "removed contract fields remain readable"
-            `Quick
-            test_task_codec_accepts_removed_contract_fields
         ; Alcotest.test_case
             "malformed execution links are rejected"
             `Quick

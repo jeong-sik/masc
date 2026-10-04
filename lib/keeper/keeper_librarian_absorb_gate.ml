@@ -964,7 +964,8 @@ let run
      | Error
          ((Typesafeai_config.Board_attention_disabled
           | Typesafeai_config.Context_review_disabled
-          | Typesafeai_config.Skill_applicability_disabled) as reason)
+          | Typesafeai_config.Skill_applicability_disabled
+          | Typesafeai_config.Librarian_preflight_disabled) as reason)
        ->
        (* Another gate's switch: [absorb_gate_destinations] does not produce
           these. Named rather than caught so a new reason has to be placed;

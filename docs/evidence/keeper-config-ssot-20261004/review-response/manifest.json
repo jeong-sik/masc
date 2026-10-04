@@ -1,0 +1,16 @@
+{
+  "scope": "four actual configuration modules natively compiled with cached dependency objects; no server/full build",
+  "baseline": "5f31164b244c745cfb10058bb1400e2d55f5faea",
+  "source_sha256": {
+    "lib/config/env_config_keeper_supervisor.ml": "6d23921b11685737fd5c6041796be69d68fe74048ac299875beb656be6e4bec0",
+    "lib/config/env_config_keeper_supervisor.mli": "4415222e30b956ac3c9fba8780edf69132286f5984fe480f1a8dd001f2e58e67",
+    "lib/config/env_config_keeper.ml": "2ec9fedc428a929adb43c48479a1667f04b8b45d28974f29faaeda18ea651743",
+    "lib/config/env_config_keeper.mli": "c026c636f4df30991e2d20a74476648008e5ba2b4fe07a36cd1efc1a4212e98d",
+    "lib/config/keeper_runtime_setting_registry.ml": "9d5c9cd8634504943a41a962b06e2577df04090942799cbacbb6947a32f44ea6",
+    "lib/config/keeper_runtime_setting_registry.mli": "89bde3778f692bb6525d53d3c2e56ec595218ee7494dd7678e2d48f4a762807b",
+    "lib/keeper_runtime/keeper_runtime_config.ml": "4e3e7cfc36509ed536979eb80071d3344cdcce2e1a9d08a1c9e22fa72807b36a",
+    "lib/keeper_runtime/keeper_runtime_config.mli": "52ece5895fe6866c1948d76219db31e45ccd2b3c94a6c0e358a9bdcaad0fc587",
+    "lib/runtime_settings.ml": "fb2317c5d2bd26714525cdf29a6e90cb374a1761fe0bb50512e1c2b6700408f3",
+    "test/test_runtime_toml_overrides.ml": "a1c6318fdc450399bb190bc141332577a7bb51cc90c1452c9e6ff22a57d14520"
+  }
+}

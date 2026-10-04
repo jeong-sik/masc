@@ -96,6 +96,53 @@ class FusionResults(unittest.TestCase):
                 self.assertTrue(call("fusion-results", [source(snapshot)])["isError"])
         self.assertFalse(call("fusion-results", [source(detail("failed"))])["isError"])
 
+    def test_protocol_rejections_keep_stdio_alive(self):
+        cases = [
+            ("id", "\ud800", False),
+            ("id", True, False),
+            ("id", {}, False),
+            ("id", float("inf"), False),
+            ("output", "nan", False),
+            ("output", "nan", True),
+            ("output", "surrogate", False),
+            ("error", "surrogate", False),
+        ]
+        for kind, value, summary in cases:
+            with self.subTest(kind=kind, value=value, summary=summary):
+                code = ("import sys; sys.path.insert(0, " + repr(str(ADDONS)) + "); "
+                        "import protocol\n"
+                        "def observe(binding, sources):\n")
+                if kind == "error":
+                    code += "    raise protocol.InvalidInput('bad ' + chr(0xd800))\n"
+                elif value == "nan":
+                    code += "    return {'value': float('nan')}\n"
+                elif value == "surrogate":
+                    code += "    return {'value': chr(0xd800)}\n"
+                else:
+                    code += "    return {}\n"
+                code += "protocol.serve('fixture', observe"
+                if summary:
+                    code += ", text_summary=lambda output: 'summary'"
+                code += ")\n"
+                first = {"jsonrpc": "2.0", "id": value if kind == "id" else 1,
+                         "method": "ping" if kind == "id" else "tools/call",
+                         "params": {"name": "lane_observe", "arguments": {
+                             "binding": {}, "sources": []}}}
+                ping = {"jsonrpc": "2.0", "id": "next", "method": "ping"}
+                proc = run_stdio([sys.executable, "-c", code],
+                                 input=json.dumps(first) + "\n" + json.dumps(ping) + "\n",
+                                 capture_output=True, text=True, timeout=10)
+                self.assertEqual(proc.stderr, "")
+                responses = [json.loads(line) for line in proc.stdout.splitlines()]
+                self.assertEqual(len(responses), 2)
+                if kind == "id":
+                    self.assertEqual(responses[0]["error"]["code"], -32602)
+                    self.assertIsNone(responses[0]["id"])
+                else:
+                    self.assertTrue(responses[0]["result"]["isError"])
+                    self.assertEqual(responses[0]["id"], 1)
+                self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": "next", "result": {}})
+
     def test_oversized_integer_timestamps_do_not_terminate_worker(self):
         requests = []
         for index, field in enumerate(("started_at", "finished_at"), 1):

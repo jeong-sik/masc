@@ -10,10 +10,15 @@
 (** Build the per-tool handler closure used by both internal and
     alias tool entries. The closure dispatches via
     [execute_keeper_tool_call_with_outcome] using [~name] as the
-    INTERNAL tool name (telemetry SSOT). [~input_schema] is the
-    internal tool schema used for pre-execution validation. Descriptor-backed
-    callers pass [?prepare_input] so validation and translation follow the
-    descriptor's typed policy before dispatch.
+    INTERNAL tool name (telemetry SSOT). Descriptor-backed callers pass the
+    process-owned canonical [?descriptor] and its model-visible [?model_name].
+    The handler takes the canonical input schema and derives validation and
+    translation from the descriptor's typed policy before dispatch; a supplied
+    [?prepare_input] is ignored on this path.
+
+    Without a descriptor and model-visible name, [?prepare_input] supplies
+    input preparation when provided; otherwise [~input_schema] is used for
+    pre-execution validation.
 
     The closure's [result_projection] is the projection this call's result
     crosses on its way to the model, resolved for the lane running it. A

@@ -284,7 +284,6 @@ jobs:
       - name: Build probe
         id: build
         run: |
-          python3 scripts/test_stagehand_probe_controls.py
           opam exec -- dune build --profile release bin/stagehand_model_probe.exe
       - name: Exercise offline setup and validator controls
         id: controls

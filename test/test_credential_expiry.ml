@@ -80,7 +80,7 @@ let test_representations_share_auth_and_prune_boundary () =
       (Invite.expired ~now:(Time_compat.now ()) credential |> Result.map_error
         (fun (Expiry.Invalid_timestamp stamp) -> stamp));
     check (list string) "the live credential remains a handoff target" [ "operator" ]
-      (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ()));
+      (auth_ok (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
     check int "prune excludes the still authenticating bearer" 0
       (List.length (Inventory.expired ~now:(Time_compat.now ()) [ credential ]));
     Eio_mock.Clock.set_time clock (expiry_second +. 1.);
@@ -93,7 +93,7 @@ let test_representations_share_auth_and_prune_boundary () =
       (Invite.expired ~now:(Time_compat.now ()) credential |> Result.map_error
         (fun (Expiry.Invalid_timestamp stamp) -> stamp));
     check (list string) "expired credentials are not handoff targets" []
-      (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ()));
+      (auth_ok (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
     check int "prune includes it only after authentication ends" 1
       (List.length (Inventory.expired ~now:(Time_compat.now ()) [ credential ])))
     [ canonical
@@ -133,7 +133,7 @@ let test_malformed_expiry_denies_a_known_bearer_and_bootstrap () =
      | Error (Expiry.Invalid_timestamp value) -> check string "Play preserves the parse error" stamp value
      | Ok _ -> fail "an unknown expiry is not an expired or live credential");
     check (list string) "the invalid persisted credential is not seated" []
-      (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ()));
+      (auth_ok (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
     (match Inventory.classify ~now:(Time_compat.now ()) invalid with
      | Inventory.Invalid_expiry value -> check string "inventory reports invalid explicitly" stamp value
      | Inventory.Never | Inventory.Valid_until _ | Inventory.Expired_at _ ->

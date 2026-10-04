@@ -471,6 +471,10 @@ let tools_display_lines ?(cols = 80) (state : state) =
           | Some max_bytes -> Printf.sprintf "%d bytes" max_bytes
           | None -> "not configured"
         in
+        let byte_count = function
+          | Some bytes -> Printf.sprintf "%dB" bytes
+          | None -> "?"
+        in
         (* Names, not the wire form. These were serialised to JSON and then
            cut to the width of the line, so the header read
            [{"identity":{"source_id":"project-masc","package_id"~] -- sixty
@@ -839,12 +843,12 @@ let tools_display_lines ?(cols = 80) (state : state) =
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
           Ansi.bold,
           Printf.sprintf
-            "   Skill context: profile discovery=%dB · eager=%dB · deferred bodies=%dB · skill tool schema=%dB/%dB all tools"
+            "   Skill context: profile discovery=%dB · eager=%dB · deferred bodies=%s · skill tool schema=%s/%s all tools"
             ets_skill_discovery_bytes
             ets_skill_eager_body_bytes
-            ets_skill_body_bytes
-            ets_skill_tool_surface_bytes
-            ets_tool_surface_bytes;
+            (byte_count ets_skill_body_bytes)
+            (byte_count ets_skill_tool_surface_bytes)
+            (byte_count ets_tool_surface_bytes);
           Ansi.bold,
           "   Skills — J/K select · Enter evidence · e edit · c new instruction · C new composition";
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]

@@ -22,6 +22,7 @@ let post_field_names =
   ; "body"
   ; "post_kind"
   ; "visibility"
+  ; "audience"
   ; "created_at"
   ; "content_updated_at"
   ; "updated_at"
@@ -183,6 +184,15 @@ let optional_closed fields =
      | None -> Error ())
 ;;
 
+let optional_audience fields =
+  match List.assoc_opt "audience" fields with
+  | None -> Ok None
+  | Some value ->
+    (match Board_audience.of_yojson value with
+     | Some audience -> Ok (Some audience)
+     | None -> Error ())
+;;
+
 let post_of_yojson (json : Yojson.Safe.t) : post option =
   match json with
   | `Assoc fields
@@ -207,7 +217,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , optional_string fields "classification_reason"
        , optional_meta fields
        , optional_origin fields
-       , optional_closed fields )
+       , optional_closed fields
+       , optional_audience fields )
      with
      | ( Some id_str
        , Some author_str
@@ -228,7 +239,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , Ok classification_reason
        , Ok meta_json
        , Ok origin
-       , Ok closed ) when Float.is_finite content_updated_at ->
+       , Ok closed
+       , Ok audience ) when Float.is_finite content_updated_at ->
     let post_kind_opt =
       post_kind_of_string post_kind_raw
     in
@@ -252,6 +264,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
           ; post_kind
           ; meta_json
           ; visibility
+          ; audience
           ; created_at
           ; content_updated_at
           ; updated_at

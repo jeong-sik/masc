@@ -9,23 +9,20 @@ import os
 import re
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+import tui_keyboard_chat as chat
+import tui_keyboard_keepers as keepers
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_chat.ml",
-)
+
 
 
 def queue_identity_journey(executable):
-    fixture = h.AtomicChatFixture(first_working=True, hold_first_acceptance=True)
+    fixture = chat.AtomicChatFixture(first_working=True, hold_first_acceptance=True)
     requests = []
 
     def interact(process, fd, _slave, output, _base):
         try:
-            h.open_atomic_chat(process, fd, output)
+            chat.open_atomic_chat(process, fd, output)
             h.send_and_wait(process, fd, output, b"preceding-turn",
                             h.composer_showing(b"preceding-turn"))
             os.write(fd, b"\r")
@@ -68,13 +65,13 @@ def queue_identity_journey(executable):
 
             # Home's identity clause proves the failed health reading was
             # applied, rather than merely requested by a background fiber.
-            h.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
+            keepers.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
                                     needle=b"workspace identity not read")
             # Identity is applied before admission is released, so awaiting
             # control cannot dispatch the queued request. Release promptly;
             # subsequent navigation does not consume the fixture's hold limit.
             fixture.release_first_acceptance.set()
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 1)
+            chat.wait_for_atomic_admissions(process, fd, output, fixture, 1)
             h.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
@@ -125,11 +122,11 @@ def queue_identity_journey(executable):
                     fixture.received.append(request)
                     fixture.submitted.append(request)
                     fixture.admitted.notify_all()
-                return h.keeper_chat_succeeded_response(body)
+                return chat.keeper_chat_succeeded_response(body)
 
             fixture.fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(recovered_stream)
             fixture.fixtures.update(health)
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 2)
+            chat.wait_for_atomic_admissions(process, fd, output, fixture, 2)
             recovered = fixture.submitted[1]
             assert recovered["request_id"] == saved_id, "recovery minted another request"
             assert recovered["message"] == "identity-held-next"
@@ -145,7 +142,7 @@ def queue_identity_journey(executable):
             assert len(fixture.received) == 2, "recovery duplicated admission"
             assert not fixture.interrupt_requests
             assert not any(path == "/api/v1/keepers/turn/interrupt" for path, _ in requests)
-            h.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
+            keepers.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
                                     needle=b"Continue with alpha")
             os.write(fd, b"q")
         finally:

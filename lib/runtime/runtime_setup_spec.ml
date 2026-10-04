@@ -6,6 +6,7 @@ type transport =
       kind:http_kind}
   | Client of {command:string; oauth:string option; timeout:float option; account_home:string option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
+  supports_image_input:bool option;
   transport:transport; canonical_spec:string}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
@@ -66,7 +67,7 @@ let wire_kind_name = function
    give two different connections one id, and an overwritten row is invisible
    where a duplicate row is not. *)
 let[@warning "+9"] canonical_spec_of
-      ({ choice; model; context; tools; streaming; transport; canonical_spec = _ } : t)
+      ({ choice; model; context; tools; streaming; supports_image_input; transport; canonical_spec = _ } : t)
   =
   let credential_json = function
     | None -> `Null
@@ -85,10 +86,11 @@ let[@warning "+9"] canonical_spec_of
               "timeout",(match timeout with None -> `Null | Some value -> `Float value)]
       @ (match account_home with None -> [] | Some home -> ["account_home", `String home])
       |> fun fields -> `Assoc fields in
-  Yojson.Safe.to_string (`Assoc [
+  Yojson.Safe.to_string (`Assoc ([
     "choice",`String (choice_name choice); "model",`String model;
     "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
-    "transport", transport_json])
+    "transport", transport_json]
+    @ (match supports_image_input with None -> [] | Some value -> ["supports_image_input", `Bool value])))
 
 let of_json ?home_dir = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) ->
@@ -99,7 +101,7 @@ let of_json ?home_dir = function
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
       | "muse" -> Ok Muse
       | _ -> invalid "choice" in
-    let allowed = ["choice";"model";"max_context";"tools";"streaming"]
+    let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input"]
       @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
       @ (match choice with Claude_code | Codex | Muse -> ["account_home"] | _ -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
@@ -107,6 +109,10 @@ let of_json ?home_dir = function
     let* model = required fields "model" in
     let* context = match List.assoc_opt "max_context" fields with Some (`Int value) when value > 0 -> Ok value | _ -> invalid "max_context" in
     let* tools = bool fields "tools" in let* streaming = bool fields "streaming" in
+    let* supports_image_input = match List.assoc_opt "supports_image_input" fields with
+      | None -> Ok None
+      | Some (`Bool value) -> Ok (Some value)
+      | _ -> invalid "supports_image_input" in
     let* transport = if http choice then (
       let* endpoint = required fields "endpoint" in
       let* () = if valid_endpoint endpoint then Ok () else invalid "endpoint" in
@@ -147,7 +153,7 @@ let of_json ?home_dir = function
           | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout;account_home})) in
-    let parsed = {choice;model;context;tools;streaming;transport;canonical_spec=""} in
+    let parsed = {choice;model;context;tools;streaming;supports_image_input;transport;canonical_spec=""} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
@@ -234,7 +240,8 @@ let render spec =
        verified this model's reasoning stream, so it is declared off rather
        than left to the wire default. *)
     ^ table [Runtime_toml_namespace.(key Models);model_key;"capabilities"]
-        ["reasoning-streaming-format",`String "none"]
+        (["reasoning-streaming-format",`String "none"]
+         @ (match spec.supports_image_input with None -> [] | Some value -> ["supports-image-input", `Bool value]))
     ^ table [provider;model_key] (["wizard-default",`Bool true] @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
   {runtime_id;runtime_toml=runtime}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]

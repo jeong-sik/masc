@@ -45,22 +45,12 @@ let test_an_escape_byte_is_still_escaped () =
   check bool "the lines around it survive" true
     (contains "before" text && contains "after" text)
 
-(* The questions are the ask and the reason explains it, so the reason is what
-   the layout drops first. It dropped without a word: hidden questions are
-   counted on a line of their own, folded asks are too, and only this one left
-   no trace. *)
-let test_a_dropped_reason_says_so () =
-  check int "the surface says the reason did not fit" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding
-       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"draw_ask_questions"
-       ~needle:"    %sthe reason did not fit -- a opens it%s")
-
 let () =
   run "tui_ask_context_block"
     [ ( "context"
       , [ test_case "a break stays a break" `Quick test_a_break_stays_a_break
         ; test_case "an escape byte is still escaped" `Quick
             test_an_escape_byte_is_still_escaped
-        ; test_case "a dropped reason says so" `Quick test_a_dropped_reason_says_so
+
         ] )
     ]

@@ -1261,7 +1261,8 @@ def run_replace_and_promote(executable: str) -> None:
             raise AssertionError("promotion lost or reordered other candidates")
         _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=131,
-                          needle=b"gpt-6-luna medium", controls=(_keyboard_harness.FULL_REDRAW,))
+                          needle=b"gpt-6-luna medium", controls=(_keyboard_harness.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
         screen = _keyboard_harness.screen_text(bytes(output))
         if screen.count(b"context") <= 3:
             raise AssertionError("a tall terminal still shows only three model choices")

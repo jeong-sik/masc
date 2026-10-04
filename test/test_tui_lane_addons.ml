@@ -143,11 +143,11 @@ let configuration_and_ports () =
       desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only}] true));
   check bool "invalid owned file with no recoverable ID blocks removal" true
     (Option.is_some (removal [{owned with installation_id=None;desired=None;applied=None;
-      instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true));
+      instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only}] true));
   check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
   check (option string) "unrelated invalid declaration does not block cleanup" None
     (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
-      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true);
+      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only}] true);
   check (option string) "manual cleanup remains available" None
     (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
 

@@ -445,7 +445,7 @@ def validate_observation(observation: dict[str, Json]) -> None:
         raise ValueError("preflight decision must have a highest probability")
 
 
-def completed_memory_output(output: dict[str, Json]) -> None:
+def completed_memory_output(output: dict[str, Json], current_fact_count: int) -> None:
     # Keeper_librarian_runtime.completed_output is flattened into the run output.
     # Check its receipt structure, not the semantic truth of the model's claims.
     exact = obj(output.get("exact_output"), "completed exact_output")
@@ -460,7 +460,9 @@ def completed_memory_output(output: dict[str, Json]) -> None:
     before = obj(output.get("before"), "completed before")
     if before.get("present") is not True and before.get("present") is not False:
         raise ValueError("completed before.present must be boolean")
-    count(before.get("fact_count"), "before fact_count")
+    before_count = count(before.get("fact_count"), "before fact_count")
+    if before_count != current_fact_count or (before["present"] is False and before_count != 0):
+        raise ValueError("completed before receipt disagrees with frozen current fact count")
     after = obj(output.get("after"), "completed after")
     if after.get("commit") not in ("rewritten", "unchanged"):
         raise ValueError("unknown completed Memory commit")
@@ -560,8 +562,6 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     if selected_slot is not None:
         text(selected_slot, "selected_slot")
     output = obj(run.get("output"), "output")
-    if run["status"] == "succeeded":
-        completed_memory_output(output)
     if run["status"] == "succeeded" and output.get("generation_path") == "full_lane":
         text(selected_slot, "successful full-lane selected_slot")
     if run["status"] == "failed":
@@ -577,6 +577,8 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
         raise ValueError("Librarian input must use the exact payload envelope")
     payload = source_input.get("payload")
     input_payload(payload, text(run.get("actor"), "run actor"))
+    if run["status"] == "succeeded":
+        completed_memory_output(output, count(obj(payload, "input payload")["current_fact_count"], "current_fact_count"))
     return run, payload, output, elapsed
 
 
@@ -874,7 +876,7 @@ def main() -> int:
             pairs = manifest_pairs(JsonValueReader(source), data, spool, fields)
             report = compare(data, pairs, lambda: spooled_manifest_hash(spool, fields))
         rendered = json.dumps(report, indent=2, allow_nan=False)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         print(f"preflight measurement refused: {error}", file=sys.stderr)
         return 1
     print(rendered)

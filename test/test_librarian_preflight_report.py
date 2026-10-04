@@ -270,6 +270,44 @@ class ReportCliTest(unittest.TestCase):
                 invalid["pairs"][0]["baseline"]["run"]["output"][field] = bad
                 self.assertEqual(self.execute(invalid).returncode, 1)
 
+    def test_completion_before_matches_frozen_count(self) -> None:
+        for current, present, before, accepted in (
+            (1, True, 1, True), (0, True, 0, True), (0, False, 0, True),
+            (1, False, 1, False), (1, True, 0, False), (1, True, 2, False),
+            (0, False, 1, False),
+        ):
+            with self.subTest(current=current, present=present, before=before):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    run = manifest["pairs"][0][arm]["run"]
+                    run["input"]["payload"]["current_fact_count"] = current
+                    run["input"]["payload"]["actual_input"]["rendered_prompt_variables"]["facts_budget"] = (
+                        f"max=100; current ordinary={current}")
+                    run["output"]["before"] = {"present": present, "fact_count": before}
+                    run["output"]["after"]["fact_count"] = current
+                    run["output"]["after"]["change"]["retained"] = current
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+                if not accepted:
+                    self.assertEqual(result.stdout, "")
+
+    def test_nested_json_recursion_is_a_normal_refusal(self) -> None:
+        shallow = "[" * 20 + "0" + "]" * 20
+        valid = self.execute_raw('{"nested":' + shallow + "," + json.dumps(fixture())[1:])
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        deep = "[" * 1500 + "0" + "]" * 1500
+        root = '{"nested":' + deep + "," + json.dumps(fixture())[1:]
+        manifest = fixture()
+        manifest["pairs"] = []
+        pair = json.dumps(manifest).replace('"pairs": []', '"pairs": [' + deep + "]")
+        for location, raw in (("root metadata", root), ("pair", pair)):
+            with self.subTest(location=location):
+                result = self.execute_raw(raw)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("preflight measurement refused:", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
     def test_success_requires_persisted_revision(self) -> None:
         for revision in (0, 1):
             manifest = fixture()

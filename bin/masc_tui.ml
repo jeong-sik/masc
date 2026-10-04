@@ -10035,6 +10035,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_jump_section <- None;
   state.runtime_config_status_open <- false;
   state.runtime_account_form <- None;
+  state.runtime_model_form <- None;
   state.presets_snapshot <- None;
   state.presets_error <- None;
   state.presets_cursor <- 0;
@@ -14239,11 +14240,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind
              the keys on a reload. *)
-          state.config_models_rows <-
-            Masc_tui_model_runtime_table.parse lines;
+          (match Masc_tui_model_runtime_table.parse lines with
+           | Ok rows ->
+             state.config_models_rows <- rows;
+             state.config_models_cursor <- min state.config_models_cursor (max 0 (List.length rows - 1));
+             state.runtime_config_view_error <- None
+           | Error detail ->
+             state.config_models_rows <- [];
+             state.runtime_config_view_error <- Some detail);
           set_runtime_config_cursor_near state ~direction:1
             ~target:state.runtime_config_cursor;
-          state.runtime_config_view_error <- None;
           (match apply_runtime_config_jump state with
            | None -> ()
            | Some (section, true) ->
@@ -17525,6 +17531,11 @@ let main
   in
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
+  let handle_model_form_open mode () =
+    match List.nth_opt state.config_models_rows state.config_models_cursor with
+    | Some row -> state.runtime_model_form <- Some (Masc_tui_model_form.create mode row)
+    | None -> report_action state "error" "Select a loaded account/model first"
+  in
   let handle_runtime_account_open () =
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
@@ -18966,6 +18977,8 @@ and is loaded on demand through keeper_skill.
                       Some (Masc_tui_types.runtime_param_edit_append edit text);
                     state.runtime_params_notice <- None)
                   state.runtime_param_edit
+            | Some Text_runtime_model_form ->
+                state.runtime_model_form <- Option.map (fun form -> Masc_tui_model_form.paste form text) state.runtime_model_form
             | Some Text_runtime_account_form ->
                 state.runtime_account_form <-
                   Option.map
@@ -19708,6 +19721,28 @@ and is loaded on demand through keeper_skill.
           A refusal keeps the form and what was typed, with the reason on it;
           only a save that lands closes it. The sign-in command goes to the
           session log, where it stays readable after the footer moves on. *)
+       | Some k
+         when text_input_target state ~compact_viewport = Some Text_runtime_model_form ->
+           (match state.runtime_model_form with
+            | None -> ()
+            | Some form -> match Masc_tui_model_form.key form k with
+              | Editing form -> state.runtime_model_form <- Some form
+              | Cancelled -> state.runtime_model_form <- None
+              | Submit form ->
+                let authority = state.workspace_authority and identity = state.server_identity in
+                let result =
+                  let ( let* ) = Result.bind in
+                  let* () = check_workspace_request state ~mailbox:async_messages ~authority ~identity
+                    ~host:server_peer_host ~port:state.port () in
+                  let* json = Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host ~port:state.port in
+                  let* reading = Masc_tui_runtime_config_view.decode json in
+                  let* draft = Masc_tui_model_form.apply form reading.source_text in
+                  save_runtime_config_text ~authority ~identity draft in
+                (match result with
+                 | Ok summary -> state.runtime_model_form <- None;
+                   state.runtime_catalog_reading <- Runtime_catalog_unread;
+                   report_action state "system" ("Model saved · " ^ summary ^ " · choose it in Runtime / Lanes")
+                 | Error detail -> state.runtime_model_form <- Some (Masc_tui_model_form.refused form detail)))
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_account_form -> (
@@ -25513,6 +25548,8 @@ and is loaded on demand through keeper_skill.
                This arm sits above the chat arm because that one takes [c]
                unguarded on every surface that names a Keeper. *)
             goto_surface state ~mailbox:async_messages Clients
+       | Some "c" when state.view = Config && state.config_pane = Config_models ->
+           handle_model_form_open Masc_tui_model_form.Copy ()
 | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
@@ -25834,6 +25871,8 @@ and is loaded on demand through keeper_skill.
               opens its provider deadline; a CLI slot opens its own binding. *)
            if Option.is_none state.runtime_lane_pick then
              open_selected_slot_config ()
+       | Some "o" when state.view = Config && state.config_pane = Config_models ->
+           handle_config_models_open_source ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the
@@ -25885,12 +25924,8 @@ and is loaded on demand through keeper_skill.
                  | Config_runtime -> handle_runtime_config_edit ()
                  | Config_params ->
                    handle_runtime_param_edit_open ~advanced:false ()
-                 (* The pane cannot write a value: its two columns come
-                    from two tables and a writer would have to know which.
-                    So [e] hands the reader to the source pane at the
-                    selected model's [models.NAME] line, where the existing
-                    $EDITOR path takes over. One write path, not two. *)
-                 | Config_models -> handle_config_models_open_source ()
+                 (* Structured fields still use the same preview/commit writer. *)
+                 | Config_models -> handle_model_form_open Masc_tui_model_form.Edit ()
                  (* The preset pane writes through n and u, never $EDITOR. *)
                  | Config_presets | Config_themes -> ()
                  (* The voice pane was a reading. It now opens the wizard,

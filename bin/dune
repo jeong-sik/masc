@@ -1146,7 +1146,7 @@
 (library
  (name masc_tui_model_runtime_table)
  (wrapped false)
- (libraries masc_tui_message_layout masc.runtime_toml_namespace)
+ (libraries masc_tui_message_layout masc.runtime masc.runtime_toml_namespace masc.agent_core.llm_provider)
  (modules masc_tui_model_runtime_table))
 
 (library
@@ -1407,6 +1407,7 @@
   masc_tui_usage_trend
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
+  masc_tui_model_form
   masc_tui_frame
   masc_tui_image_preview
   masc
@@ -1970,6 +1971,7 @@
   masc_tui_runtime_config_view
   masc.runtime_toml_namespace
   masc_tui_runtime_account_form
+  masc_tui_model_form
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.
   masc.toml_line_editor
@@ -2394,3 +2396,9 @@
  (wrapped false)
  (modules masc_tui_render_github)
  (libraries masc_tui_ansi masc))
+
+(library
+ (name masc_tui_model_form)
+ (wrapped false)
+ (modules masc_tui_model_form)
+ (libraries masc_tui_model_runtime_table masc_tui_message_layout masc.runtime masc.toml_line_editor masc.agent_core.llm_provider))

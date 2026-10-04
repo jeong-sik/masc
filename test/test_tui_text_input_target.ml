@@ -18,6 +18,7 @@ let target =
       | Some Tui_types.Text_preset_name -> "preset-name"
       | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"
+      | Some Tui_types.Text_runtime_model_form -> "runtime-model-form"
       | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"

@@ -12018,8 +12018,7 @@ let config_path_note (state : state) =
    same source the runtime.toml pane shows, arranged so a missing knob is a
    column and not an absence.
 
-   Read-only. Editing lands in the runtime.toml pane next door, which already
-   has the preview-checked write path. *)
+   Structured edits and copies use the runtime.toml preview-checked writer. *)
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -12031,7 +12030,12 @@ let render_config_models (state : state) =
        state);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
-  (match state.runtime_config_view_error, state.runtime_config_view with
+  (match state.runtime_model_form with
+   | Some form ->
+       let lines = Masc_tui_model_form.rows ~width:(max 1 (cols - 6)) ~height:content_height form in
+       List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
+       for _ = List.length lines + 1 to content_height do box_empty buf cols done
+   | None -> match state.runtime_config_view_error, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols
          (Theme.bad () ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);

@@ -3273,9 +3273,12 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
   let host = server_peer_host and port = state.port in
+  let check_workspace = capture_workspace_check state ~mailbox in
+  let enqueue_async = workspace_enqueue state in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Close when Login.activation_incomplete view -> ()
+   | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
    | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
@@ -3303,7 +3306,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
       `Stop_daemon) in
   match action with
   | Login.Nothing -> ()
-  | Close -> Option.iter (fun stop -> stop ()) view.cancel_stream; view.draft<-""; state.account_login<-None
+  | Close ->
+    state.account_login_detached <- Login.retain_activation view state.account_login_detached;
+    view.draft <- "";
+    state.account_login <- None
   | Cancel ->
     Option.iter (fun stop -> stop ()) view.cancel_stream; view.cancel_stream<-None;
     view.draft<-""; view.phase<-Login.Failed; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
@@ -3353,6 +3359,13 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.notice<-Printf.sprintf "모델 %d개 검증 중 · 응답과 도구 호출을 확인합니다." (List.length models);
     let body=Login.save_body view models in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
+  | Activate_saved saved ->
+    Login.activating view saved;
+    start_job (fun () ->
+      let result = match check_workspace () with
+        | Error _ as error -> error
+        | Ok () -> post_setup "/api/v1/runtime/setup/resume" (`Assoc []) in
+      enqueue result)
   | Preview_removal {provider; _} ->
     view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
     start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
@@ -3370,12 +3383,21 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
    in the GitHub tab as it arrives so the operator can read the code and
    finish in the browser. When the stream ends the tab re-reads the
    identity observation, which is the fact the login was for. *)
-let launch_runtime_config_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Runtime_config_view_loaded result)
-    (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
+let launch_runtime_config_load ?(force=false) state ~mailbox =
+  match state.runtime_config_read with
+  | `Loading pending ->
+      state.runtime_config_read <- `Loading (pending || force)
+  | `Idle ->
+      (* Cadence ticks share a single read. A write or explicit refresh queues
+         one follow-up so its source cannot be older than the triggering edit. *)
+      state.runtime_config_read <- `Loading false;
+      state.runtime_config_generation <- state.runtime_config_generation + 1;
+      let generation = state.runtime_config_generation in
+      let host = server_peer_host in
+      let port = state.port in
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Runtime_config_view_loaded (generation, result))
+        (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
 let launch_runtime_params_load state ~mailbox =
   state.runtime_params_loading <- true;
@@ -9003,9 +9025,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.usage_telemetry_open <- true
   | Masc_tui_command.Account_login requested ->
       Buffer.clear state.msg_input;
-      let view = Masc_tui_account_login.create requested in
+      let module Login = Masc_tui_account_login in
+      let restored, retained = Login.take_saved ~requested state.account_login_detached in
+      state.account_login_detached <- retained;
+      let view = match restored with
+        | Some view -> view
+        | None -> Login.create requested in
       state.account_login <- Some view;
-      launch_account_login_action state ~mailbox view Masc_tui_account_login.Inventory
+      (match restored, view.phase with
+       | Some _, Login.Finished {activation = Login.Activating; _} -> ()
+       | Some _, Login.Finished {saved; _} ->
+         launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
+       | _ -> launch_account_login_action state ~mailbox view Login.Inventory)
   | Masc_tui_command.Open_settings ->
       Buffer.clear state.msg_input;
       state.config_pane <- Config_params;
@@ -10031,6 +10062,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.task_history <- None;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.runtime_config_view <- None;
+  state.runtime_config_generation <- state.runtime_config_generation + 1;
+  state.runtime_config_read <- `Idle;
   state.runtime_config_view_error <- None;
   withdraw_config_models state;
   state.runtime_config_jump_section <- None;
@@ -10287,6 +10320,16 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_usage <- Keeper_usage_unread;
   state.github_identity_view <- None;
   state.github_identity_view_error <- None;
+  Option.iter (fun (view : Masc_tui_account_login.t) ->
+    view.generation <- view.generation + 1;
+    Option.iter (fun stop -> stop ()) view.cancel_stream;
+    view.cancel_stream <- None) state.account_login;
+  state.account_login <- None;
+  List.iter (fun (view : Masc_tui_account_login.t) ->
+    view.generation <- view.generation + 1;
+    Option.iter (fun stop -> stop ()) view.cancel_stream;
+    view.cancel_stream <- None) state.account_login_detached;
+  state.account_login_detached <- [];
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
@@ -14219,7 +14262,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
            state.runtime_params_notice <- Some (true, notice);
            launch_runtime_params_load state ~mailbox)
-  | Runtime_config_view_loaded result -> (
+  | Runtime_config_view_loaded (generation, result) -> (
+      if generation = state.runtime_config_generation then
+      let pending = match state.runtime_config_read with
+        | `Loading pending -> pending
+        | `Idle -> false in
+      state.runtime_config_read <- `Idle;
+      if pending then launch_runtime_config_load state ~mailbox else
       match result with
       | Ok (path, lines, metadata) ->
           (* Lexed once here rather than per frame or per row. TOML opens a
@@ -14313,11 +14362,22 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ())
   | Account_login_json (view, generation, action, result) ->
-      (match state.account_login with
+      (* A closed activation still owns its receipt and refresh. Workspace
+         withdrawal cancels and drops both the open and detached views. *)
+      (match List.find_opt (fun current -> current == view)
+          (Option.to_list state.account_login @ state.account_login_detached) with
        | Some current when current == view && view.generation = generation ->
          let module Login = Masc_tui_account_login in
          let applied = match action, result with
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
+           | Login.Activate_saved saved, result ->
+             let active = Login.activated view saved result in
+             if active then (
+               launch_runtime_config_load ~force:true state ~mailbox;
+               launch_runtime_catalog_load state ~mailbox;
+               launch_runtime_surface_load state ~mailbox ~force:true);
+             launch_account_login_action state ~mailbox view (Login.Refresh_saved saved);
+             Ok ()
            | Login.Refresh_saved saved, result -> Login.refresh_saved view saved result; Ok ()
            | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
            (* The request's own error is the reason: the server's sentence for a
@@ -14342,7 +14402,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
                | Ok false -> Ok () | Error _ as error -> error)
              | Save _ -> (match Login.saved view json with
-               | Ok saved -> launch_account_login_action state ~mailbox view (Login.Refresh_saved saved); Ok ()
+               | Ok saved -> launch_account_login_action state ~mailbox view (Login.Activate_saved saved); Ok ()
                | Error message -> Error message)
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
@@ -14354,7 +14414,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
              (* A removal answers through [Account_login_removal]. *)
              | Remove _ -> Ok ()
-             | Start _ | Cancel | Close | Nothing -> Ok ()) in
+             | Activate_saved _ | Start _ | Cancel | Close | Nothing -> Ok ()) in
          (match applied with
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
@@ -17503,7 +17563,7 @@ let main
           Masc_tui_http.post_runtime_config_raw ~host ~port ~source_text:edited
         with
         | Ok receipt ->
-          launch_runtime_config_load state ~mailbox:async_messages;
+          launch_runtime_config_load ~force:true state ~mailbox:async_messages;
           Ok (Masc_tui_http.runtime_config_commit_receipt_summary receipt)
         | Error detail -> Error ("save failed: " ^ detail)))
   in
@@ -23558,7 +23618,7 @@ and is loaded on demand through keeper_skill.
                 | Config_voice ->
                     launch_voice_config_load state ~mailbox:async_messages
                 | Config_runtime | Config_models | Config_themes ->
-                    launch_runtime_config_load state ~mailbox:async_messages)
+                    launch_runtime_config_load ~force:true state ~mailbox:async_messages)
             | Resources ->
                 Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages)
             | Schedules -> launch_schedules_load state ~mailbox:async_messages

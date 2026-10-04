@@ -24,11 +24,13 @@ type saved =
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }
+type activation = Activating | Activation_failed of string
+  | Active of { exact_output_available : bool }
 (* The list opens on the clients; choosing one lists its accounts under a row
    that adds a new one. *)
 type list_view = Clients | Accounts of client
 type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
-  | Finished of { saved : saved; refresh_failed : bool } | Failed
+  | Finished of { saved : saved; activation : activation; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
@@ -44,6 +46,7 @@ type t = {
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
   mutable saved_scroll_max : int;
+  mutable saved_runtime_ids : string list;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -53,7 +56,7 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existing of provider
+type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry | Select_existing of provider
   | Start of { provider : provider; existing : bool }
   | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
@@ -63,13 +66,14 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existi
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
-  cursor=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  cursor=0; saved_scroll_max=0; saved_runtime_ids=[]; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
   t.provider <- Some provider;
   let previous = if existing then t.account_ref else None in
   t.login_id <- None; t.recovery <- Login_status;
+  t.saved_runtime_ids <- [];
   t.phase <- Logging; t.output <- ""; t.models <- []; t.selected_models <- []; t.connected_models <- [];
   t.draft <- ""; t.input_pending <- false;
   t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
@@ -204,6 +208,28 @@ let requested_matches t (p:provider) =
   t.requested = "" || String.equal t.requested p.id
   || (not (List.exists (fun (row:provider) -> String.equal row.id t.requested) t.providers)
       && requested_client t.requested = Some p.client)
+let activation_incomplete t = match t.phase with
+  | Finished {activation = Activating | Activation_failed _; _} -> true
+  | Finished {activation = Active _; _}
+  | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ -> false
+let reopen_saved ~requested t = match t.phase with
+  | Finished _ ->
+    let matches = match t.provider with
+      | Some provider ->
+        (* Catalog entries such as [codex] name a client, not a competing
+           configured account. Explicit configured IDs retain precedence. *)
+        let providers = List.filter (fun (row:provider) -> row.origin=Configured) t.providers in
+        requested_matches {t with requested; providers} provider
+      | None -> requested = "" || String.equal requested t.requested in
+    if matches then Some t else None
+  | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ -> None
+let retain_activation t retained =
+  if activation_incomplete t then t :: List.filter (fun held -> held != t) retained
+  else retained
+let take_saved ~requested retained =
+  match List.find_map (reopen_saved ~requested) retained with
+  | None -> None, retained
+  | Some view -> Some view, List.filter (fun held -> held != view) retained
 let inventory ?view t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
         field "default_runtime_selection" json with
@@ -309,12 +335,64 @@ let saved_of_json json =
   | _ -> None
 let saved t json =
   match saved_of_json json with
-  | Some saved -> t.cursor <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
+  | Some saved ->
+    t.saved_runtime_ids <- (match field "runtime_ids" json with
+      | `List ids ->
+        let parsed = List.map string ids in
+        if List.for_all Option.is_some parsed then
+          List.filter (fun id -> not (List.mem id t.existing)) (List.filter_map Fun.id parsed)
+        else []
+      | _ -> []);
+    t.cursor <- 0; t.phase <- Finished {saved; activation = Activating; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
+let activation_of_result = function
+  | Ok json ->
+    (match field "runtime_ready" json, field "exact_output_authority_available" json,
+           field "status" (field "model_setup" json) with
+     | `Bool true, `Bool exact_output_available, `String "available" -> Active {exact_output_available}
+     | _ -> Activation_failed "서버가 런타임 활성화를 확인하지 않았습니다.")
+  (* Activation errors can contain configuration details. Keep the failed
+     boundary visible without printing those details into the terminal. *)
+  | Error _ -> Activation_failed "런타임 활성화 요청을 확인하지 못했습니다. 서버 상태와 접근 권한을 확인하세요."
+let activating t saved =
+  t.phase <- Finished {saved; activation = Activating; refresh_failed = false};
+  t.cursor <- 0; t.notice <- saved_notice saved
+let activated t saved result =
+  let activation = activation_of_result result in
+  t.phase <- Finished {saved; activation; refresh_failed = false};
+  t.cursor <- 0; t.notice <- saved_notice saved;
+  match activation with Active _ -> true | Activating | Activation_failed _ -> false
+let reconcile_saved_account t json =
+  match t.provider, t.saved_runtime_ids, field "runtimes" json with
+  | Some original, (_ :: _ as ids), `List runtimes ->
+    (* The save carries the selected runtime IDs; inventory owns their
+       provider relationship. Never infer an account from an ID prefix,
+       email, list order, or another account retained as a default route. *)
+    let owners = List.map (fun id ->
+      match List.filter (fun row -> string (field "id" row) = Some id) runtimes with
+      | [row] ->
+        Option.bind (string (field "provider_id" row)) (fun provider_id ->
+          List.find_opt (fun (p:provider) -> p.id=provider_id && p.origin=Configured
+            && p.client=original.client) t.providers)
+      | [] | _ :: _ :: _ -> None) ids in
+    if List.for_all Option.is_some owners then
+      (match List.sort_uniq (fun (a:provider) (b:provider) -> String.compare a.id b.id)
+          (List.filter_map Fun.id owners) with
+       | [provider] -> t.provider <- Some provider
+       | [] | _ :: _ :: _ -> ())
+  | None, _, _ | Some _, [], _ | Some _, _ :: _, _ -> ()
 let refresh_saved t saved result =
-  let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
+  let activation = match t.phase with
+    | Finished {activation; _} -> activation
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Failed | Removal _ ->
+      Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
+  let refreshed = match result with
+    | Ok json -> (match inventory t json with
+        | Ok () -> reconcile_saved_account t json; Ok ()
+        | Error _ as error -> error)
+    | Error _ as error -> error in
   t.cursor <- 0;
-  t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
+  t.phase <- Finished {saved; activation; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
 let input_response ~sequence t result =
   match result with
@@ -524,6 +602,10 @@ let key t key =
     t.cursor <- max 0 (t.cursor - 1); Nothing
   | Finished _ when key="down" || key="j" ->
     t.cursor <- min t.saved_scroll_max (t.cursor + 1); Nothing
+  | Finished {activation = Activating; _} -> Nothing
+  | Finished {saved; activation = Activation_failed _; _}
+    when List.mem key ["r"; "\r"; "\n"; "enter"] -> Activate_saved saved
+  | Finished {activation = Activation_failed _; _} -> Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -598,7 +680,9 @@ let hints t = match t.phase with
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
-  | Finished _ -> "j/k:스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Finished {activation = Activating; _} -> "j/k:스크롤  런타임 활성화 중  Esc:닫기"
+  | Finished {activation = Activation_failed _; _} -> "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기"
+  | Finished {activation = Active _; _} -> "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기"
   | Loading | Saving | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
@@ -651,7 +735,16 @@ let body_rows t =
      | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
        @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
      | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
-  | Finished {saved; refresh_failed} -> List.map (fun row -> Text row) (saved_rows saved)
+  | Finished {saved; activation; refresh_failed} ->
+    (match activation with
+     | Activating -> [Text "저장 완료 · 런타임 활성화 중입니다."]
+     | Activation_failed detail ->
+       [Text "저장 완료 · 런타임 활성화 미확인"; Text detail;
+        Text "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다."]
+     | Active {exact_output_available} ->
+       Text "저장한 설정을 런타임에 활성화했습니다." ::
+       (if exact_output_available then [] else [Text "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."]))
+    @ List.map (fun row -> Text row) (saved_rows saved)
     @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
   | Loading | Saving | Failed -> []
 let lines t = Text t.notice :: body_rows t

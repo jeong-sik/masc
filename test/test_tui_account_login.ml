@@ -146,7 +146,7 @@ let unicode_and_late_input_response () =
   check bool "current failure allows correction" false t.input_pending
 let verified_save_refresh () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; refresh_failed} in
+  let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; activation=Login.Active {exact_output_available=true}; refresh_failed} in
   t.phase<-finished false;
   Login.refresh_saved t Login.Saved_verified (Error "network unavailable");
   check bool "transport failure cannot revoke verified save" true (t.phase=finished true);
@@ -155,6 +155,143 @@ let verified_save_refresh () =
   check bool "bad inventory cannot revoke verified save" true (t.phase=finished true);
   Login.refresh_saved t Login.Saved_verified (Ok inventory);
   check bool "successful refresh retains saved screen" true (t.phase=finished false)
+let saved_activation_retry () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  let saved = match Login.saved t (`Assoc ["configured", `Bool true; "readiness", `String "verified";
+      "commit", `Assoc ["durability", `String "durable"; "warnings", `List []]]) with
+    | Ok saved -> saved | Error message -> fail message in
+  check bool "pending activation cannot dispatch another save" true (Login.key t "enter"=Login.Nothing);
+  check bool "pending activation cannot duplicate activation" true (Login.key t "r"=Login.Nothing);
+  List.iter (fun response ->
+    check bool "unconfirmed activation is not active" false (Login.activated t saved response);
+    check bool "retry activates without another save" true (Login.key t "r"=Login.Activate_saved saved);
+    Login.refresh_saved t saved (Ok inventory);
+    check bool "inventory cannot turn saved configuration into active runtime" true
+      (Login.key t "enter"=Login.Activate_saved saved))
+    [Error "private configuration detail";
+     Ok (`Assoc ["runtime_ready", `Bool true; "model_setup", `Assoc ["status", `String "available"]]);
+     Ok (`Assoc ["runtime_ready", `Bool true; "exact_output_authority_available", `Bool true;
+                "model_setup", `Assoc ["status", `String "waiting"]])];
+  check bool "chat runtime can activate before exact output becomes available" true
+    (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
+      "exact_output_authority_available", `Bool false; "model_setup", `Assoc ["status", `String "available"]])));
+  Login.refresh_saved t saved (Error "inventory unavailable");
+  check bool "active result survives a failed inventory refresh" true
+    (t.phase=Login.Finished {saved; activation=Login.Active {exact_output_available=false}; refresh_failed=true});
+  check bool "active refresh is read-only" true (Login.key t "r"=Login.Refresh_saved saved)
+let closed_activation_recovery () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  t.provider <- Some provider;
+  let saved = Login.Saved_partly {unverified=[]; not_rechecked=["saved-account.model"]} in
+  Login.activating t saved;
+  t.generation <- 7;
+  check bool "closing retains a pending activation" true (Login.activation_incomplete t);
+  let reopened = match Login.reopen_saved ~requested:"" t with
+    | Some view -> view | None -> fail "saved activation disappeared on reopen" in
+  check bool "the pending request keeps the same view identity" true (reopened == t);
+  check int "reopening does not supersede the pending reply" 7 reopened.generation;
+  check bool "reopening cannot start a duplicate activation" true (Login.key reopened "r"=Login.Nothing);
+  check bool "another client cannot claim the saved account" true
+    (Login.reopen_saved ~requested:"claude" t=None);
+  ignore (Login.activated t saved (Error "lost response"));
+  check bool "closing retains an unconfirmed activation" true (Login.activation_incomplete t);
+  let reopened = match Login.reopen_saved ~requested:"codex" t with
+    | Some view -> view | None -> fail "failed activation disappeared on reopen" in
+  Login.refresh_saved reopened saved (Error "inventory unavailable");
+  check bool "reopened failed activation retries only resume with the original receipt" true
+    (Login.key reopened "enter"=Login.Activate_saved saved);
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready",`Bool true;
+    "exact_output_authority_available",`Bool true;"model_setup",`Assoc ["status",`String "available"]])));
+  check bool "a detached request can finish before reopening" true
+    (Option.is_some (Login.reopen_saved ~requested:"codex" t));
+  check bool "completed activation does not need retaining on another close" false (Login.activation_incomplete t);
+  check bool "the completed receipt refreshes without repeating activation" true (Login.key t "r"=Login.Refresh_saved saved)
+let closed_activation_accounts () =
+  let first=Login.create "codex" and second=Login.create "codex" in
+  first.provider <- Some {provider with id="codex_first"};
+  second.provider <- Some {provider with id="codex_second"};
+  first.providers <- [{provider with id="codex";origin=Login.Catalog};
+    {provider with id="codex_first";origin=Login.Configured}];
+  second.providers <- first.providers @ [{provider with id="codex_second";origin=Login.Configured}];
+  let saved_first=Login.Saved_partly {unverified=[]; not_rechecked=["first.model"]} in
+  let saved_second=Login.Saved_unverified ({runtime_id="second.model";code="quota_exhausted"},[]) in
+  Login.activating first saved_first;
+  Login.activating second saved_second;
+  ignore (Login.activated first saved_first (Error "first unavailable"));
+  ignore (Login.activated second saved_second (Error "second unavailable"));
+  check bool "catalog codex entry does not shadow client recovery" true
+    (Option.is_some (Login.reopen_saved ~requested:"codex" first));
+  first.providers <- {provider with id="codex";origin=Login.Configured} :: first.providers;
+  check bool "an explicit configured codex ID still wins over the client alias" true
+    (Login.reopen_saved ~requested:"codex" first=None);
+  let retained = Login.retain_activation first [] |> Login.retain_activation second in
+  let retained = Login.retain_activation second retained in
+  check int "closing another account preserves both distinct receipts" 2 (List.length retained);
+  let taken, rest = Login.take_saved ~requested:"codex_first" retained in
+  let first = match taken with Some view -> view | None -> fail "first account receipt lost" in
+  check bool "first account retries its own saved receipt" true (Login.key first "r"=Login.Activate_saved saved_first);
+  check int "reopening one account leaves the other recoverable" 1 (List.length rest);
+  let taken, rest = Login.take_saved ~requested:"codex_second" rest in
+  let second = match taken with Some view -> view | None -> fail "second account receipt lost" in
+  check bool "second account keeps its usage-limited receipt" true (Login.key second "enter"=Login.Activate_saved saved_second);
+  check int "reopened views are removed once" 0 (List.length rest)
+let generated_account_activation_recovery () =
+  let catalog={provider with origin=Login.Catalog} in
+  let inventory runtimes = `Assoc ["setup_revision",`String "saved-revision";
+    "default_runtime_selection",`List [`String "old.selected"];"account_emails",`List [];
+    "runtimes",`List (List.map (fun (id,owner) -> `Assoc ["id",`String id;"provider_id",`String owner]) runtimes);
+    "integrations",`List (List.map (fun id -> `Assoc ["id",`String id;"display_name",`String id;
+      "protocol",`String "codex-app-server";"origin",`String (if id="codex" then "masc_integration" else "runtime_config")])
+      ["codex";"old-account";"generated-first";"generated-second"])] in
+  let runtimes=["old.selected","old-account";"first.runtime","generated-first";"second.runtime","generated-second"] in
+  let make id =
+    let t=Login.create "codex" in
+    ignore (Login.begin_attempt t catalog ~existing:false);
+    t.existing <- ["old.selected"];
+    let saved=ok (Login.saved t (`Assoc ["configured",`Bool true;"readiness",`String "verified";
+      "commit",`Assoc ["durability",`String "durable";"warnings",`List []];
+      "runtime_ids",`List [`String "old.selected";`String id]])) in
+    ignore (Login.activated t saved (Error "activation unavailable"));
+    t,saved in
+  let first,saved_first=make "first.runtime" and second,saved_second=make "second.runtime" in
+  Login.refresh_saved first saved_first (Ok (inventory runtimes));
+  Login.refresh_saved second saved_second (Ok (inventory runtimes));
+  check (option string) "new account reconciles from explicit runtime ownership"
+    (Some "generated-first") (Option.map (fun (p:Login.provider)->p.id) first.provider);
+  let retained=Login.retain_activation first [] |> Login.retain_activation second in
+  let chosen,retained=Login.take_saved ~requested:"generated-first" retained in
+  check bool "generated account ID selects its own saved receipt" true
+    (match chosen with Some view -> view==first && Login.key view "r"=Login.Activate_saved saved_first | None -> false);
+  let chosen,_=Login.take_saved ~requested:"generated-second" retained in
+  check bool "second same-client receipt remains independently recoverable" true
+    (match chosen with Some view -> view==second && Login.key view "enter"=Login.Activate_saved saved_second | None -> false);
+  Login.refresh_saved first saved_first (Error "refresh failed");
+  check bool "later read failure retains established configured account" true
+    (Option.is_some (Login.reopen_saved ~requested:"generated-first" first));
+  let missing,saved=make "absent.runtime" in
+  Login.refresh_saved missing saved (Ok (inventory runtimes));
+  check bool "missing ownership never adopts another account" true (missing.provider=Some catalog);
+  let ambiguous,saved=make "first.runtime" in
+  Login.refresh_saved ambiguous saved (Ok (inventory (("first.runtime","generated-second")::runtimes)));
+  check bool "ambiguous ownership never picks the first account" true (ambiguous.provider=Some catalog);
+  ignore (Login.begin_attempt first catalog ~existing:false);
+  check (list string) "a new login cannot reuse a previous save's runtime ownership" [] first.saved_runtime_ids
+
+let failed_activation_blocks_login_shortcuts () =
+  let t=Login.create "codex" in t.provider <- Some provider;
+  let saved=Login.Saved_partly {unverified=[];not_rechecked=["saved.model"]} in
+  ignore (Login.activated t saved (Error "activation unavailable"));
+  let original=t.phase in
+  List.iter (fun key ->
+    check bool ("failed activation blocks "^key) true (Login.key t key=Login.Nothing);
+    check bool "blocked login preserves saved phase" true (t.phase=original)) ["n";"e"];
+  check bool "activation-only retry remains available" true (Login.key t "r"=Login.Activate_saved saved);
+  check bool "close remains available for detached recovery" true (Login.key t "esc"=Login.Close);
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready",`Bool true;
+    "exact_output_authority_available",`Bool true;"model_setup",`Assoc ["status",`String "available"]])));
+  check bool "new login is available after confirmed activation" true
+    (Login.key t "n"=Login.Start {provider;existing=false})
+
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -280,6 +417,8 @@ let usage_limited_save () =
   let row id code = `Assoc ["runtime_id",`String id;"code",`String code] in
   let saved = match Login.saved t (receipt [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"]) with
     | Ok saved -> saved | Error message -> fail message in
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
+    "exact_output_authority_available", `Bool true; "model_setup", `Assoc ["status", `String "available"]])));
   let rows () = List.map Login.row_text (Login.lines t) in
   check bool "the unmeasured runtime and its code have their own row" true
     (List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
@@ -290,7 +429,7 @@ let usage_limited_save () =
     (List.mem "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." (rows ()));
   Login.refresh_saved t saved (Ok inventory);
   check bool "a refreshed list keeps the unmeasured account" true
-    (t.phase=Login.Finished {saved; refresh_failed=false}
+    (t.phase=Login.Finished {saved; activation=Login.Active {exact_output_available=true}; refresh_failed=false}
      && List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
@@ -311,6 +450,8 @@ let partly_checked_save () =
       "runtime_ids",`List [`String added;`String kept];"unverified",unverified;"not_rechecked",rechecked] in
   let saved = match Login.saved t (receipt ()) with
     | Ok saved -> saved | Error message -> fail message in
+  ignore (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
+    "exact_output_authority_available", `Bool true; "model_setup", `Assoc ["status", `String "available"]])));
   let rows () = List.map Login.row_text (Login.lines t) in
   check bool "retained runtime is explicitly not rechecked" true
     (List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") (rows ()));
@@ -318,7 +459,10 @@ let partly_checked_save () =
   check bool "the notice says existing connections were retained" true (contains t.notice "기존 연결은 그대로 유지했습니다");
   check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
   let t2=Login.create "codex" in ok (Login.inventory t2 inventory);
-  ignore (Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()));
+  let saved2 = match Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()) with
+    | Ok saved -> saved | Error message -> fail message in
+  ignore (Login.activated t2 saved2 (Ok (`Assoc ["runtime_ready", `Bool true;
+    "exact_output_authority_available", `Bool true; "model_setup", `Assoc ["status", `String "available"]])));
   check bool "quota failure and not-rechecked runtime are separately listed" true
     (let r = List.map Login.row_text (Login.lines t2) in
      List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") r);
@@ -332,7 +476,8 @@ let partly_checked_save () =
         "  " ^ kept ^ " (이번 저장에서 재검증하지 않음)" ] in
   let seen = ref initial in
   List.iter (fun _ -> ignore (Login.key t2 "j"); seen := visible () @ !seen)
-    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+    (List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:32)
+       (List.map Login.row_text (Login.lines t2)));
   List.iter (fun row -> check bool "every result fragment is reachable by scrolling" true
       (List.mem row !seen)) expected;
   let bottom = visible () in
@@ -345,7 +490,8 @@ let partly_checked_save () =
   check bool "one up key moves after repeated down keys at the bottom" true
     (visible () <> bottom);
   List.iter (fun _ -> ignore (Login.key t2 "k"))
-    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+    (List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:32)
+       (List.map Login.row_text (Login.lines t2)));
   check (list string) "scroll can return to the initial result" initial (visible ());
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
@@ -760,6 +906,11 @@ let () = run "TUI account login" ["workflow",[
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
+  test_case "saved activation retry cannot repeat save or login" `Quick saved_activation_retry;
+  test_case "closed activation retains its request and recovery receipt" `Quick closed_activation_recovery;
+  test_case "closed activation recovery preserves multiple accounts" `Quick closed_activation_accounts;
+  test_case "generated account ID restores its saved activation" `Quick generated_account_activation_recovery;
+  test_case "failed activation cannot start another login" `Quick failed_activation_blocks_login_shortcuts;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
   test_case "visible save preserves durability uncertainty without resubmitting" `Quick uncertain_durability_save;
   test_case "lock warning survives refresh without exposing diagnostics" `Quick uncertain_lock_release_save;

@@ -4966,6 +4966,9 @@ type state = {
      The reading is stamped with the requested Keeper and generation so a late
      response cannot replace a newer inspection. *)
   mutable account_login: Masc_tui_account_login.t option;
+  (* A saved activation may finish while its panel is closed. It belongs to
+     this workspace and is cleared when workspace authority is withdrawn. *)
+  mutable account_login_detached: Masc_tui_account_login.t list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -5222,6 +5225,9 @@ type state = {
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
   mutable runtime_config_view: runtime_config_reading option;
+  mutable runtime_config_generation: int;
+  mutable runtime_config_read: [ `Idle | `Loading of bool ];
+  (* Loading carries an explicit refresh queued behind the current read. *)
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
   (* The [a] form on the runtime.toml pane, which declares one more account
@@ -8086,6 +8092,7 @@ let create_state
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
   account_login = None;
+  account_login_detached = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -8192,6 +8199,8 @@ let create_state
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
   runtime_config_view = None;
+  runtime_config_generation = 0;
+  runtime_config_read = `Idle;
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;

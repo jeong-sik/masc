@@ -927,7 +927,9 @@ let test_nested_bool_preserves_binding_layouts () =
         ~key:"wizard-default" ~value:true with
       | Ok text -> text | Error _ -> Alcotest.fail "repeat refused" in
     Alcotest.(check string) (name ^ ": repeat is idempotent") changed repeated)
-    ["inline binding", "[account]\n# operator note\nold = { max-context = 8192, price-input = 0.075 }", ["account"; "old"], Some 0.075;
+    ["implicit binding in inline parent", "account = {}", ["account"; "old"], None;
+     "implicit binding in nested inline parent", "root = { account = {} }", ["root"; "account"; "old"], None;
+     "inline binding", "[account]\n# operator note\nold = { max-context = 8192, price-input = 0.075 }", ["account"; "old"], Some 0.075;
      "inline explicit false", "[account]\nold = { wizard-default = false, price-input = 0.004 } # keep trailing", ["account"; "old"], Some 0.004;
      "nested inline quoted IDs", "'account.one' = { 'model.v1' = { price-input = 0.123456789012345 } }", ["account.one"; "model.v1"], Some 0.123456789012345;
      "dotted binding", "[account]\nold.price-input = 0.075", ["account"; "old"], Some 0.075;

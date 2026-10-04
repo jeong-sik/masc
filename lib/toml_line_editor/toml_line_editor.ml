@@ -590,6 +590,9 @@ let edit_nested_bool content ~path ~key ~value =
        | name :: rest ->
          let child = match List.assoc_opt name fields with
            | Some child -> Some child
+           (* Once an existing inline ancestor is reached, its missing
+              descendants must be created inside that same sealed value. *)
+           | None when inline -> Some (T.TomlInlineTable [])
            | None when create -> Some (T.TomlTable [])
            | None -> None in
          Option.bind child (fun child ->

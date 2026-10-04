@@ -1,7 +1,7 @@
 import { effect, signal } from '@preact/signals'
 import {
   fetchRuntimeTomlConfig, previewRuntimeTomlConfig, saveRuntimeTomlConfig,
-  RuntimeTomlRevisionConflict, type RuntimeTomlCurrentSource, type RuntimeTomlConfig,
+  RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlCurrentSource, type RuntimeTomlConfig,
   type CommittedRuntimeTomlConfig,
 } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
@@ -172,6 +172,8 @@ export class BrowserLaneActivitySession {
             readBrowserActivity(error.current.source_text, this.lane)
             this.update({ current: error.current, error: '파일이 바뀌어 저장하지 않았습니다. 초안은 보관했습니다.' })
           } catch (cause) { this.update({ current: null, error: errorToString(cause) }) }
+        } else if (error instanceof RuntimeTomlSaveRejected) {
+          this.update({ uncertain: false, error: `${errorToString(error)} 저장 전에 거절되었습니다. 초안과 저장 기준은 유지됩니다.` })
         } else this.update({ current: sent ? null : current, uncertain: sent || this.state.peek().uncertain,
           error: errorToString(error) + (sent ? ' 저장 결과가 불확실합니다. 현재 설정을 다시 읽으세요.' : '') })
       }

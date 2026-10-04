@@ -696,6 +696,7 @@ let create_post_with_audience
                 ; post_kind = normalized_kind
                 ; meta_json = normalized_meta
                 ; visibility
+                ; audience = Some audience
                 ; created_at = now
                 ; content_updated_at = now
                 ; updated_at = now
@@ -965,7 +966,7 @@ let update_post_with_outcome
               else match Board_audience.audience_for_post ~visibility:existing.visibility
                   ~title:normalized_title ~content:normalized_body with
               | Error error -> Error error
-              | Ok _ -> (
+              | Ok audience -> (
                 let content_changed =
                   not (String.equal existing.title normalized_title
                        && String.equal existing.body normalized_body
@@ -979,6 +980,7 @@ let update_post_with_outcome
                   ; title = normalized_title
                   ; body = normalized_body
                   ; meta_json = normalized_meta
+                  ; audience = Some audience
                   ; content_updated_at =
                       if content_changed then now else existing.content_updated_at
                   ; updated_at = now

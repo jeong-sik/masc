@@ -2910,6 +2910,18 @@ let render_keeper_message (state : state) =
             message.me_request_id
         | Tagged_block log -> Masc_tui_types.turn_log_request_id log
       in
+      (* Transcript projections own dispatch and settlement times. Move their
+         span to the final opening row, which may be a committed input whose
+         pre-merge edge was Turn_alone. History alone has no running span. *)
+      let request_spans =
+        List.filter_map
+          (fun block ->
+            Option.map (fun span -> block.lb_request_id, span)
+              (List.find_map
+                 (fun (entry : Message_layout.entry) -> entry.span_clock)
+                 block.lb_entries))
+          blocks
+      in
       let first = Hashtbl.create 8 and last = Hashtbl.create 8 in
       List.iteri
         (fun index (tag, _) ->
@@ -2946,7 +2958,10 @@ let render_keeper_message (state : state) =
               , { entry with
                   Message_layout.turn_rail =
                     turn_rail_of ~siding ~edge
-                      ~style:entry.Message_layout.style
+                      ~style:entry.Message_layout.style;
+                  span_clock =
+                    if opens then List.assoc_opt request_id request_spans
+                    else None
                 } )
           | Some _, None | None, Some _ | None, None -> item)
         merged
@@ -3686,14 +3701,10 @@ let render_keeper_message (state : state) =
       let roster_rows = match portrait with
         | None -> pane_rows
         | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
-      keeper_roster_pane
-        ~focused:(state.keeper_message_focus = Left_pane)
-        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
       Option.iter (fun portrait ->
         box_line left_buf keeper_roster_pane_cols
-          (Theme.recede () ^ " 대화 · " ^ display_keeper_name ^ Ansi.reset);
-        (* Anchor pixels to the actual caption, since the roster renderer can
-           emit fewer lines than its requested budget. *)
+          (Theme.recede () ^ " 현재 대화 · " ^ display_keeper_name ^ Ansi.reset);
+        (* Anchor pixels to the caption actually drawn above the selectable roster. *)
         let picture_row = count_frame_lines left_buf in
         List.iter (box_line left_buf keeper_roster_pane_cols)
           portrait.Masc_tui_chat_portrait.picture_lines;
@@ -3705,6 +3716,9 @@ let render_keeper_message (state : state) =
           Masc_tui_portrait_view.request
             {placement with row = picture_row + strip_rows}) portrait.placement)
         portrait;
+      keeper_roster_pane
+        ~focused:(state.keeper_message_focus = Left_pane)
+        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
         ~right:chat_buf
     end;

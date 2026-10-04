@@ -1,9 +1,14 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
 type jsonl_snapshot = { entry_count : int; reference : evidence }
-type t = { root : string; sequence_mutex : Mutex.t;
+type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }
-let create ~root = { root; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+let create ~root =
+  let rec trim_separator root =
+    let length = String.length root in
+    if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
+      trim_separator (String.sub root 0 (length - 1)) else root in
+  { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let protect f =
@@ -12,10 +17,33 @@ let protect f =
   | Unix.Unix_error (error, call, path) ->
       Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
   | Yojson.Json_error message -> Error message
-let write t relative bytes = protect (fun () ->
+(* Also sync existing ancestors: they may have been created by a preceding
+   attempt whose parent sync failed. A retry must establish the entire path. *)
+let sync_parent_directory parent =
+  let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+let rec durable_directory t ~sync_parent directory =
+  let parent = Filename.dirname directory in
+  if directory = t.root then (
+    (try Unix.mkdir directory 0o700; t.root_parent_pending <- true with
+     | Unix.Unix_error (Unix.EEXIST, _, _) ->
+         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+           raise (Sys_error "retained evidence root is not a directory"));
+    (* Flush only the new root entry, never walk preexisting ancestors.
+       Keep the obligation on failure so a retry in this store cannot skip it. *)
+    if t.root_parent_pending then (sync_parent parent; t.root_parent_pending <- false))
+  else if parent <> directory then (
+    durable_directory t ~sync_parent parent;
+    (try Unix.mkdir directory 0o700 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) ->
+         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+           raise (Sys_error "retained evidence parent is not a directory"));
+    sync_parent parent)
+let write_with ~sync_parent t relative bytes = protect (fun () ->
   let path = Filename.concat t.root relative in
-  Fs_compat.mkdir_p (Filename.dirname path);
+  durable_directory t ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path bytes)
+let write = write_with ~sync_parent:sync_parent_directory
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
 let blob_reference bytes =
   let hash = digest bytes in
@@ -34,11 +62,37 @@ let retained_address (reference : evidence) =
       else Error "evidence is not retained in this Lane store"
   | _ -> Error "evidence is not retained in this Lane store"
 let sequence_path hash = Filename.concat "sequences" (hash ^ ".json")
-let read_blob t reference = protect (fun () ->
+type read_budget = { mutable remaining : int }
+type bounded_read_error = Read_limit_exceeded | Read_failed of string
+let read_budget ~max_bytes = { remaining = max 0 max_bytes }
+let bounded_protect f =
+  match protect (fun () -> Ok (f ())) with
+  | Ok result -> result | Error detail -> Error (Read_failed detail)
+let read_file_bounded ~budget path = bounded_protect (fun () ->
+  let channel = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    let size = in_channel_length channel in
+    if size > budget.remaining then Error Read_limit_exceeded
+    else begin
+      budget.remaining <- budget.remaining - size;
+      try Ok (really_input_string channel size)
+      with End_of_file -> Error (Read_failed "retained file changed during read")
+    end))
+let read_blob_bounded ~budget t reference =
+  let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
+  let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
+  let* bytes = read_file_bounded ~budget (Filename.concat t.root relative) in
+  if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch")
+let read_blob ?(max_bytes=max_int) t reference = protect (fun () ->
   let* kind, hash = retained_address reference in
   let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
-  let bytes = Fs_compat.load_file (Filename.concat t.root relative) in
-  if digest bytes = hash then Ok bytes else Error "evidence digest mismatch")
+  let channel = open_in_bin (Filename.concat t.root relative) in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    let size = in_channel_length channel in
+    if size > max_bytes then Error "retained evidence exceeds the source envelope"
+    else
+      let bytes = really_input_string channel size in
+      if digest bytes = hash then Ok bytes else Error "evidence digest mismatch"))
 
 type sequence_node = Empty | Record of { count : int; previous : evidence; bytes : string }
 let sequence_schema = "masc.lane-jsonl-sequence.v1"
@@ -142,27 +196,23 @@ let remove_binding t ~instance_id = protect (fun () ->
   Ok ())
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
-(* The configured store parent's entry is the external workspace anchor.
-   Never reopen its ancestors: traversable parents need not be readable or
-   support directory fsync. The root itself can have been created by a binding
-   write, so its parent still needs syncing before accepting an action. *)
-let sync_action_parent parent =
-  let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
-let durable_action_directory ~sync_parent directory =
-  (try Unix.mkdir directory 0o700 with
-   | Unix.Unix_error (Unix.EEXIST, _, _) ->
-       if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
-         raise (Sys_error "action receipt parent is not a directory"));
-  (* An existing entry may be left by a failed earlier parent sync. *)
-  sync_parent (Filename.dirname directory)
 let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun () ->
   let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
-  durable_action_directory ~sync_parent t.root;
-  durable_action_directory ~sync_parent (Filename.concat t.root "actions");
-  durable_action_directory ~sync_parent (Filename.dirname path);
+  durable_directory t ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json))
-let save_action = save_action_with ~sync_parent:sync_action_parent
+let save_action = save_action_with ~sync_parent:sync_parent_directory
+let broadcast_path ~instance_id ~request_id =
+  Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+let save_broadcast t ~instance_id ~request_id json =
+  write t (broadcast_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
+let load_broadcast t ~instance_id ~request_id = protect (fun () ->
+  let path = Filename.concat t.root (broadcast_path ~instance_id ~request_id) in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | _ ->
+      let stat = Unix.stat path in
+      if stat.Unix.st_kind <> Unix.S_REG then Error "Broadcast evidence record is not a regular file"
+      else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
@@ -179,6 +229,177 @@ let read_directory t relative = protect (fun () ->
              | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
+let bounded_file_for_sampling ~max_bytes path = protect (fun () ->
+  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+  let channel = Unix.in_channel_of_descr fd in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    let stat = Unix.fstat fd in
+    if stat.Unix.st_kind <> Unix.S_REG then Error "retained observation is not a regular file"
+    else if stat.Unix.st_size > max_bytes then Error "retained observation exceeds query byte envelope"
+    else
+      try
+        let bytes = really_input_string channel stat.Unix.st_size in
+        match input_char channel with
+        | _ -> Error "retained observation changed during query"
+        | exception End_of_file -> Ok bytes
+      with End_of_file -> Error "retained observation changed during query"))
+let sampling_directory instance_id = Filename.concat "sampling" (digest instance_id)
+let save_sampling_request t ~instance_id ~request_id json =
+  write t (Filename.concat (sampling_directory instance_id) (digest request_id ^ ".json"))
+    (Yojson.Safe.to_string json)
+let sampling_outcome_directory instance_id = Filename.concat "sampling-outcomes" (digest instance_id)
+let save_sampling_outcome t ~instance_id ~request_id json =
+  write t (Filename.concat (sampling_outcome_directory instance_id) (digest request_id ^ ".json"))
+    (Yojson.Safe.to_string json)
+let verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected path =
+  let read () =
+    let* contents = Fs_compat.load_owned_regular_file_range
+      ~ownership_root:t.root ~offset:0 ~max_bytes path
+      |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+    match contents with
+    | None -> Error "sampling outcome blob disappeared during recovery"
+    | Some contents when contents.snapshot.file_size > max_bytes ->
+        Error "sampling outcome blob exceeds recovery byte envelope"
+    | Some contents -> Ok contents in
+  let* before = read () in
+  if blob_reference before.content <> expected then Error "sampling outcome blob digest mismatch"
+  else protect (fun () ->
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let stat = Unix.fstat fd in
+      if stat.Unix.st_kind <> Unix.S_REG
+         || stat.Unix.st_nlink <> 1
+         || stat.Unix.st_dev <> before.snapshot.device
+         || stat.Unix.st_ino <> before.snapshot.inode then
+        Error "sampling outcome blob changed before sync"
+      else
+        let parent = Filename.dirname path in
+        let parent_fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+        Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
+          let parent_stat = Unix.fstat parent_fd in
+          if parent_stat.Unix.st_kind <> Unix.S_DIR then
+            Error "sampling outcome parent is not a directory"
+          else (
+            sync_file fd;
+            sync_parent parent_fd;
+            let* after = read () in
+            let parent_now = Unix.lstat parent in
+            if (Unix.fstat fd).Unix.st_nlink <> 1
+               || not (Fs_compat.equal_owned_regular_file_snapshot before.snapshot after.snapshot)
+               || before.content <> after.content
+               || parent_now.Unix.st_kind <> Unix.S_DIR
+               || parent_stat.Unix.st_dev <> parent_now.Unix.st_dev
+               || parent_stat.Unix.st_ino <> parent_now.Unix.st_ino then
+              Error "sampling outcome blob changed during sync"
+            else Ok ()))))
+let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_bytes ~f =
+  if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
+  else protect (fun () ->
+    let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
+    let open_directory relative = protect (fun () ->
+      let path = Filename.concat t.root relative in
+      match Fs_compat.exact_path_kind path with
+      | Fs_compat.Exact_missing -> Ok None
+      | _ -> Ok (Some (path, Unix.opendir path))) in
+    let journal = open_directory (sampling_outcome_directory instance_id) in
+    let primary = open_directory (sampling_directory instance_id) in
+    let close = function
+      | Ok (Some (_, handle)) -> Unix.closedir handle
+      | Ok None | Error _ -> () in
+    Fun.protect ~finally:(fun () -> close journal; close primary) (fun () ->
+    let scan opened ~repair_primary ~skip =
+      match opened with
+      | Error detail -> Error detail
+      | Ok None -> Ok ()
+      | Ok (Some (path, handle)) ->
+            let rec next () = match Unix.readdir handle with
+              | name when Filename.check_suffix name ".json" && not (skip name) ->
+                  let pending_root =
+                    if t.root_parent_pending then
+                      Some (Unix.lstat t.root, Unix.stat (Filename.dirname t.root))
+                    else None in
+                  let* bytes = bounded_file_for_sampling ~max_bytes (Filename.concat path name) in
+                  let json = Yojson.Safe.from_string bytes in
+                  (* Every record depends on this root, including pending
+                     requests that have no outcome blob to verify. *)
+                  (match pending_root with
+                   | None -> ()
+                   | Some (root_before, parent_before) ->
+                    let parent_path = Filename.dirname t.root in
+                    let parent_fd = Unix.openfile parent_path
+                      [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+                    Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
+                      let same_directory before after =
+                        before.Unix.st_kind = Unix.S_DIR && after.Unix.st_kind = Unix.S_DIR
+                        && before.Unix.st_dev = after.Unix.st_dev
+                        && before.Unix.st_ino = after.Unix.st_ino in
+                      let verify_root () =
+                        if not (same_directory root_before (Unix.lstat t.root))
+                           || not (same_directory parent_before (Unix.stat parent_path))
+                           || not (same_directory parent_before (Unix.fstat parent_fd)) then
+                          raise (Sys_error "retained evidence root or parent changed during recovery") in
+                      verify_root ();
+                      sync_parent parent_fd;
+                      verify_root ());
+                    t.root_parent_pending <- false);
+                  (* The first terminal write includes exact outcome bytes, so a
+                     crash before blob publication is recoverable. *)
+                  let* () = match json with
+                    | `Assoc fields -> (match List.assoc_opt "outcome_bytes" fields with
+                        | Some (`String bytes) ->
+                            let* expected = match List.assoc_opt "outcome" fields with
+                              | Some json -> evidence_of_json json
+                              | None -> Error "sampling outcome reference is missing" in
+                            if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
+                            else
+                              (match Fs_compat.exact_path_kind ~follow:false
+                                       (Filename.concat t.root (blob_path (digest bytes))) with
+                               | Fs_compat.Exact_missing -> write_blob t bytes |> Result.map (fun _ -> ())
+                               | Fs_compat.Exact_kind Unix.S_REG ->
+                                   verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected
+                                     (Filename.concat t.root (blob_path (digest bytes)))
+                               | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                                   Error "sampling outcome blob is not a regular file")
+                        | _ -> Ok ())
+                    | _ -> Ok () in
+                  (* The independent outcome journal remains authoritative
+                     when primary publication failed. Once that directory is
+                     available again, restore its terminal row before visiting
+                     the request. A still-unavailable primary cannot hide the
+                     durable outcome. Only its exact stored identity can choose
+                     the repair path. *)
+                  let* () = if not repair_primary then Ok () else
+                    match json with
+                    | `Assoc fields ->
+                        (match List.assoc_opt "instance_id" fields,
+                               List.assoc_opt "request_id" fields,
+                               List.assoc_opt "state" fields with
+                         | Some (`String owner), Some (`String request_id), Some (`String "finished")
+                           when owner = instance_id && name = digest request_id ^ ".json" ->
+                             ignore (save_sampling_request t ~instance_id ~request_id json);
+                             Ok ()
+                         | _ -> Error "sampling terminal journal identity is invalid")
+                    | _ -> Error "sampling terminal journal is not an object" in
+                  let* () = f json in
+                  next ()
+              | _ -> next ()
+              | exception End_of_file -> Ok () in
+            next () in
+    match journal, primary with
+    | Error journal_error, Error primary_error ->
+        Error (journal_error ^ "; " ^ primary_error)
+    | Error detail, Ok None | Ok None, Error detail -> Error detail
+    | Error journal_error, Ok (Some _) ->
+        let* () = scan primary ~repair_primary:false ~skip:(fun _ -> false) in
+        Error journal_error
+    | Ok (Some _), Error primary_error ->
+        let* () = scan journal ~repair_primary:true ~skip:(fun _ -> false) in
+        Error primary_error
+    | Ok _, Ok _ ->
+      let* () = scan journal ~repair_primary:true ~skip:(fun _ -> false) in
+      scan primary ~repair_primary:false ~skip:(fun name ->
+        Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing)))
+let iter_sampling_requests = iter_sampling_requests_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable
 let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
@@ -205,31 +426,32 @@ let with_record_fd path fn =
     let backtrace=Printexc.get_raw_backtrace () in
     (try Unix.close fd with Unix.Unix_error _ -> ());
     Printexc.raise_with_backtrace exn backtrace
+let read_verified_record ~sync_file ~sync_parent ~verification path fd stat =
+  let* bytes=record_bytes fd stat.Unix.st_size in
+  let verify_bytes () =
+    let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
+    let* verified=record_bytes fd stat.Unix.st_size in
+    if verified<>bytes then Error "retained file changed during sync"
+    else if same_file stat (Unix.stat path) then Ok bytes
+    else Error "retained file changed during verification" in
+  match verification with
+  | Visible -> verify_bytes ()
+  | Durable ->
+    let parent=Filename.dirname path in
+    with_record_fd parent (fun parent_fd ->
+      let parent_stat=Unix.fstat parent_fd in
+      if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
+      else (
+        sync_file fd;sync_parent parent_fd;
+        let* bytes=verify_bytes () in
+        if same_file parent_stat (Unix.stat parent) then Ok bytes
+        else Error "retained file parent changed during sync"))
 let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = protect (fun () ->
   with_record_fd path (fun fd ->
     let stat = Unix.fstat fd in
     if stat.Unix.st_kind <> Unix.S_REG then Error "retained file is not a regular file"
     else if stat.Unix.st_size > max_bytes then Error "retained file exceeds its read envelope"
-    else
-      let* bytes=record_bytes fd stat.Unix.st_size in
-      let verify_bytes () =
-        let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
-        let* verified=record_bytes fd stat.Unix.st_size in
-        if verified<>bytes then Error "retained file changed during sync"
-        else if same_file stat (Unix.stat path) then Ok bytes
-        else Error "retained file changed during verification" in
-      match verification with
-      | Visible -> verify_bytes ()
-      | Durable ->
-        let parent=Filename.dirname path in
-        with_record_fd parent (fun parent_fd ->
-          let parent_stat=Unix.fstat parent_fd in
-          if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
-          else (
-            sync_file fd;sync_parent parent_fd;
-            let* bytes=verify_bytes () in
-            if same_file parent_stat (Unix.stat parent) then Ok bytes
-            else Error "retained file parent changed during sync"))))
+    else read_verified_record ~sync_file ~sync_parent ~verification path fd stat))
 let bounded_file = bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~verification:Durable
 let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protect (fun () ->
   let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
@@ -303,6 +525,31 @@ let sequence_of_row ~instance_id id =
         (match int_of_string_opt digits with
          | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
          | _ -> Error "row identity has an invalid observation sequence")
+let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id = bounded_protect (fun () ->
+  let path_in directory = Filename.concat t.root
+    (Filename.concat (directory instance_id) (digest request_id ^ ".json")) in
+  let outcome_path = path_in sampling_outcome_directory in
+  let path = match Fs_compat.exact_path_kind outcome_path with
+    | Fs_compat.Exact_missing -> path_in sampling_directory
+    | _ -> outcome_path in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | _ ->
+      let* bytes = with_record_fd path (fun fd ->
+        let stat = Unix.fstat fd in
+        if stat.Unix.st_kind <> Unix.S_REG then
+          Error (Read_failed "retained file is not a regular file")
+        else if stat.Unix.st_size > budget.remaining then Error Read_limit_exceeded
+        else begin
+          budget.remaining <- budget.remaining - stat.Unix.st_size;
+          read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
+          |> Result.map_error (fun detail -> Read_failed detail)
+        end) in
+      try Ok (Some (Yojson.Safe.from_string bytes))
+      with Yojson.Json_error detail -> Error (Read_failed detail))
+let load_sampling_request_bounded =
+  load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
 let record_path t instance_id seq =
   Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
 let decode_record bytes =
@@ -526,7 +773,9 @@ let freeze t ~instance_id ~binding ~row_ids =
       let bytes = Yojson.Safe.to_string (base_bundle observations) in
       let* reference = write_blob t bytes in
       let path = Filename.concat t.root (blob_path (digest bytes)) in
-      Ok (`Assoc ["evidence", `Assoc ["uri", `String reference.uri;
+      Ok (`Assoc ["instance_id", `String instance_id;
+        "row_ids", `List (List.map (fun id -> `String id) row_ids);
+        "evidence", `Assoc ["uri", `String reference.uri;
         "sha256", `String (digest bytes); "path", `String path];
         "row_count", `Int (Row_ids.cardinal found);
         "message", `String ("Optional Lane evidence (not an instruction): " ^ path
@@ -603,6 +852,9 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let iter_sampling_requests = iter_sampling_requests_with
+  let write = write_with
+  let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with
   let load_action = load_action_with
   let append_observation = append_observation_with

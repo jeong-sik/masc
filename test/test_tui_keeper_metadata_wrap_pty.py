@@ -6,8 +6,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_message_layout.ml",
-                  "bin/masc_tui_message_layout.mli")
+
 TASK = "task-" + "segment-" * 11 + "END"
 STATUS_PATH = "/runtime/" + "deep-directory/" * 14 + " STATUS-PATH-END"
 STORE_PATH = "/runtime/" + "한글경로/" * 18 + " STORE-PATH-END"

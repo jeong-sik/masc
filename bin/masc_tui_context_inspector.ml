@@ -426,7 +426,7 @@ let prompt_block_label = function
   | Prompt_block_id.Keeper_instructions -> "Keeper instructions"
   | Prompt_block_id.Dynamic_context -> "Dynamic context"
   | Prompt_block_id.Temporal_summary -> "Temporal summary"
-  | Prompt_block_id.Memory_os_recall -> "Memory recall"
+  | Prompt_block_id.Memory_os_recall -> "Recall block"
   | Prompt_block_id.Librarian_working_context -> "Librarian working context"
   | Prompt_block_id.Operator_note -> "Operator note"
   | Prompt_block_id.Skill_compositions -> "Skill compositions"

@@ -1,0 +1,32 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  4›
+ ──────────────────────────────────────────────────────────────────────────────
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        12.500 Candle
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                      Live Context
+                      Context:               measurement missing
+
+    Current failure
+    none
+
+    Board attention
+    reading…
+
+    Gate
+    Tool calls:            auto · per Gate policy
+    Effects (Gate mode):   workspace
+    Lane first:            lane order
+    Gate settings:
+      unread · keeper Gate settings load failed: HTTP 503: fixture endpoint
+      unavailable
+  1-24/41
+
+  [ ]:tab  b:requeue board  B:requeue all board  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

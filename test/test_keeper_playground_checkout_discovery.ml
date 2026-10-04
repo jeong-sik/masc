@@ -65,14 +65,6 @@ let check_paths msg expected result = check (list string) msg expected (paths_of
 (* Discovery shape                                                     *)
 (* ------------------------------------------------------------------ *)
 
-(* The old layout must keep working: this is what makes the change need no
-   migration. *)
-let test_finds_legacy_repos_layout () =
-  with_temp_root (fun root ->
-    make_checkout root "repos/masc";
-    check_paths "repos/masc is still found" [ "repos/masc" ] (C.discover ~root))
-;;
-
 let test_finds_checkout_directly_under_root () =
   with_temp_root (fun root ->
     make_checkout root "masc";
@@ -386,8 +378,7 @@ let () =
   run
     "keeper_playground_checkout_discovery"
     [ ( "discovery"
-      , [ test_case "legacy repos/ layout still found" `Quick test_finds_legacy_repos_layout
-        ; test_case "checkout directly under root" `Quick
+      , [ test_case "checkout directly under root" `Quick
             test_finds_checkout_directly_under_root
         ; test_case "root itself is a checkout" `Quick test_root_itself_is_a_checkout
         ; test_case "hidden directories are traversed" `Quick

@@ -15,6 +15,7 @@ type t = {
   instance_id : string;
   package : package;
   artifact_store : Lane_addon_store.t option;
+  sampling_broker : Lane_addon_sampling.t option;
   mutable action_schema : Yojson.Safe.t option;
   mutable client : Agent_core.Mcp.t option;
   cleanup : unit -> (unit, error) result;
@@ -253,12 +254,20 @@ let stop t =
     Ok ()
 
 let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?(mounts = [])
-    ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store () =
+    ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
     else Error (Invalid_package "control_timeout_sec must be finite and positive") in
   let* () = validate_package package in
+  let sampling_broker = sampling_handler in
+  let* sampling_handler = match package.model_access, sampling_handler with
+    | Model_disabled, None -> Ok None
+    | Host_sampling, Some broker ->
+        Lane_addon_sampling.for_worker broker ~package ~instance_id
+        |> Result.map Option.some |> Result.map_error (fun detail -> Invalid_package detail)
+    | Host_sampling, None -> Error (Invalid_package "package requires host sampling; no host model handler is configured")
+    | Model_disabled, Some _ -> Error (Invalid_package "package does not declare host sampling") in
   let* () = match package.action_tool, artifact_store with
     | Some _, None -> Error (Invalid_package "action worker requires its owned artifact store")
     | _ -> Ok () in
@@ -331,7 +340,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
       stderr_source := None;
       Ok () in
-    let worker = { id; name; instance_id; package; artifact_store; action_schema = None;
+    let worker = { id; name; instance_id; package; artifact_store; sampling_broker; action_schema = None;
                    client = None; cleanup = worker_cleanup;
                    mutex = Eio.Mutex.create (); stopping = false; removed = false } in
     let result = try
@@ -351,7 +360,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         let* client = Agent_core.Mcp.connect ~sw ~mgr ~command:docker_command
             ~args:[ "container"; "start"; "--attach"; "--interactive"; id ]
             ~stderr:(stderr_w :> Eio.Flow.sink_ty Eio.Resource.t)
-            ~max_response_bytes:package.resources.max_reply_bytes ()
+            ~max_response_bytes:package.resources.max_reply_bytes ?sampling_handler ()
           |> Result.map_error protocol_error in
         Eio.Flow.close stderr_w;
         worker.client <- Some client;
@@ -392,6 +401,7 @@ let observe t ~binding ~sources =
   else Eio.Mutex.use_ro t.mutex (fun () ->
     if t.stopping then Error Stopped
     else
+      let read () =
       try
         let* client = match t.client with
           | Some client -> Ok client | None -> Error (Protocol_failed "worker initialization pending") in
@@ -418,7 +428,11 @@ let observe t ~binding ~sources =
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
         | Invalid_argument _) as exn ->
           if t.stopping then Error Stopped
-          else Error (Protocol_failed (Printexc.to_string exn)))
+          else Error (Protocol_failed (Printexc.to_string exn)) in
+      match t.sampling_broker with
+      | None -> read ()
+      | Some broker -> Lane_addon_sampling.with_observation broker ~binding ~sources
+          ~on_error:(fun detail -> Invalid_observation detail) read)
 
 (* This call only reports transport success or the package's explicit outcome.
    Once dispatched, errors never establish that the environment was unchanged. *)

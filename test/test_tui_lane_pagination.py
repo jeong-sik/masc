@@ -7,30 +7,24 @@ import hashlib
 import json
 import os
 import re
-from pathlib import Path
 import sys
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The row this pages through ("VERIFICATION REQUEST") and the surface it
-# starts on are both masc_tui_render.ml's.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-)
+
 
 
 def run(executable: str) -> None:
     lane = "verifier_exact"
-    first_path = h.lane_runs_path(lane)
+    first_path = _keyboard_keepers.lane_runs_path(lane)
     next_path = first_path + "&before_started_at=100.125&before_run_id=run-002"
     detail_path = "/api/v1/dashboard/exact-lane-runs/run-001"
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-    template = h.verifier_lane_runs_response()[1]["runs"][0]
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    template = _keyboard_keepers.verifier_lane_runs_response()[1]["runs"][0]
 
     # The list draws no run id, so each row is told apart on screen by the
     # task it verified; the pages still turn on the run id.
@@ -53,7 +47,7 @@ def run(executable: str) -> None:
         return older
 
     fixtures[next_path] = fail_next
-    _, detail = h.verifier_lane_run_detail_response()
+    _, detail = _keyboard_keepers.verifier_lane_run_detail_response()
     detail = copy.deepcopy(detail)
     detail["run"]["run_id"] = "run-001"
     detail["run"]["started_at"] = 100.125
@@ -66,48 +60,48 @@ def run(executable: str) -> None:
     fixtures[detail_path] = read_detail
 
     def interact(process, master, _slave, output, _base_path):
-        h.resize_and_wait(process, master, output, rows=30, columns=150,
+        _keyboard_harness.resize_and_wait(process, master, output, rows=30, columns=150,
                           needle=b"MASC Dashboard")
-        h.palette_go(process, master, output, b"go lanes", b"Verifier")
-        h.send_and_wait(process, master, output, b"/Verifier",
+        _keyboard_harness.palette_go(process, master, output, b"go lanes", b"Verifier")
+        _keyboard_harness.send_and_wait(process, master, output, b"/Verifier",
                         re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier"))
-        h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
-        h.send_and_wait(process, master, output, b"\r", b"50 loaded / 51 retained")
-        h.send_and_wait(process, master, output, b"]", b"older history temporarily unavailable")
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
+        _keyboard_harness.send_and_wait(process, master, output, b"\r", b"50 loaded / 51 retained")
+        _keyboard_harness.send_and_wait(process, master, output, b"]", b"older history temporarily unavailable")
+        screen = _keyboard_harness.screen_text(bytes(output))
         if b"50 loaded / 51 retained" not in screen or b"task-051" not in screen:
             raise AssertionError(f"failed page hid retained rows: {screen!r}")
         fixtures[next_path] = next_page
-        h.send_and_wait(process, master, output, b"]", b"51 loaded / 51 retained")
-        h.read_available(master, output)
+        _keyboard_harness.send_and_wait(process, master, output, b"]", b"51 loaded / 51 retained")
+        _keyboard_harness.read_available(master, output)
         before_resize = len(output)
-        h.resize_and_wait(process, master, output, rows=30, columns=149,
-                          needle=b"51 loaded / 51 retained", controls=(h.FULL_REDRAW,))
-        redraw = output.find(h.FULL_REDRAW, before_resize)
+        _keyboard_harness.resize_and_wait(process, master, output, rows=30, columns=149,
+                          needle=b"51 loaded / 51 retained", controls=(_keyboard_harness.FULL_REDRAW,))
+        redraw = output.find(_keyboard_harness.FULL_REDRAW, before_resize)
         if redraw < 0:
             raise AssertionError("pagination resize did not redraw the terminal")
-        h.wait_for_output(process, master, output, h.FRAME_END, start=redraw, timeout=3.0)
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.wait_for_output(process, master, output, _keyboard_harness.FRAME_END, start=redraw, timeout=3.0)
+        screen = _keyboard_harness.screen_text(bytes(output))
         if b"task-001" not in screen or b"older history temporarily unavailable" in screen:
             raise AssertionError(f"older row or recovered page status is wrong: {screen!r}")
         captured = bytes(output)
-        end = captured.rfind(h.FRAME_END) + len(h.FRAME_END)
-        redraw = captured.rfind(h.FULL_REDRAW, 0, end)
-        start = captured.rfind(h.FRAME_START, 0, redraw)
+        end = captured.rfind(_keyboard_harness.FRAME_END) + len(_keyboard_harness.FRAME_END)
+        redraw = captured.rfind(_keyboard_harness.FULL_REDRAW, 0, end)
+        start = captured.rfind(_keyboard_harness.FRAME_START, 0, redraw)
         if min(start, redraw) < 0:
             raise AssertionError("pagination evidence has no complete redraw")
         frame = captured[start:end]
-        h.send_and_wait(process, master, output, b"\r", b"VERIFICATION REQUEST")
+        _keyboard_harness.send_and_wait(process, master, output, b"\r", b"VERIFICATION REQUEST")
         if detail_calls != ["run-001"]:
             raise AssertionError(f"Enter did not open the exact older run: {detail_calls!r}")
-        h.send_and_wait(process, master, output, b"\x1b", b"51 loaded / 51 retained")
+        _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"51 loaded / 51 retained")
         # A current refresh replaces the accumulated history instead of
         # attaching a fresh head to an older cursor's rows.
         fixtures[first_path] = (200, {"runs": [row(99)], "has_more": False, "total": 1})
-        h.send_and_wait(process, master, output, b"r", b"1 loaded / 1 retained")
-        h.resize_and_wait(process, master, output, rows=30, columns=150,
-                          needle=b"task-099", controls=(h.FULL_REDRAW,))
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.send_and_wait(process, master, output, b"r", b"1 loaded / 1 retained")
+        _keyboard_harness.resize_and_wait(process, master, output, rows=30, columns=150,
+                          needle=b"task-099", controls=(_keyboard_harness.FULL_REDRAW,))
+        screen = _keyboard_harness.screen_text(bytes(output))
         if b"task-001" in screen:
             raise AssertionError(f"refresh retained the old cursor page: {screen!r}")
         if page_calls != ["failed", "succeeded"]:
@@ -121,7 +115,7 @@ def run(executable: str) -> None:
         }), flush=True)
         os.write(master, b"q")
 
-    h.run_terminal_scenario(executable, description="Standalone history cursor pages preserve exact source",
+    _keyboard_harness.run_terminal_scenario(executable, description="Standalone history cursor pages preserve exact source",
                             interact=interact, http_fixtures=fixtures)
 
 

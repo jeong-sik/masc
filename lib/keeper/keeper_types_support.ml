@@ -193,8 +193,8 @@ let keeper_feedback_log_path config name =
 (** Rotate [path] if it exceeds the configured size threshold.
     Keeps at most [max_rotated] numbered backups (.1, .2, ...). *)
 let maybe_rotate_file path =
-  let max_bytes = Env_config.KeeperMetrics.max_file_bytes in
-  let max_rotated = Env_config.KeeperMetrics.max_rotated_files in
+  let max_bytes = (Env_config.KeeperMetrics.max_file_bytes ()) in
+  let max_rotated = (Env_config.KeeperMetrics.max_rotated_files ()) in
   if max_bytes <= 0 then ()
   else
     match Fs_compat.file_size path with

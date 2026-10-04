@@ -138,6 +138,7 @@ let dispatch
        | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
        | Some _ | None ->
          let run () = Tool_misc.dispatch
+           ~lane_access:(Lane_addon_sources.Keeper keeper_name)
            { Tool_misc.config
            ; agent_name
            ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()

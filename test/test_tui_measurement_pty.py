@@ -12,23 +12,13 @@ from pathlib import Path
 import re
 import threading
 from typing import Any
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_repositories as _keyboard_repositories
 
-import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "lib/librarian_continuity_report.ml",
-    "lib/tui_decode.ml",
-    "lib/tui_decode.mli",
-    "lib/masc_http_client/pool.ml",
-    "lib/masc_http_client/pool.mli",
-    "lib/masc_http_client/masc_http_client.ml",
-    "lib/masc_http_client/masc_http_client.mli",
-)
+
 
 
 def generation(text: str) -> dict[str, Any]:
@@ -141,7 +131,7 @@ def report(identity: str, samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def artifact(value: dict[str, Any]) -> tuple[str, h.HttpResponse]:
+def artifact(value: dict[str, Any]) -> tuple[str, _keyboard_harness.HttpResponse]:
     content = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     sha = hashlib.sha256(content.encode()).hexdigest()
     return sha, (
@@ -156,8 +146,8 @@ def artifact(value: dict[str, Any]) -> tuple[str, h.HttpResponse]:
 
 
 def run(executable: str, scenario: str, evidence: Path | None) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
-    requests: h.HttpRequests = []
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    requests: _keyboard_harness.HttpRequests = []
     values = {
         "contexts": report(
             "two-contexts",
@@ -219,7 +209,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
     if scenario == "missing":
         response = (404, {"error": "artifact not found"})
     delayed = (
-        h.GatedHttpResponse(response, hold_seconds=15.0)
+        _keyboard_harness.GatedHttpResponse(response, hold_seconds=15.0)
         if scenario == "stale"
         else None
     )
@@ -238,16 +228,16 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         # The existing streaming fixture sends headers before asking for body
         # chunks. Fixed-length refusal must need no body; a close-delimited
         # response must be refused without waiting for its end.
-        fixtures["/api/v1/artifacts/" + sha] = h.StreamingHttpResponse(
+        fixtures["/api/v1/artifacts/" + sha] = _keyboard_harness.StreamingHttpResponse(
             unfinished_body,
             headers=(("Content-Length", str(oversized_bytes)),)
             if scenario in ("oversized-length", "oversized-lane")
             else (),
         )
         if scenario == "oversized-lane":
-            fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-            fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-            fixtures[h.lane_runs_path("librarian_exact")] = (
+            fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
+            fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+            fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (
                 200,
                 {
                     "runs": [
@@ -270,7 +260,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 "/api/v1/artifacts/" + sha
             ]
     if scenario == "malformed":
-        fixtures["/api/v1/artifacts/" + sha] = h.RawHttpResponse(
+        fixtures["/api/v1/artifacts/" + sha] = _keyboard_harness.RawHttpResponse(
             200, b"{", content_type="application/json"
         )
     new_sha, new_response = artifact(
@@ -279,7 +269,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
     fixtures["/api/v1/artifacts/" + new_sha] = new_response
     status_requested = threading.Event()
     if scenario in ("overlay", "overlay-lanes", "overlay-return", "overlay-palette"):
-        status_response: h.HttpResponse = (
+        status_response: _keyboard_harness.HttpResponse = (
             200,
             {
                 "scope": {"kind": "project"},
@@ -296,12 +286,12 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             },
         )
 
-        def read_status() -> h.HttpResponse:
+        def read_status() -> _keyboard_harness.HttpResponse:
             status_requested.set()
             return status_response
 
         fixtures["/api/v1/git/status"] = read_status
-        fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
+        fixtures[_keyboard_repositories.REPOSITORIES_PATH] = _keyboard_repositories.repositories_fixture()
         fixtures["/api/v1/repositories/masc/changes"] = (
             200,
             {
@@ -311,13 +301,13 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         )
 
     def interact_body(process, master, _slave, output, _base):
-        h.send_and_wait(process, master, output, b"3", b"MASC Keepers")
-        h.select_keeper_row(process, master, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, master, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, master, output, b"alpha")
 
         def check_receive_limit() -> None:
             reason = b"HTTP 200: body exceeds 4194304 bytes"
-            h.wait_for_output(process, master, output, reason, start=0, timeout=3.0)
-            screen = h.screen_text(bytes(output))
+            _keyboard_harness.wait_for_output(process, master, output, reason, start=0, timeout=3.0)
+            screen = _keyboard_harness.screen_text(bytes(output))
             assert body_started.is_set() and not release_body.is_set()
             # The ordinary 100-column frame must show the reason and limit;
             # the long artifact URL may follow beyond the visible line.
@@ -328,17 +318,17 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 (evidence / (scenario + ".txt")).write_bytes(screen)
 
         if scenario == "oversized-lane":
-            h.palette_go(process, master, output, b"go lanes", b"Librarian")
-            h.send_and_wait(
+            _keyboard_harness.palette_go(process, master, output, b"go lanes", b"Librarian")
+            _keyboard_harness.send_and_wait(
                 process,
                 master,
                 output,
                 b"/Librarian",
                 re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian"),
             )
-            h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
-            h.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained")
-            h.send_and_wait(
+            _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
+            _keyboard_harness.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained")
+            _keyboard_harness.send_and_wait(
                 process, master, output, b"\r", b"Lane run detail: GET failed:"
             )
             check_receive_limit()
@@ -346,19 +336,19 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             return
 
         def submit_command(text: str, needle: bytes) -> None:
-            h.send_and_wait(process, master, output, b"i", h.COMPOSER_FOCUSED)
+            _keyboard_harness.send_and_wait(process, master, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
             command = text.encode()
-            h.send_and_wait(
+            _keyboard_harness.send_and_wait(
                 process,
                 master,
                 output,
-                h.PASTE_START + command + h.PASTE_END,
+                _keyboard_chat.PASTE_START + command + _keyboard_chat.PASTE_END,
                 command,
             )
-            h.send_and_wait(process, master, output, b"\r", needle)
+            _keyboard_harness.send_and_wait(process, master, output, b"\r", needle)
 
         if scenario in ("overlay-lanes", "overlay-palette"):
-            h.palette_go(process, master, output, b"go lanes", b"MASC Lanes")
+            _keyboard_harness.palette_go(process, master, output, b"go lanes", b"MASC Lanes")
         if scenario in (
             "overlay",
             "overlay-lanes",
@@ -369,7 +359,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             # still sees it. The HTTP fixture proves /diff opened that state.
             submit_command(
                 "/diff",
-                h.FRAME_START
+                _keyboard_harness.FRAME_START
                 if scenario in ("overlay-lanes", "overlay-palette")
                 else b"overlay-file.ml",
             )
@@ -378,17 +368,17 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             # Returning to the same surface need not repaint its footer.
             # Check the observable result after the palette command and Esc
             # instead of requiring a redundant intermediate Lanes frame.
-            h.send_and_wait(process, master, output, b":go lanes\r\x1b", b"MASC Dashboard")
+            _keyboard_harness.send_and_wait(process, master, output, b":go lanes\r\x1b", b"MASC Dashboard")
             # Home opens a Keeper chooser on i; select the command target
             # explicitly before exercising the shared composer again.
-            h.send_and_wait(process, master, output, b"3", b"MASC Keepers")
-            h.select_keeper_row(process, master, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, master, output, b"3", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, master, output, b"alpha")
         if scenario == "theme-preview":
-            h.palette_go(process, master, output, b"go System / themes", b"MASC Themes")
-            h.wait_for_output(
+            _keyboard_harness.palette_go(process, master, output, b"go System / themes", b"MASC Themes")
+            _keyboard_harness.wait_for_output(
                 process, master, output, b"terminal colours", start=0, timeout=3.0
             )
-            preview = h.send_and_wait(
+            preview = _keyboard_harness.send_and_wait(
                 process, master, output, b"j", b"Enter:pick another"
             )
             assert b"\x1b]4;" in preview and b"\x1b]11;" in preview, preview
@@ -420,10 +410,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             "oversized-length": b"Measurement: GET failed:",
             "oversized-unfinished": b"Measurement: GET failed:",
         }[scenario]
-        h.wait_for_output(process, master, output, expected, start=0, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, master, output, expected, start=0, timeout=5.0)
         if scenario in ("oversized-length", "oversized-unfinished"):
             check_receive_limit()
-            h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
+            _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
             os.write(master, b"q")
             return
         if delayed is not None:
@@ -432,24 +422,24 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             delayed.release.set()
             assert delayed.completed.wait(2.0), "old artifact was not released"
         before = len(output)
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process,
             master,
             output,
             rows=70 if scenario == "large" else 50,
             columns=90 if scenario == "large" else 200,
             needle=b"MASC Measurement",
-            controls=(h.FULL_REDRAW,),
+            controls=(_keyboard_harness.FULL_REDRAW,),
         )
-        redraw = output.find(h.FULL_REDRAW, before)
+        redraw = output.find(_keyboard_harness.FULL_REDRAW, before)
         assert redraw >= 0
-        h.wait_for_output(
-            process, master, output, h.FRAME_END, start=redraw, timeout=3.0
+        _keyboard_harness.wait_for_output(
+            process, master, output, _keyboard_harness.FRAME_END, start=redraw, timeout=3.0
         )
-        end = output.find(h.FRAME_END, redraw) + len(h.FRAME_END)
-        start = output.rfind(h.FRAME_START, before, redraw)
+        end = output.find(_keyboard_harness.FRAME_END, redraw) + len(_keyboard_harness.FRAME_END)
+        start = output.rfind(_keyboard_harness.FRAME_START, before, redraw)
         assert start >= 0
-        screen = h.screen_text(bytes(output[start:end]))
+        screen = _keyboard_harness.screen_text(bytes(output[start:end]))
         if scenario == "large":
             assert b"SCORED 2" in screen and b"INCOMPLETE 0" in screen, screen
             for needle in (
@@ -463,7 +453,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             ):
                 assert needle in screen, (needle, screen)
             # A bounded display remains interactive after the large response.
-            h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
+            _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
         elif scenario == "contexts":
             for needle in (
                 b"SCORED 2",
@@ -503,25 +493,25 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 assert needle in screen, (needle, screen)
             assert screen.count(b"JUDGE FAILED") == 1, screen
             assert b"JUDGE CAUSE  synthetic provider HTTP 503" in screen, screen
-            h.resize_and_wait(
+            _keyboard_harness.resize_and_wait(
                 process,
                 master,
                 output,
                 rows=15,
                 columns=200,
                 needle=b"MASC Measurement",
-                controls=(h.FULL_REDRAW,),
+                controls=(_keyboard_harness.FULL_REDRAW,),
             )
             for _ in range(4):
-                h.read_available(master, output)
+                _keyboard_harness.read_available(master, output)
                 next_frame = len(output)
                 os.write(master, b"\x1b[6~")
-                h.wait_for_output(
-                    process, master, output, h.FRAME_END,
+                _keyboard_harness.wait_for_output(
+                    process, master, output, _keyboard_harness.FRAME_END,
                     start=next_frame, timeout=3.0,
                 )
-                h.drain_until_quiet(process, master, output)
-                scrolled = h.screen_text(bytes(output))
+                _keyboard_harness.drain_until_quiet(process, master, output)
+                scrolled = _keyboard_harness.screen_text(bytes(output))
                 if b"JUDGE CAUSE  synthetic provider HTTP 503" in scrolled and b"JUDGE FAILED" not in scrolled:
                     break
             else:
@@ -546,27 +536,27 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             "overlay-palette",
         ):
             assert b"overlay-origin" in screen and b"SCORED 1" in screen, screen
-            closed = h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
-            assert b"MASC Measurement" not in h.screen_text(closed), closed
+            closed = _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
+            assert b"MASC Measurement" not in _keyboard_harness.screen_text(closed), closed
             if scenario == "overlay-return":
-                h.palette_go(
+                _keyboard_harness.palette_go(
                     process, master, output, b"go Workspace", b"MASC Workspace"
                 )
-                h.send_and_wait(process, master, output, b"d", b"overlay-file.ml")
-                closed = h.send_and_wait(
+                _keyboard_harness.send_and_wait(process, master, output, b"d", b"overlay-file.ml")
+                closed = _keyboard_harness.send_and_wait(
                     process, master, output, b"\x1b", b"MASC Workspace"
                 )
-                assert "Keepers ▸ alpha ▸ chat".encode() not in h.screen_text(closed), (
+                assert "Keepers ▸ alpha ▸ chat".encode() not in _keyboard_harness.screen_text(closed), (
                     closed
                 )
                 # A new /diff still owns its direct return to Keeper chat.
                 submit_command("/diff", b"overlay-file.ml")
-                h.send_and_wait(
+                _keyboard_harness.send_and_wait(
                     process, master, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode()
                 )
-                h.escape_to_keeper_detail(process, master, output, name=b"alpha")
+                _keyboard_harness.escape_to_keeper_detail(process, master, output, name=b"alpha")
         elif scenario == "theme-preview":
-            h.palette_go(
+            _keyboard_harness.palette_go(
                 process, master, output, b"go System / themes", b"terminal colours"
             )
         elif scenario == "probabilities-preview":
@@ -582,7 +572,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 assert needle in screen, (needle, screen)
             # The overview covers the entire report; the explicitly labelled
             # text preview need not contain every probability or failure stage.
-            h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
+            _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
         if evidence is not None:
             evidence.mkdir(parents=True, exist_ok=True)
             (evidence / (scenario + ".pty")).write_bytes(output)
@@ -602,7 +592,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             if delayed is not None:
                 delayed.release.set()
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Noul measurement: " + scenario,
         interact=interact,

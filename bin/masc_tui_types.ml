@@ -1791,9 +1791,10 @@ type runtime_lane_list =
 type runtime_lane_write =
   | Lane_write_idle
   | Lane_write_posting
-  | Lane_write_rereading of runtime_lane_list * int
+  | Lane_write_rereading of runtime_lane_list * int * Masc_tui_runtime_config_receipt.t
       (* The list's load generation when the write answered. A load of that
-         list launched after it is the first to carry the write. *)
+         list launched after it reads current execution state; the receipt
+         independently says whether the saved configuration was applied. *)
 
 (* What the lane editor says about its last key or write. Both the Runtime
    and the Lanes view draw it, and a new view, a moved cursor or a newly
@@ -1803,15 +1804,25 @@ type runtime_lane_notice =
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
-  | Lane_write_confirmed
-      (* A key that would write, pressed while the previous write is out. *)
+  | Lane_write_committed of Masc_tui_runtime_config_receipt.t
+      (* File commit and application facts, not inferred from a list GET. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
-  | Lane_write_confirmed -> "Saved · current candidate order reloaded"
+  | Lane_write_committed receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
+
+let runtime_lane_notice_lines ~cols notice =
+  runtime_lane_notice_text notice
+  |> Masc.Tui_terminal_text.sanitize_terminal_text
+  |> Masc_tui_message_layout.wrap_words
+       ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
+
+let runtime_lane_notice_rows ~cols notice =
+  Option.fold ~none:0
+    ~some:(fun notice -> List.length (runtime_lane_notice_lines ~cols notice)) notice
 
 (* Whether a list on screen carries the last lane write. It is not about a
    key, so it is kept apart from the notice: only a load of that list sets it.
@@ -2880,13 +2891,13 @@ let runtime_listing_chrome
       ?(editor_rows = None)
       ~authority_rows
       ~error
-      ~action_error
+      ~action_error_rows
       ~prompt
       ~picker_rows
       ()
   =
   listing_chrome ~error + 1 + max 1 authority_rows
-  + (if Option.is_some action_error then 2 else 0)
+  + (if action_error_rows > 0 then action_error_rows + 1 else 0)
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
   + route_rows
@@ -9482,7 +9493,7 @@ let runtime_lane_stale_lines (state : state) =
     ; line "standalone lane list" state.standalone_lanes_lane_freshness
     ]
 
-let lanes_scrolled (state : state) =
+let lanes_scrolled ~cols (state : state) =
   match state.lanes_mode with
   | Lanes_run_list _ ->
       (* The run list replaces the two-section overview, so the typed model
@@ -9517,7 +9528,7 @@ let lanes_scrolled (state : state) =
            | None -> false
            | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
       + (if Option.is_some state.lanes_action_error then 1 else 0)
-      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + runtime_lane_notice_rows ~cols state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
@@ -10158,12 +10169,12 @@ let runtime_picker_empty_note picker =
 let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
-let runtime_exact_picker_page (state : state) ~terminal_rows =
+let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
   match state.view, state.slot_editor with
   | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
     let extra =
       (if Option.is_some state.lanes_action_error then 1 else 0)
-      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + runtime_lane_notice_rows ~cols state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
       + (match state.runtime_lane_write with Lane_write_idle -> 0 | _ -> 1) in
     (* Two lines per model, after the frame, search, selected ID and keys. *)
@@ -10264,10 +10275,10 @@ let same_runtime_lane_list a b =
    waiting for a re-read of the list it changed that starts after this
    point; the caller launches that re-read. *)
 let settle_runtime_lane_write (state : state) ~written = function
-  | Ok () ->
-    state.runtime_lane_notice <- None;
+  | Ok receipt ->
+    state.runtime_lane_notice <- Some (Lane_write_committed receipt);
     state.runtime_lane_write <-
-      Lane_write_rereading (written, runtime_lane_list_generation state written)
+      Lane_write_rereading (written, runtime_lane_list_generation state written, receipt)
   | Error detail ->
     state.runtime_lane_notice <- Some (Lane_write_refused detail);
     state.runtime_lane_write <- Lane_write_idle
@@ -10280,15 +10291,13 @@ let runtime_lane_list_reread (state : state) ~list ~generation result =
    | Ok () -> set_runtime_lane_list_freshness state list Lane_list_read
    | Error _ -> ());
   match state.runtime_lane_write with
-  | Lane_write_rereading (written, answered_at)
+  | Lane_write_rereading (written, answered_at, receipt)
     when same_runtime_lane_list written list && generation > answered_at ->
     state.runtime_lane_write <- Lane_write_idle;
     (match result with
      | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
-     | Ok () -> state.runtime_lane_notice <- Some Lane_write_confirmed);
-    (match state.runtime_lane_notice with
-     | Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Some (Lane_write_refused _ | Lane_write_confirmed) | None -> ())
+     | Ok () -> ());
+    state.runtime_lane_notice <- Some (Lane_write_committed receipt)
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
@@ -11066,7 +11075,7 @@ let runtime_surface_listing_chrome ~cols state =
   runtime_listing_chrome
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
     ~error:state.runtime_surface_error
-    ~action_error:state.runtime_lane_notice
+    ~action_error_rows:(runtime_lane_notice_rows ~cols state.runtime_lane_notice)
     ~stale_rows:(List.length (runtime_lane_stale_lines state))
     ~prompt:(Option.is_some (runtime_lane_prompt state))
     (* The two route rows -- [runtime].default and media_failover -- and their
@@ -11134,7 +11143,7 @@ let runtime_scrolled ~cols (state : state) : scrolled option =
       ; sc_preview_keep = None
       }
 
-let scrolled_surface_rows (state : state) : surface -> scrolled option =
+let scrolled_surface_rows ~cols (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some
       { sc_count = count
@@ -11208,7 +11217,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
-       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
+       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled ~cols state))
   | Clients ->
       listing ~error:state.clients_surface_error
         (match state.clients_surface with
@@ -11314,8 +11323,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
 (* Callers pass [surface_body_rows], which has already removed the composer
    and agenda strip. Adding the agenda again here makes every key bound one row
    shorter than the renderer whenever the strip is present. *)
-let scrolled_surface (state : state) (surface : surface) : scrolled option =
-  scrolled_surface_rows state surface
+let scrolled_surface ~cols (state : state) (surface : surface) : scrolled option =
+  scrolled_surface_rows ~cols state surface
 ;;
 
 (* The text a "/" search reads for each row: the identifiers an operator

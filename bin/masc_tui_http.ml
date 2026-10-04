@@ -1880,7 +1880,7 @@ let post_runtime_assignment ~(host : string) ~(port : int)
     error rather than a guessed success, matching [tool_envelope_outcome]. *)
 let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ~(expected_runtime_ids : string list) ~(runtime_ids : string list) :
-      (unit, string) result =
+      (runtime_config_commit_receipt, string) result =
   let ( let* ) = Result.bind in
   (* The candidate order and revision must come from the same file read.
      /runtime/resolved is a separately published in-process snapshot and can
@@ -1913,7 +1913,6 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ; "expected_source_revision", `String revision ]) in
     let* json = post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body in
     decode_runtime_config_commit_receipt json
-    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 
 (* The routing API names a standalone lane's walk order "exact/<name>", which
    keeps its names apart from conversation-lane ids. *)
@@ -1927,7 +1926,6 @@ let post_runtime_lane_action ~host ~port fields =
   | Error detail -> Error detail
   | Ok json ->
     decode_runtime_config_commit_receipt json
-    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 ;;
 
 (** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
@@ -1935,7 +1933,7 @@ let post_runtime_lane_action ~host ~port fields =
     route -- it has no per-entry action -- so a caller must know it is sending
     everything the file should hold. *)
 let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)
-  : (unit, string) result =
+  : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String "media_failover"
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
@@ -1944,7 +1942,7 @@ let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string lis
 (** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the runtime
     a keeper with no assignment walks. [None] clears the entry. *)
 let set_runtime_default ~(host : string) ~(port : int)
-      ~(runtime_id : string option) : (unit, string) result =
+      ~(runtime_id : string option) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String "default"
     ; ( "runtime_id"
@@ -1955,7 +1953,7 @@ let set_runtime_default ~(host : string) ~(port : int)
     lane under [lane] with [runtime_ids] as its candidates. The server refuses
     a name the file already declares. *)
 let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-      ~(runtime_ids : string list) : (unit, string) result =
+      ~(runtime_ids : string list) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane
     ; "action", `String "create"
@@ -1967,7 +1965,7 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     header and every reference to it -- assignments and [\[runtime\].default] --
     in one validated write, because a lane's name is its routing key. *)
 let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-      ~(new_lane : string) : (unit, string) result =
+      ~(new_lane : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane
     ; "action", `String "rename"
@@ -1981,7 +1979,7 @@ let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     writer added in between is kept. The server refuses an id the lane already
     declares. *)
 let append_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) : (unit, string) result =
+      ~(runtime_id : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "append"
@@ -2002,7 +2000,7 @@ type exact_slot_move =
     declared slot it rejected. The server refuses a slot the lane does not
     declare, and its last one. *)
 let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) : (unit, string) result =
+      ~(runtime_id : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "drop"
@@ -2014,7 +2012,7 @@ let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane
     id and a direction for the same reason as the drop. The server refuses a
     slot already at the end the move heads for. *)
 let move_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
+      ~(runtime_id : string) ~(move : exact_slot_move) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "move"
@@ -2035,7 +2033,7 @@ let replace_exact_lane_slot ~host ~port ~lane ~runtime_id ~replacement_runtime_i
     through it -- an assignment, or [\[runtime\].default] for every keeper
     without one -- and names each. *)
 let remove_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-    : (unit, string) result =
+    : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane; "action", `String "remove" ]
 ;;

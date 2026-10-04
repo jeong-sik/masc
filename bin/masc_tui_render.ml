@@ -3188,7 +3188,9 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
 let runtime_lane_notice_style = function
   | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
   | Masc_tui_types.Lane_write_pending -> Theme.warn ()
-  | Masc_tui_types.Lane_write_confirmed -> Theme.info ()
+  | Masc_tui_types.Lane_write_committed receipt ->
+    if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Theme.warn ()
+    else Theme.info ()
 
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
@@ -3398,9 +3400,9 @@ let render_exact_lane_provider_editor (state : state) editor =
   (match state.runtime_lane_notice with
    | None -> ()
    | Some notice ->
-     box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
-       ("  " ^ Keeper_chat.terminal_safe_text
-          (Masc_tui_types.runtime_lane_notice_text notice)));
+     List.iter
+       (fun line -> box_line_styled buf cols ~style:(runtime_lane_notice_style notice) ("  " ^ line))
+       (Masc_tui_types.runtime_lane_notice_lines ~cols notice));
   List.iter
     (fun line -> box_line_styled buf cols ~style:(Theme.warn ())
        ("  " ^ Keeper_chat.terminal_safe_text line))
@@ -3409,10 +3411,10 @@ let render_exact_lane_provider_editor (state : state) editor =
    | Masc_tui_types.Lane_write_posting ->
      box_line_styled buf cols ~style:(Theme.info ()) "  Saving candidate order..."
    | Masc_tui_types.Lane_write_rereading _ ->
-     box_line_styled buf cols ~style:(Theme.info ()) "  Reloading saved candidate order..."
+     box_line_styled buf cols ~style:(Theme.info ()) "  Reading current candidate order..."
    | Masc_tui_types.Lane_write_idle -> ());
   (match Masc_tui_types.runtime_picker_projection
-     ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows) state with
+     ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows ~cols) state with
    | Some picker ->
      let action = match picker.Masc_tui_types.rlp_pick with
        | Masc_tui_types.Pick_exact_lane_replacement _ -> "Replace selected candidate", "Enter replace"
@@ -3749,7 +3751,7 @@ let render_lanes_overview (state : state) =
    | Some lane ->
        let action_error_rows =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
-         + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
+         + Masc_tui_types.runtime_lane_notice_rows ~cols state.runtime_lane_notice
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
        in
        let picker_rows =
@@ -3791,9 +3793,9 @@ let render_lanes_overview (state : state) =
   (match state.runtime_lane_notice with
    | None -> ()
    | Some notice ->
-       box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
-         ("  " ^ Keeper_chat.terminal_safe_text
-                   (Masc_tui_types.runtime_lane_notice_text notice)));
+       List.iter
+         (fun line -> box_line_styled buf cols ~style:(runtime_lane_notice_style notice) ("  " ^ line))
+         (Masc_tui_types.runtime_lane_notice_lines ~cols notice));
   List.iter
     (fun line ->
        box_line_styled buf cols ~style:(Theme.warn ())
@@ -3974,7 +3976,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let layout = lanes_scrolled state in
+  let layout = lanes_scrolled ~cols state in
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
@@ -6779,7 +6781,7 @@ let render_system_logs (state : state) =
   (* The scroll row is a frame row while the page holds more entries than
      fit, and only then; the layout the keypress reads says so. *)
   let content_height =
-    match scrolled_surface state System_logs with
+    match scrolled_surface ~cols state System_logs with
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
           ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
@@ -6947,7 +6949,7 @@ let render_verification_list (state : state) =
   (* The height the keypress bounds its step with, asked of the same layout:
      it counts the rows drawn under the list as well as the frame. *)
   let content_height =
-    match scrolled_surface state Verification with
+    match scrolled_surface ~cols state Verification with
     | Some layout ->
         Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
           ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
@@ -8639,7 +8641,7 @@ let render_changes_list (state : state) =
      did not, and then the preview took half the body and the bound still did
      not know. *)
   let chrome_rows, preview_keep =
-    match scrolled_surface state Changes with
+    match scrolled_surface ~cols state Changes with
     | Some s -> (s.sc_chrome, s.sc_preview_keep)
     | None -> (listing_chrome ~error:state.changes_error, None)
   in
@@ -8663,7 +8665,7 @@ let render_changes_list (state : state) =
   (* The list's rows as the keypress counts them: what the preview leaves,
      less the scroll row while the list overflows. *)
   let content_height =
-    match scrolled_surface state Changes with
+    match scrolled_surface ~cols state Changes with
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
           ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
@@ -9842,9 +9844,9 @@ let render_runtime (state : state) =
   (match state.runtime_lane_notice with
    | None -> ()
    | Some notice ->
-       c.push_styled ~style:(runtime_lane_notice_style notice)
-         ("  " ^ Keeper_chat.terminal_safe_text
-                   (Masc_tui_types.runtime_lane_notice_text notice));
+       List.iter
+         (fun line -> c.push_styled ~style:(runtime_lane_notice_style notice) ("  " ^ line))
+         (Masc_tui_types.runtime_lane_notice_lines ~cols notice);
        c.push_divider ());
   (* Counted in [runtime_surface_listing_chrome] as one row each and a
      divider. *)

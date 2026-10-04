@@ -453,6 +453,37 @@ let summary receipt =
     exact_output_registry
 ;;
 
+let lane_needs_attention receipt =
+  receipt.durability = Durability_unconfirmed
+  || receipt.lock_warnings <> []
+  || receipt.application.routing_requires_restart
+  || receipt.application.keeper_requires_restart
+  || (match receipt.application.exact_output_registry with
+      | Exact_output_registry_applied _ -> false
+      | Exact_output_registry_unpublished | Exact_output_registry_kept _ -> true)
+;;
+
+let lane_summary receipt =
+  let file = match receipt.durability with
+    | Durable -> "File saved"
+    | Durability_unconfirmed -> "File written; durability unconfirmed" in
+  let exact = match receipt.application.exact_output_registry with
+    | Exact_output_registry_applied _ -> "exact lanes applied"
+    | Exact_output_registry_unpublished -> "exact lanes unavailable; restart required"
+    | Exact_output_registry_kept { reason } ->
+      "exact lanes unchanged: " ^ reason ^ "; correct configuration before restart" in
+  let routing = match receipt.application.routing_status with
+    | Routing_active -> "routing active"
+    | Routing_applied -> "routing applied" in
+  String.concat " · "
+    ([file; exact; routing]
+     @ (if receipt.application.routing_requires_restart then ["routing restart required"] else [])
+     @ (if receipt.application.keeper_requires_restart then
+          ["Keeper settings await restart: " ^ String.concat ", " receipt.application.keeper_pending_keys]
+        else [])
+     @ List.map (fun warning -> warning.detail) receipt.lock_warnings)
+;;
+
 type preview =
   | Can_save
   | Cannot_save of string

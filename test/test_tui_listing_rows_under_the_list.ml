@@ -31,7 +31,7 @@ let answered : Masc.Tui_decode.verification_snapshot =
   }
 
 let layout state =
-  match scrolled_surface_rows state Verification with
+  match scrolled_surface_rows ~cols:100 state Verification with
   | Some layout -> layout
   | None -> Alcotest.fail "the Verification list has no scroll geometry"
 
@@ -96,14 +96,14 @@ let test_an_open_detail_is_not_the_list () =
   let detail = state () in
   detail.verification_detail_request_id <- Some "request-1";
   Alcotest.(check bool) "an open request has no list geometry" true
-    (Option.is_none (scrolled_surface_rows detail Verification))
+    (Option.is_none (scrolled_surface_rows ~cols:100 detail Verification))
 
 (* Changes: the preview takes what the list leaves over its keep, and the scroll
    row comes out of the list while the list overflows. *)
 let test_an_overflowing_changes_list_fills_the_body_exactly () =
   let changes = state () in
   let shape =
-    match scrolled_surface_rows changes Changes with
+    match scrolled_surface_rows ~cols:100 changes Changes with
     | Some layout -> layout
     | None -> Alcotest.fail "the Changes list has no scroll geometry"
   in
@@ -131,7 +131,7 @@ let test_the_logs_scroll_row_is_counted_only_while_drawn () =
   let logs = state () in
   logs.view <- System_logs;
   let shape =
-    match scrolled_surface_rows logs System_logs with
+    match scrolled_surface_rows ~cols:100 logs System_logs with
     | Some layout -> layout
     | None -> Alcotest.fail "the Logs list has no scroll geometry"
   in

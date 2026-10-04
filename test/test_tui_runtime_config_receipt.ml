@@ -273,11 +273,28 @@ let test_preview_without_can_save_is_not_a_pass () =
   check bool "not an object" true (Result.is_error (Receipt.decode_preview (`List [])))
 ;;
 
+let test_lane_notice_retains_application_and_durability () =
+  let decode json = match Receipt.decode json with Ok value -> value | Error e -> fail e in
+  let kept = decode (receipt ~exact:(exact_output_registry ~status:"kept" ()) ()) in
+  check bool "kept warns" true (Receipt.lane_needs_attention kept);
+  check string "kept explains why restarting is not a repair"
+    "File saved · exact lanes unchanged: catalog read failed; correct configuration before restart · routing applied · Keeper settings await restart: turn.temperature"
+    (Receipt.lane_summary kept);
+  let unpublished = decode (receipt ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:true ()) ()) in
+  let unpublished = {unpublished with Receipt.durability = Receipt.Durability_unconfirmed} in
+  check bool "unpublished warns" true (Receipt.lane_needs_attention unpublished);
+  check string "file uncertainty and missing registry are distinct"
+    "File written; durability unconfirmed · exact lanes unavailable; restart required · routing applied · Keeper settings await restart: turn.temperature"
+    (Receipt.lane_summary unpublished)
+;;
+
 let () =
   run
     "tui runtime config receipt"
     [ ( "decode"
-      , [ test_case "valid receipt preserves typed outcomes" `Quick
+      , [ test_case "lane notices preserve application and durability" `Quick
+            test_lane_notice_retains_application_and_durability
+        ; test_case "valid receipt preserves typed outcomes" `Quick
             test_valid_receipt_preserves_typed_outcomes
         ; test_case "causal mismatches are rejected" `Quick
             test_rejects_causal_mismatches

@@ -299,7 +299,7 @@ type async_msg =
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
-      * (unit, string) result
+      * (Masc_tui_runtime_config_receipt.t, string) result
   | Runtime_catalog_loaded of
       int * ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list

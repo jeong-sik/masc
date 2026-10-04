@@ -1,0 +1,20 @@
+name: TLA model checks
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  tla:
+    name: TLA model check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Run all TLC models
+      run: bash scripts/tla-check.sh

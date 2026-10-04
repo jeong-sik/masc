@@ -1,6 +1,7 @@
 """Exercise the installer's real shell wizard through a terminal and pipes."""
 import errno
 import http.server
+import json
 import os
 from pathlib import Path
 import pty
@@ -80,6 +81,53 @@ def run_shell(body, terminal_input=None):
 
 
 class Wizard(unittest.TestCase):
+    def test_authenticated_provider_probe_keeps_credentials_out_of_curl_argv(self):
+        key = 'synthetic-provider-probe-credential'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = root / 'curl.json'
+            curl = root / 'curl'
+            curl.write_text('#!' + sys.executable + '\n' + '''
+import json, os, stat, sys
+from pathlib import Path
+arguments = sys.argv[1:]
+headers = []
+for index, argument in enumerate(arguments):
+    if argument in ('-H', '--header'):
+        value = arguments[index + 1]
+        if value.startswith('@'):
+            path = Path(value[1:])
+            headers.append({'value': path.read_text(),
+                            'pipe': stat.S_ISFIFO(path.stat().st_mode)})
+        else:
+            headers.append({'value': value, 'pipe': False})
+Path(os.environ['CURL_RECEIPT']).write_text(json.dumps({
+    'argv': arguments, 'headers': headers,
+}))
+print(os.environ['CURL_STATUS'], end='')
+''')
+            curl.chmod(0o755)
+            for status, exit_code in (('200', 0), ('401', 1)):
+                with self.subTest(status=status):
+                    body = (
+                        '\nPATH=' + shlex.quote(str(root)) + ':"$PATH"\n'
+                        'export CURL_RECEIPT=' + shlex.quote(str(receipt)) + '\n'
+                        'export CURL_STATUS=' + status + '\n'
+                        'PROVIDER_KEYS=(PROBE_API_KEY "")\n'
+                        'PROBE_API_KEY=' + shlex.quote(key) + '\n'
+                        'ping_provider 0 "$PROBE_API_KEY"\n'
+                    )
+                    result, _ = run_shell(body)
+                    self.assertEqual(result.returncode, exit_code, result.stderr)
+                    observed = json.loads(receipt.read_text())
+                    self.assertNotIn(key, '\0'.join(observed['argv']))
+                    self.assertEqual(observed['headers'], [{
+                        'value': 'Authorization: Bearer ' + key + '\n',
+                        'pipe': True,
+                    }])
+                    self.assertIn('https://one.invalid/health', observed['argv'])
+                    self.assertNotIn(key, result.stdout + result.stderr)
+
     def test_incompatible_workspace_selection_happens_before_installer_seed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

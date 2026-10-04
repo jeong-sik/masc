@@ -49,13 +49,7 @@ type t =
             [reason] is non-empty operator-visible text describing why the
             skip is intentional; [recovered] discriminates self-healed
             (true: a fallback succeeded) from data-loss (false: the
-            failed operation produced no observable downstream effect).
-
-            The lint extension in {!Anti_fake_audit_production_scan}
-            (scripts/anti-fake-audit.sh --production-scan) requires
-            every [Quiet] construction to carry non-empty [reason]; an
-            empty-string [reason] is treated as a missing declaration
-            and fails the gate. *)
+            failed operation produced no observable downstream effect). *)
 
 val to_wire_code : t -> int
 (** [to_wire_code t] returns the integer JSON-RPC error code that goes

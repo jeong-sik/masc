@@ -1,8 +1,8 @@
 id = "fusion-report"
-revision = "0.1.0"
+revision = "0.2.0"
 title = "Fusion reports with retained evidence"
 contributions = ["derive"]
-image = "masc-lane-fusion-report:0.1.0"
+image = "masc-lane-fusion-report:0.2.0"
 command = ["python3", "server.py"]
 
 [world.outputs.report]
@@ -18,7 +18,7 @@ max_reply_bytes = 8388608
 
 [interface]
 presentation = '''{
-  "description": "Fusion 분석 본문과 근거를 에이전트가 읽을 보고서로 만듭니다",
+  "description": "Fusion 실행 또는 격리 패널·Judge의 분석 내용과 근거를 에이전트 보고서로 만듭니다",
   "readings": [
     {"lane_id": "fusion/report", "path": ["body"], "label": "보고서", "format": "text"},
     {"lane_id": "fusion/report", "path": ["input_complete"], "label": "입력 근거 모두 있음", "format": "boolean"},

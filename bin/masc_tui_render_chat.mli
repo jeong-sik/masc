@@ -44,3 +44,7 @@ val cached_chat_markdown :
   link_previews_mode:[ `Rich | `Compact | `Off ] ->
   theme:Masc_tui_ansi.Chat_theme.snapshot -> entry:Message_layout.entry ->
   width:int -> string list
+
+val keeper_message_clock : float -> string
+(** The wall-clock stamp the live heading prints, so a test can locate the
+    stamp between bodies without reading it back off a rendered frame. *)

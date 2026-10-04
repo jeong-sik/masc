@@ -63,6 +63,7 @@ let make_post ~id ~author =
     post_kind = Board.Human_post;
     meta_json = None;
     visibility = Board.Internal;
+    audience = None;
     created_at;
     content_updated_at = created_at;
     updated_at = Unix.gettimeofday ();

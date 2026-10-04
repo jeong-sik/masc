@@ -5,7 +5,8 @@
     [<resolved config root>/runtime.toml]; the remainder are explicitly
     [Env_only]. The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs
     at server startup and records unset values in the process-local boot
-    override store before this module initializes.
+    override store. TOML-backed accessors read that store when called, after
+    startup has loaded the document; module initialization precedes that load.
 
     Precedence: process env > TOML > hardcoded default below.
 
@@ -135,10 +136,13 @@ end
 
 module KeeperMetrics = struct
   (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
-  let max_file_bytes = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
+  let max_file_bytes () = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
 
-  (** Number of rotated files to keep (default: 1, i.e. .1 only) *)
-  let max_rotated_files = get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
+  (** Rotation retains at least one backup; disable rotation with max_bytes=0. *)
+  let max_rotated_files_min = 1
+  let max_rotated_files () =
+    Int.max max_rotated_files_min
+      (get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED")
 end
 
 (** {1 Keeper Wire Capture Configuration} *)
@@ -299,10 +303,10 @@ end
 
 module KeeperRuntime = struct
   (** Enable keeper debug logging. Default: false. *)
-  let debug = get_bool ~default:false "MASC_KEEPER_DEBUG"
+  let debug () = get_bool ~default:false "MASC_KEEPER_DEBUG"
 
   (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
-  let snapshot_sec = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
+  let snapshot_sec () = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
 end
 
 (** {1 Keeper Memory OS Configuration}
@@ -559,29 +563,13 @@ module KeeperGeneratedMedia = struct
   ;;
 end
 
-(** Shared keepalive interval, read early so WorkAsHeartbeat can reference it.
-    Any positive interval is valid; the scheduler must not silently rewrite an
-    operator-selected cadence.
-
-    @category Thresholds
-    @ops_class operator *)
-let keepalive_interval_sec_ =
-  let interval_sec = get_int ~default:300 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
-  if interval_sec > 0
-  then interval_sec
-  else
-    raise
-      (Config_error
-         "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC must be a positive integer")
-;;
-
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
   (** Master switch. When true, successful Workspace.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
       the full ensure_keeper_workspace_presence call. *)
-  let enabled = get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
+  let enabled () = get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
 end
 
 (** {1 Keeper Keepalive Loop Constants} *)
@@ -596,7 +584,10 @@ module KeeperKeepalive = struct
       inside [sleep_chunk_sec], so a keeper with work runs more often than
       this. Measured 2026-09-03: polisher 289 s and analyst 265 s median
       between turns, pr-updater 88 s. *)
-  let interval_sec = keepalive_interval_sec_
+  let interval_sec () =
+    let interval = get_int ~default:300 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
+    if interval > 0 then interval
+    else raise (Config_error "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC must be a positive integer")
 
   (** Interruptible sleep chunk size in seconds: the upper bound on how long a
       keeper's heartbeat sleep takes to notice a wakeup atomic set by an incoming
@@ -608,7 +599,7 @@ module KeeperKeepalive = struct
       Range: [0.1, 10.0].
       @category Thresholds
       @ops_class operator *)
-  let sleep_chunk_sec =
+  let sleep_chunk_sec () =
     Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;
 

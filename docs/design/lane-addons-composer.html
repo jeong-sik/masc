@@ -9,50 +9,61 @@
 </style>
 <div class="shell">
 <header class="top"><div><span class="brand">MASC</span> <span class="muted">/ Lane 조립</span></div><span class="pill">인터랙티브 설계 시안 · 서버 적용 없음</span></header>
-<div class="hero"><div><p class="eyebrow">COMPOSE / CONNECT / INSPECT</p><h1>필요한 Lane을 놓고,<br>결과가 흐를 층위를 조립하세요.</h1><p class="muted">병렬로 모으고, 합쳐 분석하고, 보고서를 여러 에이전트에게 전달합니다.</p></div><span class="pill">가로: 독립 블록 · 세로: 입력·출력 연결</span></div>
-<div class="toolbar"><div class="toolbar-group"><label for="template" class="small muted">시작 예제</label><select id="template"><option value="fusion">Fusion → 보고서 → Broadcast</option><option value="report">보고서 → Broadcast</option><option value="branch">분석 → 보고서·검증 → 합류</option><option value="empty">빈 조립판</option></select><button id="load-template">예제 불러오기</button></div><div class="toolbar-group"><button id="undo" disabled>되돌리기</button><button id="export">조립안 JSON 저장</button><button id="import">JSON 불러오기</button><input type="file" id="import-file" accept=".json,application/json" hidden><button class="primary" id="preview-button">전달 미리보기 →</button></div></div>
+<div class="hero"><div><p class="eyebrow">COMPOSE / CONNECT / INSPECT</p><h1>내 에이전트의 검토 능력을 더하고,<br>보고서가 전달될 층위를 조립하세요.</h1><p class="muted">같은 자료를 여러 관점에서 검토하고, Judge가 종합한 보고서와 근거를 에이전트에 전달하는 구조입니다.</p></div><span class="pill">가로: 독립 블록 · 세로: 입력·출력 연결</span></div>
+<section class="trace-grid" aria-label="에이전트에게 더하는 능력" style="margin-bottom:24px"><article class="trace"><h3>할 수 있는 일</h3><p>패널의 독립 검토를 모아 Judge가 판단합니다. 패널 수와 연결을 바꿔 검토 층위를 조립합니다.</p></article><article class="trace"><h3>활용할 결과</h3><p>종합 보고서에 원천 자료와 각 모델의 요청·응답 근거를 함께 보존합니다.</p></article><article class="trace"><h3>전달과 사용</h3><p>보고서를 보존한 뒤 명시적으로 공유합니다. Broadcast 영수증과 에이전트의 읽기·활용은 따로 확인합니다.</p></article></section><div class="toolbar"><div class="toolbar-group"><label for="template" class="small muted">시작 예제</label><select id="template"><option value="isolated">격리 Fusion 패널 → Judge → 보고서</option><option value="fusion">기존 Fusion 결과 → 보고서</option><option value="report">보고서 → Broadcast</option><option value="branch">분석 → 보고서·검증 → 합류</option><option value="empty">빈 조립판</option></select><button id="load-template">예제 불러오기</button></div><div class="toolbar-group"><button id="undo" disabled>되돌리기</button><button id="export">조립안 JSON 저장</button><button id="import">JSON 불러오기</button><input type="file" id="import-file" accept=".json,application/json" hidden><button id="declaration-preview">설치 TOML 미리보기</button><button class="primary" id="preview-button">전달 미리보기 →</button></div></div>
 <div class="workbench">
 <aside class="side"><h2>블록 추가</h2><p class="small muted">선택해서 조립판에 놓기</p><div class="palette" id="palette"></div><details><summary>조립 방법</summary><p class="protocol">블록 선택 → ‘출력 연결’ → 받을 블록 선택. 여러 입력을 한 블록에 모으거나, 같은 출력을 여러 블록에 연결할 수 있습니다.</p><p class="protocol">연결에 따라 층위를 자동 정렬합니다. 입력 없이 놓인 블록은 첫 층위에 남습니다.</p></details></aside>
 <section class="board-frame"><div class="board-head"><h2 id="graph-title">팀 작업 보고서</h2><span class="small muted" id="graph-summary"></span></div><div class="canvas-scroll"><div class="canvas" id="canvas"><svg id="wires" aria-hidden="true"></svg><div id="layers"></div></div></div></section>
 <aside class="side inspector" id="inspector"><h2>블록을 선택하세요</h2><p class="muted small">입력·출력·수신자를 여기서 설정합니다.</p></aside>
 </div>
-<p id="status" role="status" aria-live="polite" class="status"></p>
+<p id="status" role="status" aria-live="polite" class="status"></p><details class="preview"><summary>설치 선언에 사용할 공통 설정</summary><p class="small muted">서버의 자료·패키지 경로와 선언된 모델 경로를 입력하세요. 이 편집기는 파일을 설치하거나 서버를 호출하지 않습니다.</p><div id="install-settings" class="trace-grid"></div></details>
+<section id="declarations" class="preview" hidden><h2>설치 TOML 미리보기</h2><p class="small muted">명시한 경로·입력 연결에서 생성한 선언입니다. 이미지와 자료 파일이 준비됐는지 확인하고 TUI의 Installation 편집기로 옮겨 검토하세요. Broadcast·에이전트 블록은 설치나 자동 전달을 생성하지 않습니다.</p><div id="declaration-files"></div></section>
+<section class="preview" aria-label="받은 보고서 읽기"><div class="preview-head"><div><h2>받은 보고서 읽기</h2><p class="small muted">fusion-report의 출력 JSON 또는 MCP 응답 파일을 읽습니다. 파일의 기록을 표시하며 서버 조회·근거 검증·전달을 실행하지 않습니다.</p></div><div><button id="open-reports">보고서 JSON 열기</button><button id="clear-reports" disabled>보고서 닫기</button><input type="file" id="reports-file" accept=".json,application/json" hidden></div></div><p id="report-file-name" class="small muted">아직 보고서 파일을 열지 않았습니다.</p><div id="received-reports"></div></section>
+<section class="preview" aria-label="공유 영수증 읽기"><div class="preview-head"><div><h2>공유 영수증 읽기</h2><p class="small muted">Evidence 응답의 보존·전달 기록을 읽습니다. 보고서와 선택 좌표가 일치해도 내용 해시·서버 상태·Keeper 열람은 검증하지 않습니다.</p></div><div><button id="open-sharing">영수증 JSON 열기</button><button id="clear-sharing" disabled>영수증 닫기</button><input type="file" id="sharing-file" accept=".json,application/json" hidden></div></div><div id="received-sharing"></div></section>
+
 <div class="notice">원천·분석·보고서·Broadcast·에이전트는 조립 역할 예시입니다. 실제 패키지와 연결하려면 각각의 manifest·출력·행동 계약을 확인해야 합니다. 포트 종류는 이 시안의 조립 규칙입니다.</div>
 <section id="preview" class="preview" hidden><div class="preview-head"><div><p class="eyebrow">EXAMPLE DATA / NO EXECUTION</p><h2>조립한 연결대로 전달된다면</h2><p class="small muted">현재 조립안에 예시 데이터를 통과시킨 결과입니다. 실제 실행·보고서 발행·Broadcast·읽음 기록이 아닙니다.</p></div><button id="close-preview">닫기</button></div><div id="trace" class="trace-grid"></div></section>
-<details><summary>현재 기능과 제안의 경계</summary><p class="protocol">같은 run의 최신 완료 named output 연결, 직접 소비자 wake, 보존 근거, 구독 참조·sequence와 명시적 read/ack는 기존 계약입니다. 아래 조립 편집기, 일반 보고서 패키지와 자동 Board/Broadcast 연계는 제안입니다. 구독 알림을 Broadcast 또는 읽음으로 간주하지 않습니다.</p><p class="protocol">이 편집기는 단방향 출력 연결을 모델링합니다. 피드백·행동 적용·재관측은 별도 owner 계약이 필요하며, 순환선을 그린다고 실행되지 않습니다.</p></details>
-<footer class="bottom"><a href="fusion-lane-composition.md">Fusion 연결 구현·검증 범위 ↗</a><span>조립안은 JSON으로 보관 · 보고서·전달 결과는 예시</span></footer>
+<details><summary>현재 기능과 제안의 경계</summary><p class="protocol">같은 run의 최신 완료 named output 연결, 직접 소비자 wake, 보존 근거, 구독 참조·sequence와 명시적 read/ack는 기존 계약입니다. fusion-compute의 격리 패널/Judge, fusion-report, 명시적인 Evidence 공유 경로는 코드에 구현돼 있습니다. 이 조립 편집기는 설계 시안이며 설치·실행하지 않습니다. 네이티브·컨테이너 검증은 미완료이고, 자동 Board/Broadcast 연계는 제안입니다. 구독 알림을 Broadcast 또는 읽음으로 간주하지 않습니다.</p><p class="protocol">이 편집기는 단방향 출력 연결을 모델링합니다. 피드백·행동 적용·재관측은 별도 owner 계약이 필요하며, 순환선을 그린다고 실행되지 않습니다.</p></details>
+<footer class="bottom"><a href="fusion-lane-composition.md">Fusion 연결 구현·검증 범위 ↗</a><span>조립안·공통 설정은 JSON으로 보관 · 설치 TOML 생성 · 전달은 예시</span></footer>
 </div>
+<script src="lane-composition-export.js"></script>
 <script>
 'use strict';
 const kinds={
-fusion:{label:'Fusion 복합 Lane',desc:'병렬 패널 → 심판 → 결과',input:['records','insights','report'],output:'insights',port:'insights',limit:'계산은 기존 Fusion host가 소유합니다. fusion-results 격리 패키지는 캡처한 결과를 status/result 포트로 투영합니다. 이 조립기의 실행 연결은 아직 제안입니다.'},
-source:{label:'원천',desc:'자료·관측을 가져오기',input:[],output:'records',port:'records',limit:'원천 수집 adapter가 필요합니다. 실제 자료는 연결하지 않은 시안입니다.'},
+panel:{label:'Fusion 패널',desc:'같은 자료를 독립 관점에서 검토',input:['records'],output:'computation',port:'result',limit:'fusion-compute / role=panel. 모델 접근은 선언된 host sampling route로 요청하며 패키지에 provider credentials를 주입하지 않습니다. 이 시안은 모델을 호출하지 않습니다.'},
+judge:{label:'Fusion Judge',desc:'완료된 패널 답변을 종합',input:['computation'],output:'computation',port:'result',limit:'fusion-compute / role=judge. 입력 없는 포트는 대기하고, 완료 결과와 근거를 종합합니다. source_changes 자동 알림은 같은 완료 입력을 반복 호출하지 않도록 구현했으며 네이티브 검증은 아직 미완료입니다.'},
+fusion:{label:'기존 Fusion 결과',desc:'병렬 패널 → 심판 → 결과',input:['records','insights','report'],output:'insights',port:'insights',limit:'이 블록은 기존 host Fusion 경로입니다. fusion-results 격리 패키지는 캡처한 결과를 status/result 포트로 투영합니다. 이 조립기의 실행 연결은 아직 제안입니다.'},
+source:{label:'원천',desc:'자료·관측을 가져오기',input:[],output:'records',port:'records',limit:'보존된 JSON 자료의 서버 경로와 정확한 source_id를 입력합니다. 이 편집기는 자료를 읽지 않으며 실제 수집은 호스트 snapshot_file adapter가 수행합니다.'},
 analysis:{label:'분석 Lane',desc:'여러 자료를 합쳐 판단',input:['records','insights'],output:'insights',port:'insights',limit:'도메인별 분석 패키지와 근거 보존 계약이 필요합니다.'},
-report:{label:'보고서 Lane',desc:'결과를 읽기 좋게 정리',input:['records','insights','review','report'],output:'report',port:'report',limit:'일반 보고서 패키지는 제안입니다. 입력 누락·출처를 보고서에 남겨야 합니다.'},
+report:{label:'보고서 Lane',desc:'결과를 읽기 좋게 정리',input:['records','insights','review','report','computation'],output:'report',port:'report',limit:'fusion-report는 Fusion 결과 또는 격리 computation을 보고서로 투영합니다. 요청·응답·원천 근거를 보존하며 분석 완료, 입력 누락, 전달 상태를 따로 표시합니다. 임의 입력을 다루는 일반 보고서는 제안입니다.'},
 verify:{label:'검증 Lane',desc:'주장과 원천을 대조',input:['insights','report'],output:'review',port:'review',limit:'실제 검증 실행과 결과 영수증은 별도 구현이 필요합니다.'},
-broadcast:{label:'Broadcast',desc:'여러 수신자에게 알림',input:['report','review'],output:'notice',port:'notice',limit:'자동 보고서 Broadcast 연계는 제안입니다. 전달 성공은 수신자별 영수증으로 확인합니다.'},
+broadcast:{label:'Broadcast',desc:'여러 수신자에게 알림',input:['report','review'],output:'notice',port:'notice',limit:'호스트 Evidence의 명시적인 Broadcast 공유 경로는 구현돼 있습니다. 보고서 패키지 자체는 발행하지 않으며 이 선은 자동 전달을 실행하지 않습니다. 영수증은 메시지 저장을 뜻하고 에이전트의 읽기·활용을 증명하지 않습니다.'},
 agent:{label:'에이전트',desc:'결과를 읽고 작업에 사용',input:['insights','report','review','notice'],output:null,port:null,limit:'이 블록은 예시 수신자입니다. 실제 Keeper identity·구독 및 read/ack를 연결해야 합니다.'}
 };
 const $=id=>document.getElementById(id);
-let graph,selected=null,connecting=null,history=[],nextId=1;
+let graph,selected=null,connecting=null,history=[],nextId=1,graphReadGeneration=0;
+const emptySettings=()=>({run_id:'',analysis_id:'',compute_manifest:'',report_manifest:'',prompt:''});
 const copy=value=>JSON.parse(JSON.stringify(value));
 const nodeById=id=>graph.nodes.find(n=>n.id===id);
 const incoming=id=>graph.edges.filter(e=>e.to===id);
 const outgoing=id=>graph.edges.filter(e=>e.from===id);
 function message(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
 function remember(){history.push(copy(graph));$('undo').disabled=false;}
-function changed(){connecting=null;$('preview').hidden=true;render();}
-function makeNode(kind,name){let id;do{id='block-'+nextId++;}while(graph?.nodes.some(n=>n.id===id));return {id,kind,name,available:true,...(kind==='fusion'?{fusion:{topology:'simple',panels:['패널 A','패널 B','패널 C'],judge:'종합 심판'}}:{})};}
-function template(name){
+function invalidateDeclarations(){$('declarations').hidden=true;$('declaration-files').replaceChildren();}
+function changed(){graphReadGeneration++;connecting=null;$('preview').hidden=true;invalidateDeclarations();render();}
+function makeNode(kind,name){let id;do{id='block-'+nextId++;}while(graph?.nodes.some(n=>n.id===id));return {id,kind,name,available:true,...(kind==='source'?{snapshot_path:'',snapshot_source_id:''}:{}),...(['panel','judge','report'].includes(kind)?{installation:{id,model_route:'',instructions:'',max_tokens:null}}:{}),...(kind==='fusion'?{fusion:{topology:'simple',panels:['패널 A','패널 B','패널 C'],judge:'종합 심판'}}:{})};}
+function template(name){return {...templateGraph(name),installation_settings:emptySettings()};}
+function templateGraph(name){
  const nodes=[],edges=[];const add=(kind,title)=>{const node=makeNode(kind,title);nodes.push(node);return node.id};const link=(from,to)=>edges.push({from,to});
- if(name==='empty')return {version:1,title:'새 Lane 조립',nodes,edges};
+ if(name==='empty')return {version:2,title:'새 Lane 조립',nodes,edges};
+ if(name==='isolated'){const input=add('source','공통 질문·보존 자료'),a=add('panel','패널 A · 제안 검토'),b=add('panel','패널 B · 반론 검토'),judge=add('judge','Judge · 종합 판단'),report=add('report','근거가 이어진 보고서'),send=add('broadcast','명시적으로 보고서 공유');link(input,a);link(input,b);link(a,judge);link(b,judge);link(judge,report);link(report,send);link(send,add('agent','작업 에이전트'));link(send,add('agent','검증 에이전트'));return {version:2,title:'격리 Fusion · 병렬 검토와 보고서 활용',nodes,edges};}
  const a=add('source','코드·검사 기록'),b=add('source','배포·화면 기록'),c=add('source','작업·논의 기록'),analysis=add(name==='fusion'?'fusion':'analysis',name==='fusion'?'Fusion 다각도 심의':'작업 현황 분석');[a,b,c].forEach(id=>link(id,analysis));
  const report=add('report','팀 작업 보고서');link(analysis,report);
  let last=report;
  if(name==='branch'){const verify=add('verify','독립 검증'),join=add('report','검증 포함 보고서');link(analysis,verify);link(report,join);link(verify,join);last=join;}
  const send=add('broadcast','팀에 보고서 알림');link(last,send);
  link(send,add('agent','개발 에이전트'));link(send,add('agent','검증 에이전트'));
- return {version:1,title:name==='branch'?'분석 결과를 나누고 다시 합치기':name==='fusion'?'Fusion → 보고서 → Broadcast':'팀 작업 보고서',nodes,edges};
+ return {version:2,title:name==='branch'?'분석 결과를 나누고 다시 합치기':name==='fusion'?'Fusion → 보고서 → Broadcast':'팀 작업 보고서',nodes,edges};
 }
 function ranks(g=graph){
  const degrees=new Map(g.nodes.map(n=>[n.id,0])),depth=new Map(g.nodes.map(n=>[n.id,0]));
@@ -84,7 +95,7 @@ function render(){
  button.addEventListener('click',()=>selectNode(n.id));nodes.append(button);
  });row.append(label,nodes);$('layers').append(row);});
  const widest=Math.max(1,...levels.map(level=>graph.nodes.filter(n=>depth.get(n.id)===level).length));$('canvas').style.minWidth=(widest*214+110)+'px';
- renderInspector();requestAnimationFrame(drawWires);
+ renderInspector();renderInstallSettings();renderReceivedReports();requestAnimationFrame(drawWires);
 }
 function drawWires(){
  const svg=$('wires'),canvas=$('canvas');svg.setAttribute('width',0);svg.setAttribute('height',0);const rect=canvas.getBoundingClientRect();const width=canvas.scrollWidth,height=canvas.scrollHeight;svg.setAttribute('width',width);svg.setAttribute('height',height);svg.replaceChildren();
@@ -110,38 +121,162 @@ function renderInspector(){
  if(!n){box.append(el('h2','블록을 선택하세요'),el('p','입력·출력·연결 대상을 설정합니다.','muted small'));return;}
  const kind=kinds[n.kind];box.append(el('p',kind.label,'eyebrow'),el('h2',n.name));
  if(n.kind==='fusion')renderFusion(box,n);
+ if(n.kind==='source'){const section=el('section');section.append(el('h3','보존 자료'));editField(section,'서버 자료 파일 절대 경로',n,'snapshot_path');editField(section,'자료 JSON의 source_id',n,'snapshot_source_id');box.append(section);}
+ if(n.installation){const section=el('section');section.append(el('h3','설치 선언'));editField(section,'설치 이름',n.installation,'id');if(n.kind!=='report'){editField(section,'선언된 모델 경로',n.installation,'model_route');editField(section,'검토 지시',n.installation,'instructions');editField(section,'출력 토큰 한도',n.installation,'max_tokens',true);}box.append(section);}
  const label=el('label','이름');label.htmlFor='node-name';const input=el('input');input.id='node-name';input.value=n.name;input.maxLength=120;
  input.addEventListener('change',()=>{const name=input.value.trim();if(!name){input.value=n.name;return message('이름을 입력하세요.',true);}remember();n.name=name;changed();message('이름을 변경했습니다.');});box.append(label,input);
- const connections=el('section');connections.append(el('h3','들어오는 결과'));if(!incoming(n.id).length)connections.append(el('p',kind.input.length?'아직 입력이 없습니다.':'이 블록은 자료를 제공하는 원천입니다.','small muted'));incoming(n.id).forEach(e=>connections.append(connectionLine(e,'from')));connections.append(el('h3','전달할 곳'));if(!outgoing(n.id).length)connections.append(el('p',kind.output?'아직 수신 블록이 없습니다.':'이 에이전트가 결과를 읽습니다.','small muted'));outgoing(n.id).forEach(e=>connections.append(connectionLine(e,'to')));box.append(connections);
+ const connections=el('section');connections.append(el('h3','들어오는 결과'));if(!incoming(n.id).length)connections.append(el('p',kind.input.length?'아직 입력이 없습니다.':'이 블록은 자료를 제공하는 원천입니다.','small muted'));incoming(n.id).forEach(e=>connections.append(connectionLine(e,'from')));connections.append(el('h3','전달할 곳'));if(!outgoing(n.id).length)connections.append(el('p',kind.output?'아직 수신 블록이 없습니다.':'이 에이전트가 결과를 받도록 조립합니다.','small muted'));outgoing(n.id).forEach(e=>connections.append(connectionLine(e,'to')));box.append(connections);
  if(kind.output){const section=el('section');section.append(el('p','출력: '+kind.port,'mono small'));const button=el('button',connecting?'연결 취소':'출력 연결 →','primary');button.id='connect-mode';button.addEventListener('click',()=>{connecting=connecting?null:n.id;render();message(connecting?'받을 블록을 클릭하세요. Escape로 취소할 수 있습니다.':'연결을 취소했습니다.');});section.append(button);
  const formLabel=el('label','또는 받을 블록 선택');formLabel.htmlFor='target';const select=el('select');select.id='target';select.append(new Option('대상 선택',''));graph.nodes.filter(other=>other.id!==n.id&&kinds[other.kind].input.includes(kind.output)&&!outgoing(n.id).some(e=>e.to===other.id)).forEach(other=>select.append(new Option(other.name,other.id)));const submit=el('button','연결');submit.id='connect-submit';submit.style.marginTop='8px';submit.addEventListener('click',()=>{if(select.value)connect(n.id,select.value);else message('받을 블록을 선택하세요.',true);});section.append(formLabel,select,submit);box.append(section);}
  if(n.kind==='source'){const section=el('section');const label=el('label');const checkbox=el('input');checkbox.type='checkbox';checkbox.id='source-available';checkbox.checked=n.available;checkbox.addEventListener('change',()=>{remember();n.available=checkbox.checked;changed();message('예시 데이터의 수집 상태를 변경했습니다.');});label.append(checkbox,document.createTextNode(' 예시 자료가 수집됨'));section.append(label,el('p','해제한 뒤 전달 미리보기를 열면 누락이 아래로 어떻게 전달되는지 볼 수 있습니다.','small muted'));box.append(section);}
- const controls=el('section');const row=el('div',undefined,'row');const clone=el('button','블록 복제');clone.id='duplicate';clone.addEventListener('click',()=>{remember();const twin=makeNode(n.kind,n.name+' 복사');twin.available=n.available;if(n.kind==='fusion')twin.fusion=copy(n.fusion);graph.nodes.push(twin);selected=twin.id;changed();message('독립 블록을 추가했습니다. 연결은 따로 선택하세요.');});const remove=el('button','블록 제거');remove.id='remove';remove.addEventListener('click',()=>{remember();graph.nodes=graph.nodes.filter(other=>other.id!==n.id);graph.edges=graph.edges.filter(e=>e.from!==n.id&&e.to!==n.id);selected=null;changed();message('블록과 관련 연결을 제거했습니다. 되돌릴 수 있습니다.');});row.append(clone,remove);controls.append(row,el('p',kind.limit,'small muted'));box.append(controls);
+ const controls=el('section');const row=el('div',undefined,'row');const clone=el('button','블록 복제');clone.id='duplicate';clone.addEventListener('click',()=>{remember();const twin=makeNode(n.kind,n.name+' 복사');twin.available=n.available;if(n.kind==='source'){twin.snapshot_path=n.snapshot_path;twin.snapshot_source_id=n.snapshot_source_id;}if(n.installation)twin.installation={...n.installation,id:twin.id};if(n.kind==='fusion')twin.fusion=copy(n.fusion);graph.nodes.push(twin);selected=twin.id;changed();message('독립 블록을 추가했습니다. 연결은 따로 선택하세요.');});const remove=el('button','블록 제거');remove.id='remove';remove.addEventListener('click',()=>{remember();graph.nodes=graph.nodes.filter(other=>other.id!==n.id);graph.edges=graph.edges.filter(e=>e.from!==n.id&&e.to!==n.id);selected=null;changed();message('블록과 관련 연결을 제거했습니다. 되돌릴 수 있습니다.');});row.append(clone,remove);controls.append(row,el('p',kind.limit,'small muted'));box.append(controls);
 }
 function connectionLine(edge,direction){const row=el('div',undefined,'connection-item'),other=nodeById(edge[direction]);row.append(el('span',other.name));const remove=el('button','×');remove.setAttribute('aria-label',nodeById(edge.from).name+' → '+nodeById(edge.to).name+' 연결 제거');remove.addEventListener('click',()=>{remember();graph.edges=graph.edges.filter(e=>e!==edge);changed();message('연결을 제거했습니다.');});row.append(remove);return row;}
 function preview(){
  const results=new Map();$('trace').replaceChildren();const {order}=ranks();
  order.forEach(id=>{const n=nodeById(id),up=incoming(id).map(e=>results.get(e.from)),sources=[...new Set(up.flatMap(r=>r.sources))],missing=[...new Set(up.flatMap(r=>r.missing))];let partial=false,text='';
  if(n.kind==='source'){sources.push(n.name);if(!n.available)missing.push(n.name);partial=!n.available;text=n.available?'예시 자료 1건 수집':'예시 자료 수집 실패';}
- else{if(!up.length)missing.push(n.name+'의 입력');partial=missing.length>0;const descriptions={fusion:n.kind==='fusion'?'예시: '+n.fusion.panels.length+' 패널 → '+n.fusion.judge+' / '+n.fusion.topology+' · 실제 모델 호출 없음':null,analysis:'입력 근거를 합쳐 현황 분석',report:'변경·확인 결과·다음 행동을 보고서로 구성',verify:'주장과 입력 근거의 대조 결과',broadcast:'각 수신 블록에 보고서 참조 알림',agent:'참조 수신을 가정한 예시 · 실제 읽기·사용 미확인'};text=descriptions[n.kind];}
+ else{if(!up.length)missing.push(n.name+'의 입력');partial=missing.length>0;const descriptions={panel:partial?'입력 대기 · 이 시안에서는 모델 호출 없음':'독립 패널 답변과 모델 요청·응답 근거 · 실행을 가정한 예시',judge:partial?'입력 대기 · 이 시안에서는 모델 호출 없음':'입력 관점들의 판단·불일치·근거를 종합하는 예시',fusion:n.kind==='fusion'?'예시: '+n.fusion.panels.length+' 패널 → '+n.fusion.judge+' / '+n.fusion.topology+' · 실제 모델 호출 없음':null,analysis:'입력 근거를 합쳐 현황 분석',report:'변경·확인 결과·다음 행동을 보고서로 구성',verify:'주장과 입력 근거의 대조 결과',broadcast:'각 수신 블록에 보고서 참조 알림',agent:'참조 수신을 가정한 예시 · 실제 읽기·사용 미확인'};text=descriptions[n.kind];}
  results.set(id,{sources,missing,partial});const article=el('article',undefined,'trace');article.append(el('p','예시 · '+kinds[n.kind].label,'eyebrow'),el('h3',n.name),el('p',partial?'입력 누락 포함':'예시 입력 확보',partial?'partial small':'small muted'),el('p',text,'small'));
  const list=el('ul');sources.forEach(source=>list.append(el('li','원천: '+source)));missing.forEach(source=>list.append(el('li','누락: '+source)));if(n.kind==='broadcast')outgoing(id).forEach(e=>list.append(el('li','예시 대상: '+nodeById(e.to).name)));article.append(list);$('trace').append(article);
  });$('preview').hidden=false;message('예시 데이터로 전달 구조를 확인했습니다. 서버 실행이나 Broadcast는 하지 않았습니다.');$('preview').scrollIntoView({behavior:'smooth',block:'start'});
 }
+function installationFields(node){
+ if(!['panel','judge','report'].includes(node.kind))return {};
+ const config=node.installation;if(!config||typeof config!=='object'||Array.isArray(config)||['id','model_route','instructions'].some(key=>typeof config[key]!=='string')||(config.max_tokens!==null&&typeof config.max_tokens!=='number'))throw Error('블록 '+node.name+'의 설치 설정을 확인하세요.');
+ return {installation:{id:config.id,model_route:config.model_route,instructions:config.instructions,max_tokens:config.max_tokens}};
+}
+function sourceFields(node){if(node.kind!=='source')return {};if(typeof node.snapshot_path!=='string'||typeof node.snapshot_source_id!=='string')throw Error('자료 경로와 source_id를 확인하세요.');return {snapshot_path:node.snapshot_path,snapshot_source_id:node.snapshot_source_id};}
 function validate(value){
- if(!value||value.version!==1||typeof value.title!=='string'||!value.title.trim()||!Array.isArray(value.nodes)||!Array.isArray(value.edges))throw Error('version 1의 title·nodes·edges가 필요합니다.');
- const ids=new Set(),nodes=value.nodes.map(n=>{if(!n||typeof n.id!=='string'||!/^[a-zA-Z0-9_-]+$/.test(n.id)||ids.has(n.id)||!Object.hasOwn(kinds,n.kind)||typeof n.name!=='string'||!n.name.trim()||typeof n.available!=='boolean')throw Error('블록 ID·종류·이름·자료 상태를 확인하세요.');ids.add(n.id);return {id:n.id,kind:n.kind,name:n.name,available:n.available,...(n.kind==='fusion'?{fusion:validateFusion(n.fusion)}:{})};});
- const pairs=new Set(),edges=value.edges.map(e=>{if(!e||!ids.has(e.from)||!ids.has(e.to)||e.from===e.to)throw Error('연결의 출발·도착 블록을 확인하세요.');const key=JSON.stringify([e.from,e.to]);if(pairs.has(key))throw Error('중복 연결이 있습니다.');pairs.add(key);const from=nodes.find(n=>n.id===e.from),to=nodes.find(n=>n.id===e.to);if(!kinds[to.kind].input.includes(kinds[from.kind].output))throw Error('입출력 종류가 맞지 않는 연결입니다.');return {from:e.from,to:e.to};});const result={version:1,title:value.title,nodes,edges};ranks(result);return result;
+ if(!value||value.version!==2||typeof value.title!=='string'||!value.title.trim()||!Array.isArray(value.nodes)||!Array.isArray(value.edges))throw Error('version 2의 title·nodes·edges가 필요합니다.');
+ const ids=new Set(),nodes=value.nodes.map(n=>{if(!n||typeof n.id!=='string'||!/^[a-zA-Z0-9_-]+$/.test(n.id)||ids.has(n.id)||!Object.hasOwn(kinds,n.kind)||typeof n.name!=='string'||!n.name.trim()||typeof n.available!=='boolean')throw Error('블록 ID·종류·이름·자료 상태를 확인하세요.');ids.add(n.id);return {id:n.id,kind:n.kind,name:n.name,available:n.available,...sourceFields(n),...installationFields(n),...(n.kind==='fusion'?{fusion:validateFusion(n.fusion)}:{})};});
+ const pairs=new Set(),edges=value.edges.map(e=>{if(!e||!ids.has(e.from)||!ids.has(e.to)||e.from===e.to)throw Error('연결의 출발·도착 블록을 확인하세요.');const key=JSON.stringify([e.from,e.to]);if(pairs.has(key))throw Error('중복 연결이 있습니다.');pairs.add(key);const from=nodes.find(n=>n.id===e.from),to=nodes.find(n=>n.id===e.to);if(!kinds[to.kind].input.includes(kinds[from.kind].output))throw Error('입출력 종류가 맞지 않는 연결입니다.');return {from:e.from,to:e.to};});if(!value.installation_settings||typeof value.installation_settings!=='object'||Array.isArray(value.installation_settings))throw Error('공통 설치 설정이 포함된 version 2 조립안이 필요합니다.');const installation_settings={};for(const key of Object.keys(emptySettings())){if(typeof value.installation_settings[key]!=='string')throw Error('공통 설정 '+key+'는 문자열이어야 합니다.');installation_settings[key]=value.installation_settings[key];}const result={version:2,title:value.title,nodes,edges,installation_settings};ranks(result);return result;
+}
+function editField(parent,label,object,key,number=false){
+ const caption=el('label',label),input=el('input');input.value=object[key]??'';input.type=number?'number':'text';if(number){input.min='1';input.step='1';}caption.append(input);parent.append(caption);
+ input.addEventListener('change',()=>{remember();object[key]=number?(input.value===''?null:Number(input.value)):input.value;changed();});
+}
+function renderInstallSettings(){$('install-settings').replaceChildren();for(const [key,label] of Object.entries({run_id:'실행 이름',analysis_id:'분석 이름',compute_manifest:'계산 패키지 manifest 절대 경로',report_manifest:'보고서 패키지 manifest 절대 경로',prompt:'공통 질문'}))editField($('install-settings'),label,graph.installation_settings,key);}
+function declarationPreview(){
+ try{const plan=MascLaneComposition.compile(validate(copy(graph)));$('declaration-files').replaceChildren();for(const declaration of plan.declarations){const section=el('section');section.append(el('h3',declaration.file_name));const content=el('pre',declaration.toml,'mono');content.style.whiteSpace='pre-wrap';section.append(content);const download=el('button','이 TOML 저장');download.addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([declaration.toml],{type:'text/plain;charset=utf-8'}));const link=el('a');link.href=url;link.download=declaration.file_name;link.click();URL.revokeObjectURL(url);});section.append(download);$('declaration-files').append(section);}$('declarations').hidden=false;message(plan.declarations.length+'개의 설치 선언을 생성했습니다. 설치·모델 호출·전달은 실행하지 않았습니다.');}
+ catch(error){invalidateDeclarations();message('설치 선언 생성 실패: '+error.message,true);}
+}
+let receivedReports=null,reportReadGeneration=0;
+let receivedSharing=null,sharingReadGeneration=0;
+function parseSharingReceipt(value){
+ if(!value||typeof value!=='object'||Array.isArray(value)||value.isError===true)throw Error('Evidence 응답 JSON이 필요합니다.');
+ const r=value.structuredContent??value,nonblank=v=>typeof v==='string'&&v.trim().length>0;
+ if(!r||!nonblank(r.instance_id)||!Array.isArray(r.row_ids)||!r.row_ids.length||!r.row_ids.every(nonblank)||new Set(r.row_ids).size!==r.row_ids.length||r.row_count!==r.row_ids.length)throw Error('영수증의 보존 주체와 정확한 선택 행 목록이 필요합니다.');
+ if(!r.evidence||!nonblank(r.evidence.uri)||typeof r.evidence.sha256!=='string'||r.evidence.sha256.length!==64||![...r.evidence.sha256].every(c=>'0123456789abcdef'.includes(c)))throw Error('영수증의 보존 참조와 SHA-256을 확인하세요.');
+ const d=r.delivery;
+ if(d!==undefined){
+  if(!d||!['keeper','broadcast'].includes(d.destination)||!['accepted','committed','failed','outcome_unknown'].includes(d.status))throw Error('전달 대상과 기록 상태를 확인하세요.');
+  if(d.destination==='keeper'&&!nonblank(d.keeper_name))throw Error('대상 Keeper 이름이 필요합니다.');
+  if((d.status==='accepted'&&d.destination!=='keeper')||(d.status==='committed'&&d.destination!=='broadcast'))throw Error('전달 상태와 대상이 일치하지 않습니다.');
+  if(['failed','outcome_unknown'].includes(d.status)&&typeof d.error!=='string')throw Error('실패·결과 미확정 영수증에는 원래 오류가 필요합니다.');
+ }
+ return r;
+}
+function receiptSelectsReport(receipt,row){return row.lane_id===receipt.instance_id+'/fusion/report'&&receipt.row_ids.includes(row.id);}
+function sharingStateText(receipt){
+ const d=receipt.delivery;if(!d)return '근거만 보존 · 전달 기록 없음';
+ const target=d.destination==='broadcast'?'Broadcast':'Keeper '+d.keeper_name;
+ return target+' · '+({accepted:'전달 수락',committed:'메시지 저장',failed:'전달 실패',outcome_unknown:'전달 결과 확인 필요'}[d.status])+(d.error!==undefined?' · '+d.error:'')+' · 읽기·활용 미확인';
+}
+function renderSharingReceipt(){
+ const box=$('received-sharing');box.replaceChildren();$('clear-sharing').disabled=!receivedSharing;
+ if(!receivedSharing){box.append(el('p','아직 영수증 파일을 열지 않았습니다.','small muted'));return;}
+ const r=receivedSharing.receipt,matching=(receivedReports?.rows??[]).filter(row=>receiptSelectsReport(r,row));
+ box.append(el('p','불러온 영수증 파일: '+receivedSharing.fileName,'small muted'),el('p',sharingStateText(r),'sharing-state'));
+ box.append(el('p','보존 주체: '+r.instance_id,'mono small'),el('p','SHA-256: '+r.evidence.sha256,'mono small'));
+ for(const id of r.row_ids)box.append(el('p','선택한 행: '+id,'mono small'));
+ box.append(el('p',matching.length?'열린 보고서와 선택 좌표 일치 · 내용 진위·전달·열람 검증은 별도':'열린 보고서와 선택 좌표 미확인 · 이 영수증을 보고서의 전달 기록으로 연결하지 않습니다.','sharing-match small muted'));
+}
+function parseReceivedReports(value){
+ if(!value||typeof value!=='object'||Array.isArray(value)||value.isError===true)throw Error('보고서 출력 또는 성공한 MCP 응답이 필요합니다.');
+ const output=value.structuredContent??value;
+ if(!output||!Array.isArray(output.rows)||!output.rows.length)throw Error('파일에 보고서 행이 없습니다.');
+ const byId=new Map();
+ for(const row of output.rows){if(!row||typeof row.id!=='string'||byId.has(row.id))throw Error('보고서 행의 고유 좌표가 필요합니다.');byId.set(row.id,row);}
+ const reports=output.rows.filter(row=>row.lane_id==='fusion/report'||row.lane_id?.endsWith('/fusion/report'));
+ if(!reports.length)throw Error('파일에 보고서 행이 없습니다.');
+ return reports.map(row=>{
+  const f=row.fields;
+  if(typeof row.title!=='string'||!f||f.format!=='markdown'||typeof f.body!=='string'||typeof f.input_complete!=='boolean'||!['supplied_fusion_computation','supplied_fusion_output'].includes(f.scope))throw Error('Fusion 보고서의 본문·입력 상태·범위를 확인하세요.');
+  if(!Array.isArray(row.related_ids)||row.related_ids.length!==1)throw Error('보고서의 보존 입력 연결이 필요합니다.');
+  const context=byId.get(row.related_ids[0]),expectedLane=row.lane_id.slice(0,-'report'.length)+'report-context',p=context?.fields?.producer;
+  if(context?.lane_id!==expectedLane||typeof context.fields?.body!=='string'||!Array.isArray(context.fields.raw_computed_rows))throw Error('같은 출력의 보고서 입력 기록을 확인하세요.');
+  if(!p||!['installation_id','instance_id','run_id'].every(key=>typeof p[key]==='string'&&p[key].trim())||!Number.isSafeInteger(p.observation_seq)||p.observation_seq<1)throw Error('보고서의 생산자·실행·완료 관측 좌표가 필요합니다.');
+  if(f.scope==='supplied_fusion_computation'&&(typeof f.analysis_id!=='string'||!['answered','host_error','outcome_unknown','invalid_response'].includes(f.computation_status)))throw Error('계산 보고서의 분석 이름과 호출 상태를 확인하세요.');
+  if(f.scope==='supplied_fusion_output'&&(typeof f.fusion_run_id!=='string'||!['running','completed','failed'].includes(f.run_status)))throw Error('Fusion 보고서의 실행 이름과 상태를 확인하세요.');
+  const retained=context.fields.raw_computed_rows.filter(raw=>{
+   const c=raw?.fields?.computation,refs=raw?.fields?.model_evidence;
+   return raw?.lane_id===p.instance_id+'/fusion/computation'&&raw.subject_id===f.analysis_id&&c&&f.computation&&['analysis_id','role','status','model','stop_reason'].every(key=>Object.hasOwn(c,key)&&Object.hasOwn(f.computation,key)&&c[key]===f.computation[key])&&refs?.request&&f.model_evidence?.request&&typeof refs.request.uri==='string'&&typeof refs.request.sha256==='string'&&['request','outcome'].every(key=>refs[key]?.uri===f.model_evidence[key]?.uri&&refs[key]?.sha256===f.model_evidence[key]?.sha256);
+  });
+  return {...row,fields:{...f,producer:p,report_context:context,retained_computation:retained.length===1?retained[0].fields:null}};
+ });
+}
+function declaredReportMatches(row,g=graph){
+ const f=row.fields;
+ if(f.scope!=='supplied_fusion_computation'||g.installation_settings.run_id!==f.producer.run_id||g.installation_settings.analysis_id!==f.analysis_id)return [];
+ return g.nodes.filter(n=>n.kind==='report'&&g.edges.some(e=>e.to===n.id&&g.nodes.some(up=>up.id===e.from&&['panel','judge'].includes(up.kind)&&up.installation?.id===f.producer.installation_id))).map(n=>n.name);
+}
+function retainedReportAnswer(row){
+ const f=row.fields,c=f.retained_computation?.computation,r=f.retained_computation?.sampling_response;
+ if(f.scope!=='supplied_fusion_computation'||f.computation_status!=='answered'||c?.status!=='answered'||typeof c.text!=='string'||!c.text.trim())return null;
+ if(c.analysis_id!==f.analysis_id||typeof c.model!=='string'||!c.model.trim()||!Object.hasOwn(c,'stop_reason')||(c.stop_reason!==null&&typeof c.stop_reason!=='string'))return null;
+ if(r?.role!=='assistant'||r.content?.type!=='text'||r.content.text!==c.text||r.model!==c.model||(r.stopReason??null)!==c.stop_reason)return null;
+ return c.text;
+}
+function renderReceivedReports(){
+ renderSharingReceipt();
+ const box=$('received-reports');box.replaceChildren();$('clear-reports').disabled=!receivedReports;
+ $('report-file-name').textContent=receivedReports?'불러온 파일: '+receivedReports.fileName:'아직 보고서 파일을 열지 않았습니다.';
+ if(!receivedReports)return;
+ for(const row of receivedReports.rows){
+  const f=row.fields,card=el('article',undefined,'trace'),matches=declaredReportMatches(row),answer=retainedReportAnswer(row);
+  card.append(el('p','파일에서 받은 보고서 · 실행·전달 검증 없음','eyebrow'),el('h3',row.title));
+  if(answer!==null){const result=el('pre',answer,'received-answer');result.style.whiteSpace='pre-wrap';result.style.fontFamily='inherit';card.append(result);}
+  card.append(el('p','입력 범위: '+(f.input_complete?'기록상 입력 완전':'기록상 입력 불완전'),f.input_complete?'small muted':'partial small'));
+  const state=f.computation_status??f.run_status,labels={answered:'응답 받음',host_error:'호출 실패',outcome_unknown:'호출 결과 확인 필요',invalid_response:'응답 검증 실패',running:'분석 진행 중',completed:'분석 완료',failed:'분석 실패'};
+  card.append(el('p','기록 상태: '+labels[state],'small'));
+  card.append(el('p',matches.length?'선언된 입력이 일치하는 블록: '+matches.join(', ')+' · 설치·실행 확인은 별도':'현재 조립안과 연결 미확인 · 파일의 보고서를 따로 표시','small muted'));
+  if(receivedSharing&&receiptSelectsReport(receivedSharing.receipt,row))card.append(el('p','선택 좌표가 일치하는 영수증 (파일 기록): '+sharingStateText(receivedSharing.receipt),'report-sharing small'));
+  const records=el('details',undefined,'report-records');records.append(el('summary','입력 경로와 전체 보존 기록'));
+  records.append(el('p','생산자: '+f.producer.installation_id+' · 실행 '+f.producer.run_id+' · 완료 관측 '+f.producer.observation_seq+' · 상태 '+state,'mono small'));
+  const body=el('pre',f.body,'mono received-report-body');body.style.whiteSpace='pre-wrap';body.style.fontFamily='inherit';
+  if(answer===null)card.append(body);else records.append(body);
+  const contextBody=el('pre',f.report_context.fields.body,'received-context-body');contextBody.style.whiteSpace='pre-wrap';contextBody.style.fontFamily='inherit';records.append(contextBody);
+  card.append(records);
+  card.append(el('p','전달·Keeper 읽기·활용은 별도 영수증과 실행 기록으로 확인합니다.','small muted'));box.append(card);
+ }
 }
 Object.entries(kinds).forEach(([kind,info])=>{const button=el('button');button.dataset.add=kind;button.append(el('b','+ '+info.label),el('small',info.desc));button.addEventListener('click',()=>{remember();let n;do{n=makeNode(kind,info.label);}while(nodeById(n.id));graph.nodes.push(n);selected=n.id;changed();message('블록을 추가했습니다. 입력·출력을 연결하세요.');});$('palette').append(button);});
 $('load-template').addEventListener('click',()=>{remember();graph=template($('template').value);selected=null;changed();message('시작 예제를 불러왔습니다. 이전 조립안은 되돌리기로 복원할 수 있습니다.');});
 $('undo').addEventListener('click',()=>{if(!history.length)return;graph=history.pop();selected=null;changed();$('undo').disabled=!history.length;message('이전 조립안으로 되돌렸습니다.');});
 $('export').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(graph,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='masc-lane-composition.json';a.click();URL.revokeObjectURL(url);message('조립안 JSON을 저장했습니다. MASC 설치 TOML이나 실행 결과는 아닙니다.');});
 $('import').addEventListener('click',()=>$('import-file').click());
-$('import-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;try{const result=validate(JSON.parse(await file.text()));remember();graph=result;selected=null;changed();message('조립안 JSON을 불러왔습니다.');}catch(error){message('불러오기 실패: '+error.message,true);}event.target.value='';});
+// Protect edits as soon as typing starts, including fields committed on blur.
+for(const id of ['inspector','install-settings'])$(id).addEventListener('input',()=>{graphReadGeneration++;});
+$('import-file').addEventListener('change',async event=>{
+ const file=event.target.files[0];if(!file)return;
+ const generation=++graphReadGeneration;event.target.value='';
+ let result;
+ try{const text=await file.text();if(generation!==graphReadGeneration)return;result=validate(JSON.parse(text));}
+ catch(error){if(generation===graphReadGeneration)message('불러오기 실패: '+error.message,true);return;}
+ remember();graph=result;selected=null;changed();message('조립안 JSON을 불러왔습니다.');
+});
+$('open-reports').addEventListener('click',()=>$('reports-file').click());
+$('reports-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;const generation=++reportReadGeneration;try{const rows=parseReceivedReports(JSON.parse(await file.text()));if(generation!==reportReadGeneration)return;receivedReports={fileName:file.name,rows};renderReceivedReports();message('보고서 파일을 읽었습니다. 서버 실행·공유·읽음 기록은 만들지 않았습니다.');}catch(error){if(generation===reportReadGeneration)message('보고서 불러오기 실패: '+error.message+(receivedReports?' · 이전 파일의 보고서는 유지됩니다.':''),true);}finally{event.target.value='';}});
+$('clear-reports').addEventListener('click',()=>{reportReadGeneration++;receivedReports=null;renderReceivedReports();message('보고서 파일 보기를 닫았습니다.');});
+$('open-sharing').addEventListener('click',()=>$('sharing-file').click());
+$('sharing-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;const generation=++sharingReadGeneration;try{const receipt=parseSharingReceipt(JSON.parse(await file.text()));if(generation!==sharingReadGeneration)return;receivedSharing={fileName:file.name,receipt};renderReceivedReports();message('영수증 파일을 읽었습니다. 서버 전달·열람을 실행하거나 검증하지 않았습니다.');}catch(error){if(generation===sharingReadGeneration)message('영수증 불러오기 실패: '+error.message+(receivedSharing?' · 이전 영수증은 유지됩니다.':''),true);}finally{event.target.value='';}});
+$('clear-sharing').addEventListener('click',()=>{sharingReadGeneration++;receivedSharing=null;renderReceivedReports();message('영수증 파일 보기를 닫았습니다.');});
+
+$('declaration-preview').addEventListener('click',declarationPreview);
 $('preview-button').addEventListener('click',preview);$('close-preview').addEventListener('click',()=>$('preview').hidden=true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&connecting){connecting=null;render();message('연결을 취소했습니다.');}});
 new ResizeObserver(()=>requestAnimationFrame(drawWires)).observe($('canvas'));
-graph=template('fusion');$('template').value='fusion';render();
+graph=template('isolated');$('template').value='isolated';render();
 </script>
 </html>

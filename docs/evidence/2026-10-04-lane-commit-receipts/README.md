@@ -9,6 +9,7 @@ The routing client now returns its decoded receipt through the async lane-write 
 - Thirteen changed OCaml source/interface files passed `ocamlc -stop-after parsing` with OCaml 5.5.1. Parsing does not establish type or link correctness.
 - The actual receipt `.ml`/`.mli` and `test_tui_runtime_config_receipt.ml` were copied to a temporary directory and compiled directly with OCaml 5.5.1, Yojson and Alcotest. All 9 isolated cases passed. The command, source hashes, scope and output are retained in `isolated-receipt-tests.json` and `.log`.
 - `git diff --check` passed.
+- The existing replacement/promotion PTY scenario was updated to read the new pending message and assert that the application receipt remains in the current screen after the new selected model appears. Python AST parsing passed; the PTY scenario was not executed.
 
 ## Not established
 

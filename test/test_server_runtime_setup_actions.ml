@@ -319,6 +319,40 @@ let test_catalog_responses_save () = fixture (fun base runtime binary _net ->
       (List.length (List.filter (fun (b:Runtime_schema.binding) -> b.provider_id=provider.id) after.bindings)))
     ["openai-responses"; "deepseek-responses"])
 
+let test_alias_reuses_operator_account () = fixture (fun base runtime binary net ->
+  let home = Filename.concat base "alias-selected-account" in
+  Unix.mkdir home 0o700;
+  Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun out ->
+    output_string out (Printf.sprintf {|
+[providers.operator_codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = %S
+[models.already_bound]
+api-name = "fresh-model"
+max-context = 272000
+tools-support = true
+[operator_codex.already_bound]
+|} home));
+  let reference = Runtime_setup_accounts.register_home ~workspace:base
+      ~integration_id:"codex" ~cli_path:"codex" ~account_home:home
+    |> Result.get_ok |> Runtime_setup_accounts.reference_to_string in
+  let source = `Assoc ["integration_id", `String "codex"; "account_ref", `String reference] in
+  Eio.Switch.run (fun sw ->
+    let models = get (Actions.discover ~binary ~sw ~net ~base_path:base source)
+      |> Yojson.Safe.Util.member "models" |> Yojson.Safe.Util.to_list in
+    let bound = List.find (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string)="fresh-model") models in
+    Alcotest.(check bool) "product alias sees configured account's bound models" true
+      Yojson.Safe.Util.(bound |> member "bound" |> to_bool));
+  let before = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let receipt = get (Actions.save ~binary ~base_path:base (request base source)) in
+  let id = Yojson.Safe.Util.(receipt |> member "runtime_id" |> to_string) in
+  let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let binding = List.find (fun binding -> Runtime_schema.binding_key binding=id) after.bindings in
+  Alcotest.(check string) "alias save retains configured provider ID" "operator_codex" binding.provider_id;
+  Alcotest.(check int) "alias adds no duplicate provider" (List.length before.providers) (List.length after.providers))
+
 let test_configured_muse_readiness_inventory () = fixture (fun _base runtime _binary _net ->
   Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
     output_string channel {|
@@ -591,6 +625,7 @@ let test_status_of_error () =
   check "wrong discovery connection is 400" `Bad_request
     (Actions.Discovery_failed Runtime_model_discovery.Invalid_connection)
 let () = Alcotest.run "web setup actions" ["request boundary",[
+  Alcotest.test_case "product alias reuses the configured account" `Quick test_alias_reuses_operator_account;
   Alcotest.test_case "disabled provider is preserved and refused" `Quick test_disabled_provider_refused;
   Alcotest.test_case "catalog Responses paths survive account setup and reuse" `Quick test_catalog_responses_save;
   Alcotest.test_case "bound models use the same effective home as account grouping" `Quick test_bound_models_follow_effective_ambient_home;

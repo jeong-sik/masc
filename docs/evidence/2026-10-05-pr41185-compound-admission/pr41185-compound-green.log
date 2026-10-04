@@ -1,0 +1,21 @@
+Testing `browser surface'.
+This run has ID `UA622RKJ'.
+
+  [OK]          behavior          0   compound read retains its original admi...
+  [OK]          behavior          1   input correction resumes on the same co...
+  [OK]          behavior          2   scoped scene acknowledgement.
+  [OK]          behavior          3   read any website by active or explicit ...
+  [OK]          behavior          4   empty browser has no page.
+  [OK]          behavior          5   no active tab is not guessed.
+  [OK]          behavior          6   scene node requires sourceContext.
+  [OK]          behavior          7   invalid input is refused.
+  [OK]          behavior          8   backend failure is visible.
+  [OK]          behavior          9   an absent lane names its own setup.
+  [OK]          behavior         10   capture target and image identity.
+  [OK]          behavior         11   Keeper discovers ambiguous clients with...
+  [OK]          behavior         12   off precedes live client guidance.
+  [OK]          behavior         13   Keeper hears why no browser is connected.
+  [OK]          behavior         14   live read pins client across both hops.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/browser surface'.
+Test Successful in 0.036s. 15 tests run.

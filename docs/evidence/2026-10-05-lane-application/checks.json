@@ -21,9 +21,10 @@
   "review_repairs": [
     "P2 source-confirmed: terminal historical cleanup pending/failed publication could appear inactive; repair keeps typed owned state, retries publication only, syncs unlink and cold inventories, handles cancellation.",
     "P3 source-confirmed: old binding_inventory no-sync doc corrected.",
-    "Prior test incorrectly expected enabled=true to be rejected as an unknown field; now uses unexpected=true."
+    "Prior test incorrectly expected enabled=true to be rejected as an unknown field; now uses unexpected=true.",
+    "P2 follow-up: retain terminal obligation before yielding resource event publication, then preserve it on reporting cancellation/exception. Source reviewed and syntax parsed only."
   ],
-  "source_checkpoint": "9d2026d60a637b4154b1bae1fd40b664a1ae62bf",
+  "source_checkpoint": "4368a0bf18ce2546a8032faef9fa6ca65554fcd1",
   "authored_direct_runtime_scenarios": 5,
   "parent_refresh": {
     "previous_base": "24ddb0d7d315299246a9dabfe6d2b9025ab2ecb2",

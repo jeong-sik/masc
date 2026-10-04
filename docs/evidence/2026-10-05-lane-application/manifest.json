@@ -7,8 +7,8 @@
     },
     {
       "path": "checks.json",
-      "bytes": 2298,
-      "sha256": "1abd9d70008b36de0ca07e4cd824c247e7e587237f44b7603d5fcadce9fa4d30"
+      "bytes": 2484,
+      "sha256": "963c5e40cfa388d058bb82d6d7b6bba6134c9696517b22bd83b63708181fb372"
     },
     {
       "path": "pure-compile.txt",
@@ -23,7 +23,7 @@
     {
       "path": "syntax.json",
       "bytes": 1979,
-      "sha256": "e1352f7fedaf054c1dc76d2f93d1dc677ab9b9e1b5bfde68b8bcaf69bdc5b5e0"
+      "sha256": "4ef68a5a5d2d62cad61dc29c3d85b7cf42b22729e57d8db520ed6f8100881aed"
     }
   ]
 }

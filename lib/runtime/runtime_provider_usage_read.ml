@@ -348,9 +348,23 @@ let refresh_readables ~clock ~fetch ~catalogue =
     repeating
 ;;
 
-let refresh_declared ~net ~clock =
+let rec watch_readables ~clock ~codex ~antigravity ~fetch ~catalogue ~revision ~await_change =
+  let current = revision () in
+  Eio.Fiber.first
+    (fun () -> ignore (await_change ~after:current))
+    (fun () ->
+      read_scopes ~codex ~antigravity ~fetch (catalogue ());
+      refresh_readables ~clock ~fetch ~catalogue;
+      Eio.Fiber.await_cancel ());
+  watch_readables ~clock ~codex ~antigravity ~fetch ~catalogue ~revision ~await_change
+;;
+
+let watch_declared ~mgr ~net ~clock ~cwd =
+  let codex ~scope exec = read_codex ~mgr ~clock ~cwd ~scope exec in
   let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
-  refresh_readables ~clock ~fetch ~catalogue:readable_scopes
+  watch_readables ~clock ~codex ~antigravity:read_antigravity ~fetch
+    ~catalogue:readable_scopes ~revision:Runtime.catalogue_revision
+    ~await_change:Runtime.await_catalogue_change
 ;;
 
 (* Scopes a background read is running for. Keepers sharing one account are

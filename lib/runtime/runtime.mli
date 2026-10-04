@@ -444,6 +444,13 @@ end
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 
+val catalogue_revision : unit -> int
+(** Monotonic revision of the published runtime catalogue. *)
+
+val await_catalogue_change : after:int -> int
+(** Wait for a publication newer than [after], without polling. A publication
+    that precedes the wait is returned immediately. *)
+
 val get_default_and_runtimes : unit -> t option * t list
 (** The default runtime and the runtime list from one read of the loaded
     state, so a reload between two separate reads cannot pair a default with

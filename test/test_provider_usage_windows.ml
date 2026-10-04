@@ -1097,6 +1097,63 @@ let test_a_raising_repeat_does_not_end_the_repeats () =
   check bool "the later read recorded its answer" true (reported readable.scope)
 ;;
 
+let test_catalogue_publication_wakes_usage_reads () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let clock = env#clock in
+  let current = ref [] and revision = ref 0 in
+  let changed = Eio.Condition.create () and read_done = Eio.Condition.create () in
+  let http_count = ref 0 and codex_count = ref 0 in
+  let publish accounts =
+    current := accounts;
+    incr revision;
+    Eio.Condition.broadcast changed
+  in
+  let await_change ~after = Eio.Condition.loop_no_mutex changed (fun () ->
+    if !revision > after then Some !revision else None) in
+  let await_count count expected = Eio.Condition.loop_no_mutex read_done (fun () ->
+    if !count >= expected then Some () else None) in
+  let codex ~scope:_ _ =
+    incr codex_count;
+    Eio.Condition.broadcast read_done;
+    Ok () in
+  let fetch ~api_key:_ _ =
+    incr http_count;
+    Eio.Condition.broadcast read_done;
+    Ok ollama_usage_response in
+  let http = http_readable ~provider_id:"usage_added_after_setup"
+      ~url:"https://ok.invalid/added" ~key:"k" ~refresh_s:(Some changed_period_s) in
+  let codex_account =
+    { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id:"usage_added_codex" None
+    ; how = Codex codex_exec } in
+  Eio.Fiber.first
+    (fun () -> Read.watch_readables ~clock ~codex ~antigravity:no_antigravity ~fetch
+      ~catalogue:(fun () -> !current) ~revision:(fun () -> !revision) ~await_change)
+    (fun () ->
+      Eio.Fiber.yield ();
+      check int "an empty initial catalogue makes no HTTP request" 0 !http_count;
+      publish [codex_account];
+      await_count codex_count 1;
+      publish [http];
+      await_count http_count 1;
+      await_count http_count 2;
+      check int "new HTTP account repeats without restarting the worker" 2 !http_count;
+      publish [];
+      Eio.Fiber.yield ();
+      publish [http];
+      await_count http_count 3;
+      check int "restored account gets an immediate read" 3 !http_count)
+;;
+
+let test_runtime_publication_is_visible_before_wait () =
+  Eio_mock.Backend.run_full @@ fun _env ->
+  let before = Runtime.catalogue_revision () in
+  with_runtimes (fun () ->
+    let published = Runtime.catalogue_revision () in
+    check bool "runtime publication advances revision" true (published > before);
+    check int "a publication before subscribe is not lost" published
+      (Runtime.await_catalogue_change ~after:before))
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -1141,7 +1198,11 @@ let () =
         ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
         ] )
     ; ( "repeating a read"
-      , [ test_case "repeats follow the catalogue and end when it drops the account" `Quick
+      , [ test_case "new and restored catalogue accounts start reading" `Quick
+            test_catalogue_publication_wakes_usage_reads
+        ; test_case "runtime publication has no lost wake" `Quick
+            test_runtime_publication_is_visible_before_wait
+        ; test_case "repeats follow the catalogue and end when it drops the account" `Quick
             test_repeats_follow_the_catalogue_and_end_when_it_drops_the_account
         ; test_case "only accounts that can answer repeat, each on its period" `Quick
             test_only_accounts_that_can_answer_repeat_each_on_its_period

@@ -900,10 +900,10 @@ def run_provider_jump(executable: str) -> None:
     )
 
 
-def run_cli_binding_jump(executable: str) -> None:
+def run_cli_binding_jump(executable: str, *, missing_binding: bool = False) -> None:
     """Enter edits a declared CLI binding even when the registry rejected its slot."""
     store = LaneStore()
-    slot = "codex_subscription.luna"
+    slot = "codex_subscription.retired" if missing_binding else "codex_subscription.luna"
     librarian = store.exact_lane("librarian_exact")
     librarian["declared_cli_slots"] = [slot]
     librarian["cli_slots"] = []
@@ -928,6 +928,13 @@ def run_cli_binding_jump(executable: str) -> None:
             raise AssertionError(f"The slot groups are unclear: {screen!r}")
         _keyboard_harness.send_and_wait(process, fd, output, b"j",
                         b"> 2/2  [CLI] " + slot.encode() + b"  (not admitted)")
+        if missing_binding:
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"[providers.codex_subscription]")
+            screen = _keyboard_harness.screen_text(bytes(output))
+            if b"Edit model" in screen or b"protocol" not in screen:
+                raise AssertionError("a missing binding did not open its provider source for repair")
+            os.write(fd, b"q")
+            return
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", "Edit model · codex_subscription".encode())
         assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
         _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=80,
@@ -938,7 +945,7 @@ def run_cli_binding_jump(executable: str) -> None:
 
     _keyboard_harness.run_terminal_scenario(
         executable,
-        description="Rejected Librarian CLI slot opens shared model settings",
+        description="Rejected Librarian CLI slot opens " + ("raw repair source" if missing_binding else "shared model settings"),
         interact=interact,
         http_fixtures=fixtures,
     )
@@ -998,8 +1005,16 @@ def run_model_settings_read_isolation(executable: str, *, old_fails: bool) -> No
             with lock:
                 queued.append(newer)
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"MASC Models")
-            await_event(newer.requested, "the second settings read was not requested")
+            # Automatic ticks must neither start another read nor invalidate
+            # this slow one. Edit/copy must not consume the retained cursor.
+            os.write(fd, b"ec")
+            if _keyboard_harness.wait_for_fixture_event(
+                    process, fd, output, newer.requested, timeout=2.5):
+                raise AssertionError("a second source read started before the first completed")
+            if b"Edit model" in _keyboard_harness.screen_text(bytes(output)):
+                raise AssertionError("edit used retained rows while the requested model was loading")
             older.release.set()
+            await_event(newer.requested, "the queued settings read was not requested")
             await_event(older.completed, "the old settings read did not finish")
             _keyboard_harness.drain_until_quiet(process, fd, output)
             # Force a complete frame after the old callback has been delivered.
@@ -1393,6 +1408,7 @@ if __name__ == "__main__":
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))
+    run_cli_binding_jump(os.path.abspath(sys.argv[1]), missing_binding=True)
     run_model_settings_read_isolation(os.path.abspath(sys.argv[1]), old_fails=False)
     run_model_settings_read_isolation(os.path.abspath(sys.argv[1]), old_fails=True)
     print("runtime lane editor: PASS")

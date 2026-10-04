@@ -351,6 +351,26 @@ let apply_runtime_config_jump state =
     Some (runtime_config_path_text path, Option.is_some found)
   | None, _ | Some _, None -> None
 
+let open_runtime_model_source state runtime_id =
+  state.runtime_model_form <- None;
+  state.config_pane <- Config_runtime;
+  state.runtime_config_status_open <- false;
+  state.runtime_config_view_error <- None;
+  state.config_scroll <- 0;
+  state.runtime_config_cursor <- 0;
+  let paths = match String.index_opt runtime_id '.' with
+    | None -> []
+    | Some index ->
+        let provider = String.sub runtime_id 0 index in
+        let model = String.sub runtime_id (index + 1)
+            (String.length runtime_id - index - 1) in
+        [[provider; model]; ["models"; model]; ["providers"; provider]] in
+  state.runtime_config_jump_section <-
+    (match state.runtime_config_view with
+     | None -> None
+     | Some {rcv_rows; _} -> List.find_opt
+         (fun path -> Option.is_some (runtime_config_section_line ~path rcv_rows)) paths)
+
 let move_runtime_config_cursor state ~delta =
   let direction = if delta >= 0 then 1 else -1 in
   set_runtime_config_cursor_near state ~direction
@@ -10073,6 +10093,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_status_open <- false;
   state.runtime_account_form <- None;
   state.runtime_model_jump <- None;
+
   state.presets_snapshot <- None;
   state.presets_error <- None;
   state.presets_cursor <- 0;
@@ -14309,14 +14330,22 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                    state.config_models_cursor <- index;
                    state.config_scroll <- 0;
                    state.runtime_model_form <- Some (Masc_tui_model_form.create Edit row)
-                 | None -> report_action state "error"
-                     ("No saved account/model binding for " ^ Terminal_text.single_line runtime_id))
+                 | None ->
+                   open_runtime_model_source state runtime_id;
+                   report_action state "info"
+                     ("Binding unavailable; edit runtime.toml for " ^ Terminal_text.single_line runtime_id))
               | Some _ | None -> ());
              state.runtime_model_jump <- None
            | Error detail ->
-             state.runtime_model_jump <- None;
              state.config_models_rows <- [];
-             state.config_models_error <- Some detail);
+             state.config_models_error <- Some detail;
+             (match requested_model with
+              | Some runtime_id when state.runtime_model_jump = requested_model
+                    && state.view = Config && state.config_pane = Config_models ->
+                  open_runtime_model_source state runtime_id;
+                  report_action state "error" ("Model settings unreadable; edit runtime.toml: " ^ detail)
+              | Some _ | None -> ());
+             state.runtime_model_jump <- None);
           set_runtime_config_cursor_near state ~direction:1
             ~target:state.runtime_config_cursor;
           (match apply_runtime_config_jump state with
@@ -17506,7 +17535,9 @@ let main
     scan 0 rows
   in
   let handle_config_models_open_source () =
-    match List.nth_opt state.config_models_rows state.config_models_cursor with
+    if Option.is_some state.runtime_model_jump then
+      report_action state "info" "Loading the selected binding; Esc cancels"
+    else match List.nth_opt state.config_models_rows state.config_models_cursor with
     | None -> report_action state "error" "no model row is selected"
     | Some row -> (
       match state.runtime_config_view with
@@ -17615,8 +17646,9 @@ let main
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
   let handle_model_form_open mode () =
-    state.runtime_model_jump <- None;
-    match selected_config_model state with
+    if Option.is_some state.runtime_model_jump then
+      report_action state "info" "Loading the selected binding; Esc cancels"
+    else match selected_config_model state with
     | Ok row -> state.runtime_model_form <- Some (Masc_tui_model_form.create mode row)
     | Error detail -> report_action state "error" detail
   in
@@ -17640,7 +17672,7 @@ let main
     state.config_scroll <- 0;
     (* Read the authoritative source before choosing the exact account/binding;
        a pending catalogue or stale cursor cannot select a neighbour's model. *)
-    launch_runtime_config_load state ~mailbox:async_messages
+    launch_runtime_config_load ~force:true state ~mailbox:async_messages
   in
   let open_selected_slot_config () =
     match Masc_tui_types.slot_editor_cursor_row state with
@@ -19794,7 +19826,7 @@ and is loaded on demand through keeper_skill.
                 (match result with
                  | Ok summary -> state.runtime_model_form <- None;
                    launch_runtime_catalog_load state ~mailbox:async_messages;
-                   launch_runtime_surface_load state ~mailbox:async_messages ~force:false;
+                   launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
                    launch_lanes_reread state ~mailbox:async_messages;
                    report_action state "system" ("Model saved · " ^ summary ^ " · choose it in Runtime / Lanes")
                  | Error detail -> state.runtime_model_form <- Some (Masc_tui_model_form.refused form detail)))

@@ -36,6 +36,9 @@ The server exports each retained detail at
 
 Each response has the shape `{"generated_at": "...", "run": {...}}`. Assign
 that entire object directly to the arm; do not wrap it in another `run` object.
+The envelope must include `generated_at`; the run must declare
+`run_kind=exact_output` and `skill_evidence={"state":"no_keeper_skills"}`.
+These structural checks cannot authenticate that an endpoint produced the file.
 Replace the placeholders with the actual full objects. The input payloads,
 including the rendered prompt SHA, must match exactly. Each run and sample ID
 may occur only once. Missing/unavailable payloads, missing timings and
@@ -54,6 +57,29 @@ before normalization, including within these two JSON variables; the manifest
 digest describes canonical JSON, not the original file's whitespace or key order.
 Keep all selected sample IDs in the manifest to avoid selection bias.
 
+The CLI reads the same manifest incrementally, decoding one pair at a time with
+Python's standard JSON decoder. It does not add a file-reference format or a
+parser dependency. All selected samples remain in order, including failures.
+Metadata may appear before or after the pairs. Duplicate keys and malformed or
+trailing JSON are refused before any report is printed.
+
+Canonical pair bytes are written to a private temporary file. After validation,
+the reporter hashes its root members in sorted order, reading those bytes back
+in chunks. This preserves the canonical manifest digest regardless of input key
+order without keeping all decoded pairs. Input retention depends on the largest
+pair or metadata value and decoder lookahead, not the sum of all pair inputs.
+Prompt rendering still materializes one prompt. Sample/run identities and the
+reported summaries remain in memory, so report-sized state still grows with the
+sample count. This is pair-bounded input processing, not constant-memory parsing
+of an arbitrarily large individual value.
+
+The tradeoff is temporary disk space proportional to canonical manifest size,
+plus serialization and disk I/O. Temporary-file failures refuse the report;
+there is no input-size cap or silent sample omission. Preserve enough temporary
+storage for the selected export set. A synthetic Linux CLI scaling measurement
+uses 136,600,000 ASCII conversation bytes per arm; the raw evidence records
+baseline and current RSS and verifies complete report equality for each batch.
+
 ```sh
 python3 scripts/librarian/compare-preflight.py frozen-manifest.json > report.json
 python3 test/test_librarian_preflight_report.py -v
@@ -69,6 +95,16 @@ and preflight failure evidence can include provider response bodies.
 Each pair retains `preflight_observation`, including its own `status`, decision
 or failure, independently of `preflight_status` (the whole Librarian run).
 A successful fallback can therefore still show a failed JEV evaluation.
+`baseline_selected_slot`, `preflight_selected_slot` and
+`preflight_domain_rejection` preserve the full-lane choices and fallback cause.
+Different selected slots are permitted and visible; their timing delta may be
+confounded by that routing difference.
+
+Successful Memory runs require the flattened completion receipt: `exact_output`,
+`before`, `after`, `absorption`, `claims_not_applied` and terminal `absorb_gate`
+structures. A skipped absorb gate is valid. Failed and cancelled runs do not
+require these success fields. The receipt checks do not rerun the native domain
+validator, verify semantic claims or attest persistence from an external export.
 Failed runs require their code and detail; other terminal statuses must omit
 both fields. Goal contexts require exactly the fields emitted for their recorded
 status, so stale fields from another variant are refused. `baseline_failure` and

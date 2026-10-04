@@ -3,9 +3,9 @@ let at text = match Candle_time.of_rfc3339 text with Ok value -> value | Error d
 let now = at "2026-09-29T00:00:00Z"
 let policy : Candle_event.t = {at=now;body=Candle_event.Half_life_set Candle_decay.Off}
 let payment ?(keeper="keeper") ?(deduction_rate=0) ?(overdue_hours=0) goal amount =
-  match Candle_payment.make
+  match Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
     ~identity:{goal_id=goal;request_id="request";verification_run_id="verified"}
-    ~grade:Candle_grade.Trivial ~total_milli:amount
+    ~grade:(Option.get (Candle_grade.of_string "trivial")) ~total_milli:amount
     ~grade_trace:{run_id="grade";slot_id="slot"}
     ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="slot"}}]
     ~weights_trace:{run_id="weights";slot_id="slot"}

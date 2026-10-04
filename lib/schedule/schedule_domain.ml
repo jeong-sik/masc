@@ -363,7 +363,7 @@ let validate_daily ~hour ~minute ~second ~timezone =
 ;;
 
 type cron_field =
-  { any : bool
+  { starts_with_wildcard : bool
   ; values : int list
   }
 
@@ -441,9 +441,11 @@ let parse_cron_atom ~field ~min_v ~max_v ~map_value atom =
     if step <= 0
     then Error (Printf.sprintf "recurrence.cron.%s step must be positive" field)
     else if String.equal base "*"
-    then range_values ~field ~min_v ~max_v ~map_value min_v max_v step
+    then (
+      let* values = range_values ~field ~min_v ~max_v ~map_value min_v max_v step in
+      Ok { starts_with_wildcard = true; values })
     else (
-      match split_char '-' base with
+      let* values = match split_char '-' base with
       | [ one ] ->
         (match explicit_step with
          | Some _ -> Error (Printf.sprintf
@@ -461,7 +463,9 @@ let parse_cron_atom ~field ~min_v ~max_v ~map_value atom =
           (Printf.sprintf
              "recurrence.cron.%s token must be *, n, n-m, */s, or n-m/s: %s"
              field
-             atom)))
+             atom)
+      in
+      Ok { starts_with_wildcard = false; values }))
 ;;
 
 let parse_cron_field ~field ~min_v ~max_v ?(map_value = fun value -> Ok value) raw =
@@ -469,14 +473,17 @@ let parse_cron_field ~field ~min_v ~max_v ?(map_value = fun value -> Ok value) r
   if String.equal raw ""
   then Error (Printf.sprintf "recurrence.cron.%s must be non-empty" field)
   else (
-    let atoms = split_char ',' raw in
-    let rec loop acc = function
-      | [] -> Ok { any = String.equal raw "*"; values = dedupe_sorted acc }
-      | atom :: rest ->
-        let* values = parse_cron_atom ~field ~min_v ~max_v ~map_value atom in
-        loop (List.rev_append values acc) rest
-    in
-    loop [] atoms)
+    match split_char ',' raw with
+    | [] -> Error (Printf.sprintf "recurrence.cron.%s must be non-empty" field)
+    | first :: rest ->
+      let* first = parse_cron_atom ~field ~min_v ~max_v ~map_value first in
+      let rec loop acc = function
+        | [] -> Ok { first with values = dedupe_sorted acc }
+        | atom :: rest ->
+          let* parsed = parse_cron_atom ~field ~min_v ~max_v ~map_value atom in
+          loop (List.rev_append parsed.values acc) rest
+      in
+      loop first.values rest)
 ;;
 
 let parse_cron_expression expression =
@@ -512,12 +519,11 @@ let max_possible_day_of_month = function
 ;;
 
 let cron_has_possible_date spec =
-  (* Vixie cron uses OR when both DOM and DOW are restricted. A restricted DOW
-     therefore always supplies future dates. When DOW is unrestricted, at
-     least one selected month must admit one selected DOM; February 29 is
-     possible because Gregorian leap years recur. The parser guarantees every
-     field is non-empty, so this invariant makes calendar-day search total. *)
-  (not spec.dow.any)
+  (* With no leading wildcard, DOM/DOW use OR, so the non-empty DOW supplies
+     future dates. Otherwise they use AND: a selected month must admit a
+     selected DOM. That date eventually occurs on every weekday in the
+     Gregorian cycle, including February 29. *)
+  (not spec.dom.starts_with_wildcard && not spec.dow.starts_with_wildcard)
   || List.exists
        (fun month ->
           match max_possible_day_of_month month with
@@ -702,11 +708,9 @@ let field_matches field value = List.mem value field.values
 let cron_day_matches spec tm =
   let dom_matches = field_matches spec.dom tm.Unix.tm_mday in
   let dow_matches = field_matches spec.dow tm.Unix.tm_wday in
-  match spec.dom.any, spec.dow.any with
-  | true, true -> true
-  | true, false -> dow_matches
-  | false, true -> dom_matches
-  | false, false -> dom_matches || dow_matches
+  if spec.dom.starts_with_wildcard || spec.dow.starts_with_wildcard
+  then dom_matches && dow_matches
+  else dom_matches || dow_matches
 ;;
 
 let cron_date_matches spec tm =

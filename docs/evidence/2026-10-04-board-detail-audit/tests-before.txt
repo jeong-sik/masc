@@ -1,0 +1,43 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-audit-board-detail-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/board/board-state.test.ts -t 'keeps detail-only evidence'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-audit-board-detail-20261004/dashboard
+
+ ❯ src/components/board/board-state.test.ts (58 tests | 1 failed | 57 skipped) 8ms
+   ❯ loadPostDetail (23)
+     × keeps detail-only evidence and viewer state through the real API decoder 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/board/board-state.test.ts > loadPostDetail > keeps detail-only evidence and viewer state through the real API decoder
+AssertionError: expected undefined to deeply equal { turn_ref: 'trace-board#5', …(2) }
+
+- Expected:
+{
+  "fusion_run_id": null,
+  "source": "dashboard",
+  "turn_ref": "trace-board#5",
+}
+
++ Received:
+undefined
+
+ ❯ src/components/board/board-state.test.ts:391:40
+    389|       await loadPostDetail('detail-evidence')
+    390|
+    391|       expect(detailPost.value?.origin).toEqual(response.post.origin)
+       |                                        ^
+    392|       expect(detailPost.value?.attachments).toEqual([{ ok: true, attac…
+    393|         kind: 'external_link', source: { kind: 'url', url: 'https://ex…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 57 skipped (58)
+   Start at  01:11:05
+   Duration  1.12s (transform 48%, environment 21%, setup 20%, import 9%, tests 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.

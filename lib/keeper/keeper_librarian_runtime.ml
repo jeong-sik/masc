@@ -990,12 +990,9 @@ let execute_exact_output_classified
    undiagnosable from disk afterwards. Every failure path routes here so the
    log severity and the recorded line resolve snapshot presence from the same
    read and cannot disagree about one instant. *)
-let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
+let record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
   let snapshot_absent =
-    match
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
-    with
+    match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
     | Ok (Some _) -> false
     | Ok None | Error _ -> true
   in
@@ -1008,15 +1005,19 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
   if snapshot_absent
   then Log.Keeper.error ~keeper_name:keeper_id "%s" message
   else Log.Keeper.warn ~keeper_name:keeper_id "%s" message;
+  Keeper_memory_os_current.append_librarian_failure
+    ~keepers_dir
+    ~keeper_id
+    ~now:(Time_compat.now ())
+    ~trace_id
+    ~kind
+    ~detail
+    ~snapshot_present:(not snapshot_absent)
+;;
+
+let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
   Domain_pool_ref.submit_io_or_inline (fun () ->
-    Keeper_memory_os_current.append_librarian_failure
-      ~keepers_dir
-      ~keeper_id
-      ~now:(Time_compat.now ())
-      ~trace_id
-      ~kind
-      ~detail
-      ~snapshot_present:(not snapshot_absent))
+    record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
 ;;
 
 let current_selection_registry_summary = function
@@ -1783,15 +1784,21 @@ let run_best_effort
                  complete
                    Exact_lane_run_registry.Cancelled
                    (failed_output !observed_absorb_gate);
-               record_failure
-                 ~keepers_dir
-                 ~keeper_id
-                 ~trace_id
-                 ~kind:Keeper_memory_os_current.Lane_cancelled
-                 ~detail:
-                   (Printf.sprintf
-                      "memory os librarian cancelled lane=%s"
-                      exact_lane_id));
+               (* The shared executor's workers are children of the server
+                  switch being cancelled. Do not enqueue protected cleanup on
+                  that pool: its workers can already be gone while this child
+                  prevents the switch's queue-close hook from running. Join a
+                  systhread for the same snapshot read and failure journal. *)
+               Eio_unix.run_in_systhread ~label:"librarian-cancellation-journal" (fun () ->
+                 record_failure_io
+                   ~keepers_dir
+                   ~keeper_id
+                   ~trace_id
+                   ~kind:Keeper_memory_os_current.Lane_cancelled
+                   ~detail:
+                     (Printf.sprintf
+                        "memory os librarian cancelled lane=%s"
+                        exact_lane_id)));
            (* A later signal reads the same position again, but it does not
               replay this immutable input; graceful lifecycle boundaries
               therefore drain accepted work instead of cancelling it. *)

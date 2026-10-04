@@ -1609,7 +1609,7 @@ let test_rate_limits_read_without_turn () =
               , (match w.kind with
                  | Five_hour -> "5h" | Seven_day -> "7d"
                  | Duration_minutes m -> string_of_int m | Provider_label l -> l)
-              , (match w.utilization with Percent p -> p | Fraction _ -> -1) ))
+              , (match w.utilization with Percent p -> p | Fraction _ | Usd _ -> -1) ))
             report.windows
         in
         check (list (triple string string int)) "every bucket, keyed"
@@ -1667,7 +1667,8 @@ let test_background_read_outlives_the_turn () =
                 | Runtime_provider_usage_window.Not_reported_since_start when tries > 0 ->
                   Eio.Time.sleep clock 0.05;
                   wait (tries - 1)
-                | Runtime_provider_usage_window.Not_reported_since_start -> false
+                | Runtime_provider_usage_window.Not_reported_since_start
+                | Runtime_provider_usage_window.Reported_no_windows _ -> false
               in
               wait 100)
           in
@@ -1720,7 +1721,8 @@ let read_after_spent_usage_refusal ~provider_id read_result =
              = Runtime_provider_usage_read.Started)))));
   (match Runtime_provider_usage_window.state ~scope with
    | Runtime_provider_usage_window.Reported _ -> ()
-   | Runtime_provider_usage_window.Not_reported_since_start ->
+   | Runtime_provider_usage_window.Not_reported_since_start
+   | Runtime_provider_usage_window.Reported_no_windows _ ->
      fail "the read after the refusal recorded no window");
   scope
 ;;

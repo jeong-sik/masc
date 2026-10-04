@@ -8,16 +8,17 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_schedule as _keyboard_schedule
 
 
 
-SCHEDULES = h.SCHEDULES_PATH
+SCHEDULES = _keyboard_schedule.SCHEDULES_PATH
 
 
-def mixed_rows_fixtures() -> h.HttpFixtures:
-    fixtures = h.keeper_runtime_http_fixtures()
-    source = h.schedule_detail_http_fixtures()[SCHEDULES]
+def mixed_rows_fixtures() -> _keyboard_harness.HttpFixtures:
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    source = _keyboard_schedule.schedule_detail_http_fixtures()[SCHEDULES]
     assert isinstance(source, tuple)
     payload = copy.deepcopy(cast(dict[str, Any], source[1]))
     prototype = payload["requests"][0]
@@ -64,7 +65,7 @@ def mixed_rows_fixtures() -> h.HttpFixtures:
 
 
 def checked_frame(output: bytearray) -> dict[int, bytes]:
-    rows = h.screen_rows(bytes(output))
+    rows = _keyboard_harness.screen_rows(bytes(output))
     labels = ("STATUS", "TRIGGERED", "OUTCOME", "RECEIVED", "RECURRENCE")
     header = next(
         (
@@ -91,7 +92,7 @@ def checked_frame(output: bytearray) -> dict[int, bytes]:
 
     positions = {}
     for name in ("success-proof", "failure-proof", "closed-proof", "held-proof"):
-        positions[name] = h.screen_row_of(rows, name.encode())
+        positions[name] = _keyboard_harness.screen_row_of(rows, name.encode())
         if positions[name] < 0:
             raise AssertionError(f"Automation lost {name}: {rows!r}")
     for name, status, outcome, triggered, received in (
@@ -171,32 +172,32 @@ def run(executable: str, frame_path: str | None = None) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process, fd, output, rows=40, columns=420, needle=b"MASC Dashboard"
         )
-        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
-        h.send_and_wait(process, fd, output, b"[", "▸Runs".encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"[", "▸Runs".encode())
         before = len(output)
-        h.send_and_wait(process, fd, output, b"[", "▸Automation".encode())
-        h.wait_for_output(process, fd, output, b"held-proof", start=before, timeout=5)
-        h.wait_for_output(
+        _keyboard_harness.send_and_wait(process, fd, output, b"[", "▸Automation".encode())
+        _keyboard_harness.wait_for_output(process, fd, output, b"held-proof", start=before, timeout=5)
+        _keyboard_harness.wait_for_output(
             process,
             fd,
             output,
-            h.FRAME_END,
-            start=h.end_of_needle(output, b"held-proof", before),
+            _keyboard_harness.FRAME_END,
+            start=_keyboard_harness.end_of_needle(output, b"held-proof", before),
             timeout=5,
         )
         if frame_path is not None:
-            Path(frame_path).write_bytes(h.screen_text(bytes(output)))
+            Path(frame_path).write_bytes(_keyboard_harness.screen_text(bytes(output)))
             Path(frame_path + ".ansi").write_bytes(bytes(output))
         checked_frame(output)
         reject_swapped_columns(output)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Keeper Automation draws mixed rows and held occurrence blanks",
         interact=interact,

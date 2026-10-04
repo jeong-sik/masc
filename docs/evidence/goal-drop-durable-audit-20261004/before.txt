@@ -1,0 +1,38 @@
+Testing `Goal cancellation delivery'.
+This run has ID `3VM485GU'.
+
+> [FAIL]        durability          0   repeat repairs committed audit exactl...
+  [FAIL]        durability          1   fresh process drains audit after Goal...
+  [OK]          durability          2   failed commit creates no effects.
+  [OK]          durability          3   unavailable primary remains unchanged.
+  [OK]          durability          4   missing Goal remains missing.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        durability          0   repeat repairs committed audit exa...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-04 16:51:53] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/goal-drop-delivery-6528f1 (no git root found)
+[2026-10-04 16:51:53] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/Users/dancer/me for requested path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/goal-drop-delivery-6528f1
+[2026-10-04 16:51:53] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/goal-drop-delivery-6528f1 for test executable test_goal_drop_delivery.exe
+[exception] Sys_error("Unix.Unix_error(Unix.EISDIR, \"open\", \"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/goal-drop-delivery-6528f1/.masc/goal_events.jsonl\")")
+            Raised at Stdlib__String.index_rec in file "string.ml", line 143, characters 19-34
+            Called from Stdlib__String.contains_from in file "string.ml", line 207, characters 15-34
+            Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+            Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+            Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+            Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+            Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+            Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+            Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+            Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+            Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+            Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+            Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+            Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+            Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+            Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-drop-zlt839cm/_build/_tests/Goal cancellation delivery/durability.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-drop-zlt839cm/_build/_tests/Goal cancellation delivery'.
+2 failures! in 0.021s. 5 tests run.

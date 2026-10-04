@@ -73,6 +73,67 @@ async function draft() {
 }
 
 describe('Exact activity operator flow', () => {
+  it('does not automatically reload an invalidated raw write with unknown outcome', async () => {
+    const authority = executionWorkspaceAuthority.peek()!, raw = runtimeTomlSessionFor(authority)
+    await raw.read(authority, 'reload')
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    expect(await raw.write(authority, async options => {
+      options.beforeDispatch?.(); announceRuntimeTomlWritten()
+      throw new Error('save response lost')
+    }, source)).toBe(false)
+    expect(raw.state.value.uncertainWrite).toBe(true)
+    expect(raw.state.value.needsRead).toBe(true)
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    expect(raw.writable(authority)).toBe(false)
+  })
+
+  it('keeps unload guarded during verified receipt setup follow-up', async () => {
+    const { authority, session } = await draft(), pending = deferred<void>()
+    followup.resumeSavedModelSetup.mockImplementationOnce(async () => {
+      await pending.promise
+      return { kind: 'active', exactOutputAvailable: true }
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(session.state.value.phase).toBe('followup'))
+    expect(session.state.value.uncertain).toBe(false)
+    expect(session.modified()).toBe(false)
+    const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    pending.resolve(); await saving
+    const finished = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(finished)
+    expect(finished.defaultPrevented).toBe(false)
+  })
+  it.each([false, true])('settles a superseded raw-save basis after follow-up while preserving dirty=%s', async dirty => {
+    const authority = executionWorkspaceAuthority.peek()!, raw = runtimeTomlSessionFor(authority)
+    await raw.read(authority, 'reload')
+    const pending = deferred<void>(), rawSource = source + '# raw commit\n'
+    followup.resumeSavedModelSetup.mockImplementationOnce(async () => {
+      await pending.promise
+      return { kind: 'active', exactOutputAvailable: true }
+    })
+    const saving = raw.write(authority, async options => {
+      options.beforeDispatch?.(); stored = rawSource; return receipt(rawSource)
+    }, rawSource)
+    await waitFor(() => expect(raw.state.value.config?.source_text).toBe(rawSource))
+    if (dirty) raw.edit('draft', rawSource + '# retained local intent\n')
+    const session = exactLaneActivitySessionFor(authority, lane)
+    await session.read(authority); session.toggle(authority)
+    expect(await session.save(authority)).toBe(true)
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    expect(raw.state.value.needsRead).toBe(true)
+    pending.resolve(); expect(await saving).toBe(true)
+    expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    if (dirty) {
+      expect(raw.state.value.draft).toBe(rawSource + '# retained local intent\n')
+      expect(raw.state.value.needsRead).toBe(true)
+      expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    } else {
+      expect(raw.state.value.config?.source_text).toBe(stored)
+      expect(raw.state.value.needsRead).toBe(false)
+      expect(raw.writable(authority)).toBe(true)
+    }
+  })
+
   it('does not expose an invalid conflict document as an editable source', async () => {
     const { authority, session } = await draft(), previous = session.state.value.draft
     api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlRevisionConflict(

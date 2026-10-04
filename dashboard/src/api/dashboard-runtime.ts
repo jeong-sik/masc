@@ -2316,7 +2316,7 @@ export class RuntimeTomlRevisionConflict extends Error {
   }
 }
 
-/** This raw route returns structured HTTP 400 only before a visible file
+/** Structured raw-route validation and authorization rejections occur before
  * replacement; after-rename durability failures return a committed receipt. */
 export class RuntimeTomlSaveRejected extends Error {
   constructor(message: string) { super(message); this.name = 'RuntimeTomlSaveRejected' }
@@ -2340,13 +2340,15 @@ export async function saveRuntimeTomlConfig(
     return decodeCommittedRuntimeTomlConfig(raw)
   } catch (error: unknown) {
     if (error instanceof ApiRequestError && error.method === 'POST'
-      && error.path === '/api/v1/runtime/config/raw' && error.status === 400
+      && error.path === '/api/v1/runtime/config/raw'
+      && (error.status === 400 || error.status === 401 || error.status === 403)
       && !error.timeout && error.configApplied !== true
       && error.configApplicationState !== 'indeterminate' && !error.authoritativeReloadRequired
       && error.runtimeSync === undefined) {
       const failure = error.responseData
       if (isRecord(failure) && typeof failure.error === 'string' && failure.error.trim() !== ''
-        && (failure.ok === undefined || failure.ok === false)) {
+        && (failure.ok === undefined || failure.ok === false)
+        && (error.status === 400 || typeof failure.auth_error_code === 'string' && failure.auth_error_code.trim() !== '')) {
         throw new RuntimeTomlSaveRejected(error.message)
       }
     }

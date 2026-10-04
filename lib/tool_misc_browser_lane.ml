@@ -64,8 +64,10 @@ let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
-  | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason ->
-    make_workflow_err ~tool_name ~start_time reason
+  | Browser_lane.Rejected_before_effect reason ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect reason
+  | Browser_lane.Refused reason -> make_workflow_err ~tool_name ~start_time reason
 ;;
 
 let tool_request args =

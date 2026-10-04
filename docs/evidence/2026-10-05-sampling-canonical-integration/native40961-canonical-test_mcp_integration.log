@@ -1,0 +1,33 @@
+Testing `MCP Integration'.
+This run has ID `8WO2EVTH'.
+
+  [OK]          server_spec                0   fields.
+  [OK]          server_spec                1   empty args.
+  [OK]          server_spec                2   multiple env.
+  [OK]          merge_env                  0   empty extras.
+  [OK]          merge_env                  1   add new var.
+  [OK]          merge_env                  2   override existing.
+  [OK]          merge_env                  3   multiple vars.
+  [OK]          merge_env                  4   preserves existing.
+  [OK]          sampling_boundary          0   host model access round trip o...
+  [OK]          sampling_boundary          1   host denial reaches the package.
+  [OK]          sampling_boundary          2   callback exception preserves s...
+  [OK]          sampling_boundary          3   callback cancellation propagates.
+  [OK]          sampling_boundary          4   no handler means no advertised...
+  [OK]          connect_lifecycle          0   connect_all empty.
+  [OK]          connect_lifecycle          1   close_all empty.
+  [OK]          connect_lifecycle          2   connect_all bad command.
+  [OK]          connect_lifecycle          3   connect_and_load bad command.
+  [OK]          connect_lifecycle          4   connect_all partial failure.
+  [OK]          connect_lifecycle          5   resources and prompts roundtrip.
+  [OK]          managed_type               0   tools list access.
+  [OK]          agent_integration          0   default options mcp_clients.
+  [OK]          agent_integration          1   create with default options.
+  [OK]          agent_integration          2   create preserves regular tools.
+  [OK]          agent_integration          3   close no mcp.
+  [OK]          agent_integration          4   close idempotent.
+  [OK]          agent_integration          5   options mcp_clients field.
+  [OK]          agent_integration          6   checkpoint with mcp options.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40961-review-response-20261005/_build/default/packages/agent_core/test/_build/_tests/MCP Integration'.
+Test Successful in 0.162s. 27 tests run.

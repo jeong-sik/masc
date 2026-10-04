@@ -1,0 +1,64 @@
+{
+  "qualified_commit": "a7bb25fd5b4787d3c81f66c63b2542cbf14686f2",
+  "results": [
+    {
+      "target": "test/test_lane_addon_worker.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-canonical-test_lane_addon_worker.log"
+    },
+    {
+      "target": "test/test_server_lane_addon_sampling.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-canonical-test_server_lane_addon_sampling.log"
+    },
+    {
+      "target": "test/test_lane_sampling_receipt_recovery.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-canonical-test_lane_sampling_receipt_recovery.log"
+    },
+    {
+      "target": "test/test_lane_addon.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-canonical-test_lane_addon.log"
+    },
+    {
+      "target": "test/test_lane_addon_sources.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-canonical-test_lane_addon_sources.log"
+    },
+    {
+      "target": "test/test_lane_addon_store_query.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-canonical-test_lane_addon_store_query.log"
+    },
+    {
+      "target": "packages/agent_core/test/test_mcp_integration.exe",
+      "exit": 0,
+      "log": "/tmp/native40961-canonical-test_mcp_integration.log"
+    }
+  ],
+  "sources_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "4b6b6711a546d420ae9e8b858dea73fb97bb5c5c90494a911a3d91ed8f9a2865",
+    "lib/lane_addon/lane_addon_store.mli": "10962bf0e767ba8358ccf4a1cea447be41d4e2a8625f6e88fbeae3b38fa42a28",
+    "test/test_lane_addon_worker.ml": "7c478a39ef02bacb9b0da1ac1e84bee86433ecc8cd70b6782e1514264b949a89"
+  },
+  "raw_logs_sha256": {
+    "build.log": "5a6ca89ba14da11102cf8cdbe7223ab87d424ca1a25056f620318b393c342b63",
+    "native40961-canonical-test_lane_addon_worker.log": "89c406928d00e8c1a356044ca7e0c84fd84437cda34f9458096a19e0140fb3a7",
+    "native40961-canonical-test_server_lane_addon_sampling.log": "1475a5df7fba8117c6c6a85906adfcd582dfc36becea3e3e9e0b8c89e210f7f7",
+    "native40961-canonical-test_lane_sampling_receipt_recovery.log": "2ce6f19ce6cb7f9b87fb5a9c1b0f878c6a88d16428aa0f69b8917b637752e766",
+    "native40961-canonical-test_lane_addon.log": "5d4bc9ac3c7163a838184905b3b1872dc6fce811cd8a224678bb9dc82fa40cce",
+    "native40961-canonical-test_lane_addon_sources.log": "fe3ec468a85ba4263694699ae6759a3737d6dc967d2cd84c4f2bd14fc468d4a1",
+    "native40961-canonical-test_lane_addon_store_query.log": "c441e538815c75a820fac5ed1bbc99a065fff989442c7ded0ed6ef8fbbca27f5",
+    "native40961-canonical-test_mcp_integration.log": "115ebb1d27446a2d71d02b2adcaa836aee742c77d7d7e65c33ab7e482a9bbcf1"
+  },
+  "binaries_sha256": {
+    "test/test_lane_addon_worker.exe": "ff0e5decedec9287d6f27a0bc54a6fc2c936e5562d6234187fe7b11adfe7b962",
+    "test/test_server_lane_addon_sampling.exe": "118f857cc2d24c7d78862f9e56f52cb448885844c4fe15686dda1691b8d8212e",
+    "test/test_lane_sampling_receipt_recovery.exe": "c4436f482512d9d3781cb0dc732be423a7734e96a57b5fe132a5f6dc6ebf2078",
+    "test/test_lane_addon.exe": "0cd31f593ca45e5a6a8d4445ed37ae28304ff67d69467ff94420b258d317ae17",
+    "test/test_lane_addon_sources.exe": "4e610533180c580a5a7115a211392cc73e0663e732bf90d62cb0c8b77ae05fd3",
+    "test/test_lane_addon_store_query.exe": "bb646254eec95abf9fba205343e05cbeb2dbdf627f28d438dfc713069675b5d3",
+    "packages/agent_core/test/test_mcp_integration.exe": "ad9659c52e762dcd3d3daa5c0b2f4e5464d5554905c31b793348244a856e89b6"
+  }
+}

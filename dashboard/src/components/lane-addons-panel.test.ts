@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { parseLaneAddonSnapshot, parseLaneAddonSlice, parseLaneAddonActionReceipt } from '../api/lane-addons'
 
 const api = vi.hoisted(() => ({
@@ -47,6 +48,13 @@ const actionReceipt = {
   executor: null, input_sha256: 'receipt-input-digest', action: actionRequest.action,
   state: 'queued', result: null, detail: null,
 }
+let workspaceEpoch = 0
+beforeEach(() => {
+  const epoch = `lane-panel-${++workspaceEpoch}`
+  invalidateExecutionSnapshotGeneration(epoch, 0)
+  hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+    status: { project: 'fixture', workspace_root: '/workspace' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
+})
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {

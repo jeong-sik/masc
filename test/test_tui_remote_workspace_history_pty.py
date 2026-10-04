@@ -388,6 +388,10 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             self.release_admission = threading.Event()
             self.held_once = False
             self.phases = []
+            self.directives = []
+        def directive(self, body):
+            self.directives.append(json.loads(body))
+            return super().directive(body)
         def stream(self, body):
             with wire.lock:
                 self.phases.append(wire.phase)
@@ -435,8 +439,9 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
             _keyboard_harness.send_and_wait(process, fd, output, b"/queue resume", _keyboard_harness.composer_showing(b"/queue resume"))
-            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Server confirmed queue resume")
+            os.write(fd, b"\r")
             _keyboard_chat.wait_for_atomic_admissions(process, fd, output, admission, 2)
+            assert admission.directives == [], "local input resume issued a server directive"
             assert admission.phases == ["a", "a-returned"], admission.phases
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
@@ -452,6 +457,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             + " suspends complete unsent inputs until explicit resume in A",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
+    assert admission.directives == [], "local resume sent a late server directive"
 
 
 def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:

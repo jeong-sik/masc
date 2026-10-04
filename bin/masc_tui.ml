@@ -4015,6 +4015,24 @@ let lane_addons_failure_for_request request detail : lane_addons_failure =
   | `Detail -> `Detail detail
   | `Request -> `Request detail
 
+let launch_lane_package_catalog state ~mailbox directory =
+  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  if view.loading then () else (
+    state.lane_addons_generation <- state.lane_addons_generation + 1;
+    let generation = state.lane_addons_generation in
+    let pending = Result.bind (Option.to_result ~none:"No installation wizard" view.installer)
+      (Masc_tui_lane_installer.begin_catalog ~request_id:generation ~directory) in
+    match pending with
+    | Error detail -> state.lane_addons <- Some {view with error=lane_addons_input_failure detail}
+    | Ok installer ->
+      state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None;scroll=0};
+      let host=server_peer_host and port=state.port in
+      let query = match directory with None -> ""
+        | Some path -> "?directory=" ^ Masc_tui_http.percent_encode_query_value path in
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Lane_package_catalog_loaded (generation,directory,result))
+        (fun () -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/package-catalog" ^ query)))
+
 let launch_lane_package_preview state ~mailbox path =
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then () else (
@@ -13275,6 +13293,17 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Workspace_identity_unconfirmed detail ->
       apply_server_identity_reading state (Error detail);
       report_action state "error" detail
+  | Lane_package_catalog_loaded (generation,directory,result) ->
+      map_lane_addons state (fun view ->
+        if view.generation<>generation then view else
+        let response = Option.bind view.installer
+          (Masc_tui_lane_installer.receive_catalog ~request_id:generation ~directory result) in
+        match response with
+        | None -> view
+        | Some (installer,error) ->
+            {view with loading=false;installer=Some installer;
+              package_directory=Masc_tui_lane_installer.directory installer;
+              error=Option.bind error lane_addons_detail_failure;scroll=0})
   | Lane_package_preview_loaded (generation,path,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -20056,7 +20085,7 @@ and is loaded on demand through keeper_skill.
                  | Some installer ->
                      if key="pageup" || key="pagedown" then (
                        let _, cols = get_terminal_size () in
-                       let last = List.length (Addons.lines ~width:(framed_inner_width cols) view)-1 in
+                       let last = List.length (Addons.lines ~height:(surface_rows state) ~width:(framed_inner_width cols) view)-1 in
                        update {view with scroll=max 0 (min last (view.scroll + (if key="pagedown" then 1 else -1)))})
                      else if view.loading then (
                        if key="esc" then invalidate {view with installer=None;loading=false;error=None;scroll=0})
@@ -20064,6 +20093,7 @@ and is loaded on demand through keeper_skill.
                        | Error detail -> update {view with error=lane_addons_input_failure detail}
                        | Ok (Updated installer) -> update {view with installer=Some installer;error=None;scroll=0}
                        | Ok Cancel -> invalidate {view with installer=None;error=None;scroll=0}
+                       | Ok (Browse directory) -> launch_lane_package_catalog state ~mailbox:async_messages directory
                        | Ok (Preview path) -> launch_lane_package_preview state ~mailbox:async_messages path
                        | Ok (Draft session) ->
                            if List.exists (fun (existing : Masc_tui_lane_declaration.session) -> existing.file_name=session.file_name) view.documents
@@ -20176,9 +20206,10 @@ and is loaded on demand through keeper_skill.
                           | Addons.Overview, (Some _ | None) | Addons.Detail _, None -> ()))
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
-                         else (match Masc_tui_lane_installer.create () with
-                          | Ok installer -> invalidate {view with installer=Some installer;document_key=None;error=None;scroll=0}
-                          | Error detail -> update {view with error=lane_addons_input_failure detail})
+                         else (
+                           let installer = Masc_tui_lane_installer.browse ?directory:view.package_directory () in
+                           invalidate {view with installer=Some installer;document_key=None;error=None;scroll=0};
+                           launch_lane_package_catalog state ~mailbox:async_messages view.package_directory)
                      | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
                      | ":" ->
                          state.palette_open <- true;

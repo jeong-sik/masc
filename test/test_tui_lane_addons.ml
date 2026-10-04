@@ -558,6 +558,32 @@ let guided_installation () =
   check (option string) "matching preview advances without error" None error;
   check bool "failed image inspection remains explicit" true
     (List.mem "Image unverified: engine offline" (Install.lines form));
+  let module Catalog = Masc.Lane_addon_catalog in
+  let catalog=Catalog.{directory="/packages";parent=None;
+    entries=[Package {manifest_path="/packages/arbitrary/lane.toml";
+      metadata={title="Previously listed title";revision="older-revision";description=None}}]} in
+  let browser=Install.browse () in
+  let pending_catalog=Install.begin_catalog ~request_id:20 ~directory:None browser |> ok in
+  check bool "canceled catalog response cannot reopen installer" true
+    (Option.is_none (Install.receive_catalog ~request_id:20 ~directory:None (Ok (Catalog.to_json catalog)) (Install.browse ())));
+  check bool "different directory response ignored" true
+    (Option.is_none (Install.receive_catalog ~request_id:20 ~directory:(Some "/other") (Ok (Catalog.to_json catalog)) pending_catalog));
+  let failed,detail=Install.receive_catalog ~request_id:20 ~directory:None (Error "cannot read folder") pending_catalog |> Option.get in
+  check (option string) "catalog read failure remains explicit" (Some "cannot read folder") detail;
+  check bool "failed catalog can retry" true (Result.is_ok (Install.begin_catalog ~request_id:21 ~directory:None failed));
+  let browser,detail=Install.receive_catalog ~request_id:20 ~directory:None (Ok (Catalog.to_json catalog)) pending_catalog |> Option.get in
+  check (option string) "catalog succeeds" None detail;
+  check (option string) "remember resolved folder" (Some "/packages") (Install.directory browser);
+  check string "Enter selects actual package" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" browser |> ok with Preview path -> path | _ -> fail "missing catalog preview");
+  let pending=Install.begin_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" browser |> ok in
+  let restored,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Error "manifest changed") pending |> Option.get in
+  check (option string) "preview failure preserves folder" (Some "/packages") (Install.directory restored);
+  check (option string) "preview failure shown" (Some "manifest changed") detail;
+  let form,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending |> Option.get in
+  check (option string) "selected package preview accepted" None detail;
+  check bool "preview rereads title and revision" true
+    (List.mem "Install Arbitrary observer · revision revision-1" (Install.lines form));
   let reviewed = form |> Install.paste ~text:"research-observer" |> edit "tab"
     |> Install.paste ~text:"project-run" |> edit "tab"
     |> Install.paste ~text:"quoted \"topic\" and 한국어" |> edit "\019" in

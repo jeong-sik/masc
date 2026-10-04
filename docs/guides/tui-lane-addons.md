@@ -8,6 +8,25 @@
 
 ## 설정을 남기고 켜기/끄기
 
+### 목록에서 패키지 설치하기
+
+Add-ons의 `i`는 연결된 workspace의 로컬 패키지 탐색기를 연다. `j/k`로 선택하고
+Enter로 폴더를 열거나 패키지를 고른다. 현재 폴더와 바로 아래 폴더의 `lane.toml`을
+실제 manifest loader로 읽어 제목·revision·설명을 표시한다. 전체 디스크나 원격
+레지스트리를 검색하는 카탈로그는 아니다. 읽을 수 없거나 잘못된 manifest는 Issue로 남는다.
+
+Left는 상위 폴더, Right는 선택한 패키지의 폴더, `g`는 폴더 경로 입력,
+`p`는 기존 manifest 경로 직접 입력, `r`은 다시 읽기다. 같은 workspace에서는 마지막
+성공한 폴더를 기억하며 workspace가 바뀌면 초기화한다. 긴 목록의 선택 행은 화면 안에
+유지하고, 선택 항목의 전체 경로·설명은 PgUp/PgDn으로 읽는다.
+
+패키지를 선택하면 manifest와 image 상태를 다시 읽는다. 이때부터 기존 schema 입력 폼을
+사용하며, 검토 후 Enter는 로컬 TOML 초안만 만든다. `s`를 눌러야 저장·적용을 요청한다.
+탐색과 미리보기는 image를 pull/build하거나 worker를 시작하지 않는다. image 검사 실패는
+unverified로 표시한다. binding schema가 없는 패키지는 `n`의 원문 TOML 편집을 사용한다.
+
+### 설정 보존 on/off
+
 선언 TOML 초안을 연 뒤 `Space`로 활성화 값을 바꾸고 `s`로 저장한다.
 루트 `enabled`만 바꾸며 주석·다른 설정·작성 중인 초안은 유지한다.
 저장 성공은 파일 반영이며 worker 정리 완료와 다르다. `r`로 상태를 읽고

@@ -8239,6 +8239,16 @@
  (libraries alcotest yojson unix masc.fs_compat masc_tui_lane_broadcast_pending))
 
 (test
+ (name test_lane_addon_catalog)
+ (modules test_lane_addon_catalog)
+ (libraries alcotest unix masc))
+
+(test
+ (name test_tui_package_browser)
+ (modules test_tui_package_browser)
+ (libraries alcotest unix yojson masc masc_tui_package_browser))
+
+(test
  (name test_tui_lane_addons)
  (modules test_tui_lane_addons)
  (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions otoml masc_tui_lane_declaration masc_tui_message_layout))

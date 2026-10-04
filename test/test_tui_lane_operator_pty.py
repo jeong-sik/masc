@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 import tomllib
+from urllib.parse import parse_qs, urlsplit
 import tui_keyboard_harness as terminal
 from test_tui_lane_visual_pty import snapshot
 
@@ -125,6 +126,17 @@ def guided_install(executable: str, captures: Path | None) -> None:
     data.update(instances=[], rows=[], coverage=[])
     fixtures = terminal.overview_event_http_fixtures()
     fixtures['/api/v1/lane-addons'] = (200, data)
+    def catalog(path: str) -> tuple[int, dict]:
+        directory = parse_qs(urlsplit(path).query).get('directory', ['/fixture'])[0]
+        if directory == '/fixture':
+            return 200, {'directory': directory, 'parent': None, 'entries': [
+                {'kind': 'folder', 'path': '/fixture/package'}]}
+        if directory == '/fixture/package':
+            return 200, {'directory': directory, 'parent': '/fixture', 'entries': [
+                {'kind': 'package', 'manifest_path': '/fixture/package/lane.toml',
+                 'title': 'Listed operator package', 'revision': 'old', 'description': 'Select to reread'}]}
+        raise AssertionError(f'Unexpected package folder: {directory!r}')
+    fixtures['/api/v1/lane-addons/package-catalog'] = terminal.PathHttpResponse(catalog)
     fixtures['/api/v1/lane-addons/package-preview'] = (200, {
         'manifest_path': '/fixture/package/lane.toml',
         'package': {'title': 'Operator package', 'revision': '1', 'image': 'fixture-image',
@@ -139,7 +151,7 @@ def guided_install(executable: str, captures: Path | None) -> None:
     def save(body: bytes) -> tuple[int, dict]:
         request = json.loads(body)
         parsed = tomllib.loads(request['source_text'])
-        expected = {'id': 'operator-layer', 'run_id': 'operator-run',
+        expected = {'enabled': True, 'id': 'operator-layer', 'run_id': 'operator-run',
                     'manifest_path': '/fixture/package/lane.toml',
                     'binding': {'source': 'explicit-source'}}
         if parsed != expected:
@@ -157,8 +169,12 @@ def guided_install(executable: str, captures: Path | None) -> None:
         def key(value: bytes, needle: bytes) -> bytes:
             return terminal.send_and_wait(process, master, output, value, needle)
         key(b':go lane add-ons\r', b'MASC Lane Add-ons')
-        key(b'i', b'Install Add-on:')
-        key(b'/fixture/package/lane.toml\x13', b'Review input')
+        key(b'i', b'Folder  package')
+        key(b'p', b'Install Add-on:')
+        key(b'\x1b', b'MASC Lane Add-ons')
+        key(b'i', b'Folder  package')
+        key(b'\r', b'Listed operator package')
+        assert not [path for path, _ in requests if path.split('?', 1)[0] == '/api/v1/lane-addons/package-preview']
         key(b'\r', b'Image unverified:')
         key(b'operator-layer\t', b'run_id')
         key(b'operator-run\t', b'binding.source')

@@ -93,6 +93,24 @@ let get_inspect request reqd =
       dispatch ?caller ~access state Runtime.Inspect args in
     respond request reqd result) request reqd
 
+let get_package_catalog request reqd =
+  with_read_auth (fun state _request reqd ->
+    let result =
+      let* directory = match query_fields request with
+        | [] -> Ok None
+        | ["directory",path] when String.trim path <> "" -> Ok (Some path)
+        | _ -> Error "package catalog accepts one nonblank directory or no parameters" in
+      let config = Mcp_server.workspace_config state in
+      Eio_unix.run_in_systhread (fun () ->
+        Lane_addon_catalog.discover ~base_path:config.Workspace.base_path ~directory
+          ~load_package:(fun ~path ->
+            Lane_addon_manifest.load ~path
+            |> Result.map_error Lane_addon_manifest.error_to_string
+            |> Result.map (fun (package : Lane_addon_types.package) -> Lane_addon_catalog.{title=package.title;
+              revision=package.revision; description=package.presentation.description})))
+      |> Result.map Lane_addon_catalog.to_json in
+    respond request reqd result) request reqd
+
 let get_package_preview request reqd =
   with_read_auth (fun state _request reqd ->
     let result =
@@ -361,6 +379,7 @@ let add_routes ~sw ~clock router =
          let result = broadcast_principal ~base_path request caller
            |> Result.map (fun principal -> `Assoc ["principal",`String principal]) in
          respond request reqd result))
+  |> Http.Router.get "/api/v1/lane-addons/package-catalog" get_package_catalog
   |> Http.Router.get "/api/v1/lane-addons/package-preview" get_package_preview
   |> Http.Router.post "/api/v1/lane-addons/subscriptions"
        (with_tool_actor_auth ~tool_name:"masc_lane_updates" (fun state caller request reqd ->

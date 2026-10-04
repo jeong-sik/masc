@@ -11,19 +11,32 @@ Executed from the repository root:
 ```sh
 pnpm --dir dashboard test src/components/exact-lane-activity-panel.test.ts src/components/lane-inventory-panel.test.ts src/components/runtime-toml-editor.test.ts src/lib/runtime-toml-config.test.ts src/api/dashboard.test.ts
 pnpm --dir dashboard typecheck
-pnpm --dir dashboard exec eslint src/lib/exact-lane-activity.ts src/lib/exact-lane-activity-session.ts src/lib/runtime-toml-session.ts src/components/exact-lane-activity-panel.ts src/components/exact-lane-activity-panel.test.ts src/components/lane-inventory-panel.ts src/components/runtime-exact-lane-editor.ts
+pnpm --dir dashboard exec eslint src/lib/exact-lane-activity.ts src/lib/exact-lane-activity-session.ts src/lib/exact-lane-observation.ts src/lib/runtime-toml-session.ts src/components/exact-lane-activity-panel.ts src/components/exact-lane-activity-panel.test.ts src/components/lane-inventory-panel.ts src/components/runtime-exact-lane-editor.ts src/components/runtime-toml-editor.ts
 MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:9 node dashboard/evidence/2026-10-04-web-exact-activity/browser-fixture.mjs
 ```
 
-Results: 451 tests in 5 files, full TypeScript check and the named source-file
+Results: 455 tests in 5 files, full TypeScript check and the named source-file
 lint pass. Chromium exercises actual Status, router, Runtime raw editor, Lane
-inventory/activity components and API decoders against synthetic HTTP. Nine
+inventory/activity components and API decoders against synthetic HTTP. Twelve
 checks pass, including draft-only navigation, explicit conflict/reapply,
 retaining the independent raw draft, both control entrypoints, and file On
-versus observed Off with a kept-registry receipt. It makes three explicit raw
-save attempts (one conflict, two commits), three previews and two setup resumes.
+versus observed Off with a kept-registry receipt. A direct Runtime save holds
+setup resume while both observation screens unmount and remount; after release
+they read the published state and keep the activity/receipt open. It makes four
+explicit raw save attempts (one conflict, three commits), four previews and
+three setup resumes.
 There are no page errors, unexpected API routes or mobile horizontal overflow.
-The three screenshots were visually inspected.
+The screenshots include desktop, mobile and the resumed Runtime activity.
+
+Independent source review found missing post-resume observation refreshes in
+Runtime and in remounted All Lanes, plus the activity panel closing during
+projection refresh. `resume-race-before.txt` reproduces both stale observations
+as failing actual-component tests on the initial implementation. The first two
+test-harness attempts lacked the resume-state export and provider descriptor;
+those fixture errors are kept separately as `resume-race-initial-*.txt` and are
+not the defect reproduction. After the fix, `resume-race-after.txt` passes 31
+activity tests, including both screens with and without remount. The final
+full focused test run and browser evidence include these fixes.
 
 Harness corrections before the final run: the fixture initially lacked a
 required provider-protocol descriptor, the reopen step raced its GET before

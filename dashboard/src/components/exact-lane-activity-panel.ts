@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import type { StandaloneLaneSnapshotRow } from '../api/dashboard-standalone-lanes'
 import { executionWorkspaceAuthority } from '../store'
 import { exactLaneActivitySessionFor } from '../lib/exact-lane-activity-session'
@@ -9,10 +9,10 @@ import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
 const label = (enabled: boolean) => enabled ? '켜짐' : '꺼짐'
 
-export function ExactLaneActivityPanel({ lane, onSaved }: { lane: StandaloneLaneSnapshotRow; onSaved?: () => void }) {
+export function ExactLaneActivityPanel({ lane }: { lane: StandaloneLaneSnapshotRow }) {
   const authority = executionWorkspaceAuthority.value
-  const [open, setOpen] = useState(false)
   const session = authority === null ? null : exactLaneActivitySessionFor(authority, lane)
+  const open = session?.expanded.value ?? false
   const state = session?.state.value
   useEffect(() => {
     if (open && session && authority) void session.read(authority)
@@ -23,11 +23,8 @@ export function ExactLaneActivityPanel({ lane, onSaved }: { lane: StandaloneLane
   const conflict = state.draft && state.current && (state.draft.base.source_revision !== state.current.source_revision
     || state.draft.base.source_path !== state.current.source_path)
   const changedPath = state.draft && state.current && state.draft.base.source_path !== state.current.source_path
-  async function save() {
-    if (await session!.save(authority!) && executionWorkspaceAuthority.peek() === authority) onSaved?.()
-  }
   return html`<section class="rounded border border-[var(--color-border-default)] p-3 space-y-3" aria-label=${`${lane.label} 활동 설정`}>
-    <button type="button" class=${button} aria-expanded=${open} onClick=${() => setOpen(value => !value)}>
+    <button type="button" class=${button} aria-expanded=${open} onClick=${() => { session.expanded.value = !open }}>
       ${open ? '활동 설정 닫기' : '활동 설정 열기'}${session.modified() ? ' · 미저장 초안' : ''}
     </button>
     ${open ? html`<div class="space-y-3">
@@ -45,7 +42,7 @@ export function ExactLaneActivityPanel({ lane, onSaved }: { lane: StandaloneLane
       </div>` : null}
       <div class="flex flex-wrap gap-2">
         <button type="button" class=${button} disabled=${!ready || !session.modified() || !!conflict}
-          onClick=${save}>${state.phase === 'saving' ? '활동 설정 저장 중…' : '활동 설정 저장'}</button>
+          onClick=${() => session.save(authority)}>${state.phase === 'saving' ? '활동 설정 저장 중…' : '활동 설정 저장'}</button>
         <button type="button" class=${button} disabled=${busy} onClick=${() => session.read(authority)}>현재 설정 읽기</button>
         ${conflict && !changedPath ? html`<button type="button" class=${button} disabled=${!ready}
           onClick=${() => session.reapply(authority)}>활동 값만 다시 적용</button>` : null}

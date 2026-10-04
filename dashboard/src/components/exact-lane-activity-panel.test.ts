@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { html } from 'htm/preact'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseLaneInventory } from '../api/lane-inventory'
 import inventory from '../api/fixtures/lane-inventory.json'
@@ -13,13 +13,16 @@ import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../li
 import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { LaneInventoryPanel } from './lane-inventory-panel'
+import { RuntimeTomlEditor } from './runtime-toml-editor'
 
-const api = vi.hoisted(() => ({ fetchRuntimeTomlConfig: vi.fn(), previewRuntimeTomlConfig: vi.fn(), saveRuntimeTomlConfig: vi.fn() }))
+const api = vi.hoisted(() => ({ fetchRuntimeTomlConfig: vi.fn(), previewRuntimeTomlConfig: vi.fn(), saveRuntimeTomlConfig: vi.fn(), fetchRuntimeResolved: vi.fn() }))
+const projectionApi = vi.hoisted(() => ({ fetchStandaloneLanes: vi.fn() }))
 const followup = vi.hoisted(() => ({ resumeSavedModelSetup: vi.fn(), refreshRuntimeConfigConsumers: vi.fn() }))
 const inventoryApi = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
 vi.mock('../api/lane-inventory', async original => ({ ...await original<typeof import('../api/lane-inventory')>(), ...inventoryApi }))
 vi.mock('../api/dashboard-runtime', async original => ({ ...await original<typeof import('../api/dashboard-runtime')>(), ...api }))
-vi.mock('../lib/model-setup-resume', () => ({ resumeSavedModelSetup: followup.resumeSavedModelSetup }))
+vi.mock('../api/dashboard-standalone-lanes', async original => ({ ...await original<typeof import('../api/dashboard-standalone-lanes')>(), ...projectionApi }))
+vi.mock('../lib/model-setup-resume', async original => ({ ...await original<typeof import('../lib/model-setup-resume')>(), resumeSavedModelSetup: followup.resumeSavedModelSetup }))
 vi.mock('../lib/runtime-config-refresh', () => ({ refreshRuntimeConfigConsumers: followup.refreshRuntimeConfigConsumers }))
 
 const lane = parseLaneInventory(inventory).exact_snapshot.lanes.find(row => row.laneId === 'librarian_exact')!
@@ -28,7 +31,9 @@ const source = '# notes stay\n[runtime.exact_output_lanes.librarian_exact]\nslot
 const off = source.replace('enabled = true', 'enabled = false')
 const revision = (text: string) => createHash('sha256').update('runtime_config_source\0' + text).digest('hex')
 function config(text = source, path = '/workspace/runtime.toml'): RuntimeTomlConfig {
-  return { ok: true, path, file_name: 'runtime.toml', source_text: text, source_revision: revision(text), provider_protocols: [], reserved_provider_ids: [] }
+  return { ok: true, path, file_name: 'runtime.toml', source_text: text, source_revision: revision(text),
+    provider_protocols: [{ protocol: 'openai-compatible-http', transport: 'endpoint', semantics: 'http_provider',
+      credential_policy: 'optional', requires_non_interactive: false, provider_fields: [], required_provider_fields: [] }], reserved_provider_ids: [] }
 }
 function receipt(text: string) {
   const value = committedRuntimeTomlConfigFixture({ ...config(text), path: '/workspace/runtime.toml' })
@@ -51,6 +56,8 @@ beforeEach(() => {
   ++epoch; generation = 0; invalidateExecutionSnapshotGeneration(`exact-activity-${epoch}`, 0); workspace('/fixture/A'); stored = source
   api.fetchRuntimeTomlConfig.mockImplementation(async () => config(stored))
   api.previewRuntimeTomlConfig.mockResolvedValue({ ok: true, can_save: true })
+  api.fetchRuntimeResolved.mockResolvedValue({ runtimes: [] })
+  projectionApi.fetchStandaloneLanes.mockResolvedValue(parseLaneInventory(inventory).exact_snapshot)
   api.saveRuntimeTomlConfig.mockImplementation(async (text, expected) => {
     if (expected !== revision(stored)) throw new RuntimeTomlRevisionConflict('changed', document(stored))
     stored = text; return receipt(text)
@@ -66,6 +73,41 @@ async function draft() {
 }
 
 describe('Exact activity operator flow', () => {
+  it.each(['Runtime', 'All Lanes'].flatMap(surface => [false, true].map(remount => ({ surface, remount }))))(
+    'refreshes $surface after a delayed resume (remount: $remount)', async ({ surface, remount }) => {
+    const resume = deferred<{ kind: 'active'; exactOutputAvailable: boolean }>()
+    let published = false
+    followup.resumeSavedModelSetup.mockReturnValueOnce(resume.promise)
+    const snapshot = () => {
+      const value = parseLaneInventory(inventory)
+      value.exact_snapshot.lanes = value.exact_snapshot.lanes.map(row => row.laneId === lane.laneId
+        ? { ...row, status: published ? 'off' : 'unavailable' } : row)
+      return value
+    }
+    inventoryApi.fetchLaneInventory.mockImplementation(async () => snapshot())
+    projectionApi.fetchStandaloneLanes.mockImplementation(async () => snapshot().exact_snapshot)
+    const mount = async () => {
+      const view = render(surface === 'Runtime' ? html`<${RuntimeTomlEditor} />` : html`<${LaneInventoryPanel} />`)
+      if (surface === 'Runtime') fireEvent.click(await view.findByTestId('runtime-toml-nav-lanes'))
+      else fireEvent.click(await view.findByRole('button', { name: `Inspect ${lane.label}` }))
+      const panel = within(await view.findByRole('region', { name: `${lane.label} 활동 설정` }))
+      const open = panel.queryByRole('button', { name: /활동 설정 열기/ })
+      if (open) fireEvent.click(open)
+      return { view, panel }
+    }
+    const first = await mount()
+    fireEvent.click(await first.panel.findByRole('switch'))
+    fireEvent.click(first.panel.getByRole('button', { name: '활동 설정 저장' }))
+    await waitFor(() => expect(followup.resumeSavedModelSetup).toHaveBeenCalledTimes(1))
+    if (remount) first.view.unmount()
+    const next = remount ? await mount() : first
+    expect(await next.view.findByText(/관측 상태: unavailable/)).toBeTruthy()
+    await act(async () => { published = true; resume.resolve({ kind: 'active', exactOutputAvailable: true }) })
+    // Query the current DOM, including any projection-triggered remount.
+    await waitFor(() => expect(next.view.getByText(/관측 상태: off/)).toBeTruthy())
+    expect(next.view.getByText(/Exact registry 적용됨/)).toBeTruthy()
+    expect(next.view.getByRole('button', { name: '활동 설정 닫기' })).toBeTruthy()
+  })
   it('follows a fresh file when there is no unsaved activity change', async () => {
     const authority = executionWorkspaceAuthority.peek()!, session = exactLaneActivitySessionFor(authority, lane)
     await session.read(authority)
@@ -122,19 +164,18 @@ describe('Exact activity operator flow', () => {
     expect(inventoryApi.fetchLaneInventory).toHaveBeenCalledTimes(1)
   })
   it('retains a local draft across closing and remount; writes only on explicit Save', async () => {
-    const onSaved = vi.fn(), view = render(html`<${ExactLaneActivityPanel} lane=${lane} onSaved=${onSaved} />`)
+    const view = render(html`<${ExactLaneActivityPanel} lane=${lane} />`)
     expect(api.fetchRuntimeTomlConfig).not.toHaveBeenCalled()
     fireEvent.click(view.getByRole('button', { name: '활동 설정 열기' }))
     const toggle = await view.findByRole('switch', { name: `${lane.label} 활동 초안` })
     fireEvent.click(toggle); expect(toggle.getAttribute('aria-checked')).toBe('false')
     expect(api.previewRuntimeTomlConfig).not.toHaveBeenCalled(); expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     view.unmount()
-    const reopened = render(html`<${ExactLaneActivityPanel} lane=${lane} onSaved=${onSaved} />`)
-    fireEvent.click(reopened.getByRole('button', { name: /활동 설정 열기/ }))
+    const reopened = render(html`<${ExactLaneActivityPanel} lane=${lane} />`)
     await waitFor(() => expect(reopened.getByRole('switch').hasAttribute('disabled')).toBe(false))
     expect(reopened.getByRole('switch').getAttribute('aria-checked')).toBe('false')
     fireEvent.click(reopened.getByRole('button', { name: '활동 설정 저장' }))
-    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(reopened.getByText(/파일 설정: 꺼짐/)).toBeTruthy())
     expect(stored).toBe(off); expect(api.saveRuntimeTomlConfig).toHaveBeenCalledWith(off, revision(source), expect.any(Object))
     expect(reopened.getByText(/파일 설정: 꺼짐/)).toBeTruthy()
     expect(reopened.getByText(/Exact registry 적용됨/)).toBeTruthy()

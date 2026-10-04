@@ -4,6 +4,7 @@ import { fetchLaneInventory, type LaneInventory, type LaneInventoryRow } from '.
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { RouteLink } from './common/route-link'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
+import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
 function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
@@ -36,14 +37,14 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   }
 }
 
-function LaneDetails({ row, snapshot, onSaved }: { row: LaneInventoryRow; snapshot: LaneInventory; onSaved: () => void }) {
+function LaneDetails({ row, snapshot }: { row: LaneInventoryRow; snapshot: LaneInventory }) {
   const selection = row.selection
   const exactLane = selection.kind === 'exact'
     ? snapshot.exact_snapshot.lanes.find(lane => lane.laneId === selection.lane_id) : undefined
   return html`<section aria-label=${`Details for ${row.label}`} class="rounded border border-[var(--color-border-default)] p-4 space-y-3">
     <h3 class="font-semibold">${row.label}</h3><p>${row.purpose}</p><code class="break-all">${row.id}</code>
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
-    ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} onSaved=${onSaved} />` : null}
+    ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
       <${RouteLink} tab="monitoring" params=${{ section: 'internal-agents' }}>Exact runs and diagnostics<//>
       <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Runtime settings · Lane candidates<//>
@@ -63,6 +64,7 @@ function LaneDetails({ row, snapshot, onSaved }: { row: LaneInventoryRow; snapsh
 /** The operator inventory is a separate read; displaying it never starts workers. */
 export function LaneInventoryPanel() {
   const authority = executionWorkspaceAuthority.value
+  const observationRevision = exactLaneObservationRevision(authority)
   const [reading, setReading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [received, setReceived] = useState<{ authority: ExecutionWorkspaceAuthority; value: LaneInventory } | null>(null)
@@ -103,10 +105,13 @@ export function LaneInventoryPanel() {
     }
   }
   useEffect(() => {
-    request.current?.abort(); setSelected(null); setQuery(''); setError(null); setReading(false)
+    setSelected(null); setQuery(''); setError(null); setReading(false)
+  }, [authority])
+  useEffect(() => {
+    request.current?.abort()
     if (authority !== null) void refresh()
     return () => request.current?.abort()
-  }, [authority])
+  }, [authority, observationRevision])
   const search = query.trim().toLocaleLowerCase()
   const rows = snapshot?.rows.filter(row => [row.id, row.label, row.purpose].some(value => value.toLocaleLowerCase().includes(search))) ?? []
   const detail = snapshot?.rows.find(row => row.id === selected)
@@ -127,7 +132,7 @@ export function LaneInventoryPanel() {
     </div>` : null}
     <label class="block">Find a Lane<input class="block w-full rounded border bg-transparent p-2" type="search" value=${query}
       onInput=${(event: Event) => setQuery((event.currentTarget as HTMLInputElement).value)} /></label>
-    ${snapshot && detail ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} onSaved=${refresh} /></div>`
+    ${snapshot && detail ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} /></div>`
       : selected && snapshot ? html`<p role="status">The selected Lane is absent from this reading.</p>` : null}
     ${snapshot && !rows.length ? html`<p>No Lanes match this search.</p>` : null}
     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

@@ -33,6 +33,7 @@ import {
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
+import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -215,13 +216,14 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
   const setNotice = (value: string | null) => session.edit('notice', value)
   const setSection = (value: RuntimeSectionId) => session.edit('section', value)
   const ready = session.ready(authority)
+  const observationRevision = exactLaneObservationRevision(authority)
   const [projection, setProjection] = useState<{
-    authority: ExecutionWorkspaceAuthority; config: typeof config; revision: number;
+    authority: ExecutionWorkspaceAuthority; config: typeof config; revision: number; observationRevision: number;
     lanes: StandaloneLaneSnapshotRow[] | null; runtimes: RuntimeResolution[] | null; error: string | null;
   } | null>(null)
   const projectionRequest = useRef(0)
   const currentProjection = projection?.authority === authority && projection.config === config
-    && projection.revision === projectionRevision ? projection : null
+    && projection.revision === projectionRevision && projection.observationRevision === observationRevision ? projection : null
   const exactLanes = currentProjection?.lanes ?? null, laneRuntimes = currentProjection?.runtimes ?? null
   const exactLaneError = currentProjection?.error ?? null
   useEffect(() => {
@@ -229,13 +231,13 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
     if (config === null) return
     void Promise.all([fetchStandaloneLanes(), fetchRuntimeResolved()]).then(([snapshot, resolved]) => {
       if (mounted.current && session.admits(authority) && projectionRequest.current === request)
-        setProjection({ authority, config, revision: projectionRevision, lanes: snapshot.lanes, runtimes: resolved.runtimes, error: null })
+        setProjection({ authority, config, revision: projectionRevision, observationRevision, lanes: snapshot.lanes, runtimes: resolved.runtimes, error: null })
     }, error => {
       if (mounted.current && session.admits(authority) && projectionRequest.current === request)
-        setProjection({ authority, config, revision: projectionRevision, lanes: null, runtimes: null, error: errorToString(error) })
+        setProjection({ authority, config, revision: projectionRevision, observationRevision, lanes: null, runtimes: null, error: errorToString(error) })
     })
     return () => { ++projectionRequest.current }
-  }, [session, authority, config, projectionRevision])
+  }, [session, authority, config, projectionRevision, observationRevision])
 
   useEffect(() => {
     if (!onClose) return undefined

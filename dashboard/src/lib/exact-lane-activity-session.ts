@@ -10,6 +10,7 @@ import { readExactActivity, writeExactActivity, type ExactActivityLane } from '.
 import { errorToString } from './format-string'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
+import { announceExactLaneObservationChanged } from './exact-lane-observation'
 
 type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
@@ -38,6 +39,7 @@ function document(config: RuntimeTomlConfig): Document {
 /** An activity draft owns only a boolean. It never adopts or overwrites the
  * full raw editor's independent draft, including when that editor is hidden. */
 export class ExactLaneActivitySession {
+  readonly expanded = signal(false)
   readonly state = signal<State>({ draft: null, current: null, phase: 'idle', error: null, notice: null, followupError: null, receipt: null, uncertain: false })
   private authority: ExecutionWorkspaceAuthority | null = null
   private version = 0
@@ -160,6 +162,7 @@ export class ExactLaneActivitySession {
       const controller = new AbortController(); this.resumeController = controller
       const resumed = await resumeSavedModelSetup({ signal: controller.signal })
       if (!this.owns(authority, version)) return false
+      announceExactLaneObservationChanged(authority)
       if (resumed.kind === 'failed') this.update({ followupError: '설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.' })
       try { await refreshRuntimeConfigConsumers() }
       catch (error) { if (this.owns(authority, version)) this.update({ followupError:

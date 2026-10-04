@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  31 passed (31)
+   Start at  21:40:25
+   Duration  1.72s (tests 32%, transform 30%, import 25%, environment 8%, setup 5%)
+

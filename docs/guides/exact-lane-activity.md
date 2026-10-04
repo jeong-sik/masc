@@ -114,4 +114,7 @@ an invalid file can be corrected to on. An optional empty lane needs a candidate
 before on can be saved. The screen separately shows the file setting, observed
 Lane state and the commit's durability/application result. A kept registry or
 failed setup resume is not reported as successful Lane activation. Saving
-rereads the file and observations; it does not prove a model has executed.
+rereads the file and observations after setup resume completes, including when
+the operator navigated away and returned during that resume. An open activity
+panel and its receipt survive these observation refreshes. This does not prove
+a model has executed.

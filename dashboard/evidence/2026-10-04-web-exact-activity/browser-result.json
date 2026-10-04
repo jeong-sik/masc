@@ -11,7 +11,10 @@
     "Runtime Lane candidate screen shares activity control and fresh observation despite a retained raw draft",
     "stored On, live Off and kept receipt remain distinct",
     "mobile no horizontal overflow",
-    "only 3 explicit save attempts, 2 resume calls; no page errors or unexpected routes"
+    "Runtime direct save keeps the open activity and receipt during delayed resume",
+    "Runtime remount retains the pending activity save and receipt",
+    "both remounted consumers show the post-resume observation with the activity still open",
+    "only 4 explicit save attempts, 3 resume calls; no page errors or unexpected routes"
   ],
   "mutations": [
     {
@@ -55,6 +58,23 @@
       "body": {
         "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = true # preserve comment\n# concurrent other writer\n",
         "expected_source_revision": "3a23c6e453a5cc1686adac5a45c9e606da3f1716bec218a5d1ffb9e0a54e9fb5"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/setup/resume",
+      "body": {}
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = false # preserve comment\n# concurrent other writer\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = false # preserve comment\n# concurrent other writer\n",
+        "expected_source_revision": "0b096c2e7bb09268325c3ccccc73cf2cf8cd653e2d25a26b4428add5bdc6666e"
       }
     },
     {

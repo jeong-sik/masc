@@ -14,6 +14,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [], unexpected = [], mutations = [], checks = []
 const initial = '# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = ["first", "second"]\ncli_slots = ["client"]\nenabled = true # preserve comment\n'
 let text = initial, publishedOff = false, applied = 0
+let resumeGate = null
 const path = '/fixture/runtime.toml'
 const revision = source => createHash('sha256').update('runtime_config_source\0' + source).digest('hex')
 const config = () => ({ ok: true, path, file_name: 'runtime.toml', source_text: text, source_revision: revision(text),
@@ -48,7 +49,10 @@ await page.route('**/api/**', async route => {
  }
  if (pathname === '/api/v1/lanes') return send(reading())
  if (pathname === '/api/v1/dashboard/standalone-lanes') return send(reading().exact_snapshot)
- if (pathname === '/api/v1/runtime/setup/resume') return send({runtime_ready:true,exact_output_authority_available:true,model_setup:{status:'available'}})
+ if (pathname === '/api/v1/runtime/setup/resume') {
+  if (resumeGate) { await resumeGate; publishedOff = true }
+  return send({runtime_ready:true,exact_output_authority_available:true,model_setup:{status:'available'}})
+ }
  if (pathname === '/api/v1/runtime/resolved') return send({config_path:path,default_runtime:null,runtimes:[],lanes:[],assignments:[]})
  if (pathname === '/api/v1/providers') return send({providers:[]})
  if (pathname === '/api/v1/runtime/params') return send({parameters:[]})
@@ -61,8 +65,11 @@ const click = name => page.getByRole('button',{name,exact:true}).click()
 const activity = () => page.getByRole('region',{name:`${label} 활동 설정`})
 const readback = () => page.waitForResponse(response=>response.url().endsWith('/api/v1/runtime/config/raw') && response.request().method()==='GET')
 const open = async () => {
+ const reading=readback()
  await click('Fixture All Lanes');await click(`Inspect ${label}`)
- const reading=readback();await page.getByRole('button',{name:/활동 설정 열기/}).click();await reading
+ const button=page.getByRole('button',{name:/활동 설정 열기/})
+ if (await button.count()) await button.click()
+ await reading
  await page.getByRole('switch').waitFor();await page.waitForFunction(()=>!document.querySelector('[role=switch]')?.disabled)
 }
 try {
@@ -89,9 +96,9 @@ try {
  await click('Fixture Runtime');await page.getByTestId('runtime-toml-source').waitFor()
  assert.equal(await page.getByTestId('runtime-toml-source').inputValue(),rawDraft)
  assert.equal(await page.getByTestId('runtime-toml-save').isDisabled(),true);checks.push('raw editor draft retained and old save basis invalidated')
- await page.getByTestId('runtime-toml-nav-lanes').click()
+ const runtimeReading=readback();await page.getByTestId('runtime-toml-nav-lanes').click()
  const runtimeLane=page.getByTestId('exact-lane-librarian_exact')
- const runtimeReading=readback();await runtimeLane.getByRole('button',{name:'활동 설정 열기',exact:true}).click();await runtimeReading
+ await runtimeReading
  await runtimeLane.getByText(/관측 상태: off/).waitFor()
  await page.waitForFunction(()=>!document.querySelector('[data-testid="exact-lane-librarian_exact"] [role=switch]')?.disabled)
  assert.equal(await runtimeLane.getByRole('switch').getAttribute('aria-checked'),'false');checks.push('Runtime Lane candidate screen shares activity control and fresh observation despite a retained raw draft')
@@ -102,10 +109,38 @@ try {
  await page.setViewportSize({width:390,height:844})
  await activity().scrollIntoViewIfNeeded();await page.screenshot({path:out+'activity-mobile.png'})
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);checks.push('mobile no horizontal overflow')
- assert.equal(mutations.filter(x=>x.path==='/api/v1/runtime/config/raw').length,3)
- assert.equal(mutations.filter(x=>x.path==='/api/v1/runtime/config/raw/preview').length,3)
- assert.equal(mutations.filter(x=>x.path==='/api/v1/runtime/setup/resume').length,2)
- assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);checks.push('only 3 explicit save attempts, 2 resume calls; no page errors or unexpected routes')
+ await page.setViewportSize({width:1440,height:1000})
+ // A setup resume can publish the registry after the file receipt and after
+ // both observation consumers have been replaced by navigation.
+ publishedOff=false
+ let releaseResume
+ resumeGate=new Promise(resolve=>{releaseResume=resolve})
+ const runtimeReopen=readback();await click('Fixture Runtime');await runtimeReopen
+ await runtimeLane.getByText(/관측 상태: idle/).waitFor()
+ await page.waitForFunction(()=>!document.querySelector('[data-testid="exact-lane-librarian_exact"] [role=switch]')?.disabled)
+ await runtimeLane.getByRole('switch').click()
+ const resuming=page.waitForRequest(request=>request.url().endsWith('/api/v1/runtime/setup/resume'))
+ await runtimeLane.getByRole('button',{name:'활동 설정 저장',exact:true}).click();await resuming
+ await runtimeLane.getByRole('button',{name:'활동 설정 저장 중…',exact:true}).waitFor()
+ await runtimeLane.getByText(/Exact registry 적용됨/).waitFor()
+ checks.push('Runtime direct save keeps the open activity and receipt during delayed resume')
+ await click('Fixture All Lanes');await click(`Inspect ${label}`)
+ await activity().getByText(/관측 상태: idle/).waitFor()
+ await click('Fixture Runtime');await runtimeLane.getByText(/관측 상태: idle/).waitFor()
+ await runtimeLane.getByRole('button',{name:'활동 설정 저장 중…',exact:true}).waitFor()
+ checks.push('Runtime remount retains the pending activity save and receipt')
+ await click('Fixture All Lanes');await click(`Inspect ${label}`)
+ await activity().getByText(/관측 상태: idle/).waitFor()
+ releaseResume();await activity().getByText(/관측 상태: off/).waitFor()
+ await activity().getByText(/파일 설정: 꺼짐/).waitFor()
+ const finalRuntimeRead=readback();await click('Fixture Runtime');await finalRuntimeRead
+ await runtimeLane.getByText(/관측 상태: off/).waitFor();await runtimeLane.getByText(/Exact registry 적용됨/).waitFor()
+ checks.push('both remounted consumers show the post-resume observation with the activity still open')
+ await runtimeLane.scrollIntoViewIfNeeded();await page.screenshot({path:out+'activity-runtime-resumed.png'})
+ assert.equal(mutations.filter(x=>x.path==='/api/v1/runtime/config/raw').length,4)
+ assert.equal(mutations.filter(x=>x.path==='/api/v1/runtime/config/raw/preview').length,4)
+ assert.equal(mutations.filter(x=>x.path==='/api/v1/runtime/setup/resume').length,3)
+ assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);checks.push('only 4 explicit save attempts, 3 resume calls; no page errors or unexpected routes')
  await writeFile(out+'browser-result.json',JSON.stringify({passed:true,browser:browser.version(),scope:'Actual Status/Lane activity/Runtime raw editor/router/API with synthetic HTTP. No backend, native TUI, model, CI or deployment.',checks,mutations,errors,unexpected},null,2)+'\n')
  console.log(`PASS: ${checks.length} Web activity browser checks`)
 } catch(error) {

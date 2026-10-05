@@ -3341,6 +3341,8 @@
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc_tui_runtime_account_form
+  masc_tui_runtime_config_view
+  masc_tui_model_form
   masc.voice_setup
   masc.voice_wizard))
 

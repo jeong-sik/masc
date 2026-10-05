@@ -3426,7 +3426,10 @@ let render_exact_lane_provider_editor (state : state) editor =
          (Masc_tui_types.runtime_picker_empty_note picker)
      else
        picker.Masc_tui_types.rlp_choices
-       |> List.iteri (fun offset (runtime : Tui_decode.runtime_option) ->
+       |> List.iteri (fun offset choice ->
+            match choice with
+            | Masc_tui_types.Lane_choice _ -> ()
+            | Masc_tui_types.Runtime_choice runtime ->
             let destination =
               match picker.rlp_pick, runtime.ro_exact_slot_group with
               | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_http_slots -> "HTTP replacement"
@@ -3469,11 +3472,11 @@ let render_exact_lane_provider_editor (state : state) editor =
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
-         | Some runtime ->
+         | Some (Masc_tui_types.Runtime_choice runtime) ->
            box_line_styled buf cols ~style:(Theme.recede ())
              ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6))
                 (Terminal_text.single_line ("Connection " ^ runtime.ro_provider_id ^ " · Selected " ^ runtime.ro_id)))
-         | None -> ())
+         | Some (Masc_tui_types.Lane_choice _) | None -> ())
       | None -> ());
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
@@ -3821,7 +3824,10 @@ let render_lanes_overview (state : state) =
            (Masc_tui_types.runtime_picker_empty_note picker)
        else
          List.iteri
-           (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
+           (fun offset choice ->
+              match choice with
+              | Masc_tui_types.Lane_choice _ -> ()
+              | Masc_tui_types.Runtime_choice runtime ->
               (* A refusal leads the row, as in the provider editor: a note
                  after the label is the first thing the frame cuts. *)
               let refusal_prefix, note =
@@ -9431,7 +9437,8 @@ let runtime_routes_detail_lines state ~width =
         in
         field "Source" (Option.value resolved.rrs_config_path ~default:"unavailable")
         @ field "Recorded" resolved.rrs_generated_at_iso
-        @ field "Default" (Option.value resolved.rrs_default_runtime_id ~default:"none")
+        @ field "Default route" (Option.value resolved.rrs_default_route ~default:"none")
+        @ field "Entry runtime" (Option.value resolved.rrs_default_runtime_id ~default:"none")
         @ route "Declared media" resolved.rrs_media_failover_declared
         @ route "Admitted media" resolved.rrs_media_failover
         @ route "Unresolved media" dropped
@@ -9858,14 +9865,6 @@ let render_runtime (state : state) =
          Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)
            state.runtime_surface
        in
-       let default_text =
-         match resolved with
-         | None -> missing_resolved_value
-         | Some resolved ->
-             (match resolved.rrs_default_runtime_id with
-              | Some id -> Terminal_text.single_line id
-              | None -> Ansi.dim ^ "none — every keeper needs an assignment" ^ Ansi.reset)
-       in
        let media_text =
          match resolved with
          | None -> missing_resolved_value
@@ -9892,11 +9891,9 @@ let render_runtime (state : state) =
                          (String.concat ", " (List.map Terminal_text.single_line dropped))
                      ^ Ansi.reset))
        in
-       c.push_styled ~style:(Theme.recede ())
-         (Printf.sprintf "  %s %s   %s"
-            (runtime_column runtime_lane_width "[runtime].default")
-            (runtime_column runtime_candidate_width default_text)
-            (Ansi.dim ^ "f replaces it · the runtime an unassigned keeper walks" ^ Ansi.reset));
+       List.iter
+         (fun line -> c.push_styled ~style:(Theme.recede ()) ("  " ^ line))
+         (Masc_tui_types.runtime_default_route_lines ~cols state);
        c.push_styled ~style:(Theme.recede ())
          (Printf.sprintf "  %s %s   %s"
             (runtime_column runtime_lane_width "media_failover")
@@ -10001,7 +9998,7 @@ let render_runtime (state : state) =
          | Masc_tui_types.Pick_route_default ->
              (* Replaces rather than appends, and the row it replaces is
                 marked "(already a candidate)" in the choices below. *)
-             ("the runtime an unassigned keeper walks", "Enter replace")
+             ("the route an unassigned keeper walks", "Enter replace")
        in
        c.push_styled ~style:(Theme.info ())
          (Printf.sprintf "  %s — %s — %s" what picker.rlp_summary
@@ -10010,37 +10007,54 @@ let render_runtime (state : state) =
          c.push_styled ~style:(Theme.recede ())
            (Masc_tui_types.runtime_picker_empty_note picker)
        else
-         List.iteri (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
-           let note =
-             if List.exists (String.equal runtime.ro_id) picker.rlp_already
-             then "  (already a candidate)"
-             else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-             then "  (same provider as a current candidate)"
-             else ""
-           in
-           let ctx =
-             Printf.sprintf " [%s %s]"
-               (format_context_tokens runtime.ro_effective_max_context)
+         List.iteri (fun offset choice ->
+           let mark = if picker.rlp_selected_row = Some offset then ">" else " " in
+           let label = match choice, picker.rlp_pick with
+             | Masc_tui_types.Runtime_choice runtime,
+               (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
+                 Masc_tui_types.runtime_model_picker_title runtime
+             | _ -> Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
+           match choice with
+           | Masc_tui_types.Lane_choice lane ->
+               let note =
+                 if List.exists (String.equal lane.rrl_id) picker.rlp_already
+                 then "  (current route)" else "" in
+               c.push
+                 (Printf.sprintf "  %s %s%s" mark
+                    label
+                    (Ansi.dim ^ note ^ Ansi.reset))
+           | Masc_tui_types.Runtime_choice runtime ->
+               let note =
+                 if List.exists (String.equal runtime.ro_id) picker.rlp_already
+                 then (match picker.rlp_pick with
+                   | Masc_tui_types.Pick_route_default -> "  (current route)"
+                   | _ -> "  (already a candidate)")
+                 else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+                 then "  (same provider as a current candidate)"
+                 else ""
+               in
+               let ctx =
+                 Printf.sprintf " [%s %s]"
+                   (format_context_tokens runtime.ro_effective_max_context)
+                   (match picker.rlp_pick with
+                    | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
+                    | _ -> "ctx")
+               in
+               let def = if runtime.ro_is_default then
+                 (match picker.rlp_pick with
+                  | Masc_tui_types.Pick_route_default -> " [entry runtime]"
+                  | _ -> " [default]") else "" in
+               c.push
+                 (Printf.sprintf "  %s %s%s%s%s" mark
+                    label
+                    ctx def
+                    (Ansi.dim ^ note ^ Ansi.reset));
                (match picker.rlp_pick with
-                | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
-                | _ -> "ctx")
-           in
-           let def = if runtime.ro_is_default then " [default]" else "" in
-           c.push
-             (Printf.sprintf "  %s %s%s%s%s"
-                (if picker.rlp_selected_row = Some offset then ">" else " ")
-                (match picker.rlp_pick with
-                 | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
-                     Masc_tui_types.runtime_model_picker_title runtime
-                 | _ -> Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
-                ctx def
-                (Ansi.dim ^ note ^ Ansi.reset));
-           (match picker.rlp_pick with
-            | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
-                c.push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
-                  ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
-                  ^ " · " ^ Terminal_text.single_line runtime.ro_id)
-            | _ -> ())) picker.rlp_choices;
+                | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+                    c.push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
+                      ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
+                      ^ " · " ^ Terminal_text.single_line runtime.ro_id)
+                | _ -> ())) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
     let empty =

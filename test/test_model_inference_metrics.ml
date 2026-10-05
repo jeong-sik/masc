@@ -1813,7 +1813,9 @@ let test_runtime_history_invalid_decision_rows () =
     let schema_invalid = `Assoc ["ts_unix", `Float now; "telemetry", `Assoc []] in
     let ignored = [`Assoc ["ts_unix", `Float (now -. 172800.); "telemetry", `Assoc []];
       `Assoc ["ts_unix", `Float now; "event", `String "keeper_started"]] in
-    let open Yojson.Safe.Util in
+    let member = Yojson.Safe.Util.member
+    and to_string = Yojson.Safe.Util.to_string
+    and to_int = Yojson.Safe.Util.to_int in
     let read () = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
     write_decisions path (valid :: ignored);
     check string "outside-window and valid non-inference rows do not degrade history"

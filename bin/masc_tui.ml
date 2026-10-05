@@ -17752,7 +17752,7 @@ let main
   in
   (* The raw editor and account form share preview and guarded commit. Each
      caller keeps the revision from the same read as the text it edits. *)
-  let save_runtime_config_text ~authority ~identity ~expected_source_revision edited =
+  let save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision edited =
     let host = server_peer_host in
     let port = state.port in
     let ( let* ) = Result.bind in
@@ -17766,7 +17766,7 @@ let main
     | Masc_tui_runtime_config_receipt.Can_save ->
       let* () = refused (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ()) in
       let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
-        ~source_text:edited ~expected_source_revision in
+        ~source_text:edited ~expected_source_path ~expected_source_revision in
       launch_runtime_config_load ~force:true state ~mailbox:async_messages;
       Ok receipt
   in
@@ -17776,7 +17776,7 @@ let main
     let identity = state.server_identity in
     Masc_tui_types.put_runtime_config_edit state ~workspace session;
     match save_runtime_config_text ~authority ~identity
-        ~expected_source_revision:session.Edit.base.source_revision session.text with
+        ~expected_source_path:session.Edit.base.path ~expected_source_revision:session.Edit.base.source_revision session.text with
     | Ok receipt ->
       (match receipt.Masc_tui_runtime_config_receipt.durability with
        | Masc_tui_runtime_config_receipt.Durable ->
@@ -20033,7 +20033,7 @@ and is loaded on demand through keeper_skill.
                   let* reading = Masc_tui_runtime_config_view.decode json in
                   let* draft = Masc_tui_model_form.apply form reading.source_text in
                   save_runtime_config_text ~authority ~identity
-                    ~expected_source_revision:reading.metadata.source_revision draft
+                    ~expected_source_path:reading.path ~expected_source_revision:reading.metadata.source_revision draft
                   |> Result.map Masc_tui_runtime_config_receipt.lane_summary
                   |> Result.map_error Masc_tui_http.runtime_config_save_error_message in
                 (match result with
@@ -20083,12 +20083,12 @@ and is loaded on demand through keeper_skill.
                        Masc_tui_runtime_account_form.declare_on
                          ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
                          current.Masc_tui_runtime_config_view.source_text
-                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision)
+                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision, current.path)
                    in
                    match declared with
                    | Error form -> state.runtime_account_form <- Some form
-                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision) -> (
-                       match save_runtime_config_text ~authority ~identity ~expected_source_revision text with
+                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision, expected_source_path) -> (
+                       match save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision text with
                        | Ok receipt ->
                          let summary = Masc_tui_http.runtime_config_commit_receipt_summary receipt in
                          (* A sign-in keeps the form open on its command;

@@ -337,6 +337,134 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
     )
 
 
+def empty_q_leaves_a_running_turn(binary: str) -> None:
+    requests: _keyboard_harness.HttpRequests = []
+    release = threading.Event()
+    started = threading.Event()
+
+    def respond(body: bytes) -> _keyboard_harness.StreamingHttpResponse:
+        normal = _keyboard_chat.keeper_chat_succeeded_response(body)
+        blocks = [block for block in normal.body.split(b"\n\n") if block]
+        start = next(
+            i for i, block in enumerate(blocks)
+            if json.loads(block.removeprefix(b"data: "))["type"] == "RUN_STARTED"
+        )
+
+        def chunks() -> Iterator[bytes]:
+            started.set()
+            yield b"\n\n".join(blocks[: start + 1]) + b"\n\n"
+            release.wait(timeout=30)
+
+        return _keyboard_harness.StreamingHttpResponse(chunks)
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        fd: int,
+        _slave: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        try:
+            open_chat(process, fd, output)
+            _keyboard_harness.send_and_wait(process, fd, output, b"first", _keyboard_harness.composer_showing(b"first"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"draftQ", _keyboard_harness.composer_showing(b"draftQ"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x15", _keyboard_harness.composer_showing(b""))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=240,
+                              needle=b"Q / Ctrl-Q:leave")
+            _keyboard_harness.send_and_wait(process, fd, output, b"Q", b"Keepers")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            screen = _keyboard_harness.screen_text(bytes(output))
+            if not started.is_set() or release.is_set():
+                raise AssertionError("the streamed turn did not remain held")
+            if any("interrupt" in path for path, _ in requests):
+                raise AssertionError(f"empty Q interrupted the turn: {requests!r}")
+            if (
+                b"MASC Keepers" not in screen
+                or "Keepers ▸ alpha ▸ chat".encode() in screen
+            ):
+                raise AssertionError(f"empty Q stayed in chat: {screen[-600:]!r}")
+        finally:
+            release.set()
+            os.killpg(process.pid, signal.SIGTERM)
+
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    fixtures[CHAT] = _keyboard_harness.RequestHttpResponse(respond)
+    _keyboard_harness.run_terminal_scenario(
+        binary,
+        description="empty Q leaves a running Keeper turn without interrupting it",
+        interact=interact,
+        confirm_exit=b"",
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
+def quiet_leave_draft_boundaries(binary: str, kind: str) -> None:
+    """Q edits visible drafts, but leaves a hidden draft intact without stopping."""
+    requests: _keyboard_harness.HttpRequests = []
+    release = threading.Event()
+
+    def respond(body: bytes) -> _keyboard_harness.StreamingHttpResponse:
+        normal = _keyboard_chat.keeper_chat_succeeded_response(body)
+        blocks = [block for block in normal.body.split(b"\n\n") if block]
+        start = next(i for i, block in enumerate(blocks)
+                     if json.loads(block.removeprefix(b"data: "))["type"] == "RUN_STARTED")
+
+        def chunks() -> Iterator[bytes]:
+            yield b"\n\n".join(blocks[:start + 1]) + b"\n\n"
+            release.wait(timeout=30)
+
+        return _keyboard_harness.StreamingHttpResponse(chunks)
+
+    def interact(process, fd, _slave, output, base):
+        try:
+            open_chat(process, fd, output)
+            if kind != "idle":
+                _keyboard_harness.send_and_wait(process, fd, output, b"first", _keyboard_harness.composer_showing(b"first"))
+                _keyboard_harness.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
+            if kind == "attachment":
+                image = Path(base, _keyboard_chat.IMAGE_NAME)
+                _keyboard_harness.send_and_wait(process, fd, output, f"/attach {image}\r".encode(), b"attached ")
+            elif kind == "reference":
+                _keyboard_harness.send_and_wait(process, fd, output, b"/ref https://example.invalid/caption.png\r", b"reference(s)")
+            elif kind == "hidden":
+                _keyboard_harness.send_and_wait(process, fd, output, b"preserved draft", _keyboard_harness.composer_showing(b"preserved draft"))
+                _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=40,
+                    needle=b"Keeper chat needs", controls=(_keyboard_harness.FULL_REDRAW,))
+                _keyboard_harness.send_and_wait(process, fd, output, b"Q", b"MASC Keepers")
+                _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=240,
+                    needle=b"MASC Keepers", controls=(_keyboard_harness.FULL_REDRAW,))
+                _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+                _keyboard_harness.send_and_wait(process, fd, output, b"c", _keyboard_harness.composer_showing(b"preserved draft"))
+                screen = _keyboard_harness.screen_text(bytes(output))
+                if b"preserved draftQ" in screen:
+                    raise AssertionError("quiet leave edited the hidden draft")
+            if kind != "hidden":
+                frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=240,
+                    needle=b"Ctrl-Q:leave", controls=(_keyboard_harness.FULL_REDRAW,))
+                _keyboard_harness.send_and_wait(process, fd, output, b"Question", _keyboard_harness.composer_showing(b"Question"))
+                if b"Q / Ctrl-Q:leave" in _keyboard_harness.screen_text(frame):
+                    raise AssertionError(f"{kind} draft advertised printable Q as leave")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x11", b"MASC Keepers")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            if any("interrupt" in path for path, _ in requests):
+                raise AssertionError(f"quiet leave interrupted the turn: {requests!r}")
+            print(f"quiet leave {kind}: PASS", flush=True)
+        finally:
+            release.set()
+            os.killpg(process.pid, signal.SIGTERM)
+
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    fixtures[CHAT] = _keyboard_harness.RequestHttpResponse(respond)
+    _keyboard_harness.run_terminal_scenario(binary,
+        description=f"quiet leave respects {kind} draft boundary", interact=interact,
+        confirm_exit=b"", http_fixtures=fixtures, http_requests=requests,
+        prepare_workspace=_keyboard_chat.seed_image_workspace)
+
+
 if __name__ == "__main__":
     executable = str(Path(sys.argv[1]).resolve())
     approval_typing(executable, "approve")
@@ -344,3 +472,7 @@ if __name__ == "__main__":
     queued_attachments(executable)
     failed_progress_names_the_cause_once(executable)
     quiet_leave_belongs_to_the_chat_surface(executable)
+    empty_q_leaves_a_running_turn(executable)
+
+    for kind in ("attachment", "reference", "idle", "hidden"):
+        quiet_leave_draft_boundaries(executable, kind)

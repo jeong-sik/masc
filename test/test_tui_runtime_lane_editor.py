@@ -580,10 +580,12 @@ def run_exact(executable: str) -> None:
         # that did is closed.
         _keyboard_harness.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
         # The second picker is built from that list, so runtime-a is no
-        # longer offered and the cursor opens on runtime-b.
+        # longer offered and the cursor opens on runtime-b. The lanes picker
+        # leads a row with the model title, not the runtime id (the id is on
+        # the row's detail line), so the row reads "> model-b default".
         mark = mark_output(fd, output)
         _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
-        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-b default", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
         # A pick sends only the slot it adds. A whole order built from the

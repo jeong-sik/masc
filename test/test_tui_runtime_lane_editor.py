@@ -534,7 +534,7 @@ DROPPED_SLOT = "retired-catalog.slot"
 # scenario exercises the message the server really sends.
 EXACT_REFUSAL_LINES = (
     b"lane write refused: HTTP 400:",
-    b"exact-body-timeout-s to [providers.openrouter]",
+    b"exact-body-timeout-s = 1200.0 to [providers.openrouter]",
 )
 EXACT_REFUSAL = (
     "/Users/dancer/me/.masc/config/runtime.toml: this change adds 1 exact-output "
@@ -543,7 +543,7 @@ EXACT_REFUSAL = (
     "exact-body-timeout-s is the only deadline on the whole request:\n"
     "  [runtime.exact_output_lanes.board_attention_exact] slot "
     "\"openrouter.openrouter-deepseek-v4-1-flash\" runs on provider \"openrouter\"; "
-    "add exact-body-timeout-s to [providers.openrouter]"
+    "add exact-body-timeout-s = 1200.0 to [providers.openrouter]"
 )
 
 

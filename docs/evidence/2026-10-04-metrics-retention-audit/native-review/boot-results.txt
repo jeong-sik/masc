@@ -1,0 +1,3 @@
+PASS TOML zero retention: two applied settings, matching effective values and no backups after actual append
+PASS env precedence: effective two backups, current rotated, prior backup shifted and excess pruned
+PASS negative TOML retention: rejected by boot validation

@@ -124,8 +124,8 @@ let read_antigravity ~scope (antigravity : Runtime_execution.antigravity_cli) =
        Log.Runtime_agent.info
          "provider usage read for %s (antigravity /usage) stated no windows"
          (Runtime_quota_window.scope_to_string scope)
-     | _ :: _ ->
-       Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report);
+     | _ :: _ -> ());
+    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
     Ok ()
   | Error error -> Error (Runtime_antigravity_usage.error_to_string error)
 ;;
@@ -233,8 +233,8 @@ let read_http ~fetch ~scope http =
        "provider usage read for %s (shape %s) stated no windows"
        (Runtime_quota_window.scope_to_string scope)
        (shape_label http)
-   | _ :: _ ->
-     Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report);
+   | _ :: _ -> ());
+  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
   Ok ()
 ;;
 
@@ -348,9 +348,23 @@ let refresh_readables ~clock ~fetch ~catalogue =
     repeating
 ;;
 
-let refresh_declared ~net ~clock =
+let rec watch_readables ~clock ~codex ~antigravity ~fetch ~catalogue ~revision ~await_change =
+  let current = revision () in
+  Eio.Fiber.first
+    (fun () -> ignore (await_change ~after:current))
+    (fun () ->
+      read_scopes ~codex ~antigravity ~fetch (catalogue ());
+      refresh_readables ~clock ~fetch ~catalogue;
+      Eio.Fiber.await_cancel ());
+  watch_readables ~clock ~codex ~antigravity ~fetch ~catalogue ~revision ~await_change
+;;
+
+let watch_declared ~mgr ~net ~clock ~cwd =
+  let codex ~scope exec = read_codex ~mgr ~clock ~cwd ~scope exec in
   let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
-  refresh_readables ~clock ~fetch ~catalogue:readable_scopes
+  watch_readables ~clock ~codex ~antigravity:read_antigravity ~fetch
+    ~catalogue:readable_scopes ~revision:Runtime.catalogue_revision
+    ~await_change:Runtime.await_catalogue_change
 ;;
 
 (* Scopes a background read is running for. Keepers sharing one account are
@@ -472,6 +486,8 @@ let window_spent (window : Runtime_provider_usage_window.window) =
   match window.utilization with
   | Runtime_provider_usage_window.Fraction used -> Float.compare used 1.0 >= 0
   | Runtime_provider_usage_window.Percent used -> used >= 100
+  | Runtime_provider_usage_window.Usd { used; limit = Some limit } -> used >= limit
+  | Runtime_provider_usage_window.Usd { limit = None; _ } -> false
 ;;
 
 (* Only a window that gates model calls can explain a refused model call. *)

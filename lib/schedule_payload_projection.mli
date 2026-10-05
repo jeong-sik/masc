@@ -53,6 +53,15 @@ val creation_keeper_wake_target
   :  payload:Yojson.Safe.t
   -> (string option, string) result
 
+val keeper_participants : Schedule_domain.schedule_request -> string list
+(** The automated creator, followed by a distinct decoded wake target. Human
+    and system actor IDs are not Keeper identities. An absent or malformed
+    target adds no participant; the creator remains visible for diagnosis. *)
+
+val visible_to_keeper : string option -> Schedule_domain.schedule_request -> bool
+(** [None] selects the full inventory. [Some name] selects only requests in
+    which [name] participates, as creator or wake target. *)
+
 val set_keeper_wake_result_delivery :
   payload:Yojson.Safe.t ->
   channel:Keeper_continuation_channel.t option ->

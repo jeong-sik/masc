@@ -4,7 +4,8 @@
     RFC-0058 layers 1-3 plus [\[runtime\].default] into a self-standing
     {!Runtime_schema.config}:
 
-    - [\[providers.*\]] — Layer 1
+    - [\[providers.*\]] — Layer 1; unknown provider fields are rejected with
+      their full TOML path
     - [\[models.*\]] — Layer 2
     - [<provider>.<model>] binding tables — Layer 3
     - [model_sets.<name>].models — shared model ids. A provider's

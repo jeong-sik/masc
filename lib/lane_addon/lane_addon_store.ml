@@ -893,6 +893,18 @@ let retry_sampling_markers ~on_read t ~instance_id ~max_reply_bytes =
         (sampling_outcome_directory instance_id) name in
       let primary = recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes
         (sampling_directory instance_id) name in
+      (* The terminal journal is only needed to promote its row into a primary
+         row that is still pending. A verified finished primary row leaves
+         nothing to promote, so an unreadable terminal namespace must not hold
+         this request's marker; that namespace's own error stays visible
+         through discovery. *)
+      let primary_finished = match primary with
+        | Ok (Some (`Assoc fields)) ->
+            List.assoc_opt "state" fields = Some (`String "finished")
+        | Ok _ | Error _ -> false in
+      let terminal = match terminal with
+        | Error _ when primary_finished -> Ok None
+        | other -> other in
       let* terminal = terminal in
       let* primary = primary in
       let* () = match terminal with

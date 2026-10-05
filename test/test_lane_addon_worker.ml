@@ -166,8 +166,10 @@ let write path value =
   Fun.protect ~finally:(fun () -> close_out channel)
     (fun () -> output_string channel value)
 
+(* A symlink is unlinked, never followed: a fixture that links a namespace to
+   an external directory must not have its cleanup walk through that link. *)
 let rec remove_tree path =
-  if Sys.is_directory path then begin
+  if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then begin
     Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
     Unix.rmdir path
   end else Sys.remove path

@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 module Chat = Masc.Keeper_chat_store
-module Projection = Masc.Server_bootstrap_loops.For_testing
+module Projection = Server_bootstrap_loops.For_testing
 
 let rec remove_tree path =
   if Sys.is_directory path then (

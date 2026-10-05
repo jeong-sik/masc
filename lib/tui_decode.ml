@@ -1740,6 +1740,7 @@ type runtime_resolved_snapshot = {
   rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
+  rrs_default_route : string option;
   rrs_default_runtime_id : string option;
   rrs_media_failover : string list;
   rrs_media_failover_declared : string list;
@@ -2039,6 +2040,7 @@ let decode_runtime_resolved_snapshot json =
            source)
   in
   let* rrs_config_path = required_nullable_string_field json "config_path" in
+  let* rrs_default_route = required_nullable_string_field json "default_route" in
   let string_list_field name =
     let* items = required_list_field json name in
     decode_list
@@ -2129,10 +2131,23 @@ let decode_runtime_resolved_snapshot json =
     in
     loop rrs_lanes
   in
+  let* () =
+    match rrs_default_route, rrs_default_runtime_id with
+    | None, None -> Ok ()
+    | Some route, Some runtime_id ->
+        (match Hashtbl.find_opt lane_by_id route with
+         | Some lane when List.nth_opt lane.rrl_runtime_ids 0 = Some runtime_id -> Ok ()
+         | Some _ -> Error "default_route disagrees with its lane's entry runtime"
+         | None when String.equal route runtime_id && Hashtbl.mem runtime_by_id route -> Ok ()
+         | None -> Error "default_route is absent from the resolved route list")
+    | Some _, None | None, Some _ ->
+        Error "default_route and default_runtime must be present together"
+  in
   Ok
     { rrs_usage
     ; rrs_generated_at_iso
     ; rrs_config_path
+    ; rrs_default_route
     ; rrs_default_runtime_id
     ; rrs_media_failover
     ; rrs_media_failover_declared

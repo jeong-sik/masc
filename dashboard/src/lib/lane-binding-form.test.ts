@@ -46,6 +46,13 @@ describe('Package schema inputs and declaration preparation', () => {
     expect(readBindingInput(schema, { kind: 'text', text: '한😀' })).toBe('한😀')
     const binding = { text: 'quotes " and newline\ncontrol\u007f' }
     expect(getStaticTOMLValue(parseTOML(packageDeclaration('unicode', 'run', '/a', binding)))).toMatchObject({ binding })
+    // An actual DEL is emitted as the six-character escape; the literal
+    // backslash-u text is a different value and must round-trip unchanged.
+    const del = packageDeclaration('del', 'run', '/a', { text: '\u007f' })
+    expect(del).toContain('"\\u007f"')
+    expect(del).not.toContain('\u007f')
+    const literal = { text: 'literal \\u007f stays text' }
+    expect(getStaticTOMLValue(parseTOML(packageDeclaration('literal', 'run', '/a', literal)))).toMatchObject({ binding: literal })
     expect(() => packageDeclaration('bad', 'run', '/a', { text: '\ud800' })).toThrow(/Unicode/)
   })
   it('preserves prototype-like keys as own data without inherited field lookups', () => {

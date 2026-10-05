@@ -26,11 +26,17 @@ export class LanePackageInstallationSession {
   private authority: ExecutionWorkspaceAuthority | null = null
   private request: AbortController | null = null
   private generation = 0
+  // The manifest path each typed input named on its last successful preview.
+  // The server resolves an alias such as `addons/foo/lane.toml` to an absolute
+  // manifest_path, and drafts are keyed by that canonical path, so a recheck
+  // through the alias must invalidate the canonical draft too.
+  private readonly resolved = new Map<string, string>()
   constructor(readonly workspaceRoot: string) {}
   admits(authority: ExecutionWorkspaceAuthority) { return executionWorkspaceAuthority.peek() === authority && authority.workspaceRoot === this.workspaceRoot }
   attach(authority: ExecutionWorkspaceAuthority) {
     if (!this.admits(authority) || this.authority === authority) return
     this.authority = authority; this.request?.abort(); this.generation++
+    this.resolved.clear()
     const state = this.state.peek()
     this.state.value = { ...state, catalog: null, phase: 'idle', error: null,
       drafts: new Map([...state.drafts].map(([key, draft]) => [key, { ...draft, previewAuthority: null }])) }
@@ -68,14 +74,18 @@ export class LanePackageInstallationSession {
   preview(path: string, authority: ExecutionWorkspaceAuthority) {
     if (!this.admits(authority)) return Promise.resolve()
     const state = this.state.peek()
+    const canonical = this.resolved.get(path) ?? path
+    const rechecks = (draft: PackageDraft | undefined) =>
+      draft !== undefined && (draft.preview.manifest_path === path || draft.preview.manifest_path === canonical)
     this.state.value = { ...state,
-      selected: state.selected !== null && state.drafts.get(state.selected)?.preview.manifest_path === path ? state.selected : null,
+      selected: state.selected !== null && rechecks(state.drafts.get(state.selected)) ? state.selected : null,
       drafts: new Map([...state.drafts].map(([key, draft]) => [key,
-        draft.preview.manifest_path === path ? { ...draft, previewAuthority: null } : draft])) }
+        rechecks(draft) ? { ...draft, previewAuthority: null } : draft])) }
     return this.read('preview', authority, signal => fetchLanePackagePreview(path, signal), (preview, state) => {
       if (preview.package.binding_schema === null) throw new Error('This package has no binding schema. Use New TOML for an advanced declaration.')
       const schema = parseBindingSchema(preview.package.binding_schema)
       if (schema.type !== 'object') throw new Error('Package binding schema must describe an object.')
+      this.resolved.set(path, preview.manifest_path)
       const key = JSON.stringify([preview.manifest_path, preview.package.binding_schema])
       const prior = state.drafts.get(key)
       const draft: PackageDraft = prior ? { ...prior, preview, previewAuthority: authority }

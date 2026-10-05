@@ -96,6 +96,22 @@ describe('Web package discovery to explicit declaration save', () => {
     expect(screen.queryByLabelText('TOML source')).toBeNull()
     expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
   })
+  it('invalidates the canonical preview when a recheck through its relative alias fails', async () => {
+    const authority = executionWorkspaceAuthority.peek()!
+    const owner = lanePackageInstallationFor(authority, directory)
+    const alias = 'packages/report/lane.toml'
+    await owner.preview(alias, authority)
+    const key = owner.state.peek().selected!
+    expect(owner.state.peek().drafts.get(key)!.preview.manifest_path).toBe(preview.manifest_path)
+    expect(owner.state.peek().drafts.get(key)!.previewAuthority).toBe(authority)
+    api.fetchLanePackagePreview.mockRejectedValueOnce(new Error('manifest missing'))
+    await owner.preview(alias, authority)
+    expect(api.fetchLanePackagePreview).toHaveBeenLastCalledWith(alias, expect.any(AbortSignal))
+    const state = owner.state.peek()
+    expect(state.error).toBe('manifest missing')
+    expect(state.selected).toBe(key)
+    expect(state.drafts.get(key)!.previewAuthority).toBeNull()
+  })
   it('edits schema alternatives and optional enums without JSON textareas or lost branch inputs', async () => {
     const alternatives = { type: 'object', oneOf: [
       object({ kind: { type: 'string', const: 'file' }, path: { type: 'string', minLength: 1 } }),

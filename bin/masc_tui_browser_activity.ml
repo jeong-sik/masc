@@ -44,24 +44,50 @@ let with_activity lane desired (config : Browser_configuration.t) = match lane w
   | Automation -> {config with automation_enabled=desired}
   | Stagehand -> {config with stagehand_enabled=desired}
 
+let qualify_automation_paths source =
+  let lines, trailing_newline = Toml_line_editor.split_lines source in
+  let qualify line =
+    let rec first_key i =
+      if i < String.length line && (line.[i] = ' ' || line.[i] = '\t')
+      then first_key (i + 1) else i in
+    let at = first_key 0 in
+    String.sub line 0 at ^ "automation." ^ String.sub line at (String.length line - at) in
+  let _, reversed = List.fold_left2 (fun (inside, acc) line structural ->
+    if structural && Toml_line_editor.is_table_header line then
+      Toml_line_editor.is_table ~path:browser_table line, line :: acc
+    else
+      let line = if structural && inside then
+        match Toml_line_editor.key_of_line line with
+        | Some ("geckodriver" | "binary") -> qualify line
+        | Some _ | None -> line
+      else line in
+      inside, line :: acc) (false, []) lines (Toml_line_editor.structural_lines lines) in
+  Toml_line_editor.join_lines (List.rev reversed) ~trailing_newline
+
 let apply desired lane (document : document) =
   let* toml, config = configuration document in
-  (* During the accepted transition, setting automation.enabled also moves
-     root automation paths into its canonical table. Other Browser backends
-     and unrelated Runtime settings stay in their original locations. *)
-  let source = match lane, config.automation with
-    | Browser_lane.Lane_name.Automation, Some {driver;binary}
+  let* source_text = match lane, config.automation with
+    | Browser_lane.Lane_name.Automation, Some _
       when Option.is_some (Otoml.find_opt toml Fun.id [browser_table;"geckodriver"]) ->
-        let source = Toml_line_editor.edit_table_scalar document.source_text
-          ~path:browser_table ~key:"geckodriver" ~value:None in
-        let source = Toml_line_editor.edit_table_scalar source
-          ~path:browser_table ~key:"binary" ~value:None in
-        let source = Toml_line_editor.edit_table_scalar source
-          ~path:(table lane) ~key:"geckodriver" ~value:(Some driver) in
-        (match binary with None -> source | Some value ->
-          Toml_line_editor.edit_table_scalar source ~path:(table lane) ~key:"binary" ~value:(Some value))
-    | (Live | Automation | Stagehand), _ -> document.source_text in
-  let source_text = Toml_line_editor.edit_table_bool source ~path:(table lane) ~key:"enabled" ~value:desired in
+        (* Qualify the original assignments in place: value spelling, inline
+           comments and adjacent operator notes remain attached to their keys.
+           Dotted keys declare automation, so add its flag through the nested
+           editor rather than redeclaring it with a new table header. *)
+        Toml_line_editor.edit_nested_bool (qualify_automation_paths document.source_text)
+          ~path:(path lane) ~key:"enabled" ~value:desired
+        |> Result.map_error (fun _ ->
+          "Browser paths could not be preserved; use the Runtime source editor.")
+    | (Live | Automation | Stagehand), _ ->
+        (match Otoml.find_opt toml Fun.id (path lane) with
+         | Some (Otoml.TomlTable _) ->
+             (* A previously qualified path remains a dotted table on later
+                toggles; do not redeclare that table with a new header. *)
+             Toml_line_editor.edit_nested_bool document.source_text
+               ~path:(path lane) ~key:"enabled" ~value:desired
+             |> Result.map_error (fun _ -> "Browser activity requires the Runtime source editor.")
+         | Some _ | None ->
+             Ok (Toml_line_editor.edit_table_bool document.source_text
+               ~path:(table lane) ~key:"enabled" ~value:desired)) in
   match configuration {document with source_text} with
   | Error _ -> Error "Inline or dotted Browser settings require the Runtime source editor; no file was changed."
   | Ok (_, observed) ->

@@ -526,14 +526,24 @@ DROPPED_SLOT = "retired-catalog.slot"
 # both, so the operator can read what to declare. The first line is longer
 # than the frame and is cut at its tail; the fix line is what the operator
 # needs and must be whole.
+#
+# The text is the server's own [Runtime_config_error.Exact_slot_body_deadlines_absent]
+# rendering (lib/runtime/runtime_config_error.ml): the long first line names the
+# count and the key, and the second line names the lane, slot and provider and
+# says which key to add to which table. The fixture keeps that shape so the
+# scenario exercises the message the server really sends.
 EXACT_REFUSAL_LINES = (
     b"lane write refused: HTTP 400:",
-    b"Add exact-body-timeout-s to [providers.openrouter] (for example 1200.0) and retry.",
+    b"exact-body-timeout-s to [providers.openrouter]",
 )
 EXACT_REFUSAL = (
     "/Users/dancer/me/.masc/config/runtime.toml: this change adds 1 exact-output "
-    "slot(s) on a provider that declares no exact-body-timeout-s.\n"
-    "Add exact-body-timeout-s to [providers.openrouter] (for example 1200.0) and retry."
+    "slot(s) on a provider that declares no exact-body-timeout-s. connect-timeout-s "
+    "ends when the response headers arrive and does not bound the response body, so "
+    "exact-body-timeout-s is the only deadline on the whole request:\n"
+    "  [runtime.exact_output_lanes.board_attention_exact] slot "
+    "\"openrouter.openrouter-deepseek-v4-1-flash\" runs on provider \"openrouter\"; "
+    "add exact-body-timeout-s to [providers.openrouter]"
 )
 
 

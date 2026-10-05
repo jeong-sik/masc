@@ -3758,12 +3758,12 @@ let render_lanes_overview (state : state) =
          (match state.lanes_action_error with
           | None -> 0
           | Some detail ->
-              box_lines_row_count
+              box_lines_row_count ~cols
                 (Keeper_chat.terminal_safe_text ~preserve_newlines:true detail))
          + (match state.runtime_lane_notice with
             | None -> 0
             | Some notice ->
-                box_lines_row_count
+                box_lines_row_count ~cols
                   (Keeper_chat.terminal_safe_text ~preserve_newlines:true
                      (Masc_tui_types.runtime_lane_notice_text notice)))
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
@@ -3807,7 +3807,17 @@ let render_lanes_overview (state : state) =
   (match state.runtime_lane_notice with
    | None -> ()
    | Some notice ->
-       box_lines_styled buf cols ~style:(runtime_lane_notice_style notice)
+       (* The refusal can be the server's own multi-line sentence, which wraps
+          to more rows than the frame has left. Bound it to what remains after
+          the picker and the footer, keeping the "lane write refused" head and
+          the actionable tail. *)
+       let picker_rows =
+         match Masc_tui_types.runtime_picker_projection state with
+         | None -> 0
+         | Some picker -> 1 + max 1 (2 * List.length picker.rlp_choices)
+       in
+       let budget = max 1 (rows - count_frame_lines buf - picker_rows - 4) in
+       box_lines_styled_bounded buf cols ~style:(runtime_lane_notice_style notice) ~budget
          (Keeper_chat.terminal_safe_text ~preserve_newlines:true
                    (Masc_tui_types.runtime_lane_notice_text notice)));
   List.iter

@@ -120,11 +120,11 @@ let append_raw base_path text =
    current producer floors deductions and gives equal remainders to the first
    name, but that must not rewrite or make these stored facts unreadable. *)
 let stored_rounded_payment =
-  {|{"kind":"paid","at":"2026-09-29T06:00:00Z","goal_id":"past-rounded","request_id":"request-rounded","verification_run_id":"verified-rounded","grade":"small","total_milli":2001,"grade_trace":{"run_id":"grade-rounded","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-rounded","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":30,"coefficient":700,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":2001,"amount_milli":1401}]}|}
+  {|{"kind":"paid","distribution":{"share_rounding":"largest_remainder","remainder_tie_break":"name_ascending","deduction_rounding":"down"},"unallocated_milli":0,"at":"2026-09-29T06:00:00Z","goal_id":"past-rounded","request_id":"request-rounded","verification_run_id":"verified-rounded","grade":"small","total_milli":2001,"grade_trace":{"run_id":"grade-rounded","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-rounded","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":30,"coefficient":700,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":2001,"amount_milli":1401}]}|}
 ;;
 
 let stored_tied_payment =
-  {|{"kind":"paid","at":"2026-09-29T06:00:00Z","goal_id":"past-tied","request_id":"request-tied","verification_run_id":"verified-tied","grade":"trivial","total_milli":1000,"grade_trace":{"run_id":"grade-tied","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}},{"task_id":"task-b","relation":"related","trace":{"run_id":"relation-b","slot_id":"slot-relation"}},{"task_id":"task-c","relation":"related","trace":{"run_id":"relation-c","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-tied","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":0,"coefficient":1000,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-b","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-c","weight":1,"share_milli":334,"amount_milli":334}]}|}
+  {|{"kind":"paid","distribution":{"share_rounding":"largest_remainder","remainder_tie_break":"name_ascending","deduction_rounding":"down"},"unallocated_milli":0,"at":"2026-09-29T06:00:00Z","goal_id":"past-tied","request_id":"request-tied","verification_run_id":"verified-tied","grade":"trivial","total_milli":1000,"grade_trace":{"run_id":"grade-tied","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}},{"task_id":"task-b","relation":"related","trace":{"run_id":"relation-b","slot_id":"slot-relation"}},{"task_id":"task-c","relation":"related","trace":{"run_id":"relation-c","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-tied","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":0,"coefficient":1000,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-b","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-c","weight":1,"share_milli":334,"amount_milli":334}]}|}
 ;;
 
 let payment_of_event (row : E.t) =
@@ -211,7 +211,7 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
     receipts;
   let rounded = payment_of_event (List.hd receipts) in
   let current =
-    Candle_payment.make
+    Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
       ~identity:{ rounded.identity with goal_id = "new-current" }
       ~grade:rounded.grade ~total_milli:rounded.total_milli
       ~grade_trace:rounded.grade_trace ~relations:rounded.relations
@@ -543,7 +543,7 @@ let test_item_http_seed_replays_current_contract () =
   List.iter (fun (event : E.t) -> match event.body with
     | E.Paid payment ->
       Alcotest.(check int) "synthetic payout amount matches fixture policy"
-        (Candle_config.grade_amount_milli policy.payout payment.grade) payment.total_milli
+        (Option.get (Candle_config.grade_amount_milli policy.payout payment.grade)) payment.total_milli
     | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
     | E.Unattributed _ | E.Payout_failed _ | E.Purchased _ | E.Equipped _ -> ()) events;
   (match Candle_ledger.recover_at_start ~base_path with
@@ -573,7 +573,7 @@ let test_item_acceptance_seed_contract () =
   List.iter (fun (event : E.t) -> match event.body with
     | E.Paid payment ->
         Alcotest.(check int) "synthetic payout matches the fixture policy"
-          (Candle_config.grade_amount_milli policy.payout payment.grade)
+          (Option.get (Candle_config.grade_amount_milli policy.payout payment.grade))
           payment.total_milli
     | _ -> ()) events;
   (* Seed receipts alone must not bypass the same production admission rules. *)

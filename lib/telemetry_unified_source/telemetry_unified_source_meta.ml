@@ -50,7 +50,7 @@ let source_freshness_slo_s ?keeper_keepalive_interval_s = function
     let keepalive_interval_s =
       Option.value
         keeper_keepalive_interval_s
-        ~default:(float_of_int Env_config.KeeperKeepalive.interval_sec)
+        ~default:(float_of_int (Env_config.KeeperKeepalive.interval_sec ()))
     in
     Float.max 300.0 (keepalive_interval_s +. 120.0)
   | Tool_call_io -> 300.0

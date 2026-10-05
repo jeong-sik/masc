@@ -93,9 +93,10 @@ Installing MASC's built-in browser Skill does not install a browser extension.
 
 After registering the native host above, open
 `about:debugging#/runtime/this-firefox` in the intended Firefox / Zen profile,
-choose **Load Temporary Add-on**, and select
-`connectors/browser/extension/manifest.json` from this checkout. Then refresh the
-Browser Lane connections with `r` and choose that browser.
+choose **Load Temporary Add-on**, and select `manifest.json` in the downloaded
+`$EXTENSION_DIR` above. From a source checkout, select
+`connectors/browser/extension/manifest.json` instead. Then refresh the Browser
+Lane connections with `r` and choose that browser.
 
 This is a development installation: Firefox removes a temporary extension on
 browser restart, so it must be loaded again. See

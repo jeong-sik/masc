@@ -7,28 +7,24 @@ import copy
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sys
-from typing import Any, cast
 import zlib
+from pathlib import Path
+from typing import Any, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The two section headings it reads ("INPUT · RUN INPUT",
-# "OUTPUT · RUN RESULT") are masc_tui_render.ml's.
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_markdown.ml")
+
 
 
 def run(executable: str, scenario: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
     run_id = "payload-" + scenario
-    detail = cast(dict[str, Any], copy.deepcopy(h.hitl_lane_run_detail_response()[1]))
+    detail = cast(dict[str, Any], copy.deepcopy(_keyboard_keepers.hitl_lane_run_detail_response()[1]))
     run_record = cast(dict[str, Any], detail["run"])
     run_record["run_id"] = run_id
     run_record["lane"] = "librarian_exact"
@@ -111,7 +107,7 @@ def run(executable: str, scenario: str) -> None:
             "selected_slot",
         )
     }
-    fixtures[h.lane_runs_path("librarian_exact")] = (
+    fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (
         200,
         {"runs": [summary], "has_more": False, "total": 1},
     )
@@ -124,42 +120,42 @@ def run(executable: str, scenario: str) -> None:
     fixtures["/api/v1/dashboard/exact-lane-runs/" + run_id] = read_detail
 
     def interact(process, master, _slave, output, _base):
-        h.palette_go(process, master, output, b"go lanes", b"Librarian")
-        h.send_and_wait(
+        _keyboard_harness.palette_go(process, master, output, b"go lanes", b"Librarian")
+        _keyboard_harness.send_and_wait(
             process,
             master,
             output,
             b"/Librarian",
             re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian"),
         )
-        h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
+        _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
         # Summary IDs are abbreviated to fit their column; the exact detail
         # request and the full detail frame below establish run identity.
-        h.send_and_wait(
+        _keyboard_harness.send_and_wait(
             process, master, output, b"\r", b"1 loaded / 1 retained \xc2\xb7 end"
         )
-        h.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7")
-        h.read_available(master, output)
+        _keyboard_harness.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7")
+        _keyboard_harness.read_available(master, output)
         before = len(output)
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process,
             master,
             output,
             rows=42,
             columns=140,
             needle=b"OUTPUT \xc2\xb7",
-            controls=(h.FULL_REDRAW,),
+            controls=(_keyboard_harness.FULL_REDRAW,),
         )
-        redraw = output.find(h.FULL_REDRAW, before)
+        redraw = output.find(_keyboard_harness.FULL_REDRAW, before)
         assert redraw >= 0
-        h.wait_for_output(
-            process, master, output, h.FRAME_END, start=redraw, timeout=3.0
+        _keyboard_harness.wait_for_output(
+            process, master, output, _keyboard_harness.FRAME_END, start=redraw, timeout=3.0
         )
-        end = output.find(h.FRAME_END, redraw) + len(h.FRAME_END)
-        start = output.rfind(h.FRAME_START, before, redraw)
+        end = output.find(_keyboard_harness.FRAME_END, redraw) + len(_keyboard_harness.FRAME_END)
+        start = output.rfind(_keyboard_harness.FRAME_START, before, redraw)
         assert start >= 0
         frame = bytes(output[start:end])
-        screen = h.screen_text(frame)
+        screen = _keyboard_harness.screen_text(frame)
         initial_screen = screen
         assert detail_reads == [run_id], detail_reads
         assert run_id.encode() in screen, screen
@@ -189,10 +185,10 @@ def run(executable: str, scenario: str) -> None:
         elif scenario == "large-fields":
             assert b'"absorb_gate"' in screen and b"judged" in screen, screen
             if b"after-preserved" not in screen:
-                h.send_and_wait(process, master, output, b"\x1b[F", b"after-preserved")
-            h.drain_until_quiet(process, master, output)
+                _keyboard_harness.send_and_wait(process, master, output, b"\x1b[F", b"after-preserved")
+            _keyboard_harness.drain_until_quiet(process, master, output)
             frame = bytes(output[start:])
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             for needle in (
                 b'"exact_output"',
                 b"original-model-output",
@@ -213,10 +209,10 @@ def run(executable: str, scenario: str) -> None:
                 for cell in line.split("│".encode())
             ), screen
         elif scenario == "large-scalar":
-            h.send_and_wait(process, master, output, b"\x1b[F", b"truncated, total")
-            h.drain_until_quiet(process, master, output)
+            _keyboard_harness.send_and_wait(process, master, output, b"\x1b[F", b"truncated, total")
+            _keyboard_harness.drain_until_quiet(process, master, output)
             frame = bytes(output[start:])
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             frame.decode("utf-8", errors="strict")
             assert "\ufffd".encode() not in frame, frame
             assert "한".encode() in screen, screen
@@ -224,19 +220,19 @@ def run(executable: str, scenario: str) -> None:
         elif scenario == "many-fields":
             assert b'"field-00"' in screen and b"FIELD_00_START" in screen, screen
             assert b"truncated, total" in screen, screen
-            h.send_and_wait(process, master, output, b"\x1b[F", b"FIELD_63_START")
-            h.drain_until_quiet(process, master, output)
+            _keyboard_harness.send_and_wait(process, master, output, b"\x1b[F", b"FIELD_63_START")
+            _keyboard_harness.drain_until_quiet(process, master, output)
             frame = bytes(output[start:])
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             assert b'"field-63"' in screen, screen
         elif scenario == "many-labels":
             assert b'"field-00000"' in screen and b"VALUE_00000" in screen, screen
-            h.send_and_wait(
+            _keyboard_harness.send_and_wait(
                 process, master, output, b"\x1b[F", b"field(s) not rendered"
             )
-            h.drain_until_quiet(process, master, output)
+            _keyboard_harness.drain_until_quiet(process, master, output)
             frame = bytes(output[start:])
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             assert b'"field-09999"' not in screen and b"VALUE_09999" not in screen, (
                 screen
             )
@@ -245,10 +241,10 @@ def run(executable: str, scenario: str) -> None:
             )
         elif scenario == "total-fit":
             assert b'"exact_output"' in screen, screen
-            h.send_and_wait(process, master, output, b"\x1b[F", b"TOTAL_FIT_TAIL")
-            h.drain_until_quiet(process, master, output)
+            _keyboard_harness.send_and_wait(process, master, output, b"\x1b[F", b"TOTAL_FIT_TAIL")
+            _keyboard_harness.drain_until_quiet(process, master, output)
             frame = bytes(output[start:])
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             for needle in (b"TOTAL_FIT_TAIL", b"before-small", b"after-small"):
                 assert needle in screen, (needle, screen)
             assert b"truncated, total" not in screen, screen
@@ -275,7 +271,7 @@ def run(executable: str, scenario: str) -> None:
         )
         os.write(master, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Lane payload availability: " + scenario,
         interact=interact,

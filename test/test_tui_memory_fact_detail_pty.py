@@ -8,24 +8,16 @@ terminal it was given, the window marker under it says how much of the claim is
 on screen, j scrolls that window instead of the list behind it, and Esc gives
 the list back whole.
 
-SOURCE_MODULES names the files this scenario stands over. PR CI picks the suite
-up from those paths, so a change to the key wiring, the surface state or the
-overlay render has to pass here, and so does the wheel: a notch over the
-reading moves it, not the list it covers.
+The wheel is scoped to the reading: a notch over it moves the detail, not the
+list it covers.
 """
 import os
 import re
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_memory as _keyboard_memory
 
-SOURCE_MODULES = ("lib/tui_decode_memory_facts.ml", "lib/tui_decode_memory_facts.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_types.ml",
-)
 
 DETAIL_ROWS_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
 
@@ -42,8 +34,8 @@ SIDE_PANE = b"no events"
 
 
 def screen_bytes(output: bytearray) -> bytes:
-    end = output.rfind(h.FRAME_END)
-    return bytes(output[: end + len(h.FRAME_END)]) if end >= 0 else bytes(output)
+    end = output.rfind(_keyboard_harness.FRAME_END)
+    return bytes(output[: end + len(_keyboard_harness.FRAME_END)]) if end >= 0 else bytes(output)
 
 
 def plain_screen(output: bytearray) -> bytes:
@@ -52,9 +44,9 @@ def plain_screen(output: bytearray) -> bytes:
     Every earlier frame is still in the stream, so a substring search over the
     raw output would report text this surface has already covered.
     """
-    rows = h.screen_rows(screen_bytes(output))
+    rows = _keyboard_harness.screen_rows(screen_bytes(output))
     return b"\n".join(
-        h.CSI_RE.sub(b"", rows[number]) for number in sorted(rows))
+        _keyboard_harness.CSI_RE.sub(b"", rows[number]) for number in sorted(rows))
 
 
 def detail_window(output: bytearray) -> tuple[int, int, int]:
@@ -67,8 +59,13 @@ def detail_window(output: bytearray) -> tuple[int, int, int]:
 
 
 def run(executable: str) -> None:
-    fixtures = h.memory_facts_http_fixtures()
-    status, payload = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    fixtures = _keyboard_memory.memory_facts_http_fixtures()
+    response = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    if not isinstance(response, tuple):
+        raise AssertionError("memory fixture must be a status/payload response")
+    status, payload = response
+    if not isinstance(payload, dict):
+        raise AssertionError("memory fixture payload must be an object")
     for fact in payload["ordinary"]["facts"]:
         fact["claim"] = CLAIM
     for fact in payload["source_bound"]["facts"]:
@@ -77,36 +74,55 @@ def run(executable: str) -> None:
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         # Wide enough for the Activity side pane, which the reading covers.
-        h.resize_and_wait(process, master_fd, output, rows=38,
-                          columns=h.ACTING_PANE_NARROW_TERMINAL_COLUMNS,
+        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=38,
+                          columns=_keyboard_harness.ACTING_PANE_NARROW_TERMINAL_COLUMNS,
                           needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
-        h.drain_until_quiet(process, master_fd, output)
-        h.palette_go(process, master_fd, output, b"go Memory", b"MASC Memory")
-        h.wait_for_output(process, master_fd, output, b"Total 3 facts",
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.palette_go(process, master_fd, output, b"go Memory", b"MASC Memory")
+        _keyboard_harness.wait_for_output(process, master_fd, output, b"Total 3 facts",
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"\r",
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\r",
                         b"\xe2\x96\xb8 alpha")
         # The listing lands async. Every claim in this fixture opens the same
         # way, so the needle does not depend on which row sorts first.
-        h.wait_for_output(process, master_fd, output, b"clause-0000",
+        _keyboard_harness.wait_for_output(process, master_fd, output, b"clause-0000",
                           start=0, timeout=5.0)
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         for needle in (LIST_STRIP, LIST_DETAIL_HINT, SIDE_PANE):
             if needle not in plain_screen(output):
                 raise AssertionError(
                     f"the fact browser never drew {needle!r}: "
                     f"{plain_screen(output)[-900:]!r}")
 
+        # Category navigation is opt-in; it must give the fact width back.
+        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=38, columns=240,
+                          needle=b"MASC Memory", final_cursor=b"\x1b[?25l")
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" in plain_screen(output):
+            raise AssertionError("Category rail must be closed by default")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"d", b"CATEGORIES")
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" not in plain_screen(output):
+            raise AssertionError("d did not open Category navigation")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"d", LIST_STRIP)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" in plain_screen(output):
+            raise AssertionError("d did not restore the full-width fact list")
+        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=38,
+                          columns=_keyboard_harness.ACTING_PANE_NARROW_TERMINAL_COLUMNS,
+                          needle=b"MASC Memory", final_cursor=b"\x1b[?25l")
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+
         # Recency opens on the dropped row, whose facts carry no claim; one step
         # down lands on an ordinary fact, and the list's block under that row is
         # what a reading has to outgrow.
-        h.send_and_wait(process, master_fd, output, b"j", b"Fact Detail")
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"j", b"Fact Detail")
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
 
-        h.send_and_wait(process, master_fd, output, b"\r", b"FACT DETAIL")
-        h.wait_for_output(process, master_fd, output, b"[lines ",
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\r", b"FACT DETAIL")
+        _keyboard_harness.wait_for_output(process, master_fd, output, b"[lines ",
                           start=0, timeout=5.0)
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         plain = plain_screen(output)
         for needle in (LIST_STRIP, SIDE_PANE):
             if needle in plain:
@@ -126,7 +142,7 @@ def run(executable: str) -> None:
 
         # j moves the window this surface owns, not the list it covers.
         os.write(master_fd, b"j" * 6)
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         scrolled_first, scrolled_last, scrolled_total = detail_window(output)
         if scrolled_total != total or scrolled_first <= first:
             raise AssertionError(
@@ -136,7 +152,7 @@ def run(executable: str) -> None:
 
         # k walks the window back the way j brought it.
         os.write(master_fd, b"k" * 2)
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         back_first, _back_last, back_total = detail_window(output)
         if back_total != total or back_first >= scrolled_first:
             raise AssertionError(
@@ -151,14 +167,14 @@ def run(executable: str) -> None:
         # write, the way a trackpad sends them, so they land between two
         # frames and each still has to count.
         os.write(master_fd, b"\x1b[<65;20;10M" * 3)
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         wheel_first, _wheel_last, wheel_total = detail_window(output)
         if wheel_total != total or wheel_first != back_first + 3:
             raise AssertionError(
                 "three wheel notches did not scroll the reading three rows: "
                 f"{back_first}- then {wheel_first}-")
         os.write(master_fd, b"\x1b[<64;20;10M")
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         up_first, _up_last, up_total = detail_window(output)
         if up_total != total or up_first != wheel_first - 1:
             raise AssertionError(
@@ -167,7 +183,7 @@ def run(executable: str) -> None:
 
         # G opens the claim's tail in one step, the way g opens its head.
         os.write(master_fd, b"G")
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         end_first, end_last, end_total = detail_window(output)
         if end_total != total or end_last != end_total or end_first == 1:
             raise AssertionError(
@@ -175,8 +191,8 @@ def run(executable: str) -> None:
                 f"{end_first}-{end_last}/{end_total}")
 
         # Esc hands the list and its pane back whole.
-        h.send_and_wait(process, master_fd, output, b"\x1b", LIST_STRIP)
-        h.drain_until_quiet(process, master_fd, output)
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", LIST_STRIP)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
         plain = plain_screen(output)
         if b"FACT DETAIL" in plain:
             raise AssertionError("Esc left the wide reading on the screen")
@@ -186,7 +202,7 @@ def run(executable: str) -> None:
                     f"Esc did not give {needle!r} back: {plain[-900:]!r}")
         os.write(master_fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="A memory fact reads in the wide detail surface",
         interact=interact,

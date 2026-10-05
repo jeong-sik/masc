@@ -163,6 +163,25 @@ class Questioner(unittest.TestCase):
 
 
 class Grader(unittest.TestCase):
+    def test_decoder_limits_keep_next_ping(self):
+        frames = [
+            '{"jsonrpc":"2.0","id":' + '9' * 650 + ',"method":"ping"}',
+            '[' * 5000 + '0' + ']' * 5000,
+        ]
+        for frame in frames:
+            with self.subTest(frame_length=len(frame)):
+                proc = run_stdio([sys.executable, "-X", "int_max_str_digits=640",
+                                  str(ADDONS / "quiz-grader/server.py")],
+                                 input=frame + '\n' + json.dumps({
+                                     "jsonrpc": "2.0", "id": "next", "method": "ping"}) + '\n',
+                                 capture_output=True, text=True, timeout=10)
+                self.assertEqual(proc.stderr, "")
+                responses = [json.loads(line) for line in proc.stdout.splitlines()]
+                self.assertEqual(len(responses), 2)
+                self.assertEqual(responses[0]["error"]["code"], -32602)
+                self.assertIsNone(responses[0]["id"])
+                self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": "next", "result": {}})
+
     def setUp(self):
         self.questions = ask([deck_source(DECK)])["structuredContent"]
         self.by_subject = {row["subject_id"]: row for row in self.questions["rows"]}

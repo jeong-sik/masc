@@ -3,31 +3,32 @@
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
 
 SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_types.ml")
 
 
 def run(executable):
-    fixtures = h.keeper_runtime_http_fixtures()
-    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-    health = h.GatedHttpResponse(
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    health = _keyboard_harness.GatedHttpResponse(
         (200, {}), subsequent_response=(200, {}), hold_seconds=20.0
     )
     fixtures["/health"] = health
 
     def interact(process, master, _slave, output, _base):
         try:
-            assert h.wait_for_fixture_event(
+            assert _keyboard_harness.wait_for_fixture_event(
                 process, master, output, health.requested, timeout=3.0
             )
-            h.palette_go(process, master, output, b"go lanes", b"MASC Lanes")
+            _keyboard_harness.palette_go(process, master, output, b"go lanes", b"MASC Lanes")
             # No readiness barrier: the user has already entered Lanes while
             # the initial authority reading is still held by the fixture.
-            assert h.wait_for_fixture_event(
+            assert _keyboard_harness.wait_for_fixture_event(
                 process, master, output, health.subsequent_requested, timeout=3.0
             )
-            h.wait_for_output(
+            _keyboard_harness.wait_for_output(
                 process,
                 master,
                 output,
@@ -39,15 +40,15 @@ def run(executable):
                 "initial health escaped the fixture gate"
             )
             health.release.set()
-            h.wait_for_output(
+            _keyboard_harness.wait_for_output(
                 process, master, output, b"Librarian", start=0, timeout=3.0
             )
-            h.send_and_wait(process, master, output, b"/Librarian", b"Librarian")
+            _keyboard_harness.send_and_wait(process, master, output, b"/Librarian", b"Librarian")
             os.write(master, b"q")
         finally:
             health.release.set()
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="early Lane navigation resumes after initial workspace confirmation",
         interact=interact,

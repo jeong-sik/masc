@@ -668,6 +668,37 @@ let test_declarative_boot_allows_empty_goal_links () =
    file is parked as a .rejected-* sibling before the materialized snapshot
    takes its path: the counters leave service, but the only copy is no longer
    destroyed (2026-08-29, nine keepers zeroed by a schema cut). *)
+let test_unreadable_meta_parking_preserves_same_time_copies () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let config = Masc.Workspace.default_config (Filename.dirname config_dir) in
+  let name = "same-time-parking" in
+  let path = Keeper_types_profile.keeper_meta_path config name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let copies = [ "first unreadable counters"; "second unreadable counters" ] in
+  List.iter
+    (fun bytes ->
+      Fs_compat.save_file path bytes;
+      KR.For_testing.park_unreadable_meta_before_rematerialization
+        ~now:12345. config name)
+    copies;
+  let parked =
+    Sys.readdir (Filename.dirname path)
+    |> Array.to_list
+    |> List.filter (String.starts_with ~prefix:(Filename.basename path ^ ".rejected-"))
+  in
+  check int "same-time recovery copies both remain" 2 (List.length parked);
+  let contents =
+    List.map
+      (fun file -> Fs_compat.load_file (Filename.concat (Filename.dirname path) file))
+      parked
+  in
+  check (list string) "each original is preserved"
+    (List.sort String.compare copies) (List.sort String.compare contents);
+  check bool "source was parked" false (Fs_compat.file_exists path)
+;;
+
 let test_declarative_boot_rematerializes_incompatible_meta () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
@@ -2977,6 +3008,8 @@ let () =
         test_declarative_boot_materializes_instructions;
       test_case "declarative boot allows empty goal links" `Quick
         test_declarative_boot_allows_empty_goal_links;
+      test_case "same-time unreadable meta parking preserves both copies" `Quick
+        test_unreadable_meta_parking_preserves_same_time_copies;
       test_case "declarative boot re-materializes incompatible persisted meta" `Quick
         test_declarative_boot_rematerializes_incompatible_meta;
       test_case "declarative boot records typed invalid-config failure" `Quick

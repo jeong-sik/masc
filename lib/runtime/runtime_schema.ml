@@ -108,9 +108,8 @@ type capabilities =
   }
 [@@deriving show, eq]
 
-(** [providers.<id>] — connection + behavior. The deleted
-    [runtime_provider]'s [log] sub-record is still ignored. [healthcheck.path]
-    is retained as provider-owned metadata for install/setup probes; runtime
+(** [providers.<id>] — connection + behavior. Only declared provider fields
+    are accepted. [healthcheck.path] is retained as provider-owned metadata for install/setup probes; runtime
     startup does not use it for admission. [headers] is retained for
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
@@ -170,6 +169,8 @@ type provider =
     (** The dialect this endpoint speaks, for an endpoint the AGENT_CORE
         catalog does not know. [None] means the catalog answers, and a
         provider that has a catalog row is refused if it states this. *)
+  ; request_path : string option
+    (** Explicit HTTP request surface; None uses the catalog/protocol. *)
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
@@ -506,6 +507,7 @@ type typesafeai =
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
+  ; librarian_preflight : bool
   ; excluded_keepers : string list
   }
 [@@deriving show, eq]
@@ -539,6 +541,7 @@ let default_typesafeai =
   ; absorb_gate = false
   ; context_review = false
   ; skill_applicability = false
+  ; librarian_preflight = false
   ; excluded_keepers = []
   }
 ;;

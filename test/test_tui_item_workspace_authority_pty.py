@@ -5,21 +5,17 @@ The same Keeper name deliberately appears in both workspaces.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
 from pathlib import Path
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
 import test_tui_remote_workspace_history_pty as authority
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_items.ml",
-    "bin/masc_tui_render.ml",
-)
+
 ITEM_PATH = "/api/v1/keepers/alpha/items"
 CATALOG = (
     ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
@@ -47,6 +43,7 @@ class ItemWire(authority.WorkspaceWire):
         super().__init__(roster)
         self.account_state = "ready"
         self.roster_unavailable = False
+        self.observing_denied_retry = False
         self.malformed_revision = False
         self.missing_revision = False
         self.booting = False
@@ -63,12 +60,15 @@ class ItemWire(authority.WorkspaceWire):
         payload = json.loads(response.body)
         with self.lock:
             booting = self.booting
+            self.events.append({"event": "item-health", "booting": booting})
         payload["startup"] = {"state_ready": not booting}
-        return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
+        return _keyboard_harness.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
 
     def set_roster_unavailable(self, unavailable):
         with self.lock:
             self.roster_unavailable = unavailable
+            if not unavailable:
+                self.observing_denied_retry = False
 
     def set_malformed_revision(self, malformed):
         with self.lock:
@@ -119,7 +119,10 @@ class ItemWire(authority.WorkspaceWire):
             held = self.hold_next and phase == "a"
             if held:
                 self.hold_next = False
-            self.events.append({"event": "items", "phase": phase, "state": state, "held": held})
+            self.events.append({"event": "items", "phase": phase, "state": state, "held": held,
+                "roster_unavailable": self.roster_unavailable,
+                "denied_retry_observation": self.observing_denied_retry,
+                "missing_revision": self.missing_revision, "malformed_revision": self.malformed_revision})
         if held:
             self.held_started.set()
             if not self.release_held.wait(timeout=30.0):
@@ -137,21 +140,125 @@ class ItemWire(authority.WorkspaceWire):
         return account("7500", "crown", "2000", "b")
 
 
+class PartialRosterWire(ItemWire):
+    def __init__(self, roster):
+        super().__init__(roster)
+        self.complete = False
+        self.partial_reads = 0
+
+    def roster(self):
+        status, payload = authority.WorkspaceWire.roster(self)
+        template = next(row for row in payload["keepers"] if row["name"] == "beta")
+        rows = []
+        # The real endpoint caps its rows at 200; local alpha is outside that
+        # observed prefix, with its Item account still owned by /items.
+        for index in range(200):
+            row = copy.deepcopy(template)
+            row["name"] = f"observed-{index:03d}"
+            row["meta"] = _keyboard_harness.keeper_roster_meta(row["name"])
+            rows.append(row)
+        with self.lock:
+            complete = self.complete
+            if not complete:
+                self.partial_reads += 1
+            self.events.append({"event": "partial-roster", "complete": complete})
+        payload.update(keepers=rows, count=len(rows), total=200 if complete else 201,
+                       truncated=not complete,
+                       candle={"status": "ready", "issued_milli": "12500",
+                               "burned_milli": "0", "circulating_milli": "12500"})
+        return status, payload
+
+    def items(self):
+        response = super().items()
+        if self.held_returned.is_set() and response[0] == 200:
+            return account("99999", "glasses", "99999", "a")
+        return response
+
+
+def run_partial_roster(binary, captures):
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    roster_fixture = fixtures[authority.ROSTER_PATH]
+    assert isinstance(roster_fixture, tuple)
+    wire = PartialRosterWire(roster_fixture[1])
+    fixtures[authority.ROSTER_PATH] = wire.roster
+    fixtures["/api/v1/gate/keepers"] = wire.roster
+    fixtures["/health"] = _keyboard_harness.HeadersHttpResponse(lambda _headers: wire.health())
+    fixtures["/health?full=1"] = _keyboard_harness.HeadersHttpResponse(lambda _headers: wire.health())
+    fixtures[ITEM_PATH] = wire.items
+
+    def interact(process, fd, _slave, output, _base):
+        def wait(predicate, label):
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(authority.screen(output)), timeout=authority.WAIT_SECONDS), \
+                f"{label}: {authority.screen(output)!r}"
+
+        try:
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+            wait(lambda text: b"Balance 12.500 Candle" in text, "unobserved alpha Item read")
+            wire.arm_items()
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.held_started,
+                timeout=authority.WAIT_SECONDS), "cadence did not refresh alpha's Item account"
+            with wire.lock:
+                prior_reads = wire.partial_reads
+
+            def later_roster_reads(_text):
+                with wire.lock:
+                    return wire.partial_reads >= prior_reads + 2
+
+            wait(later_roster_reads, "partial roster cadence did not continue during Item read")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=35,
+                columns=authority.TERMINAL_COLUMNS, needle="▸Items".encode(),
+                controls=(_keyboard_harness.FULL_REDRAW,))
+            assert b"Balance 12.500 Candle" in authority.screen(output), \
+                "partial roster refresh withdrew the authoritative pending Item account"
+            if captures is not None:
+                (captures / "partial-roster-held.txt").write_bytes(authority.screen(output))
+            wire.release_held.set()
+            wait(lambda text: b"Balance 99.999 Candle" in text, "current Item response was lost")
+            wire.change_account("failed")
+            wait(lambda text: b"current Item ledger unreadable" in text,
+                 "endpoint failure retained the old account")
+            assert b"Balance " not in authority.screen(output)
+            wire.change_account("ready")
+            wait(lambda text: b"Balance 99.999 Candle" in text, "Item account did not recover")
+            with wire.lock:
+                wire.complete = True
+            wait(lambda text: b"Keeper is not observed in the current roster" in text,
+                 "a complete roster's absence did not withdraw the Item account")
+            assert b"Balance " not in authority.screen(output)
+            os.write(fd, b"q")
+        finally:
+            wire.release_held.set()
+            if captures is not None:
+                (captures / "partial-roster.pty").write_bytes(output)
+                with wire.lock:
+                    events = list(wire.events)
+                (captures / "partial-roster-requests.json").write_text(json.dumps(events, indent=2) + "\n")
+
+    _keyboard_harness.run_terminal_scenario(binary, description="Partial roster retains authoritative Item account",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_rows=34, terminal_cols=authority.TERMINAL_COLUMNS)
+
+
 def run(binary, captures):
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = ItemWire(fixtures[authority.ROSTER_PATH][1])
     fixtures[authority.ROSTER_PATH] = wire.roster
+    fixtures["/api/v1/gate/keepers"] = wire.roster
     fixtures["/health"] = wire.health
     fixtures["/health?full=1"] = wire.health
     fixtures[ITEM_PATH] = wire.items
-    posts: h.HttpRequests = []
+    posts: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
         def visible():
             return authority.screen(output)
 
         def wait(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(visible()), timeout=authority.WAIT_SECONDS), \
                 f"{label}: {visible()!r}"
 
@@ -161,20 +268,32 @@ def run(binary, captures):
                 (captures / (name + ".pty")).write_bytes(output)
             print("ITEM_AUTHORITY_FRAME " + name + "\n" + visible().decode(errors="replace"), flush=True)
 
+        def item_read_observed(*, missing=False, malformed=False):
+            with wire.lock:
+                return any(event["event"] == "items"
+                    and event["missing_revision"] == missing
+                    and event["malformed_revision"] == malformed
+                    for event in wire.events)
+
+        def booting_observed():
+            with wire.lock:
+                return any(event["event"] == "item-health" and event["booting"]
+                    for event in wire.events)
+
         def item_row(name):
             rows = [line for line in visible().splitlines() if name in line]
             assert rows, f"{name!r} absent: {visible()!r}"
             return b"\n".join(rows)
 
         def open_items(*, first=False):
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r",
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r",
                 "▸Info".encode() if first else "▸Items".encode())
             if first:
-                h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+                _keyboard_harness.send_and_wait(process, fd, output, b"]", "▸Items".encode())
 
         try:
-            h.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
             wait(lambda text: b"a.current" in text and b"MISMATCH" not in text, "A roster")
             open_items(first=True)
             wait(lambda text: b"Balance 12.500 Candle" in text and b"owned" in text, "A Item account")
@@ -182,7 +301,7 @@ def run(binary, captures):
             capture("a-ready")
             wire.arm_items()
             os.write(fd, b"r")
-            assert h.wait_for_fixture_event(process, fd, output, wire.held_started,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.held_started,
                 timeout=authority.WAIT_SECONDS), "refresh did not launch the held A Item read"
             wire.publish("b")
             wait(lambda text: b"b.current" in text and b"MISMATCH local " in text
@@ -192,18 +311,18 @@ def run(binary, captures):
             capture("b-with-a-read-held")
             after_b = len(output)
             wire.release_held.set()
-            assert h.wait_for_fixture_event(process, fd, output, wire.held_returned,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.held_returned,
                 timeout=authority.WAIT_SECONDS), "held A Item response was not released"
             wire.publish("b-after-late")
             wait(lambda text: b"b.settled" in text, "fresh B roster after release")
-            h.resize_and_wait(process, fd, output, rows=35,
-                columns=authority.TERMINAL_COLUMNS, needle=b"b.settled", controls=(h.FULL_REDRAW,))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=35,
+                columns=authority.TERMINAL_COLUMNS, needle=b"b.settled", controls=(_keyboard_harness.FULL_REDRAW,))
             # B is intentionally foreign to the local workspace. Its roster
             # remains observable, but Item reads never acquire admission.
             assert b"MISMATCH local " in visible()
             assert b"Balance " not in visible() and b"owned" not in visible()
             assert "▸Items".encode() not in visible()
-            assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
+            assert b"99.999" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[after_b:])), \
                 "late A Item money was rendered while B was unadmitted"
             with wire.lock:
                 assert not [event for event in wire.events
@@ -217,13 +336,13 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "A did not re-read its current Item account")
             assert b"7.500" not in visible() and b"99.999" not in visible()
             assert b"1.750" in item_row(b"glasses") and b"owned" not in item_row(b"glasses")
-            assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
+            assert b"99.999" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[after_b:])), \
                 "late A Item money was rendered after the workspace boundary"
             capture("a-current-after-return")
-            h.send_and_wait(process, fd, output, b"j" * 14, b"Items 15/18")
+            _keyboard_harness.send_and_wait(process, fd, output, b"j" * 14, b"Items 15/18")
             wait(lambda text: b"quill" in text and b"owned" in text, "returned A's owned quill")
             assert b"1.750" in item_row(b"quill") and b"owned" in item_row(b"quill")
-            h.send_and_wait(process, fd, output, b"k" * 14, b"Items 1/18")
+            _keyboard_harness.send_and_wait(process, fd, output, b"k" * 14, b"Items 1/18")
             wire.change_account("failed")
             os.write(fd, b"r")
             wait(lambda text: b"Account unavailable:" in text and b"current Item ledger unreadable" in text,
@@ -240,41 +359,71 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "admitted A account did not recover")
             capture("a-recovered")
             wire.set_roster_unavailable(True)
-            wait(lambda text: b"Keeper account revision" in text,
+            wait(lambda text: b"Account unavailable:" in text
+                 and (b"Keeper is not observed in the current roster" in text
+                      or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            with wire.lock:
+                # The rendered refusal establishes that the client applied
+                # the failed roster. Earlier in-flight reads were admitted
+                # before that observation and are not this denied retry.
+                wire.observing_denied_retry = True
+                item_reads = sum(event["event"] == "items" for event in wire.events)
+            # The refusal may already be drawn. Moving the selection after
+            # retrying proves the input was processed without requiring the
+            # unchanged error to be emitted again.
+            _keyboard_harness.send_and_wait(process, fd, output, b"rj", b"Items 2/18")
+            _keyboard_harness.send_and_wait(process, fd, output, b"k", b"Items 1/18")
+            def unexpected_item_read():
+                with wire.lock:
+                    return sum(event["event"] == "items" for event in wire.events) != item_reads
+            # Keyboard frames do not settle asynchronous HTTP work. Keep the
+            # TUI draining and authority unavailable for the whole existing
+            # fixture deadline, failing if any account request arrives.
+            assert not _keyboard_harness.wait_for_fixture_state(process, fd, output, unexpected_item_read,
+                timeout=authority.WAIT_SECONDS), \
+                "explicit Item retry asynchronously read the account without roster authority"
+            assert process.poll() is None, "TUI exited during denied Item retry observation"
+            assert b"Keeper roster authority is unavailable" in visible()
+            with wire.lock:
+                assert sum(event["event"] == "items" for event in wire.events) == item_reads, \
+                    "explicit Item retry read the account without roster authority"
+            assert b"Balance " not in visible() and b"owned" not in visible(), \
+                "explicit Item retry bypassed unavailable roster authority"
             capture("a-revision-unavailable")
             wire.set_roster_unavailable(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
             wire.set_missing_revision(True)
-            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
-                 "missing revision retained Item monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            wait(lambda text: item_read_observed(missing=True) and b"Balance 3.250 Candle" in text,
+                 "missing public revision blocked the authenticated Item account")
             wire.set_missing_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "restored revision did not reload Item facts")
             wire.set_malformed_revision(True)
-            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
-                 "malformed revision retained Item monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            wait(lambda text: item_read_observed(malformed=True) and b"Balance 3.250 Candle" in text,
+                 "malformed public revision blocked the authenticated Item account")
             capture("a-revision-malformed")
             wire.set_malformed_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "valid revision recovery did not reload Item facts")
             wire.set_booting(True)
-            wait(lambda text: b"MASC Keepers" in text and b"server booting" in text
+            wait(lambda text: booting_observed() and b"No keeper selected." in text
                  and "▸Items".encode() not in text,
                  "booting server did not withdraw the Item detail")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-booting")
             wire.set_booting(False)
-            wait(lambda text: b"a.boot.ready" in text and b"server booting" not in text
+            # Item authority requires a fresh explicit detail read; unlike
+            # other detail tabs, it is not automatically restored on recovery.
+            wait(lambda text: b"MASC Keepers" in text and b"a.boot.ready" in text
                  and "▸Items".encode() not in text,
-                 "ready roster did not follow the booting authority withdrawal")
+                 "ready server did not publish its fresh roster after boot")
+            assert b"Balance " not in visible() and b"owned" not in visible()
             open_items()
-            wait(lambda text: b"Balance 3.250 Candle" in text,
-                 "ready server did not re-read Item account after boot")
+            wait(lambda text: "▸ alpha".encode() in text and "▸Items".encode() in text
+                 and b"Balance 3.250 Candle" in text,
+                 "explicit readmission did not reload the Keeper Item account")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \
                 "read-only Item navigation submitted Keeper work"
             os.write(fd, b"q")
@@ -288,10 +437,16 @@ def run(binary, captures):
                     "gets": events, "posts": [{"path": p, "body": json.loads(b)} for p, b in posts],
                 }, indent=2) + "\n")
 
-    h.run_terminal_scenario(binary, description="Item accounts follow A/B/A workspace authority",
+    _keyboard_harness.run_terminal_scenario(binary, description="Item accounts follow A/B/A workspace authority",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=posts, refresh=0.5, terminal_rows=34,
         terminal_cols=authority.TERMINAL_COLUMNS)
+    # The fixture joins all handlers before returning. Include requests that
+    # arrive after the immediate keyboard assertions in the final ledger.
+    with wire.lock:
+        assert not [event for event in wire.events
+                    if event["event"] == "items" and event["denied_retry_observation"]], \
+            "an Item request was admitted during the denied retry observation"
 
 
 if __name__ == "__main__":
@@ -306,4 +461,5 @@ if __name__ == "__main__":
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
     run(binary, captures)
+    run_partial_roster(binary, captures)
     print("Item workspace authority: PASS (withdrawal, late response, failure, Off, recovery)")

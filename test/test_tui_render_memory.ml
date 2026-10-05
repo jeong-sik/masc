@@ -1257,19 +1257,8 @@ let test_the_row_badge_says_what_the_store_says () =
     (contains "[VALIDATED\xe2\x80\xa6]" (line (fact_row Cat.Validated_approach)))
 ;;
 
-(* Every badge this cell can draw has to be told apart from every other one.
-
-   The cell is ten cells wide and cuts what runs past it, which was the right
-   shape while the category was a wire string nobody could enumerate. It is a
-   closed set of eight now, plus the pane's own two words, and two of the ten
-   are longer than the cell: [CODE_CHANGE] draws as "CODE_CHAN..." and
-   [VALIDATED_APPROACH] as "VALIDATED...". Nothing collides today, and this
-   is what says so -- a category added later whose first nine characters
-   repeat another's would draw the same cell for two different things, which
-   is the whole job of the column.
-
-   Walked from [all_categories], so a ninth is measured without this file
-   changing. *)
+(* Built-in badges and dynamic labels with the same topic prefix must remain
+   distinct. Dynamic labels retain their suffix within the fixed-width cell. *)
 let test_every_badge_this_cell_draws_is_its_own () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
@@ -1315,7 +1304,11 @@ let test_every_badge_this_cell_draws_is_its_own () =
   let named =
     List.map (fun category ->
         (Cat.category_to_string category, badge (fact_row category)))
-      Cat.all_categories
+      (Cat.all_categories @ List.map (fun name ->
+         match Cat.category_of_string name with
+         | Some category -> category
+         | None -> Alcotest.failf "invalid fixture category: %s" name)
+         ["architecture_decision"; "architecture_pattern"])
     @ [ ("source", badge source_row); ("dropped", badge dropped_row) ]
   in
   List.iter
@@ -1507,12 +1500,16 @@ let test_rows_and_header_share_one_grid () =
        };
   state.memory_facts_cursor <- 0;
   let styled = ref [] in
+  let collect_header line =
+    let line = Masc_tui_theme.strip_sgr line in
+    let line = Layout.drop_cells line (cols - Render_memory.memory_facts_pane_cols state cols) in
+    styled := line :: !styled in
   Render_memory.render_memory_facts_body
     ~cols
     ~budget:30
     state
-    ~push:(fun _ -> ())
-    ~push_styled:(fun ~style:_ line -> styled := line :: !styled)
+    ~push:collect_header
+    ~push_styled:(fun ~style:_ line -> collect_header line)
     ~push_selected:(fun _ -> ())
     ~push_divider:(fun () -> ())
     ~push_empty:(fun () -> ());
@@ -1528,7 +1525,7 @@ let test_rows_and_header_share_one_grid () =
    breakdown and the sort. The title is the row that runs out of width first --
    at 140 columns against a live server it has 80 cells, and the clock and the
    connection badge sit at its end. *)
-let facts_body_lines ?(cols = 120) ?(budget = 30) state =
+let facts_body_lines ?(cols = 100) ?(budget = 30) state =
   let lines = ref [] in
   let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
   Render_memory.render_memory_facts_body ~cols ~budget state
@@ -1539,25 +1536,26 @@ let facts_body_lines ?(cols = 120) ?(budget = 30) state =
     ~push_empty:(fun () -> ());
   List.rev !lines
 
-let three_kinds_state ?(keeper = "alpha") () =
+let make_memory_fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
+  { mf_claim = claim
+  ; mf_category = category
+  ; mf_origin = "manual"
+  ; mf_first_seen = 100.0
+  ; mf_last_seen = 200.0
+  ; mf_memory_id = "mem-" ^ claim
+  ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
+  }
+
+let three_kinds_state ?(keeper = "alpha") ?(extra_ordinary = []) () =
   let state = make_state () in
-  let fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
-    { mf_claim = claim
-    ; mf_category = category
-    ; mf_origin = "manual"
-    ; mf_first_seen = 100.0
-    ; mf_last_seen = 200.0
-    ; mf_memory_id = "mem-" ^ claim
-    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
-    }
-  in
+  let fact = make_memory_fact in
   let ordinary : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1
     ; mos_updated_at = 1000.0
     ; mos_facts =
         [ fact Cat.Fact "The renderer draws the board"
         ; fact Cat.Preference "Roger reads for the tester"
-        ]
+        ] @ extra_ordinary
     }
   in
   let source : Masc.Tui_decode_memory_facts.memory_source_store =
@@ -1586,6 +1584,160 @@ let three_kinds_state ?(keeper = "alpha") () =
        };
   state.memory_facts_cursor <- 0;
   state
+
+let test_category_rail_keeps_click_targets_and_frame_width () =
+  let state = three_kinds_state () in
+  check int "default gives the facts all available width" 140
+    (Render_memory.memory_facts_pane_cols state 140);
+  state.memory_facts_categories_open <- true;
+  state.memory_facts_category <- Types.Category_ordinary Cat.Preference;
+  let render cols =
+    Masc_tui_hit.reset Masc_tui_press.press_marks;
+    let lines = ref [] in
+    let push line = lines := line :: !lines in
+    Render_memory.render_memory_facts_body ~cols ~budget:24 state ~push
+      ~push_styled:(fun ~style line -> push (style ^ line))
+      ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+    Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines)
+  in
+  let wide, zones = render 140 in
+  check bool "Category rail visible" true
+    (List.exists (contains "CATEGORIES") wide);
+  check bool "Category counts visible" true
+    (List.exists (contains "preference (1)") wide);
+  check bool "frame width preserved" true
+    (List.for_all (fun line -> Layout.display_width line <= 140) wide);
+  check bool "selected Category has clickable rail target" true
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference))
+      (Masc_tui_hit.to_list zones));
+  List.iter (fun initially_open ->
+    state.memory_facts_categories_open <- initially_open;
+    let narrow, _ = render (Masc_tui_roster_pane.threshold_cols - 1) in
+    check bool "hidden Category rail offers no toggle" false
+      (List.exists (contains "d:") narrow);
+    let wide, _ = render Masc_tui_roster_pane.threshold_cols in
+    check bool "drawable Category rail offers its actual action" true
+      (List.exists (contains (if initially_open then "d:접기" else "d:Category 펼치기")) wide)
+  ) [false; true];
+  let narrow, _ = render 80 in
+  check bool "narrow frame keeps full fact width" false
+    (List.exists (contains "CATEGORIES") narrow);
+  state.memory_facts_categories_open <- false;
+  let closed, _ = render 140 in
+  check bool "closing Categories restores the fact reading" false
+    (List.exists (contains "CATEGORIES") closed)
+
+let test_category_rail_bounds_large_label_preview () =
+  let name = "oversized_" ^ String.make 50_000 'a' in
+  let category = Option.get (Cat.category_of_string name) in
+  let filter = Types.Category_ordinary category in
+  let state = three_kinds_state ~extra_ordinary:[make_memory_fact category "bounded preview"] () in
+  state.memory_facts_categories_open <- true;
+  state.memory_facts_category <- filter;
+  Masc_tui_hit.reset Masc_tui_press.press_marks;
+  let lines = ref [] in
+  let push line = lines := line :: !lines in
+  Render_memory.render_memory_facts_body ~cols:140 ~budget:7 state ~push
+    ~push_styled:(fun ~style line -> push (style ^ line)) ~push_selected:push
+    ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+  let lines, _ = Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines) in
+  let rail = List.map (fun line -> Layout.take_cells (Masc_tui_theme.strip_sgr line)
+    Masc_tui_roster_pane.pane_cols) lines in
+  check bool "bounded preview exposes truncation and count in the visible rail" true
+    (List.exists (contains "… (1)") rail);
+  check bool "rendered rows fit the same terminal width" true
+    (List.for_all (fun line -> Layout.display_width line <= 140) lines);
+  check string "the category retained for detail is complete" name
+    (Types.memory_category_filter_label state.memory_facts_category)
+
+let test_category_rail_wrapped_range_and_overflow () =
+  let long_cat_name = "custom_architecture_infrastructure_deployment_pipeline_specification" in
+  let long_cat = Option.get (Cat.category_of_string long_cat_name) in
+  let cat_filter = Types.Category_ordinary long_cat in
+  let state =
+    three_kinds_state
+      ~extra_ordinary:[ make_memory_fact long_cat "Long category test claim" ]
+      ()
+  in
+  state.memory_facts_category <- cat_filter;
+  state.memory_facts_categories_open <- true;
+  let render ~budget cols =
+    Masc_tui_hit.reset Masc_tui_press.press_marks;
+    let lines = ref [] in
+    let push line = lines := line :: !lines in
+    Render_memory.render_memory_facts_body ~cols ~budget state ~push
+      ~push_styled:(fun ~style line -> push (style ^ line))
+      ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+    Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines)
+  in
+  let lines_fit, zones_fit = render ~budget:7 140 in
+  check bool "selected category start row visible when fitting in budget" true
+    (List.exists (contains "custom_architecture_infrastructu") lines_fit);
+  check bool "selected category end row with count visible when fitting in budget" true
+    (List.exists (contains "tion (1)") lines_fit);
+  check bool "clickable target exists when fitting" true
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category cat_filter)
+      (Masc_tui_hit.to_list zones_fit));
+  let lines_small, zones_small = render ~budget:5 140 in
+  check bool "selected category start anchored and visible under height overflow" true
+    (List.exists (contains "custom_architecture_infrastructu") lines_small);
+  check bool "clickable target exists on overflow" true
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category cat_filter)
+      (Masc_tui_hit.to_list zones_small));
+  state.view <- Types.Memory;
+  check bool "keeper is selected for detail access" true
+    (Option.is_some state.memory_facts_keeper);
+  state.memory_fact_detail_open <- true;
+  state.memory_fact_detail_scroll <- 0;
+  let rows = Types.memory_fact_rows state in
+  check int "category filter isolates long category fact" 1 (List.length rows);
+  let fact_row = List.hd rows in
+  let compact text = String.split_on_char ' ' text |> String.concat "" in
+  List.iter
+    (fun cols ->
+      let lines = Render_memory.memory_fact_detail_lines ~cols fact_row in
+      let body = match lines with [] -> [] | _heading :: body -> body in
+      List.iter
+        (fun line ->
+          check bool "detail body fits inner frame width" true
+            (Layout.display_width line <= Masc_tui_frame.inner_width ~cols))
+        body;
+      let text =
+        body |> List.map Masc_tui_theme.strip_sgr |> String.concat "" |> compact
+      in
+      check bool "wrapped detail lines preserve full category label" true
+        (contains (compact long_cat_name) text))
+    [ 80; 40; 30; 16 ];
+  let detail_cols = 40 in
+  let detail_lines = Render_memory.memory_fact_detail_lines ~cols:detail_cols fact_row in
+  let count = List.length detail_lines in
+  let small_height = 4 in
+  check bool "detail lines overflow small viewport" true (count > small_height);
+  let indexed = List.mapi (fun i line -> i, Masc_tui_theme.strip_sgr line) detail_lines in
+  let first_cat_idx = indexed |> List.find (fun (_, line) -> contains "Category:" line) |> fst in
+  let next_field_idx = indexed |> List.find (fun (i, line) -> i > first_cat_idx && contains "Origin:" line) |> fst in
+  let last_cat_idx = next_field_idx - 1 in
+  let initial_scroll = state.memory_fact_detail_scroll in
+  check int "initial detail scroll starts at top" 0 initial_scroll;
+  let scrolled =
+    Masc_tui_scroll.ensure_visible ~cursor:last_cat_idx ~height:small_height
+      initial_scroll
+  in
+  state.memory_fact_detail_scroll <- scrolled;
+  check bool "scrolled window reaches final category line" true
+    (scrolled <= last_cat_idx && last_cat_idx < scrolled + small_height);
+  check bool "scroll position indicator reports window" true
+    (Option.is_some
+       (Masc_tui_scroll.position_row ~scroll:scrolled ~height:small_height count));
+  let end_scroll = Masc_tui_scroll.normalize ~count ~height:small_height max_int in
+  check bool "normalizing the final viewport reaches bottom of detail" true
+    (end_scroll = Masc_tui_scroll.maximum ~count ~height:small_height)
 
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed
@@ -2051,8 +2203,8 @@ let test_facts_selection_follows_the_rendered_viewport () =
     ; mfs_events_read_error = None
     };
   let assert_visible ~cols ~budget () =
-    let used = ref 0 and selected = ref [] in
-    let push _ = incr used in
+    let used = ref 0 and selected = ref [] and rendered = ref [] in
+    let push line = if !used < budget then rendered := line :: !rendered; incr used in
     Render_memory.render_memory_facts_body ~cols ~budget state
       ~push ~push_styled:(fun ~style:_ line -> push line)
       ~push_selected:(fun line ->
@@ -2060,9 +2212,16 @@ let test_facts_selection_follows_the_rendered_viewport () =
         incr used)
       ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
     let row = List.nth (Types.memory_fact_rows state) state.memory_facts_cursor in
-    let expected = Render_memory.memory_fact_row_line ~cols row
+    let fact_cols = Render_memory.memory_facts_pane_cols state cols in
+    let expected = Render_memory.memory_fact_row_line ~cols:fact_cols row
       |> Masc_tui_theme.strip_sgr in
-    check (list string) "the selected fact is drawn inside the body" [ expected ] !selected
+    if fact_cols = cols then
+      check (list string) "the selected fact is drawn inside the body" [ expected ] !selected
+    else
+      let styled = Layout.fit_width
+        (Masc_tui_theme.selection ^ expected ^ Masc_tui_ansi.Ansi.reset) fact_cols in
+      check bool "the composed fact pane shows the selected fact inside the body" true
+        (List.exists (contains styled) !rendered)
   in
   let move ~cols ~budget cursor =
     let height = Render_memory.memory_facts_content_height ~cols ~budget ~cursor state in
@@ -2079,6 +2238,9 @@ let test_facts_selection_follows_the_rendered_viewport () =
   (* Resizing is a redraw before input, so the renderer also follows a
      selection whose old scroll was computed for a larger body. *)
   move ~cols:140 ~budget:40 23;
+  state.memory_facts_categories_open <- true;
+  move ~cols:140 ~budget:40 23;
+  state.memory_facts_categories_open <- false;
   assert_visible ~cols:60 ~budget:16 ();
   (* The search banner, retained read error and store error all consume
      actual rows above the list. Filtered End still selects a visible fact. *)
@@ -2308,6 +2470,12 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ; test_case "Category rail keeps counts, click targets and frame width" `Quick
+            test_category_rail_keeps_click_targets_and_frame_width
+        ; test_case "Category rail wrapped range exposure and overflow" `Quick
+            test_category_rail_wrapped_range_and_overflow
+        ; test_case "category rail bounds oversized previews" `Quick
+            test_category_rail_bounds_large_label_preview
         ; test_case "a failed facts read does not say loading" `Quick
             test_a_failed_facts_read_does_not_say_loading
         ; test_case "a failed facts refresh keeps the facts" `Quick

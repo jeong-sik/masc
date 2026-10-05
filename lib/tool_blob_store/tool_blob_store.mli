@@ -119,6 +119,11 @@ val put_durable_reuse : t -> bytes:string -> mime:string -> Tool_output.artifact
     successful integrity-checked read. Ordinary [put] does not establish this
     durability evidence. Missing or damaged bytes are strictly republished. *)
 
+val put_file_durable_blocking : t -> path:string -> mime:string -> Tool_output.artifact_ref
+(** The same durable file ingestion, executed synchronously on the caller.
+    Only use inside an existing blocking job or CPU worker; it does not
+    offload hashing and copying to another system thread. *)
+
 val put_file_durable : t -> path:string -> mime:string -> Tool_output.artifact_ref
 (** Store an internal regular spool file without loading its complete contents
     into memory. The caller owns the source file; this operation never removes

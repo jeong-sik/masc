@@ -515,7 +515,8 @@ let recorded_item_by_event_id events event_id =
    [Recorded] occurrence per id wins, matching [recorded_item_by_event_id]
    exactly), so the whole batch costs one file read regardless of size. *)
 let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
-  let events = load_events ~base_path ~keeper_name in
+  let ( let* ) = Result.bind in
+  let* events = load_events_result ~base_path ~keeper_name in
   let wanted : (string, unit) Hashtbl.t = Hashtbl.create (List.length event_ids) in
   List.iter (fun event_id -> Hashtbl.replace wanted event_id ()) event_ids;
   let found : (string, item) Hashtbl.t = Hashtbl.create (List.length event_ids) in
@@ -527,10 +528,11 @@ let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
         Hashtbl.add found item.event_id item
       | Recorded _ -> ())
     events;
-  List.filter_map
-    (fun event_id ->
-       Option.map (fun item -> event_id, item) (Hashtbl.find_opt found event_id))
-    event_ids
+  Ok
+    (List.filter_map
+       (fun event_id ->
+          Option.map (fun item -> event_id, item) (Hashtbl.find_opt found event_id))
+       event_ids)
 
 (* Read one bounded tail without parsing either boundary fragment. The writer
    may be mid-append, and [from] usually lands mid-line, so only bytes strictly

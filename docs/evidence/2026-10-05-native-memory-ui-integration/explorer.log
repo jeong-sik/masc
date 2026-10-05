@@ -1,0 +1,15 @@
+Testing `masc_tui_memory_facts_explorer'.
+This run has ID `UMQMQGHR'.
+
+  [OK]          navigation          0   category toggle respects visible width.
+  [OK]          navigation          1   category navigation.
+  [OK]          navigation          2   category filtering isolation.
+  [OK]          sorting             0   sorting orders.
+  [OK]          sorting             1   use-based sorting reads the record.
+  [OK]          search              0   search filtering.
+  [OK]          layout              0   a long fact leaves the list its floor.
+  [OK]          layout              1   a short fact leaves the list more tha...
+  [OK]          layout              2   tiny viewport keeps detail inside bud...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/native40759-reconcile-20261005/_build/_tests/masc_tui_memory_facts_explorer'.
+Test Successful in 0.001s. 9 tests run.

@@ -2634,10 +2634,89 @@ let test_result_bound_follows_the_bundle_bounds () =
     (bound declared "attached__search")
 ;;
 
+let carrier_message text : Agent_core.Types.message =
+  { role = System
+  ; content = [ Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+  }
+;;
+
+let carried_composed ~dynamic_text ~operator_text =
+  let carrier = dynamic_text ^ "\n" ^ operator_text in
+  ( carrier_message carrier
+  , { Host.carrier_sha256 = Digestif.SHA256.(digest_string carrier |> to_hex)
+    ; blocks =
+        [ Prompt_block_id.Dynamic_context, dynamic_text
+        ; Prompt_block_id.Operator_note, operator_text
+        ]
+    } )
+;;
+
+(* The log line a lane without a held set relies on to decide what a held set
+   could skip: one entry per typed block, the digest changes with the bytes,
+   and only the operator note is marked as sent on every resume. *)
+let test_carried_summaries_name_blocks_and_digests () =
+  let message, composed =
+    carried_composed ~dynamic_text:"world state one" ~operator_text:"note"
+  in
+  let summaries = Host.carried_summaries ~composed_context:composed [ message ] in
+  check (list string) "one entry per block"
+    [ "block:" ^ Prompt_block_id.to_string Prompt_block_id.Dynamic_context
+    ; "block:" ^ Prompt_block_id.to_string Prompt_block_id.Operator_note
+    ]
+    (List.map (fun (item : Host.carried_summary) -> item.label) summaries);
+  check (list bool) "only the operator note is always resent" [ false; true ]
+    (List.map (fun (item : Host.carried_summary) -> item.resent_every_resume) summaries);
+  List.iter
+    (fun (item : Host.carried_summary) ->
+       check int "digest prefix length" 12 (String.length item.sha256_prefix);
+       check bool "rendered bytes are counted" true (item.bytes > 0))
+    summaries;
+  let again = Host.carried_summaries ~composed_context:composed [ message ] in
+  check bool "same input gives the same summaries" true (summaries = again);
+  let changed_message, changed_composed =
+    carried_composed ~dynamic_text:"world state two" ~operator_text:"note"
+  in
+  let changed =
+    Host.carried_summaries ~composed_context:changed_composed [ changed_message ]
+  in
+  let sha_of items =
+    List.map (fun (item : Host.carried_summary) -> item.sha256_prefix) items
+  in
+  (match sha_of summaries, sha_of changed with
+   | [ dynamic_before; operator_before ], [ dynamic_after; operator_after ] ->
+     check bool "a changed block changes its digest" true
+       (not (String.equal dynamic_before dynamic_after));
+     check string "an unchanged block keeps its digest" operator_before operator_after
+   | _ -> fail "both turns must split into two blocks")
+;;
+
+let test_carried_summaries_without_a_witness_name_one_carrier () =
+  let message, _ = carried_composed ~dynamic_text:"world state" ~operator_text:"note" in
+  check (list string) "an unwitnessed carrier is one entry" [ "carrier" ]
+    (List.map
+       (fun (item : Host.carried_summary) -> item.label)
+       (Host.carried_summaries [ message ]));
+  check int "a conversation without carried contexts has none" 0
+    (List.length (Host.carried_summaries [ Agent_core.Types.user_msg "hi" ]))
+;;
+
 let () =
   run
     "keeper official-client host"
-    [ ( "native posture admission (RFC-0390)"
+    [ ( "carried context summaries"
+      , [ test_case
+            "names blocks and digests"
+            `Quick
+            test_carried_summaries_name_blocks_and_digests
+        ; test_case
+            "an unwitnessed carrier is one entry"
+            `Quick
+            test_carried_summaries_without_a_witness_name_one_carrier
+        ] )
+    ; ( "native posture admission (RFC-0390)"
       , [ test_case
             "full requires yolo"
             `Quick

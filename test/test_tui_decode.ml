@@ -8793,6 +8793,49 @@ let runtime_resolved_surface_json () =
           ] )
     ]
 
+let test_runtime_quota_scope_is_paired_with_its_response () =
+  let account scope id = `Assoc ["scope", `String scope; "scope_id", `String id;
+    "providers", `List []; "state", `String "not_reported_since_start"; "windows", `List []] in
+  let document scope accounts =
+    let first = resolved_runtime "runtime-a" "Resolved A" "model-a"
+      |> set_field "quota_scope" (`String scope) in
+    let base = runtime_resolved_surface_json () in
+    let runtimes = Yojson.Safe.Util.(base |> member "runtimes" |> to_list) in
+    base |> set_field "default_runtime" first
+      |> set_field "runtimes" (`List (first :: List.tl runtimes))
+      |> set_field "provider_usage_windows_since" (`Float 0.)
+      |> set_field "provider_usage_windows" (`List accounts) in
+  let decode json = match Tui_decode.decode_runtime_resolved_snapshot json with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let first snapshot = List.hd snapshot.Tui_decode.rrs_runtimes in
+  let initial = document "account:1"
+    [account "account:1" "stable-first"; account "account:2" "stable-second"] in
+  let captured = first (decode initial) in
+  Alcotest.(check (option string)) "snapshot retains quota scope" (Some "stable-first")
+    captured.ro_quota_scope_id;
+  let reordered = first (decode (document "account:2"
+    [account "account:1" "stable-second"; account "account:2" "stable-first"])) in
+  Alcotest.(check (option string)) "reordering ordinals retains quota scope" captured.ro_quota_scope_id
+    reordered.ro_quota_scope_id;
+  let relocated = document "account:1" [account "account:1" "different-location"] in
+  let new_row = first (decode relocated) in
+  Alcotest.(check (option string)) "different credential location at same ordinal changes scope"
+    (Some "different-location") new_row.ro_quota_scope_id;
+  Alcotest.(check (option string)) "old catalogue row retains its own paired scope"
+    (Some "stable-first") captured.ro_quota_scope_id;
+  (match Tui_decode.decode_runtime_resolved relocated with
+   | Ok (rows, _) -> Alcotest.(check (option string)) "catalogue projection retains quota scope"
+       new_row.ro_quota_scope_id (List.hd rows).ro_quota_scope_id
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun json ->
+    let row = first (decode json) in
+    Alcotest.(check (option string)) "unavailable or ambiguous quota scope ID stays unknown" None
+      row.ro_quota_scope_id;
+    Alcotest.(check (option string)) "response-local correlation survives failed Usage join"
+      (Some "account:1") row.ro_quota_scope)
+    [document "account:1" []; set_field "provider_usage_windows" `Null initial;
+     document "account:1" [account "account:1" "one"; account "account:1" "two"]]
+
 let test_decode_and_join_runtime_surface () =
   match
     Tui_decode.decode_runtime_surface_snapshot
@@ -9939,6 +9982,96 @@ let test_librarian_preflight_detail_reports_actual_route () =
     | _ -> Alcotest.fail "invalid fixture" in
   Alcotest.(check bool) "no-change must not invent a generation slot" true
     (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
+  let with_after ?(revision = 4) commit added =
+    match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true () with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = List.assoc "output" fields in
+      let output = match output with `Assoc fields -> `Assoc
+        (("after", `Assoc ["commit", `String commit; "revision", `Int revision;
+                            "fact_count", `Int 2; "change", `Assoc
+                              ["added_count", `Int added; "removed_count", `Int 0]]) :: fields)
+        | _ -> Alcotest.fail "invalid fixture" in
+      `Assoc ["run", `Assoc (("output", output) :: List.remove_assoc "output" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  List.iter (fun commit ->
+    List.iter (fun revision ->
+      Alcotest.(check bool) "snapshot revision must be positive" (revision > 0)
+        (Result.is_ok (Tui_decode.decode_lane_run_detail
+          (with_after ~revision commit 0)))) [-1; 0; 1]
+  ) ["unchanged"; "rewritten"];
+  let recorded = Tui_decode.decode_lane_run_detail (with_after "unchanged" 0) |> Result.get_ok in
+  Alcotest.(check bool) "snapshot result read from output, not JEV prediction" true
+    (Option.bind recorded.lrd_librarian_preflight (fun reading -> reading.lp_memory_result)
+     = Some (Tui_decode.Librarian_memory_unchanged (4,2)));
+  Alcotest.(check bool) "unchanged snapshot cannot report additions" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (with_after "unchanged" 1)));
+  Alcotest.(check bool) "memory no-change is not context-only" false
+    (Option.get recorded.lrd_librarian_preflight).lp_context_only;
+  let with_side_write key value = match with_after "unchanged" 0 with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> `Assoc
+          ((key, value) :: ("generation_path", `String "full_lane") ::
+           ("full_llm_skipped", `Bool false) ::
+           ("jev_preflight", `Assoc ["status", `String "ineligible";
+             "reason", `String "context pass"; "elapsed_s", `Null]) ::
+           List.filter (fun (key, _) ->
+             not (List.mem key ["generation_path"; "full_llm_skipped"; "jev_preflight"])) fields)
+        | _ -> Alcotest.fail "invalid output" in
+      `Assoc ["run", `Assoc (("output", output) ::
+        ("selected_slot", `String "fixture-generation") ::
+        List.remove_assoc "selected_slot" (List.remove_assoc "output" fields))]
+    | _ -> Alcotest.fail "invalid fixture" in
+  List.iter (fun (key, kind) ->
+    let json = with_side_write key
+      (`Assoc ["status", `String "failed"; "detail", `String "side write refused"]) in
+    let run = Tui_decode.decode_lane_run_detail json |> Result.get_ok in
+    Alcotest.(check bool) "Memory success retains independent side-write failure" true
+      ((Option.get run.lrd_librarian_preflight).lp_side_writes =
+       [kind, Tui_decode.Side_failed "side write refused"]);
+    Alcotest.(check bool) "side-write failure requires its recorded reason" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (with_side_write key (`Assoc ["status", `String "failed"]))));
+    Alcotest.(check bool) "unknown side-write status cannot look successful" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (with_side_write key (`Assoc ["status", `String "invented"]))))
+  ) ["context_write", Tui_decode.Context_write; "continuity_write", Tui_decode.Continuity_write];
+  List.iter (fun (key, receipt) ->
+    let json = `Assoc (("status", `String "committed") :: receipt) in
+    Alcotest.(check bool) "complete side-write receipt accepted" true
+      (Result.is_ok (Tui_decode.decode_lane_run_detail (with_side_write key json)));
+    List.iter (fun (field, _) ->
+      Alcotest.(check bool) "committed side-write requires receipt field" true
+        (Result.is_error (Tui_decode.decode_lane_run_detail
+          (with_side_write key (`Assoc (("status", `String "committed") :: List.remove_assoc field receipt)))))) receipt
+  ) ["context_write", ["generation", `String "generation-1"; "revision", `Int 1];
+     "continuity_write", ["end_atom", `Int 42; "prefix_sha256", `String (String.make 64 'a')]];
+  List.iter (fun (key, receipt) ->
+    Alcotest.(check bool) "malformed committed side-write receipt rejected" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (with_side_write key (`Assoc (("status", `String "committed") :: receipt)))))
+  ) ["context_write", ["generation", `String " "; "revision", `Int 1];
+     "context_write", ["generation", `String "generation-1"; "revision", `Int 0];
+     "continuity_write", ["end_atom", `Int 0; "prefix_sha256", `String (String.make 64 'a')];
+     "continuity_write", ["end_atom", `Int (-1); "prefix_sha256", `String (String.make 64 'a')];
+     "continuity_write", ["end_atom", `Int 42; "prefix_sha256", `String "not-a-hash"]];
+  Alcotest.(check bool) "context-only scope cannot also report a snapshot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (with_side_write "memory_write" (`String "skipped_context_only"))));
+  let context_only = match make ~decision:"needs_generation" ~path:"full_lane" ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> `Assoc
+          (("memory_write", `String "skipped_context_only") ::
+           ("jev_preflight", `Assoc ["status", `String "ineligible";
+             "reason", `String "context pass"; "elapsed_s", `Null]) ::
+           List.remove_assoc "jev_preflight" fields)
+        | _ -> Alcotest.fail "invalid fixture" in
+      `Assoc ["run", `Assoc (("output", output) :: List.remove_assoc "output" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  let context_only = Tui_decode.decode_lane_run_detail context_only |> Result.get_ok in
+  Alcotest.(check bool) "context-only scope comes from recorded output, not absent snapshot" true
+    (Option.get context_only.lrd_librarian_preflight).lp_context_only;
   let with_status status = function
     | `Assoc ["run", `Assoc fields] ->
       `Assoc ["run", `Assoc (("status", `String status) :: List.remove_assoc "status" fields)]
@@ -12459,6 +12592,8 @@ let () =
     ( "decode_runtime_surface",
       [ Alcotest.test_case "joins projection and observation in lane order" `Quick
           test_decode_and_join_runtime_surface
+      ; Alcotest.test_case "Runtime quota scopes remain paired with response" `Quick
+          test_runtime_quota_scope_is_paired_with_its_response
       ; Alcotest.test_case "rejects an unknown provider status" `Quick
           test_runtime_probe_rejects_unknown_status
       ; Alcotest.test_case "probe status reads every word the server writes"

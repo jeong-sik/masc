@@ -9,8 +9,8 @@
     that regenerated the section would delete the reason the settings are what
     they are.
 
-    Deliberately not built on {!Runtime_setup_batch}: that stages a pair of
-    files behind a [runtime-default-set] child process and verifies an LLM
+    Deliberately not built on {!Runtime_setup_batch}: that stages runtime.toml
+    behind a [runtime-default-set] child process and verifies an LLM
     runtime answers a tool round trip. None of that describes a voice
     endpoint, and a voice write has no business rewriting [\[runtime\]]. *)
 

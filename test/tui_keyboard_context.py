@@ -452,3 +452,62 @@ def run_next_request_readability_regression(executable: str) -> None:
                 terminal_cols=cols,
                 http_fixtures=fixtures,
             )
+
+
+def run_context_catalog_read_scope(executable: str) -> None:
+    """Current configuration is read on entry/refresh, not per historical turn."""
+    import copy
+    import threading
+    from tui_keyboard_harness import RUNTIME_RESOLVED_PATH, wait_for_fixture_event
+    from tui_keyboard_runtime import runtime_resolved_response
+
+    fixtures = context_inspector_fixtures()
+    _, turns = fixtures["/api/v1/keepers/alpha/turn-records?limit=50"]
+    previous = copy.deepcopy(turns["entries"][0])
+    previous["record"].update(absolute_turn=41, turn_ref="trace-context#41", ts=1787599900.0)
+    turns["entries"].insert(0, previous)
+    catalog = runtime_resolved_response()
+    reads = []
+    arrived = threading.Event()
+
+    def read_catalog():
+        reads.append(True)
+        arrived.set()
+        return catalog
+
+    fixtures[RUNTIME_RESOLVED_PATH] = read_catalog
+
+    def interact(process, fd, _slave, output, _base):
+        resize_and_wait(process, fd, output, rows=50, columns=160, needle=b"MASC Dashboard")
+        send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        select_keeper_row(process, fd, output, b"alpha")
+        send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, fd, output, b"/context", composer_showing(b"/context"))
+        before_open = len(reads)
+        arrived.clear()
+        send_and_wait(process, fd, output, b"\r", b"turn #42")
+        if not wait_for_fixture_event(process, fd, output, arrived, timeout=3.0):
+            raise AssertionError("opening Context did not read its current catalogue")
+        drain_until_quiet(process, fd, output)
+        if len(reads) != before_open + 1:
+            raise AssertionError("opening Context read its catalogue more than once")
+        opened = len(reads)
+        for key, turn in ((b"[", b"turn #41"), (b"]", b"turn #42")) * 3:
+            send_and_wait(process, fd, output, key, turn)
+        drain_until_quiet(process, fd, output)
+        if len(reads) != opened:
+            raise AssertionError("historical turn navigation fetched the current catalogue")
+        arrived.clear()
+        os.write(fd, b"r")
+        if not wait_for_fixture_event(process, fd, output, arrived, timeout=3.0):
+            raise AssertionError("explicit Context refresh did not refresh the catalogue")
+        drain_until_quiet(process, fd, output)
+        if len(reads) != opened + 1:
+            raise AssertionError("explicit refresh read its catalogue more than once")
+        send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        escape_to_keeper_detail(process, fd, output, name=b"alpha")
+        os.write(fd, b"q")
+
+    run_terminal_scenario(executable, description="Context catalogue reads follow entry and explicit refresh",
+                          interact=interact, http_fixtures=fixtures)

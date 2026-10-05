@@ -1725,6 +1725,7 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_quota_scope_id : string option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
 }
@@ -1904,7 +1905,7 @@ let decode_runtime_context_source = function
   | "binding_override_clamped_by_capability" -> Ok Runtime_context_binding_clamped
   | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
 
-let decode_runtime_option ~default_id json =
+let decode_runtime_option ~usage ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
   let* ro_provider_id = required_string_field json "provider_id" in
@@ -1951,6 +1952,16 @@ let decode_runtime_option ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
+  let ro_quota_scope_id =
+    match usage, ro_quota_scope with
+    | Error _, _ | Ok _, None -> None
+    | Ok usage, Some scope ->
+        (match List.filter (fun account ->
+           String.equal account.Tui_decode_usage.pua_scope scope)
+           usage.Tui_decode_usage.puws_accounts with
+         | [account] -> Some account.pua_scope_id
+         | [] | _ :: _ :: _ -> None)
+  in
   let* ro_rate_limited = required_bool_field json "rate_limited" in
   let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
@@ -1969,6 +1980,7 @@ let decode_runtime_option ~default_id json =
     ; ro_quota_exhausted
     ; ro_quota_resets_at
     ; ro_quota_scope
+    ; ro_quota_scope_id
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
     }
@@ -2041,10 +2053,13 @@ let decode_runtime_resolved_snapshot json =
   let* default_json, rrs_default_runtime_id =
     decode_runtime_default_member json
   in
+  (* Capture the credential/quota scope before catalogue/surface projections split.
+     quota_scope itself is only an ordinal within this response. *)
+  let rrs_usage = Tui_decode_usage.decode_provider_usage_windows json in
   let* runtime_items = required_list_field json "runtimes" in
   let* rrs_runtimes =
     decode_list "runtimes"
-      (decode_runtime_option ~default_id:rrs_default_runtime_id)
+      (decode_runtime_option ~usage:rrs_usage ~default_id:rrs_default_runtime_id)
       runtime_items
   in
   let runtime_by_id = Hashtbl.create (max 1 (List.length rrs_runtimes)) in
@@ -2066,7 +2081,7 @@ let decode_runtime_resolved_snapshot json =
     | None -> Ok None
     | Some value ->
         let* runtime =
-          decode_runtime_option ~default_id:rrs_default_runtime_id value
+          decode_runtime_option ~usage:rrs_usage ~default_id:rrs_default_runtime_id value
         in
         Ok (Some runtime)
   in
@@ -2115,7 +2130,7 @@ let decode_runtime_resolved_snapshot json =
     loop rrs_lanes
   in
   Ok
-    { rrs_usage = Tui_decode_usage.decode_provider_usage_windows json
+    { rrs_usage
     ; rrs_generated_at_iso
     ; rrs_config_path
     ; rrs_default_runtime_id
@@ -5491,6 +5506,13 @@ type librarian_preflight_status =
   | Preflight_judged of
       Typesafeai_librarian_preflight.decision Typesafeai_types.decoded_choice
 type librarian_generation_path = Generation_not_entered | Generation_full_lane | Generation_jev_no_change
+type librarian_memory_result =
+  | Librarian_memory_unchanged of int * int
+  | Librarian_memory_rewritten of { revision : int; facts : int; added : int; removed : int }
+type librarian_side_write_status =
+  | Side_not_attempted | Side_answer_missing | Side_withheld | Side_outcome_unconfirmed
+  | Side_committed | Side_answer_refused of string | Side_failed of string
+type librarian_side_write_kind = Context_write | Continuity_write
 type librarian_preflight_reading =
   { lp_status : librarian_preflight_status
   ; lp_generation_path : librarian_generation_path
@@ -5498,6 +5520,9 @@ type librarian_preflight_reading =
   ; lp_elapsed_s : float option
   ; lp_model : string option
   ; lp_domain_rejection : string option
+  ; lp_memory_result : librarian_memory_result option
+  ; lp_context_only : bool
+  ; lp_side_writes : (librarian_side_write_kind * librarian_side_write_status) list
   }
 
 (* Decode the retained observation with the same alternatives emitted by
@@ -5634,7 +5659,60 @@ let decode_librarian_preflight output =
         Error "domain rejection is only valid when Keep_current falls back to full lane"
       | _ -> Ok ()
     in
-    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection})
+    let* lp_context_only = match Json_util.assoc_member_opt "memory_write" output with
+      | None -> Ok false
+      | Some (`String "skipped_context_only") -> Ok true
+      | Some _ -> Error "unknown Librarian memory write scope" in
+    let* lp_memory_result = match Json_util.assoc_member_opt "after" output with
+      | None -> Ok None
+      | Some after ->
+        let* revision = required_int_field after "revision" in
+        let* () = if revision > 0 then Ok ()
+          else Error "invalid Memory snapshot revision" in
+        let* facts = required_nonnegative_int_field after "fact_count" in
+        let* change = required_member after "change" in
+        let* added = required_nonnegative_int_field change "added_count" in
+        let* removed = required_nonnegative_int_field change "removed_count" in
+        let* commit = required_string_field after "commit" in
+        (match commit with
+         | "unchanged" when added = 0 && removed = 0 -> Ok (Some (Librarian_memory_unchanged (revision, facts)))
+         | "rewritten" -> Ok (Some (Librarian_memory_rewritten {revision;facts;added;removed}))
+         | _ -> Error "unknown or inconsistent Librarian snapshot result") in
+    let* () = if lp_context_only && Option.is_some lp_memory_result
+      then Error "context-only Librarian output cannot contain a Memory snapshot"
+      else Ok () in
+    let decode_side_write kind key =
+      match Json_util.assoc_member_opt key output with
+      | None -> Ok None
+      | Some record ->
+        let* status = required_string_field record "status" in
+        let* status = match kind, status with
+          | _, "not_attempted" -> Ok Side_not_attempted
+          | _, "outcome_unconfirmed" -> Ok Side_outcome_unconfirmed
+          | Context_write, "committed" ->
+            let* generation = required_string_field record "generation" in
+            let* revision = required_int_field record "revision" in
+            if String.trim generation = "" || revision <= 0
+            then Error "invalid committed Context receipt" else Ok Side_committed
+          | Continuity_write, "committed" ->
+            let* end_atom = required_int_field record "end_atom" in
+            let* () = if end_atom > 0 then Ok () else Error "invalid committed Continuity end atom" in
+            let* hash = required_string_field record "prefix_sha256" in
+            if String.length hash = 64
+               && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) hash
+            then Ok Side_committed else Error "invalid committed Continuity receipt"
+          | _, "failed" ->
+            let+ detail = required_string_field record "detail" in Side_failed detail
+          | Context_write, "answer_missing" -> Ok Side_answer_missing
+          | Context_write, "withheld" -> Ok Side_withheld
+          | Context_write, "answer_refused" ->
+            let+ detail = required_string_field record "detail" in Side_answer_refused detail
+          | _ -> Error ("unknown " ^ key ^ " status " ^ status) in
+        Ok (Some (kind, status)) in
+    let* context_write = decode_side_write Context_write "context_write" in
+    let* continuity_write = decode_side_write Continuity_write "continuity_write" in
+    let lp_side_writes = List.filter_map Fun.id [context_write; continuity_write] in
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result;lp_context_only;lp_side_writes})
 
 type lane_run_detail =
   { lrd_run_id : string

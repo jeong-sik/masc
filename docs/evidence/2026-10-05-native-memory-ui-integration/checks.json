@@ -1,0 +1,41 @@
+{
+  "tested_head": "8f6c39c455c4075e242e2b79139e398315b847ee",
+  "main": "87123f7df94a27ded447b5b05d01c2f5178de029",
+  "results": {
+    "build_exit": 0,
+    "explorer": 9,
+    "render": 54,
+    "decode": 351,
+    "dedicated_pty_flows": 1,
+    "run_exit": 0
+  },
+  "commands": [
+    "opam exec --switch=5.5.1 -- env DUNE_JOBS=2 bash scripts/dune-local.sh build bin/masc_tui.exe test/test_tui_memory_facts_explorer.exe test/test_tui_render_memory.exe test/test_tui_decode.exe",
+    "_build/default/test/test_tui_memory_facts_explorer.exe",
+    "_build/default/test/test_tui_render_memory.exe",
+    "_build/default/test/test_tui_decode.exe",
+    "python3 test/test_tui_memory_fact_detail_pty.py \"$PWD/_build/default/bin/masc_tui.exe\""
+  ],
+  "binary_sha256": {
+    "bin/masc_tui.exe": "dcef78150d574b72e0444dc0f442facd4889828f62356fbbb287820fe6700d1e",
+    "test/test_tui_memory_facts_explorer.exe": "6ff3e7737ab31008f0918022dff8efbe36f2bd661c94263c7a73a3e52583cd75",
+    "test/test_tui_render_memory.exe": "00b6a3522e33485f4a0ff6bf2db0c3d3173ac9d28a09e5e8cb74c0660c839c6c",
+    "test/test_tui_decode.exe": "f2f49f7b788578d1d6973eec92bc39989f279ab125d6690fa0a507efe72e83c6"
+  },
+  "raw_logs_sha256": {
+    "build.log": "c94cebed9766aaafa0aa11062a53582c2fef771d03010243ef683fee3f64e8e1",
+    "explorer.log": "75aaa396fe425cd554737bdcdf610c39649db4eb443fe93e433657b9c8993556",
+    "render.log": "34bd86d466a58af7a083f4c3c42ee8d49dffa63dfc4f77ee3e24e0b84665c7b5",
+    "decode.log": "c7332ddd1461a5a2c8a76ab63aca191b4459da5d71b5dd445027e54e6ccfda7b",
+    "detail-pty.log": "03f761da2aa40c51bf3a2acdb429e281072f3913efab1da4f4c4e01f2f05ae91"
+  },
+  "source_sha256": {
+    "bin/dune": "aff53f14e465d9d936b04943d2f3bcf6eaeb42e34388ba1e442dc31a17328179",
+    "test/test_tui_memory_facts_explorer.ml": "f03de476192af06d4f9ed8d874ee0e0fa0dd7b5e50848e7983f2e4745394f821",
+    "test/test_tui_render_memory.ml": "82445c0e518755be1d470b76d3253c3269465294e2f6c76cae5b365c6e8b01fc",
+    "test/test_tui_decode.ml": "71cd118458013b8b93d745eada85fc98b57da7ec2e9f65b7e5d8f2f46064c9a9",
+    "test/test_tui_memory_fact_detail_pty.py": "7c2ab46e6ea8ca363ceee285aef161b050b663addc97ac777a30ab9b32ba860b",
+    "test/tui_keyboard_harness.py": "5022291719f33b140d363a785f0c5f0cda6a2306e93f1b34d9b424b9ab001840",
+    "test/tui_keyboard_memory.py": "65a2860f0730bed346c94871229ff694de7411f152d5ce05f23a385128e0c8f4"
+  }
+}

@@ -494,29 +494,39 @@ let test_runtime_text_transform () =
    | Error message -> fail ("transformed runtime.toml does not parse: " ^ message))
 ;;
 
-let test_saved_lane_requires_boolean_activity () =
+let test_saved_lane_activity_shape () =
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     let snapshot = or_fail (Preset.capture ~base_path ~name:"activity-shape" ~description:"") in
     or_fail (Preset.save ~base_path snapshot);
     let path = Filename.concat (Preset.source_directory ~base_path snapshot) "runtime.json" in
     let original = Yojson.Safe.from_file path in
-    List.iter (fun enabled ->
-      let changed = match original with
-        | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
-          if key <> "exact_output_lanes" then key, value else
-          key, (match value with
-            | `Assoc lanes -> `Assoc (List.map (fun (id, lane) ->
-              id, (match lane with
-                | `Assoc fields -> `Assoc (enabled @ List.remove_assoc "enabled" fields)
-                | _ -> Alcotest.fail "saved lane must be an object")) lanes)
-            | _ -> Alcotest.fail "saved lanes must be an object")) fields)
-        | _ -> Alcotest.fail "saved runtime must be an object" in
-      Yojson.Safe.to_file path changed;
-      match Preset.load ~base_path "activity-shape" with
-      | Error detail -> Alcotest.(check bool) "activity shape is explicitly refused" true
-          (contains_substring detail "enabled must be a boolean")
-      | Ok _ -> Alcotest.fail "missing or mistyped activity was coerced")
-      [[]; ["enabled", `String "false"]])
+    let with_activity enabled =
+      match original with
+      | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        if key <> "exact_output_lanes" then key, value else
+        key, (match value with
+          | `Assoc lanes -> `Assoc (List.map (fun (id, lane) ->
+            id, (match lane with
+              | `Assoc fields -> `Assoc (enabled @ List.remove_assoc "enabled" fields)
+              | _ -> Alcotest.fail "saved lane must be an object")) lanes)
+          | _ -> Alcotest.fail "saved lanes must be an object")) fields)
+      | _ -> Alcotest.fail "saved runtime must be an object" in
+    (* A preset saved before lanes carried activity has no [enabled]; every
+       lane in it was live, so it loads with each lane enabled. *)
+    Yojson.Safe.to_file path (with_activity []);
+    (match Preset.load ~base_path "activity-shape" with
+     | Ok legacy ->
+       Alcotest.(check bool) "a legacy preset lists lanes" true (legacy.Preset.lanes <> []);
+       List.iter (fun (lane : Preset.lane) ->
+         Alcotest.(check bool) ("legacy lane " ^ lane.id ^ " is enabled") true lane.enabled)
+         legacy.Preset.lanes
+     | Error detail -> Alcotest.failf "a legacy preset without activity must load: %s" detail);
+    (* A present value that is not a boolean is still refused, not coerced. *)
+    Yojson.Safe.to_file path (with_activity ["enabled", `String "false"]);
+    match Preset.load ~base_path "activity-shape" with
+    | Error detail -> Alcotest.(check bool) "mistyped activity is explicitly refused" true
+        (contains_substring detail "enabled must be a boolean")
+    | Ok _ -> Alcotest.fail "mistyped activity was coerced")
 ;;
 
 let test_restore_preserves_lane_activity_and_autosave () =
@@ -577,7 +587,7 @@ let () =
   Alcotest.run
     "Prompt_preset"
     [ ( "presets"
-      , [ Alcotest.test_case "saved lane requires boolean activity" `Quick test_saved_lane_requires_boolean_activity
+      , [ Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
         ; Alcotest.test_case "activity restore and autosave roundtrip" `Quick test_restore_preserves_lane_activity_and_autosave
         ; Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip

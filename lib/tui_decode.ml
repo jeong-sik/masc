@@ -308,6 +308,8 @@ type planning_rollup = {
   pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
+  pr_paused : int;
+  pr_blocked : int;
 }
 
 type planning_backlog = {
@@ -1095,7 +1097,18 @@ let http_status_error ~status_code ~body =
           (String.length body)
       else body
   in
-  Printf.sprintf "HTTP %d: %s" status_code (Tui_terminal_text.sanitize_terminal_text detail)
+  (* The server's sentence can carry its own line breaks: the exact-lane save
+     refusal names the [providers.<id>] table and the missing key on their own
+     lines. [sanitize_terminal_text] escapes a line break as "\x0A", which
+     folds the whole message into one row and cuts the fix off the end. Keep
+     the breaks, sanitizing each line on its own, so a surface that draws one
+     row per line can show the whole message. *)
+  let detail =
+    String.split_on_char '\n' detail
+    |> List.map Tui_terminal_text.sanitize_terminal_text
+    |> String.concat "\n"
+  in
+  Printf.sprintf "HTTP %d: %s" status_code detail
 
 let decode_json_response_body ~allow_empty ~status_code ~body :
     (Yojson.Safe.t, string) result =
@@ -1397,12 +1410,7 @@ let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_criterion_revision = optional_string_field json "criterion_revision" in
   let* pg_title = required_string_field json "title" in
-  let* raw_phase = required_string_field json "phase" in
-  let* pg_phase =
-    match Goal_phase.parse raw_phase with
-    | Some phase -> Ok phase
-    | None -> Error (Printf.sprintf "unknown planning goal phase %S" raw_phase)
-  in
+  let* pg_phase = Goal_phase.of_fields json in
   let* pg_priority = required_int_field json "priority" in
   let* pg_due_date = optional_string_field json "due_date" in
   let* pg_metric = optional_string_field json "metric" in
@@ -1442,12 +1450,16 @@ let decode_planning_rollup json =
   in
   let* pr_done = required_int_field json "done_count" in
   let* pr_dropped = required_int_field json "dropped_count" in
+  let* pr_paused = required_int_field json "paused_count" in
+  let* pr_blocked = required_int_field json "blocked_count" in
   Ok
     { pr_active
     ; pr_verifying
     ; pr_awaiting_confirmation
     ; pr_done
     ; pr_dropped
+    ; pr_paused
+    ; pr_blocked
     }
 
 let decode_planning_backlog json =
@@ -1716,6 +1728,7 @@ type runtime_option = {
   ro_provider_id : string;
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
+  ro_exact_body_deadline_missing : bool;
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -1740,6 +1753,7 @@ type runtime_resolved_snapshot = {
   rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
+  rrs_default_route : string option;
   rrs_default_runtime_id : string option;
   rrs_media_failover : string list;
   rrs_media_failover_declared : string list;
@@ -1918,6 +1932,15 @@ let decode_runtime_option ~usage ~default_id json =
     | None -> Ok Exact_output_unsupported
     | Some group -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
   in
+  (* Whether an exact HTTP slot on this runtime would be refused on save
+     (its provider declares no exact-body-timeout-s). Optional: an older
+     server's rows lack it, and absence keeps the pickers' previous reading. *)
+  let* ro_exact_body_deadline_missing =
+    match optional_bool_field json "exact_body_deadline_missing" with
+    | Ok (Some value) -> Ok value
+    | Ok None -> Ok false
+    | Error detail -> Error detail
+  in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
@@ -1971,6 +1994,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_provider_id
     ; ro_model
     ; ro_exact_slot_group
+    ; ro_exact_body_deadline_missing
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens
@@ -2039,6 +2063,7 @@ let decode_runtime_resolved_snapshot json =
            source)
   in
   let* rrs_config_path = required_nullable_string_field json "config_path" in
+  let* rrs_default_route = required_nullable_string_field json "default_route" in
   let string_list_field name =
     let* items = required_list_field json name in
     decode_list
@@ -2096,6 +2121,8 @@ let decode_runtime_resolved_snapshot json =
                 && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
                 && default.ro_exact_slot_group = listed.ro_exact_slot_group
+                && Bool.equal default.ro_exact_body_deadline_missing
+                     listed.ro_exact_body_deadline_missing
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
@@ -2129,10 +2156,23 @@ let decode_runtime_resolved_snapshot json =
     in
     loop rrs_lanes
   in
+  let* () =
+    match rrs_default_route, rrs_default_runtime_id with
+    | None, None -> Ok ()
+    | Some route, Some runtime_id ->
+        (match Hashtbl.find_opt lane_by_id route with
+         | Some lane when List.nth_opt lane.rrl_runtime_ids 0 = Some runtime_id -> Ok ()
+         | Some _ -> Error "default_route disagrees with its lane's entry runtime"
+         | None when String.equal route runtime_id && Hashtbl.mem runtime_by_id route -> Ok ()
+         | None -> Error "default_route is absent from the resolved route list")
+    | Some _, None | None, Some _ ->
+        Error "default_route and default_runtime must be present together"
+  in
   Ok
     { rrs_usage
     ; rrs_generated_at_iso
     ; rrs_config_path
+    ; rrs_default_route
     ; rrs_default_runtime_id
     ; rrs_media_failover
     ; rrs_media_failover_declared
@@ -2855,12 +2895,12 @@ let rec decode_overview_goal_node json =
            | _ -> Ok None)
        | _ -> Ok None)
   in
-  let* og_phase =
-    match Goal_phase.parse raw_phase with
-    | Some phase -> Ok phase
-    | None ->
-        Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
-  in
+  let* og_phase = match Goal_phase.of_fields json with
+    | Ok phase -> Ok phase
+    | Error detail ->
+        (match Goal_phase.Kind.parse raw_phase with
+         | None -> Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
+         | Some _ -> Error (Overview_goals_malformed detail)) in
   let* og_priority = malformed (required_int_field json "priority") in
   let* og_criterion_revision = malformed (optional_string_field json "criterion_revision") in
   let* og_metric = malformed (optional_string_field json "metric") in
@@ -5506,6 +5546,13 @@ type librarian_preflight_status =
   | Preflight_judged of
       Typesafeai_librarian_preflight.decision Typesafeai_types.decoded_choice
 type librarian_generation_path = Generation_not_entered | Generation_full_lane | Generation_jev_no_change
+type librarian_memory_result =
+  | Librarian_memory_unchanged of int * int
+  | Librarian_memory_rewritten of { revision : int; facts : int; added : int; removed : int }
+type librarian_side_write_status =
+  | Side_not_attempted | Side_answer_missing | Side_withheld | Side_outcome_unconfirmed
+  | Side_committed | Side_answer_refused of string | Side_failed of string
+type librarian_side_write_kind = Context_write | Continuity_write
 type librarian_preflight_reading =
   { lp_status : librarian_preflight_status
   ; lp_generation_path : librarian_generation_path
@@ -5513,6 +5560,9 @@ type librarian_preflight_reading =
   ; lp_elapsed_s : float option
   ; lp_model : string option
   ; lp_domain_rejection : string option
+  ; lp_memory_result : librarian_memory_result option
+  ; lp_context_only : bool
+  ; lp_side_writes : (librarian_side_write_kind * librarian_side_write_status) list
   }
 
 (* Decode the retained observation with the same alternatives emitted by
@@ -5649,7 +5699,60 @@ let decode_librarian_preflight output =
         Error "domain rejection is only valid when Keep_current falls back to full lane"
       | _ -> Ok ()
     in
-    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection})
+    let* lp_context_only = match Json_util.assoc_member_opt "memory_write" output with
+      | None -> Ok false
+      | Some (`String "skipped_context_only") -> Ok true
+      | Some _ -> Error "unknown Librarian memory write scope" in
+    let* lp_memory_result = match Json_util.assoc_member_opt "after" output with
+      | None -> Ok None
+      | Some after ->
+        let* revision = required_int_field after "revision" in
+        let* () = if revision > 0 then Ok ()
+          else Error "invalid Memory snapshot revision" in
+        let* facts = required_nonnegative_int_field after "fact_count" in
+        let* change = required_member after "change" in
+        let* added = required_nonnegative_int_field change "added_count" in
+        let* removed = required_nonnegative_int_field change "removed_count" in
+        let* commit = required_string_field after "commit" in
+        (match commit with
+         | "unchanged" when added = 0 && removed = 0 -> Ok (Some (Librarian_memory_unchanged (revision, facts)))
+         | "rewritten" -> Ok (Some (Librarian_memory_rewritten {revision;facts;added;removed}))
+         | _ -> Error "unknown or inconsistent Librarian snapshot result") in
+    let* () = if lp_context_only && Option.is_some lp_memory_result
+      then Error "context-only Librarian output cannot contain a Memory snapshot"
+      else Ok () in
+    let decode_side_write kind key =
+      match Json_util.assoc_member_opt key output with
+      | None -> Ok None
+      | Some record ->
+        let* status = required_string_field record "status" in
+        let* status = match kind, status with
+          | _, "not_attempted" -> Ok Side_not_attempted
+          | _, "outcome_unconfirmed" -> Ok Side_outcome_unconfirmed
+          | Context_write, "committed" ->
+            let* generation = required_string_field record "generation" in
+            let* revision = required_int_field record "revision" in
+            if String.trim generation = "" || revision <= 0
+            then Error "invalid committed Context receipt" else Ok Side_committed
+          | Continuity_write, "committed" ->
+            let* end_atom = required_int_field record "end_atom" in
+            let* () = if end_atom > 0 then Ok () else Error "invalid committed Continuity end atom" in
+            let* hash = required_string_field record "prefix_sha256" in
+            if String.length hash = 64
+               && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) hash
+            then Ok Side_committed else Error "invalid committed Continuity receipt"
+          | _, "failed" ->
+            let+ detail = required_string_field record "detail" in Side_failed detail
+          | Context_write, "answer_missing" -> Ok Side_answer_missing
+          | Context_write, "withheld" -> Ok Side_withheld
+          | Context_write, "answer_refused" ->
+            let+ detail = required_string_field record "detail" in Side_answer_refused detail
+          | _ -> Error ("unknown " ^ key ^ " status " ^ status) in
+        Ok (Some (kind, status)) in
+    let* context_write = decode_side_write Context_write "context_write" in
+    let* continuity_write = decode_side_write Continuity_write "continuity_write" in
+    let lp_side_writes = List.filter_map Fun.id [context_write; continuity_write] in
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result;lp_context_only;lp_side_writes})
 
 type lane_run_detail =
   { lrd_run_id : string

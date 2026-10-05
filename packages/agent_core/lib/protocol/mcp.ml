@@ -6,20 +6,53 @@
 
 open Types
 include Mcp_schema
-type sampling_handler = ?request_id:Mcp_protocol.Jsonrpc.id ->
-  Mcp_protocol.Sampling.create_message_params ->
-  (Mcp_protocol.Sampling.create_message_result, string) result
-
 module Stdio_transport = struct
   module Transport = Mcp_protocol_eio.Stdio_transport
-  type t = { transport : Transport.t; max_size : int option; sampling_handler : sampling_handler option }
-  let create ~stdin ~stdout ?max_size ?sampling_handler () =
-    {transport = Transport.create ~stdin ~stdout ?max_size (); max_size; sampling_handler}
+  (* [request_id] is the id of the request read last. The SDK client serves a
+     server request inline before it reads the next message, so while a
+     sampling handler runs this is the id its reply will carry. *)
+  type t =
+    { transport : Transport.t
+    ; max_size : int option
+    ; mutable request_id : Mcp_protocol.Jsonrpc.id option
+    }
+  let create ~stdin ~stdout ?max_size () =
+    {transport = Transport.create ~stdin ~stdout ?max_size (); max_size; request_id = None}
   let close t = Transport.close t.transport
+  let read t =
+    try
+      let message = Transport.read t.transport in
+      (match message with
+       | Some (Ok (Mcp_protocol.Jsonrpc.Request request)) -> t.request_id <- Some request.id
+       | _ -> ());
+      message
+    with
+    | Eio.Buf_read.Buffer_limit_exceeded ->
+      close t;
+      Some (Error "MCP response exceeds the connection's byte limit")
+    | Stack_overflow ->
+      close t;
+      Some (Error "MCP response nesting exceeds the parser's capacity")
+  ;;
+  (* Largest JSON string, quotes included, that the error reply to the request
+     being served can carry as its message and still fit the connection's byte
+     limit. [None] when the connection has no limit. A missing id cannot occur
+     while a handler runs; it yields zero rather than an optimistic bound. *)
+  let error_message_bytes t =
+    let module J = Mcp_protocol.Jsonrpc in
+    match t.max_size, t.request_id with
+    | None, _ -> None
+    | Some _, None -> Some 0
+    | Some max_size, Some id ->
+      let empty = J.make_error ~id ~code:(-32603) ~message:"" () in
+      let envelope_bytes = String.length (Yojson.Safe.to_string (J.message_to_yojson empty)) in
+      (* The empty message already contributes its own two quotes. *)
+      Some (max 0 (max_size - envelope_bytes + 2))
+  ;;
   let write t msg =
     let module J = Mcp_protocol.Jsonrpc in
     let fits msg = Option.fold ~none:true ~some:(fun max_size ->
-      String.length (Yojson.Safe.to_string (J.message_to_yojson msg)) + 1 <= max_size) t.max_size in
+      String.length (Yojson.Safe.to_string (J.message_to_yojson msg)) <= max_size) t.max_size in
     let refuse () = close t; Error "MCP outgoing message exceeds the connection's byte limit" in
     let fallback id =
       let reply = J.make_error ~id ~code:(-32603)
@@ -32,35 +65,6 @@ module Stdio_transport = struct
       | J.Response response -> fallback response.id
       | J.Error response -> fallback response.id
     with Stack_overflow | Yojson.Json_error _ | Invalid_argument _ -> refuse ()
-  let rec read t =
-    let module J = Mcp_protocol.Jsonrpc in
-    let incoming =
-      try Transport.read t.transport with
-      | Eio.Buf_read.Buffer_limit_exceeded ->
-          close t; Some (Error "MCP response exceeds the connection's byte limit")
-      | Stack_overflow ->
-          close t; Some (Error "MCP response nesting exceeds the parser's capacity") in
-    match incoming, t.sampling_handler with
-    | Some (Ok (J.Request request)), Some handler
-      when request.method_ = Mcp_protocol.Notifications.sampling_create_message ->
-        let response = match request.params with
-          | None -> J.make_error ~id:request.id
-              ~code:Mcp_protocol.Error_codes.invalid_params ~message:"Missing sampling params" ()
-          | Some json ->
-              (match Mcp_protocol.Sampling.create_message_params_of_yojson json with
-               | Error message -> J.make_error ~id:request.id
-                   ~code:Mcp_protocol.Error_codes.invalid_params ~message ()
-               | Ok params ->
-                   match handler ~request_id:request.id params with
-                   | Ok result -> J.make_response ~id:request.id
-                       ~result:(Mcp_protocol.Sampling.create_message_result_to_yojson result)
-                   | Error message -> J.make_error ~id:request.id
-                       ~code:Mcp_protocol.Error_codes.internal_error ~message ()) in
-        (match write t response with
-         | Ok () -> read t
-         | Error detail -> Some (Error detail))
-    | _ -> incoming
-
 end
 
 module Sdk_client = Mcp_protocol_eio.Generic_client.Make (Stdio_transport)
@@ -72,6 +76,8 @@ type t =
   ; kill : unit -> unit
   }
 
+type sampling_handler = ?error_bytes:int -> Mcp_protocol.Sampling.create_message_params ->
+  (Mcp_protocol.Sampling.create_message_result, string) result
 
 let text_of_tool_result (r : Sdk_types.tool_result) =
   List.filter_map
@@ -109,23 +115,23 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
     in
     Eio.Flow.close r_child_stdin;
     Eio.Flow.close w_child_stdout;
-    let sampling_handler = Option.map (fun handler ->
-      fun ?request_id params ->
-        try handler ?request_id params with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)) sampling_handler in
     let transport =
       Stdio_transport.create
         ~stdin:(r_child_stdout :> _ Eio.Flow.source)
         ~stdout:(w_child_stdin :> _ Eio.Flow.sink)
-        ?max_size:max_response_bytes ?sampling_handler
+        ?max_size:max_response_bytes
         ()
     in
     let client = Sdk_client.create ~transport () in
     let client = match sampling_handler with
       | None -> client
       | Some handler ->
-          Sdk_client.on_sampling (fun params -> handler params) client in
+          let guarded_handler params =
+            let error_bytes = Stdio_transport.error_message_bytes transport in
+            try handler ?error_bytes params with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn) in
+          Sdk_client.on_sampling guarded_handler client in
     let kill () =
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()

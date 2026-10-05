@@ -349,44 +349,53 @@ let seed_tool_calls_from_ledger
   (* Rows enqueued by the async appender are the previous cycle's own calls —
      exactly the newest evidence, and the ones a cycle started right after
      another would otherwise miss. Draining here is what the 0.5s flush daemon
-     would do moments later anyway. *)
-  Keeper_tool_call_log.flush_now ();
-  match Keeper_tool_call_log.read_recent ~keeper_name ~n:ledger_seed_row_limit () with
-  | Error (Keeper_tool_call_log.Index_unavailable detail) ->
-    (* The run-local counter still applies; an unreadable seed must not fail
-       the turn. Say why on the record instead of failing open silently. *)
+     would do moments later anyway. The write bridge can raise on a store
+     failure ([drain_queued_appends] re-raises after requeueing the entry), so
+     a seed that cannot be written degrades like one that cannot be read
+     instead of failing the turn. *)
+  match (try Ok (Keeper_tool_call_log.flush_now ()) with
+         | exn -> Error (Printexc.to_string exn)) with
+  | Error detail ->
     Log.Keeper.warn
-      "keeper %s repetition ledger seed unavailable: %s" keeper_name detail;
+      "keeper %s repetition ledger seed flush unavailable: %s" keeper_name detail;
     []
-  | Ok rows ->
-    List.filter_map
-      (fun row ->
-         match
-           ( Safe_ops.json_string_opt "tool" row
-           , Safe_ops.json_string_opt "input_fingerprint" row
-           , Safe_ops.json_string_opt "output_fingerprint" row )
-         with
-         | Some tool_name, Some input_fingerprint, Some output_fingerprint ->
-           let represented =
-             match Safe_ops.json_string_opt "tool_use_id" row with
-             | Some tool_use_id -> List.mem tool_use_id history_tool_use_ids
-             | None -> false
-           in
-           if represented then None
-           else
-             Some
-               { Keeper_agent_result.tool_name
-               ; provider = "call_ledger"
-               ; execution_outcome = Tool_result.Unknown
-               ; typed_outcome = None
-               ; latency_ms = 0.
-               ; task_id = None
-               ; route_evidence = None
-               ; input_fingerprint = Some input_fingerprint
-               ; output_fingerprint = Some output_fingerprint
-               }
-         | _ -> None)
-      rows
+  | Ok () ->
+    (match Keeper_tool_call_log.read_recent ~keeper_name ~n:ledger_seed_row_limit () with
+     | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+       (* The run-local counter still applies; an unreadable seed must not fail
+          the turn. Say why on the record instead of failing open silently. *)
+       Log.Keeper.warn
+         "keeper %s repetition ledger seed unavailable: %s" keeper_name detail;
+       []
+     | Ok rows ->
+       List.filter_map
+         (fun row ->
+            match
+              ( Safe_ops.json_string_opt "tool" row
+              , Safe_ops.json_string_opt "input_fingerprint" row
+              , Safe_ops.json_string_opt "output_fingerprint" row )
+            with
+            | Some tool_name, Some input_fingerprint, Some output_fingerprint ->
+              let represented =
+                match Safe_ops.json_string_opt "tool_use_id" row with
+                | Some tool_use_id -> List.mem tool_use_id history_tool_use_ids
+                | None -> false
+              in
+              if represented then None
+              else
+                Some
+                  { Keeper_agent_result.tool_name
+                  ; provider = "call_ledger"
+                  ; execution_outcome = Tool_result.Unknown
+                  ; typed_outcome = None
+                  ; latency_ms = 0.
+                  ; task_id = None
+                  ; route_evidence = None
+                  ; input_fingerprint = Some input_fingerprint
+                  ; output_fingerprint = Some output_fingerprint
+                  }
+            | _ -> None)
+         rows)
 ;;
 
 let prepare_agent_setup

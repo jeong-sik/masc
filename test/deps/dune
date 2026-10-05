@@ -162,10 +162,8 @@
   ;; [Masc_exec_command_gate.Shell_command_gate] directly.
   (re_export masc.masc_exec_command_gate)
   (re_export masc.masc_exec_bash_parser)
-  ;; Sandbox-only build fix (task-627): masc_tui_types transitively pulls
-  ;; masc_tui_play_card -> qrc, which the local opam switch lacks. Dropping
-  ;; these two re_exports keeps the local test build green; the modules are
-  ;; still reachable through bin/dune for the TUI suites that need them.
+  (re_export masc_tui_msx_tick)
+  (re_export masc_tui_types)
   (re_export masc_workspace)
   ;; Goal domain extracted to lib/goal/ (masc_goal). Re-export so test code
   ;; using bare Goal_store.X / Goal_phase.X resolves after decoupling.

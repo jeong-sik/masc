@@ -1815,8 +1815,8 @@ let runtime_lane_notice_text = function
 
 (* The refusal detail is the server's own message and can carry its line
    breaks (the exact-lane save refusal names the [providers.<id>] table and the
-   missing key on their own lines). The listing draws one row per line plus a
-   divider, so the chrome counts the lines rather than assuming one. *)
+   missing key on their own lines). Every renderer draws one row per line, so
+   the chrome counts the lines rather than assuming one. *)
 let detail_row_count detail = List.length (String.split_on_char '\n' detail)
 
 (* [lanes_action_error] is drawn with [box_lines_styled] too, so a refusal that
@@ -1832,6 +1832,8 @@ let runtime_lane_notice_lines = function
   | None -> 0
   | Some notice -> detail_row_count (runtime_lane_notice_text notice)
 
+(* The runtime listing draws the notice's lines plus a divider, so it counts
+   one more row than [runtime_lane_notice_lines]. *)
 let runtime_lane_notice_row_count = function
   | None -> 0
   | Some notice -> 1 + runtime_lane_notice_lines (Some notice)

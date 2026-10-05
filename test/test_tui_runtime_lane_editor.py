@@ -668,6 +668,14 @@ def run_exact_refusal(executable: str) -> None:
                 raise AssertionError(
                     f"the refusal lost {needle!r}; screen tail={screen[-1600:]!r}"
                 )
+        # A multi-line refusal spends one row per line. If the picker's row
+        # budget still counted it as one, the extra lines would push the footer
+        # off the frame. The footer's own [q:quit] is the cheapest proof it
+        # stayed on screen.
+        if b"q:quit" not in screen:
+            raise AssertionError(
+                f"the footer left the frame under a multi-line refusal; screen tail={screen[-1600:]!r}"
+            )
         if os.environ.get("MASC_CAPTURE_REFUSAL"):
             print("===== PLAINTEXT CAPTURE =====")
             print(screen.decode("utf-8", "replace"))

@@ -7027,7 +7027,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries masc_tui_surface_search alcotest yojson masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)

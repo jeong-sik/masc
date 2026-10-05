@@ -710,9 +710,12 @@ def run_exact_refusal_crowded(executable: str) -> None:
     page. The picker reserves rows for the refusal before it decides how many
     candidates fit; if it counts the refusal's server lines instead of the rows
     they wrap to, the extra rows push the footer off the frame. Twelve
-    candidates at 80x24 is the shape the operator's real catalogue has, and the
-    frame is small enough that the page is bounded by the frame rather than by
-    the candidate count -- which is what makes the row budget bind."""
+    candidates at 80 columns is the shape the operator's real catalogue has, and
+    the frame is small enough that the page is bounded by the frame rather than
+    by the candidate count -- which is what makes the row budget bind. The frame
+    is 30 rows, not 24: at 24 the refusal is bounded to one row and the
+    actionable tail cannot share the frame with the footer, so the guard would
+    test the bound rather than the count."""
     store = LaneStore()
     for index in range(12):
         store.body["runtimes"].append(
@@ -736,7 +739,7 @@ def run_exact_refusal_crowded(executable: str) -> None:
         _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
         mark = mark_output(fd, output)
         _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
-        _keyboard_harness.wait_for_output(process, fd, output, b"> model-a default", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-crowd-0 default", start=mark, timeout=5.0)
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
         _keyboard_harness.wait_for_output(
@@ -768,7 +771,7 @@ def run_exact_refusal_crowded(executable: str) -> None:
         http_fixtures=fixtures,
         http_requests=requests,
         terminal_cols=80,
-        terminal_rows=24,
+        terminal_rows=30,
     )
 
 

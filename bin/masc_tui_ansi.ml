@@ -891,15 +891,21 @@ let box_lines_row_count ~cols content = List.length (box_lines_wrapped ~cols con
    leads with "lane write refused: HTTP 400:" and ends with the actionable
    "add exact-body-timeout-s to [providers.<id>]", so when the frame cannot
    hold every row keep the first row and the tail, and mark the cut between
-   them. The head, the cut mark and at least one tail row are the least that
-   keeps that promise; a budget below three cannot show all three, so it is
-   raised to three rather than silently dropping the tail. *)
+   them. The box never draws past [budget]: at one row it keeps the head, at
+   two the head and the tail, and from three the head, the mark and the tail.
+   Raising a smaller budget to three would draw rows the frame has not got and
+   push the footer off it, so a caller that wants the mark must leave three
+   rows rather than have the box take them. *)
 let box_lines_styled_bounded buf cols ~style ~budget content =
   let rows = box_lines_wrapped ~cols content in
-  let budget = Int.max 3 budget in
+  let budget = Int.max 1 budget in
   let shown =
     if List.length rows <= budget
     then rows
+    else if budget = 1
+    then [ List.hd rows ]
+    else if budget = 2
+    then [ List.hd rows; List.nth rows (List.length rows - 1) ]
     else (
       let keep_tail = budget - 2 in
       let dropped = List.length rows - keep_tail in

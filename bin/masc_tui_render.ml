@@ -6840,7 +6840,7 @@ let render_system_logs (state : state) =
   (* The scroll row is a frame row while the page holds more entries than
      fit, and only then; the layout the keypress reads says so. *)
   let content_height =
-    match scrolled_surface state System_logs with
+    match scrolled_surface state ~cols System_logs with
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
           ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
@@ -7008,7 +7008,7 @@ let render_verification_list (state : state) =
   (* The height the keypress bounds its step with, asked of the same layout:
      it counts the rows drawn under the list as well as the frame. *)
   let content_height =
-    match scrolled_surface state Verification with
+    match scrolled_surface state ~cols Verification with
     | Some layout ->
         Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
           ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
@@ -8700,7 +8700,7 @@ let render_changes_list (state : state) =
      did not, and then the preview took half the body and the bound still did
      not know. *)
   let chrome_rows, preview_keep =
-    match scrolled_surface state Changes with
+    match scrolled_surface state ~cols Changes with
     | Some s -> (s.sc_chrome, s.sc_preview_keep)
     | None -> (listing_chrome ~error:state.changes_error, None)
   in
@@ -8724,7 +8724,7 @@ let render_changes_list (state : state) =
   (* The list's rows as the keypress counts them: what the preview leaves,
      less the scroll row while the list overflows. *)
   let content_height =
-    match scrolled_surface state Changes with
+    match scrolled_surface state ~cols Changes with
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
           ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row

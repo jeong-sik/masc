@@ -409,10 +409,16 @@ let test_the_authority_row_spells_its_config_path_whole () =
   Alcotest.(check bool) "a narrow frame spends more rows than a wide one" true
     (List.length (rows_at 80) > List.length (rows_at 260));
   (* The budget follows the rows. Counting one authority row at every width put
-     the footer past the frame's last row exactly when the sentence wrapped. *)
+     the footer past the frame's last row exactly when the sentence wrapped.
+     The selected row's summary is chrome too and wraps at a narrow width, so
+     the relation counts its rows as well; leaving them out failed the check
+     once the summary wrapped at 100 columns. *)
+  let selection_rows_at cols =
+    List.length (runtime_selection_summary_for_viewport ~rows:100 ~cols state) in
   Alcotest.(check int) "the chrome count follows the rows drawn"
     (runtime_surface_listing_chrome ~rows:100 ~cols:260 state
-     + List.length (rows_at 100) - 1)
+     + List.length (rows_at 100) - 1
+     + (selection_rows_at 100 - selection_rows_at 260))
     (runtime_surface_listing_chrome ~rows:100 ~cols:100 state);
   match runtime_scrolled ~rows:100 ~cols:100 state with
   | None -> Alcotest.fail "runtime list has no scroll geometry"

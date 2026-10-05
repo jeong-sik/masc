@@ -1095,7 +1095,18 @@ let http_status_error ~status_code ~body =
           (String.length body)
       else body
   in
-  Printf.sprintf "HTTP %d: %s" status_code (Tui_terminal_text.sanitize_terminal_text detail)
+  (* The server's sentence can carry its own line breaks: the exact-lane save
+     refusal names the [providers.<id>] table and the missing key on their own
+     lines. [sanitize_terminal_text] escapes a line break as "\x0A", which
+     folds the whole message into one row and cuts the fix off the end. Keep
+     the breaks, sanitizing each line on its own, so a surface that draws one
+     row per line can show the whole message. *)
+  let detail =
+    String.split_on_char '\n' detail
+    |> List.map Tui_terminal_text.sanitize_terminal_text
+    |> String.concat "\n"
+  in
+  Printf.sprintf "HTTP %d: %s" status_code detail
 
 let decode_json_response_body ~allow_empty ~status_code ~body :
     (Yojson.Safe.t, string) result =

@@ -83,7 +83,12 @@ let scrolled_surface state surface =
       let terminal_rows, cols = get_terminal_size () in
       let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
       Masc_tui_types.runtime_scrolled ~rows ~cols state
-  | _ -> Masc_tui_types.scrolled_surface state surface
+  | _ ->
+      (* The Lanes overview's chrome counts the rows a multi-line refusal
+         wraps to, so it is read at the terminal width like the Memory
+         overview's and Runtime's. *)
+      let _terminal_rows, cols = get_terminal_size () in
+      Masc_tui_types.scrolled_surface state ~cols surface
 ;;
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
@@ -21196,8 +21201,8 @@ and is loaded on demand through keeper_skill.
             with
             | None -> ()
             | Some action ->
-                let terminal_rows, _ = get_terminal_size () in
-                let page = Masc_tui_types.runtime_exact_picker_page state ~terminal_rows in
+                let terminal_rows, cols = get_terminal_size () in
+                let page = Masc_tui_types.runtime_exact_picker_page state ~terminal_rows ~cols in
                 let already, _providers, catalog =
                   Masc_tui_types.runtime_picker_rows state pick
                 in

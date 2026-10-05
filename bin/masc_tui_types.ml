@@ -1813,6 +1813,37 @@ let runtime_lane_notice_text = function
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
 
+(* The refusal detail is the server's own message and can carry its line
+   breaks (the exact-lane save refusal names the [providers.<id>] table and the
+   missing key on their own lines). Every renderer draws it with
+   [box_lines_styled], which wraps a line longer than the frame, so the chrome
+   counts the wrapped rows with the same function the drawing uses rather than
+   assuming one row per line. *)
+let boxed_row_count ~cols content =
+  List.length
+    (Masc_tui_message_layout.boxed_rows
+       ~inner:(Masc_tui_frame.inner_width ~cols) content)
+
+(* [lanes_action_error] is drawn with [box_lines_styled] too, so a refusal that
+   carries its own line breaks spends one row per line, plus the rows a long
+   line wraps to. *)
+let lanes_action_error_row_count ~cols = function
+  | None -> 0
+  | Some detail -> boxed_row_count ~cols detail
+
+(* The lane notice's own rows, without the divider the runtime listing adds.
+   The lanes overview and the exact picker draw the notice with
+   [box_lines_styled] and no divider, so they count these. *)
+let runtime_lane_notice_lines ~cols = function
+  | None -> 0
+  | Some notice -> boxed_row_count ~cols (runtime_lane_notice_text notice)
+
+(* The runtime listing draws the notice's lines plus a divider, so it counts
+   one more row than [runtime_lane_notice_lines]. *)
+let runtime_lane_notice_row_count ~cols = function
+  | None -> 0
+  | Some notice -> 1 + runtime_lane_notice_lines ~cols (Some notice)
+
 (* Whether a list on screen carries the last lane write. It is not about a
    key, so it is kept apart from the notice: only a load of that list sets it.
    The awaited re-read failing leaves the order from before the write on
@@ -2878,6 +2909,7 @@ let runtime_listing_chrome
       ?(stale_rows = 0)
       ?(route_rows = 0)
       ?(editor_rows = None)
+      ~cols
       ~authority_rows
       ~error
       ~action_error
@@ -2886,7 +2918,7 @@ let runtime_listing_chrome
       ()
   =
   listing_chrome ~error + 1 + max 1 authority_rows
-  + (if Option.is_some action_error then 2 else 0)
+  + runtime_lane_notice_row_count ~cols action_error
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
   + route_rows
@@ -9622,7 +9654,7 @@ let runtime_lane_stale_lines (state : state) =
     ; line "standalone lane list" state.standalone_lanes_lane_freshness
     ]
 
-let lanes_scrolled (state : state) =
+let lanes_scrolled (state : state) ~cols =
   match state.lanes_mode with
   | Lanes_run_list _ ->
       (* The run list replaces the two-section overview, so the typed model
@@ -9656,8 +9688,8 @@ let lanes_scrolled (state : state) =
           (match state.standalone_lanes with
            | None -> false
            | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
-      + (if Option.is_some state.lanes_action_error then 1 else 0)
-      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + lanes_action_error_row_count ~cols state.lanes_action_error
+      + runtime_lane_notice_lines ~cols state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
@@ -10365,12 +10397,12 @@ let runtime_picker_empty_note picker =
 let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
-let runtime_exact_picker_page (state : state) ~terminal_rows =
+let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
   match state.view, state.slot_editor with
   | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
     let extra =
-      (if Option.is_some state.lanes_action_error then 1 else 0)
-      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      lanes_action_error_row_count ~cols state.lanes_action_error
+      + runtime_lane_notice_lines ~cols state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
       + (match state.runtime_lane_write with Lane_write_idle -> 0 | _ -> 1) in
     (* Two lines per model, after the frame, search, selected ID and keys. *)
@@ -11347,6 +11379,7 @@ let runtime_selection_summary_lines ~cols state =
 
 let runtime_surface_base_chrome ~cols state =
   runtime_listing_chrome
+    ~cols
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
     ~error:state.runtime_surface_error
     ~action_error:state.runtime_lane_notice
@@ -11433,7 +11466,7 @@ let runtime_scrolled ~rows ~cols (state : state) : scrolled option =
       ; sc_preview_keep = None
       }
 
-let scrolled_surface_rows (state : state) : surface -> scrolled option =
+let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   let listing ~error count =
     Some
       { sc_count = count
@@ -11507,7 +11540,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
-       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
+       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state ~cols))
   | Clients ->
       listing ~error:state.clients_surface_error
         (match state.clients_surface with
@@ -11613,8 +11646,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
 (* Callers pass [surface_body_rows], which has already removed the composer
    and agenda strip. Adding the agenda again here makes every key bound one row
    shorter than the renderer whenever the strip is present. *)
-let scrolled_surface (state : state) (surface : surface) : scrolled option =
-  scrolled_surface_rows state surface
+let scrolled_surface (state : state) ~cols (surface : surface) : scrolled option =
+  scrolled_surface_rows state ~cols surface
 ;;
 
 (* The text a "/" search reads for each row: the identifiers an operator

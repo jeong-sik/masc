@@ -117,6 +117,9 @@ class LaneStore:
         self.lock = threading.Lock()
         self.held: tuple[threading.Event, threading.Event] | None = None
         self.fail_next_resolved = False
+        # When set, an exact-lane append answers with this message instead of
+        # committing: the server's own multi-line refusal, line breaks and all.
+        self.exact_refusal: str | None = None
         _status, standalone = _keyboard_keepers.standalone_lanes_response()
         self.standalone = standalone
         self.standalone_held: tuple[threading.Event, threading.Event] | None = None
@@ -230,6 +233,8 @@ class LaneStore:
             if lane_id.startswith("exact/"):
                 name = lane_id[len("exact/"):]
                 slot = request["runtime_id"]
+                if self.exact_refusal is not None and action == "append":
+                    return 400, {"error": self.exact_refusal}
                 lane = self.exact_lane(name)
                 declared = self.exact_declared.setdefault(name, list(lane["declared_slots"]))
                 declared_cli = self.exact_declared_cli.setdefault(
@@ -515,6 +520,31 @@ EXACT_LANE = "board_attention_exact"
 # Declared on the lane and dropped by the registry: the standalone lanes read
 # lists it under dropped_slots, never among the admitted slots the picker sees.
 DROPPED_SLOT = "retired-catalog.slot"
+# The server's refusal to add an exact slot on a provider that declares no
+# exact-body-timeout-s (Runtime_config_text, rule 3). It is two lines: the
+# sentence naming the missing key, then the fix. The lane editor must draw
+# both, so the operator can read what to declare. The first line is longer
+# than the frame and is cut at its tail; the fix line is what the operator
+# needs and must be whole.
+#
+# The text is the server's own [Runtime_config_error.Exact_slot_body_deadlines_absent]
+# rendering (lib/runtime/runtime_config_error.ml): the long first line names the
+# count and the key, and the second line names the lane, slot and provider and
+# says which key to add to which table. The fixture keeps that shape so the
+# scenario exercises the message the server really sends.
+EXACT_REFUSAL_LINES = (
+    b"lane write refused: HTTP 400:",
+    b"exact-body-timeout-s = 1200.0 to [providers.openrouter]",
+)
+EXACT_REFUSAL = (
+    "/Users/dancer/me/.masc/config/runtime.toml: this change adds 1 exact-output "
+    "slot(s) on a provider that declares no exact-body-timeout-s. connect-timeout-s "
+    "ends when the response headers arrive and does not bound the response body, so "
+    "exact-body-timeout-s is the only deadline on the whole request:\n"
+    "  [runtime.exact_output_lanes.board_attention_exact] slot "
+    "\"openrouter.openrouter-deepseek-v4-1-flash\" runs on provider \"openrouter\"; "
+    "add exact-body-timeout-s = 1200.0 to [providers.openrouter]"
+)
 
 
 def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
@@ -605,6 +635,207 @@ def run_exact(executable: str) -> None:
     _keyboard_harness.run_terminal_scenario(
         executable,
         description="Standalone lane picks wait for the standalone list",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
+def run_exact_refusal(executable: str) -> None:
+    """The exact-slot save refusal is the server's own message and carries its
+    line breaks: it names the missing key on one line and the fix on the next.
+    The lane editor must draw every line, so the operator can read what to
+    declare instead of only the first line. This is the flow the operator hit
+    (board p-70f480b8754a23c9aacc144a4c77b935): pick a candidate, press Enter,
+    and the write is refused."""
+    store = LaneStore()
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+    store.exact_refusal = EXACT_REFUSAL
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-a default", start=mark, timeout=5.0)
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"lane write refused: HTTP 400", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        for needle in EXACT_REFUSAL_LINES:
+            if needle not in screen:
+                raise AssertionError(
+                    f"the refusal lost {needle!r}; screen tail={screen[-1600:]!r}"
+                )
+        # A multi-line refusal spends one row per line. If the picker's row
+        # budget still counted it as one, the extra lines would push the footer
+        # off the frame. The footer's own [q:quit] is the cheapest proof it
+        # stayed on screen.
+        if b"q:quit" not in screen:
+            raise AssertionError(
+                f"the footer left the frame under a multi-line refusal; screen tail={screen[-1600:]!r}"
+            )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
+        # A refused write leaves the picker open so another candidate can be
+        # picked; close it before quitting.
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="A multi-line exact-slot refusal is drawn whole",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
+def run_exact_refusal_crowded(executable: str) -> None:
+    """The same multi-line refusal, but with a catalogue that fills the picker's
+    page. The picker reserves rows for the refusal before it decides how many
+    candidates fit; if it counts the refusal's server lines instead of the rows
+    they wrap to, the extra rows push the footer off the frame. Twelve
+    candidates at 80 columns is the shape the operator's real catalogue has, and
+    the frame is small enough that the page is bounded by the frame rather than
+    by the candidate count -- which is what makes the row budget bind. The frame
+    is 30 rows, not 24: at 24 the refusal is bounded to one row and the
+    actionable tail cannot share the frame with the footer, so the guard would
+    test the bound rather than the count."""
+    store = LaneStore()
+    for index in range(12):
+        store.body["runtimes"].append(
+            _keyboard_runtime.runtime_resolved_runtime(
+                f"crowd-{index}", f"Crowd {index}", f"model-crowd-{index}"
+            )
+        )
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+    store.exact_refusal = EXACT_REFUSAL
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-crowd-0 default", start=mark, timeout=5.0)
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"lane write refused: HTTP 400", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        for needle in EXACT_REFUSAL_LINES:
+            if needle not in screen:
+                raise AssertionError(
+                    f"the refusal lost {needle!r}; screen tail={screen[-1600:]!r}"
+                )
+        # The picker's page is bounded by the frame here, so the rows it
+        # reserved for the refusal decide whether the footer survives. Counting
+        # the refusal's server lines instead of the rows they wrap to leaves the
+        # extra rows to push [q:quit] off the frame.
+        if b"q:quit" not in screen:
+            raise AssertionError(
+                f"the footer left the frame under a crowded multi-line refusal; screen tail={screen[-1600:]!r}"
+            )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE (80x30 crowded) =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="A crowded picker keeps the footer under a multi-line refusal",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+        terminal_cols=80,
+        terminal_rows=30,
+    )
+
+
+def run_exact_picker_refusal(executable: str) -> None:
+    """The candidate picker refuses a candidate the save would refuse: its
+    provider declares no exact-body-timeout-s (Runtime_config_text rule 3,
+    #38779). The row carries the reason before Enter, so the operator does not
+    learn it from a 400 after the write. This is the picker half of the same
+    operator report as run_exact_refusal."""
+    store = LaneStore()
+    for runtime in store.body["runtimes"]:
+        runtime["exact_body_deadline_missing"] = True
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"no exact-body-timeout-s", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if b"no exact-body-timeout-s" not in screen:
+            raise AssertionError(
+                f"the picker did not refuse the candidate; screen tail={screen[-1600:]!r}"
+            )
+        # Enter on the refused row draws the sentence that names the table and
+        # the key, so the operator knows what to declare.
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"needs exact-body-timeout-s for exact lanes", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if b"needs exact-body-timeout-s for exact lanes" not in screen:
+            raise AssertionError(
+                f"the picker did not say why; screen tail={screen[-1600:]!r}"
+            )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="The exact-slot picker refuses a candidate the save would refuse",
         interact=interact,
         http_fixtures=fixtures,
         http_requests=requests,
@@ -1448,6 +1679,9 @@ if __name__ == "__main__":
     run_replace_and_promote(os.path.abspath(sys.argv[1]))
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
+    run_exact_refusal(os.path.abspath(sys.argv[1]))
+    run_exact_refusal_crowded(os.path.abspath(sys.argv[1]))
+    run_exact_picker_refusal(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))
     run_empty_cli_group(os.path.abspath(sys.argv[1]))
     run_curator_takes_cli(os.path.abspath(sys.argv[1]))

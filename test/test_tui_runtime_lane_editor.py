@@ -668,6 +668,10 @@ def run_exact_refusal(executable: str) -> None:
                 raise AssertionError(
                     f"the refusal lost {needle!r}; screen tail={screen[-1600:]!r}"
                 )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
         # A refused write leaves the picker open so another candidate can be
         # picked; close it before quitting.
         os.write(fd, b"\x1b")

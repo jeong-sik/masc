@@ -195,6 +195,8 @@ let test_native_client_metadata () = fixture (fun base _runtime binary net ->
     Alcotest.check Alcotest.bool "metadata does not claim account invocation verification" false
       (json |> member "account_availability_verified" |> to_bool);
     let model=json |> member "models" |> to_list |> List.hd in
+    Alcotest.check Alcotest.bool "exact catalog image support joins CLI metadata" true
+      (model |> member "supports_image_input" |> to_bool);
     Alcotest.check Alcotest.int "fresh client context retained" 272000 (model |> member "context" |> to_int);
     Alcotest.check (Alcotest.list Alcotest.string) "reported effort vocabulary retained without clamping"
       ["low";"high";"ultra";"adaptive-v2"]
@@ -202,6 +204,8 @@ let test_native_client_metadata () = fixture (fun base _runtime binary net ->
     Alcotest.check Alcotest.string "reported default effort retained" "high"
       (model |> member "default_reasoning_effort" |> to_string);
     let second=json |> member "models" |> to_list |> List.tl |> List.hd in
+    Alcotest.check Alcotest.bool "uncatalogued model image support stays unknown" true
+      (second |> member "supports_image_input" = `Null);
     Alcotest.check Alcotest.bool "empty supported effort list is valid" true
       (second |> member "supported_reasoning_efforts" = `List []);
     Alcotest.check Alcotest.string "default need not occur in the supported list" "native-auto"
@@ -601,6 +605,32 @@ let test_muse_save_rechecks_selected_catalog ?supported () = fixture (fun base r
     "omitted browser capability saves the authoritative reported value"
     supported (Option.bind model.capabilities (fun caps -> caps.supports_image_input)))
 
+let test_native_save_rechecks_image_capabilities () =
+  List.iter (fun client -> List.iter (fun supported -> fixture (fun base runtime binary _net ->
+    let before=In_channel.with_open_bin runtime In_channel.input_all in
+    let catalog=`Assoc (["id",`String "selected-model";"max_context",`Int 1024]
+      @ (match supported with None -> [] | Some value -> ["supports_image_input",`Bool value])) in
+    save (Filename.concat base "fixture-native-catalog.json") (Yojson.Safe.to_string (`List [catalog]));
+    let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
+    let request ?image () = `Assoc ["revision",`String revision;
+      "connections",`List [`Assoc ["source",`Assoc ["integration_id",`String client];
+        "models",`List [`Assoc (["id",`String "selected-model";"context",`Int 1024;"streaming",`Bool true]
+          @ (match image with None -> [] | Some value -> ["supports_image_input",`Bool value]))]]];
+      "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
+    let forged=match supported with None -> true | Some value -> not value in
+    Alcotest.check Alcotest.bool "native capability forgery is rejected" true
+      (Actions.save ~binary ~base_path:base (request ~image:forged ()) = Error Actions.Invalid_request);
+    Alcotest.check Alcotest.string "rejection preserves runtime bytes" before
+      (In_channel.with_open_bin runtime In_channel.input_all);
+    Alcotest.check Alcotest.bool "rejection precedes verification" false
+      (Sys.file_exists (Filename.concat base "save-calls"));
+    ignore (get (Actions.save ~binary ~base_path:base (request ())));
+    let configured=Runtime_toml.parse_file runtime |> Result.get_ok in
+    let model=List.find (fun (model:Runtime_schema.model_spec) -> model.api_name="selected-model") configured.models in
+    Alcotest.check (Alcotest.option Alcotest.bool) "omission preserves server capability"
+      supported (Option.bind model.capabilities (fun caps -> caps.supports_image_input))))
+    [None;Some true;Some false]) ["codex";"claude-code"]
+
 let test_named_lane_save () = fixture (fun base runtime binary _net ->
   let config = Runtime_toml.parse_file runtime |> Result.get_ok in
   let primary = Option.get config.default_runtime_id in
@@ -726,5 +756,6 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
     test_muse_save_rechecks_selected_catalog ~supported:true ();
     test_muse_save_rechecks_selected_catalog ~supported:false ());
   Alcotest.test_case "bound models follow account home across provider IDs" `Quick test_bound_models_follow_account_home;
+  Alcotest.test_case "native save rechecks image capability" `Quick test_native_save_rechecks_image_capabilities;
   Alcotest.test_case "named default route survives HTTP save" `Quick test_named_lane_save;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

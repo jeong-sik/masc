@@ -323,7 +323,9 @@ def runtime_resolved_runtime(
     }
 
 
-def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpResponse:
+def runtime_resolved_response(
+    *, runtime_a_in_two_lanes: bool = False
+) -> tuple[int, dict[str, object]]:
     runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
     return (
         200,

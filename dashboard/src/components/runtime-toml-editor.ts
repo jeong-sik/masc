@@ -260,6 +260,16 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
     if (range !== null && firstAttempt) { focusedNavigation.current = navigationTarget; setLocatedNavigation(null) }
     else setLocatedNavigation(range)
   }, [navigationTarget, config, section, draft])
+  // Returning to the TOML section while a Browser/Machine target is linked
+  // gives keyboard focus back to the editor. Only focus moves: the reader's
+  // selection stays where they left it, never jumping to the declaration.
+  const inToml = useRef(section === 'toml')
+  useEffect(() => {
+    const entering = section === 'toml' && !inToml.current
+    inToml.current = section === 'toml'
+    if (entering && navigationTarget && navigationTarget.kind !== 'exact'
+      && attemptedNavigation.current === navigationTarget) textareaRef.current?.focus()
+  }, [section, navigationTarget])
   const ready = session.writable(authority)
   const canAdopt = session.ready(authority)
   const observationRevision = exactLaneObservationRevision(authority)

@@ -223,6 +223,11 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const [received, setReceived] = useState<Owned<LaneAddonSnapshot> | null>(null)
   const [receivedSlice, setReceivedSlice] = useState<Owned<LaneAddonSlice> | null>(null)
   const snapshot = received?.authority === authority ? received.value : null
+  // The navigation target that was selected when the retained inventory was
+  // read. A target chosen after that reading is validated only against a read
+  // that began once it was selected; until then it is pending, not absent.
+  const [inventoryTarget, setInventoryTarget] = useState<typeof navigationTarget>(undefined)
+  const inventoryCurrent = navigationTarget === undefined || inventoryTarget === navigationTarget
   const slice = receivedSlice?.authority === authority ? receivedSlice.value : null
   const [receivedError, setReceivedError] = useState<Owned<string> | null>(null)
   const error = receivedError?.authority === authority ? receivedError.value : null
@@ -244,7 +249,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const [selectedValue, setSelected] = useState<string[]>([])
   const [evidenceAuthority, setEvidenceAuthority] = useState(authority)
   const evidenceCurrent = evidenceAuthority === authority
-  const navigationInstanceMissing = navigationTarget?.kind === 'instance' && snapshot !== null
+  const navigationInstanceMissing = navigationTarget?.kind === 'instance' && snapshot !== null && inventoryCurrent
     && !snapshot.instances.some(item => item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation && item.phase.kind !== 'detached')
   const instance = evidenceCurrent && !navigationInstanceMissing ? instanceValue : ''
   const focusedRow = evidenceCurrent ? focusedRowValue : null
@@ -261,6 +266,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   async function refresh() {
     if (!mounted.current || !currentAuthority(authority)) return
     const requestedAuthority = authority
+    const requestedTarget = currentNavigation.current.target
     reads.current?.abort()
     const controller = new AbortController()
     reads.current = controller
@@ -270,6 +276,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       const result = await fetchLaneAddons(controller.signal)
       if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) {
         setReceived({ authority: requestedAuthority, value: result })
+        setInventoryTarget(requestedTarget)
       }
     } catch (err) {
       if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setError(message(err))
@@ -356,7 +363,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const targetDraft = navigationTarget?.kind === 'declaration' ? session?.state.value.drafts[navigationTarget.path] : undefined
   const declarationFocus = useRef<HTMLDivElement>(null), instanceFocus = useRef<HTMLTableRowElement>(null)
   let snapshotTargetError: string | null = null
-  if (navigationTarget && snapshot) {
+  if (navigationTarget && snapshot && inventoryCurrent) {
     if (navigationTarget.kind === 'instance') {
       if (navigationInstanceMissing) snapshotTargetError = 'The selected worker is absent or its incarnation changed. No replacement worker was selected.'
     } else {
@@ -370,7 +377,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
     }
   }
   useEffect(() => {
-    if (!navigationTarget || !authority || !snapshot || snapshotTargetError) return
+    if (!navigationTarget || !authority || !snapshot || !inventoryCurrent || snapshotTargetError) return
     const previous = handledNavigation.current
     if (previous?.target === navigationTarget && previous.authority === authority && previous.attempt === navigationAttempt) return
     if (navigationTarget.kind === 'declaration') {
@@ -391,7 +398,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       session?.close(); session?.closeActivity(authority)
       handledNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt }
     }
-  }, [navigationTarget, authority, snapshot, session, snapshotTargetError, navigationAttempt, targetDraft?.phase])
+  }, [navigationTarget, authority, snapshot, inventoryCurrent, session, snapshotTargetError, navigationAttempt, targetDraft?.phase])
   let targetError = snapshotTargetError ?? (fileChecked ? fileCheck?.error ?? null : null)
   const loaded = targetDraft?.current ?? targetDraft?.document
   if (!targetError && fileChecked && navigationTarget?.kind === 'declaration' && navigationTarget.installation !== null && loaded) {
@@ -400,7 +407,15 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
         targetError = 'The file read belongs to a different installation. The replacement was not opened.'
     } catch { targetError = 'The file read cannot confirm the selected installation ID. Open the file explicitly from the current workspace to repair it.' }
   }
-  const targetPending = navigationTarget?.kind === 'declaration' && !fileChecked
+  const targetPending = !inventoryCurrent || navigationTarget?.kind === 'declaration' && !fileChecked
+  // A target selected while this panel stays mounted reads the inventory
+  // again; the mount read above already serves the first target.
+  const lastTargetRead = useRef(navigationTarget)
+  useEffect(() => {
+    if (lastTargetRead.current === navigationTarget) return
+    lastTargetRead.current = navigationTarget
+    if (navigationTarget) void refresh()
+  }, [navigationTarget])
   useEffect(() => {
     if (!navigationTarget || !authority || !snapshot || targetError || targetPending) return
     const previous = focusedNavigation.current

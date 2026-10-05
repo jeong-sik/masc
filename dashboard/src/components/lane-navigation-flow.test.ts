@@ -155,6 +155,20 @@ it('releases the linked target when the operator starts a different declaration'
   fireEvent.change(screen.getByLabelText('Open drafts'), { target: { value: path } })
   expect((screen.getByLabelText('TOML source') as HTMLTextAreaElement).value).toBe('# retained\n'+declarationDocument.source_text)
 })
+it('reads the inventory again when a Lane Add-ons target is selected while mounted', async () => {
+  const empty = { ...declarations, configuration: { ...declarations.configuration!, declarations: [] } }
+  addons.fetchLaneAddons.mockResolvedValue(empty); files.fetchLaneDeclaration.mockResolvedValue(declarationDocument)
+  replaceRoute('monitoring', { section: 'lane-addons' })
+  render(html`<${LaneAddonsPanel} />`)
+  await screen.findByText('No readable TOML declarations.')
+  const reads = addons.fetchLaneAddons.mock.calls.length
+  // The declaration appeared after the retained reading.
+  addons.fetchLaneAddons.mockResolvedValue(declarations); declarationRoute()
+  await waitFor(() => expect(addons.fetchLaneAddons.mock.calls.length).toBeGreaterThan(reads))
+  await screen.findByRole('region', { name: 'Lane TOML editor' })
+  expect(screen.queryByText('The selected declaration is absent from this reading.')).toBeNull()
+  expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
 it('uses the targeted run source for unavailable state instead of a previous successful filter', async () => {
   api.fetchExactLaneRuns.mockRejectedValue(new Error('exact unavailable'))
   replaceRoute('monitoring', { section: 'internal-agents' })

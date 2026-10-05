@@ -220,21 +220,22 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
   const setError = (value: string | null) => session.edit('error', value)
   const setNotice = (value: string | null) => session.edit('notice', value)
   const setSection = (value: RuntimeSectionId) => session.edit('section', value)
+  // A target is selected once, when it is found. Until then every draft
+  // change looks it up again so the notice follows the text; the first
+  // attempt also moves focus into the editor. A target that only becomes
+  // locatable after the reader edits is offered, not selected: selecting it
+  // under the caret would let the next keystroke overwrite the declaration.
   const focusedNavigation = useRef<RuntimeLaneTarget | undefined>(undefined)
+  const attemptedNavigation = useRef<RuntimeLaneTarget | undefined>(undefined)
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
+  const [locatedNavigation, setLocatedNavigation] = useState<[number, number] | null>(null)
   useEffect(() => {
     if (navigationTarget) session.edit('section', navigationTarget.kind === 'exact' ? 'lanes' : 'toml')
-    setNavigationNotice(null)
+    setNavigationNotice(null); setLocatedNavigation(null)
   }, [navigationTarget, session])
-  useEffect(() => {
-    if (!navigationTarget || navigationTarget.kind === 'exact' || config === null || section !== 'toml'
-      || focusedNavigation.current === navigationTarget || !textareaRef.current) return
+  const selectNavigation = (range: [number, number] | null) => {
     const textarea = textareaRef.current
-    let range: [number, number] | null = null
-    try {
-      range = runtimeTargetRange(draft, navigationTarget)
-      if (range === null) setNavigationNotice('This target is not declared in the current draft. No configuration was inserted; edit the original TOML to add it.')
-    } catch (cause) { setNavigationNotice(`Cannot locate the target in this draft: ${errorToString(cause)}. Your text is unchanged.`) }
+    if (!textarea) return
     textarea.focus()
     const start = range?.[0] ?? draft.length, end = range?.[1] ?? start
     textarea.setSelectionRange(start, end)
@@ -243,7 +244,21 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
       textarea.scrollTop = draft.slice(0, start).split('\n').length * lineHeight - lineHeight
       if (lineGutterRef.current) lineGutterRef.current.scrollTop = textarea.scrollTop
     }
-    focusedNavigation.current = navigationTarget
+  }
+  useEffect(() => {
+    if (!navigationTarget || navigationTarget.kind === 'exact' || config === null || section !== 'toml'
+      || focusedNavigation.current === navigationTarget || !textareaRef.current) return
+    let range: [number, number] | null = null, notice: string | null = null
+    try {
+      range = runtimeTargetRange(draft, navigationTarget)
+      if (range === null) notice = 'This target is not declared in the current draft. No configuration was inserted; edit the original TOML to add it.'
+    } catch (cause) { notice = `Cannot locate the target in this draft: ${errorToString(cause)}. Your text is unchanged.` }
+    setNavigationNotice(notice)
+    const firstAttempt = attemptedNavigation.current !== navigationTarget
+    attemptedNavigation.current = navigationTarget
+    if (firstAttempt) selectNavigation(range)
+    if (range !== null && firstAttempt) { focusedNavigation.current = navigationTarget; setLocatedNavigation(null) }
+    else setLocatedNavigation(range)
   }, [navigationTarget, config, section, draft])
   const ready = session.writable(authority)
   const canAdopt = session.ready(authority)
@@ -895,6 +910,8 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
               ${navigationTarget && navigationTarget.kind !== 'exact' && html`<p role="status">Selected configuration: ${laneTargetLabel(navigationTarget)}. Existing draft text is retained.</p>`}
               ${navigationNotice && html`<p role="status">${navigationNotice}</p>`}
+              ${locatedNavigation && navigationTarget && navigationTarget.kind !== 'exact' && html`<p role="status">The selected configuration is now declared in this draft.
+                <button type="button" onClick=${() => { selectNavigation(locatedNavigation); focusedNavigation.current = navigationTarget; setLocatedNavigation(null) }}>Select target</button></p>`}
               <div class="rt-toml-wrap">
                 <div class="rt-toml-bar">
                   <span class="mono">${path}</span>

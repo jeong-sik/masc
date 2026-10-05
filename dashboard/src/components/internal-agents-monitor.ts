@@ -130,6 +130,15 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 type RunReading = 'loading' | 'ready' | 'stale' | 'unavailable'
 type RunSource = Row['source']
 
+// The one run source that can hold a selected Lane's runs. Exact-lane runs
+// never name verifier_exact (ExactLane excludes it and the decoder refuses
+// it); its runs are the verification runs. Row selection and the availability
+// reading for a target both follow this, so an unrelated source's failure
+// cannot mark the target's observations unavailable.
+function laneRunSource(lane: string): RunSource {
+  return lane === 'verifier_exact' ? 'verification' : 'exact'
+}
+
 function sourceForKind(kind: Exclude<Filter, 'all'>): RunSource {
   switch (kind) {
     case 'verification': return 'verification'
@@ -752,7 +761,7 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
   }, [refresh])
 
   const visible = useMemo(() => rows.filter(row => target
-    ? row.source === 'exact' ? row.run.lane === target.lane : row.source === 'verification' && target.lane === 'verifier_exact'
+    ? row.source === laneRunSource(target.lane) && (row.source !== 'exact' || row.run.lane === target.lane)
     : matches(row, filter)), [rows, filter, target])
   const roster = keeperRosterSignal.value
   const pausedKeeperNames = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health?.names ?? []
@@ -768,7 +777,7 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
   const completeReading = allReadings.every(readingHasRows)
   const allFresh = allReadings.every(reading => reading === 'ready')
   const selectedSources: RunSource[] = target
-    ? target.lane === 'verifier_exact' ? ['exact', 'verification'] : ['exact']
+    ? [laneRunSource(target.lane)]
     : filter === 'all' ? ['exact', 'verification', 'fusion'] : [sourceForKind(filter)]
   const selectedReadings = selectedSources.map(source => runReadings[source])
   const selectedReading = !selectedReadings.every(readingHasRows) ? 'unavailable'

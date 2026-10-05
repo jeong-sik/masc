@@ -168,6 +168,16 @@ it('uses the targeted run source for unavailable state instead of a previous suc
   expect(screen.queryByText('No internal agent runs for this filter.')).toBeNull()
 })
 
+it('reads verifier_exact availability from verification runs, not the exact-run endpoint', async () => {
+  // Exact-lane runs never name verifier_exact, so their endpoint failing says
+  // nothing about this Lane's observations.
+  api.fetchExactLaneRuns.mockRejectedValue(new Error('exact unavailable'))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'verifier_exact', workspace: '/fixture/navigation' }, true))
+  render(html`<${InternalAgentsMonitor} />`)
+  await screen.findByText('No internal agent runs for this filter.')
+  expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
+})
+
 it('shows all Lane runs when leaving a target with the Show all action', async () => {
   replaceRoute('monitoring', { section: 'internal-agents' })
   render(html`<${InternalAgentsMonitor} />`)

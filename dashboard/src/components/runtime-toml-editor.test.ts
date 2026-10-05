@@ -284,6 +284,28 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
   })
 
+  it('follows draft edits for an absent navigation target and offers it without moving the caret', async () => {
+    const target = { kind: 'browser' as const, lane: 'live' as const, workspace: '/tmp' }
+    render(html`<${RuntimeTomlEditor} navigationTarget=${target} />`, container)
+    await waitFor(() => expect(container.textContent).toContain('This target is not declared in the current draft'))
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const draft = baseConfig.source_text + '[browser.live]\nenabled = true\n'
+    fireEvent.input(textarea, { target: { value: draft } })
+    textarea.setSelectionRange(draft.length, draft.length)
+    const offer = await waitFor(() => {
+      const button = [...container.querySelectorAll('button')].find(item => item.textContent === 'Select target')
+      expect(button).toBeTruthy()
+      return button as HTMLButtonElement
+    })
+    // The notice follows the text, and the reader's caret is not taken over.
+    expect(container.textContent).not.toContain('This target is not declared in the current draft')
+    expect(textarea.selectionStart).toBe(draft.length)
+    fireEvent.click(offer)
+    expect(textarea.selectionStart).toBe(draft.indexOf('[browser.live]'))
+    expect(textarea.selectionEnd).toBeGreaterThan(textarea.selectionStart)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
   it('keeps the unload guard while the dirty editor is unmounted', async () => {
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))

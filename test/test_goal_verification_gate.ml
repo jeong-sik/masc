@@ -57,11 +57,15 @@ let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* The server delivers Goal notices with the guard enabled; with it off,
+     guarded store mutexes are skipped and a wrong-context call passes. *)
+  Eio_guard.enable ();
   let dir = temp_dir () in
   let previous_delivery = Goal_delivery.For_testing.replace_backend
     (Some Server_bootstrap_loops.For_testing.goal_notification_backend) in
   Fun.protect
     ~finally:(fun () ->
+      Eio_guard.disable ();
       ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
       rm_rf dir)
     (fun () ->

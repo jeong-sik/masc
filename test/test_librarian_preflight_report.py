@@ -825,6 +825,29 @@ class ReportCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertAlmostEqual(json.loads(result.stdout)["paired_median_delta_s"], 1.05)
 
+    def test_valid_fallback_and_not_entered_failures_are_reported(self) -> None:
+        for status, path, rejection in (
+            ("succeeded", "full_lane", "No-change output failed domain validation"),
+            ("failed", "not_entered", None),
+            ("cancelled", "not_entered", None),
+        ):
+            with self.subTest(status=status, path=path):
+                manifest = fixture()
+                run = manifest["pairs"][0]["preflight"]["run"]
+                run.update(status=status, selected_slot="fixture-cli" if path == "full_lane" else None)
+                if status == "failed":
+                    run.update(code="fixture_interrupted", detail="fixture failed before selection")
+                run["output"].update(
+                    generation_path=path,
+                    full_llm_skipped=False,
+                    preflight_domain_rejection=rejection,
+                    jev_preflight=observation()
+                    if path == "full_lane" else observation("awaiting_answer"),
+                )
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["recorded_generation_skips"], 0)
+
     def test_successful_full_lane_requires_a_nonblank_selected_slot(self) -> None:
         for arm in ("baseline", "preflight"):
             for slot in (None, "", "   ", 123, False, {}, []):
@@ -855,6 +878,47 @@ class ReportCliTest(unittest.TestCase):
                 self.assertEqual(
                     json.loads(result.stdout)["pairs"][0]["baseline_status"], status
                 )
+
+    def test_unevaluated_candidate_is_refused(self) -> None:
+        for status, reason in (
+            ("skipped", "librarian_preflight_disabled"),
+            ("skipped", "lane_disabled"),
+            ("skipped", "no_armed_destination"),
+            ("skipped", "keeper_excluded"),
+            ("ineligible", "working context requires generation"),
+            ("question_unavailable", "invalid choice set"),
+        ):
+            with self.subTest(status=status, reason=reason):
+                manifest = fixture()
+                run = manifest["pairs"][0]["preflight"]["run"]
+                run["selected_slot"] = "fixture-cli"
+                run["output"].update(
+                    jev_preflight={"status": status, "reason": reason, "elapsed_s": None},
+                    generation_path="full_lane",
+                    full_llm_skipped=False,
+                )
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("preflight arm must enter preflight evaluation", result.stderr)
+
+    def test_completed_assessment_cannot_leave_generation_not_entered(self) -> None:
+        for status in ("failed", "cancelled"):
+            for observed_status in ("judged", "skipped", "ineligible", "failed", "invalid_answer"):
+                with self.subTest(status=status, observation=observed_status):
+                    manifest = fixture()
+                    run = manifest["pairs"][0]["preflight"]["run"]
+                    run.update(status=status, selected_slot=None)
+                    if status == "failed":
+                        run.update(code="fixture_interrupted", detail="fixture failed before selection")
+                    run["output"].update(
+                        jev_preflight=observation(observed_status, "needs_generation"),
+                        generation_path="not_entered",
+                        full_llm_skipped=False,
+                    )
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout, "")
 
     def test_answerless_observations_reject_received_answer_fields(self) -> None:
         for status in ("failed", "awaiting_answer"):
@@ -918,12 +982,30 @@ class ReportCliTest(unittest.TestCase):
             "boolean_count",
             "awaiting",
             "missing_rejection",
+            "disabled_candidate",
+            "keep_current_fallback",
+            "different_actor",
+            "successful_not_entered",
         ):
             with self.subTest(mode=mode):
                 manifest = fixture()
                 pair = manifest["pairs"][0]
                 run = pair["preflight"]["run"]
-                if mode == "input":
+                if mode == "different_actor":
+                    run["actor"] = "other-keeper"
+                    run["input"]["payload"]["actual_input"]["rendered_prompt_variables"][
+                        "keeper_id"
+                    ] = "other-keeper"
+                elif mode in ("disabled_candidate", "keep_current_fallback", "successful_not_entered"):
+                    run["output"].update(generation_path="full_lane", full_llm_skipped=False)
+                    if mode == "keep_current_fallback":
+                        run["selected_slot"] = "fixture-cli"
+                    if mode == "disabled_candidate":
+                        run["selected_slot"] = "fixture-cli"
+                        run["output"]["jev_preflight"] = {"status": "skipped", "reason": "librarian_preflight_disabled", "elapsed_s": None}
+                    elif mode == "successful_not_entered":
+                        run["output"].update(generation_path="not_entered", jev_preflight=observation("awaiting_answer"))
+                elif mode == "input":
                     run["input"]["payload"]["actual_input"][
                         "rendered_prompt_variables"
                     ]["source"] = "changed source"
@@ -948,6 +1030,14 @@ class ReportCliTest(unittest.TestCase):
                 result = self.execute(manifest)
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout, "")
+                if mode == "different_actor":
+                    self.assertIn("paired runs must use the same Keeper actor", result.stderr)
+                elif mode == "keep_current_fallback":
+                    self.assertIn("keep-current fallback domain rejection", result.stderr)
+                elif mode == "disabled_candidate":
+                    self.assertIn("preflight arm must enter preflight evaluation", result.stderr)
+                elif mode == "successful_not_entered":
+                    self.assertIn("interrupted awaiting preflight", result.stderr)
 
 
 if __name__ == "__main__":

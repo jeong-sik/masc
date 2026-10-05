@@ -1,0 +1,20 @@
+{
+  "base": "0693e4291f8f7708d42a4c78b2358da5dcea248e",
+  "compiler": "OCaml 5.5.1",
+  "scope": "actual Runtime_toml.parse_string/parse_file in isolated native executables with cached dependencies; no runtime/provider activation",
+  "source_sha256": {
+    "lib/runtime/runtime_toml.ml": "34ad56740a0e2b44d4f7896c26778db9649ad77a09f9350fcd77055a5810e936",
+    "lib/runtime/runtime_toml.mli": "9a5b27a830407e90ed8f277a61cacc34b6c5fbdd5dc615f3ad2329133de2fe7e",
+    "config/runtime.toml": "a5460fa572ad2764998576e0828a5e9aa9147994dbc0b0bb1262f5f0b1382542"
+  },
+  "binaries_sha256": {
+    "baseline": "230850189ba8085be7d55d2522b95440bde618eb93d2736b9efcc50ec652f257",
+    "candidate": "0645ecfe3650357209c7df05962da97663c95e7a3b8647f60efccd1b3f3f1924"
+  },
+  "checks": {
+    "valid_model_set": "two generated/explicit bindings",
+    "model_set_and_model_sets": "both exact provider paths rejected; baseline silently omitted second binding",
+    "shipped_provider_tables": "9 accepted",
+    "full_namespace_and_account_suites": "not run"
+  }
+}

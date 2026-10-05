@@ -17,7 +17,7 @@ let unavailable_result = Goal_unavailable_envelope.tool_result
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
    lifecycle SSOT) instead of hand-rolling them here, so the validator, the MCP
    schema enum, and the type can never drift apart. *)
-let goal_phase_strings = List.map Goal_phase.to_string Goal_phase.all
+let goal_phase_strings = List.map Goal_phase.Kind.to_string Goal_phase.Kind.all
 
 let goal_transition_action_strings =
   List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all
@@ -46,7 +46,7 @@ let parse_optional_goal_phase args field =
   | None | Some `Null -> Ok None
   | Some (`String raw) when String.trim raw = "" -> Ok None
   | Some (`String raw) ->
-    (match Goal_store.parse_goal_phase (Some raw) with
+    (match Goal_phase.Kind.parse raw with
      | Some phase -> Ok (Some phase)
      | None ->
        Error (make_enum_field_error ~field ~allowed:goal_phase_strings ~received:raw))
@@ -192,7 +192,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
   | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok (), Ok phase ->
-    match Goal_store.list_goals_result ctx.config ?phase () with
+    match Goal_store.list_goals_result ctx.config ?kind:phase () with
     (* RFC-0444 criterion 1: a store this build cannot read is the typed
        envelope, never [goals:[]]. [Uninitialized] reads as [Ok []]. *)
     | Error unavailable -> unavailable_result ~tool_name ~start_time unavailable
@@ -353,7 +353,8 @@ let gate_action_requires_evidence = function
   | Goal_phase.Confirm_completion
   | Goal_phase.Request_complete
   | Goal_phase.Drop
-  | Goal_phase.Reopen -> false
+  | Goal_phase.Reopen | Goal_phase.Pause | Goal_phase.Resume
+  | Goal_phase.Block | Goal_phase.Unblock -> false
 ;;
 
 let validate_gate_evidence args action =
@@ -545,18 +546,18 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
       if not (Goal_store.criterion_equal criterion (Goal_store.criterion_of_goal goal)) then
         Error "proof criterion has been superseded"
       else
-        match Goal_phase.decide_transition ~phase:goal.phase ~action with
-        | Ok (Goal_phase.Move_to phase) ->
+        let persist ~changed phase =
           let open Result.Syntax in
-          let* previous = Goal_verification.get_record_authoritative config ~goal_id in
-          let already_recorded = match previous with
-            | Some {completion=Goal_verification.Proof_proven stored | Proof_refuted stored;_} ->
-                stored = {verdict with recorded_at=stored.recorded_at}
-            | Some {completion=Completion_idle | Proof_pending _ | Human_confirmed _;_} | None -> false in
-          let* () = if already_recorded then Ok () else run_before_proof_commit before_proof_commit goal verdict in
-          let* record = Goal_verification.record_proof_verdict config ~goal_id verdict in
+          let before_commit () = run_before_proof_commit before_proof_commit goal verdict in
+          let* record = Goal_verification.record_proof_verdict ~before_commit config ~goal_id verdict in
           let* stored = recorded_proof record in
-          Ok (goal_after_proof goal phase note, (record, true, stored))
+          let updated = if changed then goal_after_proof goal phase note else goal in
+          Ok (updated, (record, changed, stored)) in
+        match Goal_phase.decide_transition ~phase:goal.phase ~action with
+        | Error _ when goal.phase = Goal_phase.Paused Goal_phase.Resume_verifying
+                    || goal.phase = Goal_phase.Blocked Goal_phase.Resume_verifying ->
+            persist ~changed:false goal.phase
+        | Ok (Goal_phase.Move_to phase) -> persist ~changed:true phase
         | Error detail ->
           (* A delivered verdict may be retried after its phase write committed.
              Require the exact stored proof; a same-outcome answer from another
@@ -708,7 +709,8 @@ let request_current_proof ?evidence_refs config ~goal_id =
       Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
         Result.map (fun record -> { goal with phase = Goal_phase.Verifying }, record)
           (mark_proof_pending ?submitted_evidence config ~goal_id goal))
-    | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped ->
+    | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped
+    | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
       Error (refuse Precondition_failed "goal is not requesting verification"))
 ;;
 
@@ -719,7 +721,8 @@ let recover_current_proof config ~goal_id =
         Result.map (fun _record -> goal, true)
           (Goal_verification.mark_proof_pending config ~goal_id
              ~criterion:(Goal_store.criterion_of_goal goal))
-    | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
+    | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
+    | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
         Ok (goal, false))
   |> Result.map snd
 ;;
@@ -790,7 +793,8 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~note =
     if not changed then no_goal_effects
     else
       { events = [ Goal_store.Phase,
-          `Assoc [ "phase", Goal_phase.to_yojson goal.phase
+          `Assoc [ "phase", `String (Goal_phase.to_string goal.phase)
+                 ; "resume_phase", Goal_phase.resume_phase_to_yojson goal.phase
                  ; "actor", `String ctx.agent_name ] ]
       ; notifications = [] }
   in
@@ -853,6 +857,43 @@ let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
            | Some record -> [ "verification", Goal_verification.record_to_yojson_for_goal ~goal record ]))
 ;;
 
+(* Suspension decisions use the current complete lifecycle under the same
+   Goal lock as proof commits and criterion edits. Linked Tasks are untouched. *)
+let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~action ~note =
+  let effects (goal : Goal_store.goal) changed =
+    if not changed then no_goal_effects else
+      { Goal_store.events = [ Goal_store.Phase,
+          `Assoc [ "phase", `String (Goal_phase.to_string goal.phase)
+                 ; "resume_phase", Goal_phase.resume_phase_to_yojson goal.phase
+                 ; "actor", `String ctx.agent_name
+                 ; "action", `String (Goal_phase.action_to_string action) ] ];
+        notifications = [] } in
+  match Goal_store.transact_goal ~effects ctx.config ~goal_id (fun goal ->
+      match Goal_phase.decide_transition ~phase:goal.phase ~action with
+      | Error detail -> Error detail
+      | Ok (Goal_phase.Already _) -> Ok (goal, false)
+      | Ok (Goal_phase.Move_to phase) ->
+          let last_review_note, last_review_at = match note with
+            | None -> goal.last_review_note, goal.last_review_at
+            | Some text -> Some text, Some (Masc_domain.now_iso ()) in
+          Ok ({ goal with phase; last_review_note; last_review_at }, true)) with
+  | Error (Goal_store.Store_unavailable unavailable) -> unavailable_result ~tool_name ~start_time unavailable
+  | Error error -> error_result_typed ~tool_name ~start_time ~code:Conflict
+                     (Goal_store.write_error_to_string error)
+  | Ok (goal, changed) ->
+      (* An explicit restore re-arms verification even on a repeated delivery.
+         The daemon binds again under the Goal lock before admitting work. *)
+      (match action, goal.phase with
+       | (Goal_phase.Resume | Goal_phase.Unblock), Goal_phase.Verifying ->
+           notify_goal_verification_pending ctx ~goal_id
+       | _ -> ());
+      let delivery = deliver_goal_effects ctx.config in
+      ok_result ~tool_name ~start_time
+        [ "goal_id", `String goal_id; "action", `String (Goal_phase.action_to_string action)
+        ; "noop", `Bool (not changed); "effect_delivery", delivery
+        ; "goal", Goal_store.goal_to_yojson goal ]
+;;
+
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
   match parse_goal_evidence_refs args with
@@ -871,6 +912,11 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
   | Ok goal_id, Ok (Some public_action) ->
     let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
+    (match public_action with
+     | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
+     | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
+         finish_goal_suspension ~tool_name ~start_time ctx ~goal_id ~action ~note
+     | Goal_phase.Public_action.Request_complete | Goal_phase.Public_action.Drop | Goal_phase.Public_action.Reopen ->
     (match Goal_store.find_goal ctx.config ~goal_id with
      | Goal_store.Goal_absent ->
        error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
@@ -881,7 +927,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
      | Goal_store.Goal_found goal when Option.is_some evidence_refs &&
          (match goal.Goal_store.phase with
           | Goal_phase.Executing | Goal_phase.Verifying -> false
-          | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped -> true) ->
+          | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped
+    | Goal_phase.Paused _ | Goal_phase.Blocked _ -> true) ->
        (* The phase decides this, not the arguments. *)
        error_result_typed ~tool_name ~start_time ~code:Precondition_failed
          "this Goal has no active proof request that can accept evidence_refs"
@@ -902,11 +949,14 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
               | Goal_phase.Awaiting_confirmation
               | Goal_phase.Executing
               | Goal_phase.Completed
-              | Goal_phase.Dropped ->
+              | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
                 already_goal_response
                   ~tool_name ~start_time ~goal_id ~action ~phase goal None)
            | Goal_phase.Public_action.Reopen ->
              finish_goal_reopen ~tool_name ~start_time ctx ~note goal
+           | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
+           | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
+             finish_goal_suspension ~tool_name ~start_time ctx ~goal_id ~action ~note
            | Goal_phase.Public_action.Drop ->
              finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~note)
         | Ok (Goal_phase.Move_to _) ->
@@ -935,8 +985,11 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                         ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ])
            | Goal_phase.Public_action.Reopen ->
                 finish_goal_reopen ~tool_name ~start_time ctx ~note goal
+           | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
+           | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
+             finish_goal_suspension ~tool_name ~start_time ctx ~goal_id ~action ~note
            | Goal_phase.Public_action.Drop ->
-                finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~note)))
+                finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~note))))
   | Ok _, Ok None ->
     validation_error_result
       ~tool_name

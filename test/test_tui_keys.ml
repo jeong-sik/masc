@@ -681,7 +681,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  d:Category pane  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
@@ -1097,7 +1097,7 @@ let test_board_and_planning_explain_their_order () =
     (board_sort_explanation Board_hot);
   check str "trending formula" "net votes / √age-hours"
     (board_sort_explanation Board_trending);
-  check str "active phase set" "executing + verifying"
+  check str "active phase set" "all nonterminal goals (including suspended)"
     (planning_filter_explanation Planning_filter_active);
   check str "phase and priority order" "phase order, then P1→P5"
     (planning_sort_explanation Planning_sort_phase_priority);
@@ -2016,7 +2016,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2432,6 +2432,28 @@ let test_the_sheet_carries_the_fact_detail_keys () =
     "j/k:scroll  PgUp/PgDn:page  g / G:top/bottom  Esc:close"
     Masc_tui_keys.memory_fact_detail_hints
 
+let test_chat_quiet_leave_respects_the_draft () =
+  let leaves = Masc_tui_keys.chat_quiet_leave in
+  List.iter (fun (input_supported, turn_active, draft_empty, expected) ->
+    Alcotest.(check bool) "printable Q follows viewport, turn and complete draft" expected
+      (leaves ~input_supported ~turn_active ~draft_empty "Q");
+    Alcotest.(check bool) "Ctrl-Q always leaves" true
+      (leaves ~input_supported ~turn_active ~draft_empty "\017");
+    Alcotest.(check bool) "lowercase q remains text" false
+      (leaves ~input_supported ~turn_active ~draft_empty "q"))
+    [ true, true, true, true; true, true, false, false
+    ; true, false, true, false; true, false, false, false
+    ; false, true, true, true; false, true, false, true
+    ; false, false, true, true; false, false, false, true ];
+  let chat = Masc_tui_keys.for_surface (Keepers Keeper_message) in
+  Alcotest.(check bool) "chat help names both quiet exits" true
+    (List.exists
+       (fun (binding : Masc_tui_keys.binding) ->
+         String.equal binding.key "Q / Ctrl-Q"
+         && binding.help = Some
+              "Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting")
+       chat)
+
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
   let global_threes =
     List.filter
@@ -2761,7 +2783,7 @@ let planning_state () =
           ; pr_verifying = 0
           ; pr_awaiting_confirmation = 0
           ; pr_done = 0
-          ; pr_dropped = 0
+          ; pr_paused = 0; pr_blocked = 0; pr_dropped = 0
           }
       ; pl_backlog =
           { pb_todo = 0; pb_claimed = 0; pb_running = 0
@@ -3556,6 +3578,8 @@ let () =
             test_the_sheet_carries_the_fact_detail_keys
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"
             `Quick test_keeper_detail_reserves_lowercase_u_for_channel_unbind
+        ; Alcotest.test_case "empty chat Q leaves, draft Q types" `Quick
+            test_chat_quiet_leave_respects_the_draft
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "the sheet opens on the current surface" `Quick

@@ -626,6 +626,21 @@ let list ~base_path =
 let finish (r : part_result) = { applied = List.rev r.applied; skipped = List.rev r.skipped }
 
 let restore_prompt_overrides ~base_path (entries : Override.entry list) =
+  let before = List.map (fun key -> key, Prompt_registry.resolve_prompt key)
+    [Prompt_names.candle_appraiser_grade;Prompt_names.candle_appraiser_relation;
+     Prompt_names.candle_appraiser_weights] in
+  let notify_changed () =
+    (* Managed default files are outside the preset surface. Use their captured
+       values and committed in-memory overrides; release cleanup does no I/O. *)
+    let overrides = Prompt_registry.override_entries () in
+    if List.exists (fun (key, (resolution : Prompt_registry.prompt_resolution)) ->
+      let override_value = List.find_opt (fun (entry : Override.entry) -> entry.key = key) overrides
+        |> Option.map (fun entry -> entry.Override.value) in
+      let _, effective = Prompt_registry_types.resolve_source
+        ~override_value ~file_value:resolution.file_value in
+      effective <> resolution.effective) before
+    then Candle_payout_worker.wake () in
+  Eio_guard.protect ~finally:notify_changed (fun () ->
   let wanted key =
     List.exists (fun (e : Override.entry) -> String.equal e.Override.key key) entries
   in
@@ -648,7 +663,7 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
   (* Each entry keeps the binding it was captured with, so a restored
      override reads as "written against an older default" when that is what
      it is, instead of looking freshly authored against today's text. *)
-  List.fold_left
+  let result = List.fold_left
     (fun acc (e : Override.entry) ->
       match Prompt_registry.restore_persisted_entry ~base_path e with
       | Ok () -> { acc with applied = e.Override.key :: acc.applied }
@@ -657,7 +672,8 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
         { acc with skipped = (e.Override.key, message) :: acc.skipped })
     cleared
     entries
-  |> finish
+  |> finish in
+  result)
 ;;
 
 let restore_instructions ~base_path instructions =

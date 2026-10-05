@@ -619,6 +619,23 @@ let exact_output_target_source ?(env = Env_config_core.raw_value_opt) () =
   | Some path -> Replacement_catalog_targets { path }
 ;;
 
+(* Whether [r], named as an HTTP slot of an exact-output lane, is a rule-3
+   gap. This one predicate decides both the save refusal below and the
+   runtime listing editors read, so a picker can refuse the candidate before
+   anything is sent instead of learning it from the write's 400. *)
+let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source) (r : t) =
+  match target_source with
+  | Replacement_catalog_targets { path = _ } -> false
+  | Runtime_binding_targets ->
+    (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
+     | Runtime_execution.Agent_core _, None -> true
+     | Runtime_execution.Agent_core _, Some (_ : float) -> false
+     | ( Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ ), (Some _ | None) -> false)
+;;
+
 (* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
    built from its binding, and its whole-request deadline is the provider's
    [exact-body-timeout-s]. Without it plan admission refuses every request on
@@ -649,18 +666,11 @@ let exact_slot_body_deadline_gaps_of
   =
   let gap_of (lane : Runtime_schema.exact_output_lane_decl) slot_id =
     match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
-    | None -> None
-    | Some r ->
-      (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
-       | Runtime_execution.Agent_core _, None ->
-         Some
-           ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
-            : exact_slot_body_deadline_gap)
-       | Runtime_execution.Agent_core _, Some (_ : float) -> None
-       | ( Runtime_execution.Codex_app_server _
-         | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _
-         | Runtime_execution.Muse_serve _ ), (Some _ | None) -> None)
+    | Some r when exact_slot_lacks_body_deadline ~target_source r ->
+      Some
+        ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
+         : exact_slot_body_deadline_gap)
+    | Some _ | None -> None
   in
   match target_source with
   | Replacement_catalog_targets { path = _ } -> []
@@ -1487,9 +1497,12 @@ let machine_configuration () = (runtime_state ()).machines
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
 
-let get_default_and_runtimes () =
+let get_default_route_and_runtimes () =
   let state = runtime_state () in
-  state.default_runtime, state.runtimes
+  let route = match state.default_route with
+    | Some _ as route -> route
+    | None -> Option.map (fun (runtime : t) -> runtime.id) state.default_runtime in
+  route, state.default_runtime, state.runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
@@ -1878,6 +1891,33 @@ let resolve_assignment_in (state : loaded_state) (assigned_id : string) =
 
 let resolve_assignment (assigned_id : string) =
   resolve_assignment_in (runtime_state ()) assigned_id
+;;
+
+type dashboard_runtime_resolved_snapshot =
+  { rs_default_route : string option
+  ; rs_default_runtime : t option
+  ; rs_runtimes : t list
+  ; rs_assignments : (string * string) list
+  ; rs_lanes : Runtime_lane.t list
+  ; rs_media_failover : string list
+  ; rs_declared_media_failover : string list
+  ; rs_config_path : string option
+  ; rs_resolve_assignment : string ->
+      [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+  }
+
+let dashboard_runtime_resolved_snapshot () =
+  let state = runtime_state () in
+  { rs_default_route = state.default_route
+  ; rs_default_runtime = state.default_runtime
+  ; rs_runtimes = state.runtimes
+  ; rs_assignments = state.keeper_assignments
+  ; rs_lanes = state.lanes
+  ; rs_media_failover = state.media_failover
+  ; rs_declared_media_failover = state.declared_media_failover
+  ; rs_config_path = state.config_path
+  ; rs_resolve_assignment = resolve_assignment_in state
+  }
 ;;
 
 type keeper_dispatch_snapshot =

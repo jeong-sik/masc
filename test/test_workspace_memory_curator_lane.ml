@@ -302,6 +302,151 @@ let test_cancelled_owner_does_not_consume_another_owners_wake () = with_base (fu
           (List.length (Ledger.dispositions (Ledger.load ~base_path:other |> require)));
         Worker.For_testing.stop ~base_path:other))))
 
+(* main's alternative Curator-publication suite: it drives the subscriber
+   wake path ([subscribe_lane_changes]) rather than the availability promise
+   the suite above uses. Both mechanisms are live in the merged registry, so
+   both suites run. *)
+let registry_ok result = result |> Result.map_error Registry.publication_error_to_string |> require
+
+let curator_lane : Runtime_schema.exact_output_lane_decl =
+  { id = "workspace_curator_exact"; enabled = true; slot_ids = ["curator-test"];
+    cli_slot_ids = []; max_output_tokens = None; thinking = None }
+
+let curator_snapshot base_url =
+  Exact_output_fixture.resolver_snapshot ~source:"curator-publication-test"
+    [{ Exact_output_fixture.id = "curator-test"; base_url }]
+
+let with_registry_configured f =
+  Fun.protect ~finally:(fun () -> registry_ok (Registry.unpublish ())) f
+
+let test_enable_publication_resumes_existing_fact () = with_registry_configured (fun () ->
+  with_base (fun base_path clock ->
+    let snapshot = curator_snapshot "http://127.0.0.1:9/v1" in
+    registry_ok (Registry.publish ~lanes:[] snapshot) |> ignore;
+    commit base_path "Existing fact before Curator is enabled";
+    let calls = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls; Ok (answer selected, "curator-test") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "disabled lane makes no call" 0 !calls;
+      (match Registry.publish ~lanes:[{ curator_lane with slot_ids = [] }] snapshot with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "empty lane publication unexpectedly succeeded");
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "rejected publication leaves the owner parked" 0 !calls;
+      (* A subscriber can read the now-published registry: notifications must
+         run after its mutex and private transaction fence are released. *)
+      let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id (fun () ->
+        ignore (registry_ok (Registry.current ()))) in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        registry_ok (Registry.publish ~lanes:[curator_lane] snapshot) |> ignore);
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "enable retries without a new memory commit" 1 !calls;
+      Alcotest.(check int) "existing fact classified" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      Worker.For_testing.stop ~base_path)))
+
+let test_transaction_recovery_is_relevant_and_committed () = with_registry_configured (fun () ->
+  with_base (fun base_path clock ->
+    let before = curator_snapshot "http://127.0.0.1:9/v1" in
+    let after = curator_snapshot "http://127.0.0.1:10/v1" in
+    registry_ok (Registry.publish ~lanes:[curator_lane] before) |> ignore;
+    commit base_path "Pending fact survives a configuration refusal";
+    let calls = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls;
+      if !calls = 1 then Error "binding refused" else Ok (answer selected, "curator-test") in
+    let prepare snapshot lanes =
+      registry_ok (Registry.prepare_replacement ~runtime_observations:[] ~lanes
+        ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "initial refused attempt" 1 !calls;
+      registry_ok (Registry.publish ~lanes:[curator_lane] before) |> ignore;
+      let unrelated = { curator_lane with id = "unrelated_exact" } in
+      registry_ok (Registry.publish ~lanes:[curator_lane; unrelated] before) |> ignore;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "unchanged and unrelated publication do not retry" 1 !calls;
+      let prepared = prepare after [curator_lane] in
+      registry_ok (Registry.transact_replacement prepared
+        ~apply_write:(fun () -> Registry.Not_committed ())) |> ignore;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "failed write does not retry" 1 !calls;
+      let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+          (fun () -> failwith "injected subscriber failure") in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        registry_ok (Registry.transact_replacement prepared
+          ~apply_write:(fun () -> Registry.Committed ())) |> ignore);
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "committed bound endpoint change retries" 2 !calls;
+      Alcotest.(check int) "pending fact classified" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      Worker.For_testing.stop ~base_path)))
+
+let test_subscriber_cancellation_keeps_commit_receipt () = with_registry_configured (fun () ->
+  let snapshot = curator_snapshot "http://127.0.0.1:9/v1" in
+  registry_ok (Registry.publish ~lanes:[curator_lane] snapshot) |> ignore;
+  let prepare lane =
+    registry_ok (Registry.prepare_replacement ~runtime_observations:[] ~lanes:[lane]
+      ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
+  let notified = ref 0 in
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+      (fun () -> incr notified) in
+  (* Subscribers run newest first: cancellation must not skip the earlier
+     subscriber or hide the write's committed result. *)
+  let unsubscribe_cancel = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+      (fun () -> raise (Eio.Cancel.Cancelled (Failure "cancelled subscriber"))) in
+  Fun.protect ~finally:(fun () -> unsubscribe_cancel (); unsubscribe ()) (fun () ->
+    let changed = { curator_lane with max_output_tokens = Some 100 } in
+    (match Registry.transact_replacement (prepare changed)
+        ~apply_write:(fun () -> Registry.Committed "saved") |> registry_ok with
+     | Registry.Committed receipt -> Alcotest.(check string) "committed receipt returned" "saved" receipt
+     | Registry.Not_committed _ -> Alcotest.fail "notification hid a committed write");
+    let current = Registry.current () |> registry_ok in
+    Alcotest.(check bool) "replacement remains published" true
+      (Registry.declared_lane current ~lane_id:curator_lane.id = Some changed);
+    Alcotest.(check int) "other subscriber receives committed change" 1 !notified;
+    (* Cancellation at the write boundary is still pre-publication and must
+       escape; only post-commit callback exceptions are isolated. *)
+    let cancelled = try
+        ignore (Registry.transact_replacement (prepare curator_lane)
+          ~apply_write:(fun () -> raise (Eio.Cancel.Cancelled (Failure "cancelled write"))));
+        false
+      with Eio.Cancel.Cancelled _ -> true in
+    Alcotest.(check bool) "write cancellation still propagates" true cancelled;
+    Alcotest.(check bool) "cancelled write keeps prior publication" true
+      (registry_ok (Registry.current ()) == current);
+    Alcotest.(check int) "cancelled write sends no recovery signal" 1 !notified))
+
+let test_publication_during_failed_call_keeps_wake () = with_registry_configured (fun () ->
+  with_base (fun base_path clock ->
+    let snapshot = curator_snapshot "http://127.0.0.1:9/v1" in
+    registry_ok (Registry.publish ~lanes:[curator_lane] snapshot) |> ignore;
+    commit base_path "Fact pending while configuration changes";
+    let entered, enter = Eio.Promise.create () in
+    let released, release = Eio.Promise.create () in
+    let calls = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls;
+      if !calls = 1 then (
+        Eio.Promise.resolve enter ();
+        Eio.Promise.await released;
+        Error "old configuration failed")
+      else Ok (answer selected, "curator-test") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
+      let changed = { curator_lane with max_output_tokens = Some 100 } in
+      registry_ok (Registry.publish ~lanes:[changed] snapshot) |> ignore;
+      Alcotest.(check int) "publication starts no parallel call" 1 !calls;
+      Eio.Promise.resolve release ();
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "in-flight failure does not consume recovery wake" 2 !calls;
+      Worker.For_testing.stop ~base_path)))
+
 let () = Alcotest.run "workspace curator lane"
   [ "changed-fact ledger",
     [ Alcotest.test_case "changed facts persist; no work is silent" `Quick
@@ -327,4 +472,12 @@ let () = Alcotest.run "workspace curator lane"
     ; Alcotest.test_case "off preserves accepted work and on resumes deferred facts" `Quick
         test_off_preserves_in_flight_and_reenable_resumes_next_fact
     ; Alcotest.test_case "cancelled owner does not consume another owner's wake" `Quick
-        test_cancelled_owner_does_not_consume_another_owners_wake ] ]
+        test_cancelled_owner_does_not_consume_another_owners_wake
+    ; Alcotest.test_case "enable publication resumes existing fact" `Quick
+        test_enable_publication_resumes_existing_fact
+    ; Alcotest.test_case "configuration recovery requires relevant committed publication" `Quick
+        test_transaction_recovery_is_relevant_and_committed
+    ; Alcotest.test_case "subscriber cancellation preserves committed receipt" `Quick
+        test_subscriber_cancellation_keeps_commit_receipt
+    ; Alcotest.test_case "publication survives an in-flight failure" `Quick
+        test_publication_during_failed_call_keeps_wake ] ]

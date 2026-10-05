@@ -2,6 +2,698 @@
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-10-05
+
+### Added
+
+- Keeper chats show the conversation partner's portrait below the left Keeper list, without taking rows from the conversation or composer. The portrait follows the chat target, stays put while browsing the list, and yields on small or colourless terminals. Chats show the roster by default; an explicit Ctrl-B choice is retained. (#39883).
+- With a `candle.toml`, the Goal verifier appends a `Snapshot` row to the Candle ledger before it commits a passing result, and refuses the commit when the row cannot be written. Without a `candle.toml`, or when Candle is disabled, nothing changes. The server logs at start whether Candle is off, enabled or disabled. A `candle.toml` that links to a missing file, or that is not a regular file, reads as disabled with a reason (#39978).
+- With a `candle.toml`, confirming a Goal's passing result appends a `PayoutOwed` row to the Candle ledger, once per Goal, and refuses the confirmation when the row cannot be written. Nothing is written without a `Snapshot` for that pass, or without an enabled `candle.toml` (#39979).
+- With a `candle.toml`, a worker reads the Tasks of each confirmed payout and appends a `Candidates` row, or an `Unattributed` row when no Keeper can be paid. It runs at server start, after a confirmation and on each maintenance tick. It calls no model yet (#39981).
+- Add checked integer Candle payout arithmetic for whole overdue hours, bounded deductions, and allocation by largest remainders with deterministic name ordering for ties. This calculation layer is part of the payout integration; it does not enable production payments on its own. (#39985)
+- Require explicit amounts for the five Candle payout grades and validated weight/deduction settings before recording payout evidence; reject incomplete or overflowing policies without supplying defaults. (#39995)
+- Connect the optional Candle appraiser lane to durable payout settlement, with separate grade, Task relation and contribution requests, exact execution evidence, and integer payment records. (#40004)
+- Equip owned portrait items through the current Keeper's authenticated tools, recording slot choices in the Candle ledger without another debit. Default restores the starting slot and repeated choices append nothing. (#40010)
+- The TUI `/about` screen gathers registered Keeper portraits around its candle, then settles into a static scene; `[tui].reduce_motion` opens the final scene directly (#40013).
+- Keeper detail now has an Items tab to browse all 18 portrait accessories and preview each over the current outfit in the TUI. The preview does not change equipment or spend Candle. (#40020)
+- Show Candle wallet balances and issued, burned and circulating supply in the TUI and dashboard, using exact decimal amounts from the authoritative ledger. (#40024)
+- Keeper Items now shows the authenticated Candle balance, configured prices, and purchased ownership beside each portrait preview. Off, disabled, and unreadable accounts stay distinct. (#40029)
+- Keeper detail now has a read-only Item tab showing the authoritative Candle balance, accessory prices, ownership, and equipped portrait. (#40033)
+- Add a read-only WKBL scoring-run addon that derives unanswered points from
+  supplied period snapshots with exact row evidence, rejecting boolean or float
+  scoring-side values instead of treating them as integer team IDs (#40058).
+- Support GPT-6.1 Sol and all Codex models advertising `ultra`, preserving the selected effort on turn and capability-verification requests. #40090
+- Share one model list across provider accounts through `model_sets` and provider `model-set` references, keeping explicit binding overrides and account identities separate. #40096
+- Remember explicitly visited Home conversations across restarts independently of startup preferences, distinguish failed or uncertain saves, and preserve named history while Keeper roster reads are unavailable. #40137
+- Show individual Home decisions by request identity, keep successful source readings during partial failures, preserve exact detail and return context across refresh, and retain continuation beside long request lists. #40152
+- Add an isolated Fusion-result projection package with named status/result outputs and snapshot export for generic Lane composition. (#40184)
+- Add an interactive Lane composer prototype with editable Fusion panel/judge layers, validated graph import/export, and missing-input previews. (#40184)
+- Connect exact Fusion run bindings to retained native source captures and wake only matching Add-on consumers on Fusion state publication. (#40189)
+- Add the isolated `fusion-report` Lane package to turn retained Fusion outputs into readable reports with exact input lineage, preserving failed and incomplete states separately from delivery (#40201).
+- Lane Add-ons now show package descriptions and the selected declared result before activity, with multiline report bodies, visible selection and separate coverage/delivery readings (#40206).
+- Match Records navigation to displayed chronology, reuse the selected result while rendering, and expose each selected result’s exact Lane in Summary and raw detail (#40206).
+- Keeper Candle balance, catalog and purchase tools use the canonical Portrait Item catalog and explicit `shop.prices_milli` prices. Purchases atomically debit the authoritative ledger and grant ownership; duplicate purchases and insufficient funds leave it unchanged. Keeper turn identity or the authenticated Keeper credential selects the account. (#40365)
+- Start the MASC server and every keeper of the arm for each arm before a Terminal-Bench run, so a release that cannot boot a rendered config or bring its keepers up stops the run before the dataset download (#40509).
+- Record the checkout commit, the sha256 of the uploaded runtime.toml and config directory, and the effort in every Terminal-Bench trial's metadata as `config_provenance`, so a result says which config it ran (#40518).
+- Edit model context windows from runtime settings with direct token input and 500K / 1M presets; invalid drafts block saving. (#40552)
+- Give durable Librarian fact batches historical Task/Goal context for each selected atom or official-client turn, with explicit unattributed gaps and separate message/tool-observation intervals. Current Goal context stays separate; continuity attribution remains a follow-up. #40681
+- An opt-in JEV no-change preflight can skip the generation lane for Memory-only Librarian passes, retaining normal snapshot and range-receipt processing. (#40755)
+- Run evidence distinguishes received JEV decisions, generation-lane entry, actual accepted skips and selection-validation fallback. (#40755)
+- Librarian run details show typed JEV judgments, probabilities and actual generation paths before raw evidence. Wide Memory screens show a clickable Category rail with counts and wrapped dynamic names; narrow screens keep their existing layout. (#40766)
+- Added a main-only minimal executable build check every 30 minutes, with successful-input skips, shared build caches and separate checked-versus-built SHA reporting (#40841).
+- Add an opt-in multi-provider reviewer lane and a runbook for recovering quota-blocked reviewers without overwriting live assignments or bypassing durable verification (#40866).
+- Define MCP Sampling and its host-owned access boundary for Lane Add-ons and Fusion. (#40913)
+- Update glossary entries on MCP Sampling deprecation status and the boundary between assembled Fusion computation and Board-backed Fusion. (#41071)
+- Define Memory Category as open-ended content metadata in the glossary, separate from retention and mutation authority. (#41076)
+- Add opt-in per-Keeper date-sharded metric retention through `metrics.store_max_bytes`, with shared turn/heartbeat writes and unlimited retention by default (#41111).
+
+### Changed
+
+- Show the newest 20 Board comments by default in post detail, with a total count and a way to load older comments (#39555).
+- TUI Home now prioritizes operator decisions and explicit conversation destinations, with detail kept in Work and Usage. Unread sources stay visible, automatic Gate work is excluded from human decisions, and chat return and selection survive refresh. (#39817)
+- Keep Plan Usage directly reachable through its top-level tab, Home `m`, `go Usage` and `/cost`; `/metrics` and `/telemetry` explicitly open diagnostics. (#39817)
+- `/play invite` shows the invite link and a QR code on a card instead of a chat row, and copies the link only when `y` is pressed. The TUI keeps every card it issued by name until it exits or the invite is revoked: `/play link` reopens the newest and `/play link <name>` an earlier one. A link longer than the card scrolls with `j`/`k`, the arrow keys or the mouse wheel. A refused invite or revoke shows the server's message and what it says is missing, not only the error code (#39877).
+- Keeper chat gives the draft a terminal-themed background, highlights slash-command choices across their row, and keeps send, newline, command discovery and escape hints ahead of display controls. The input keeps its existing history budget and command execution semantics. (#39890)
+- The chat picker offers Play subcommands without executing them during selection; invite arguments remain explicit. (#39890)
+- TUI Next Request now explains which history atoms a Librarian working state represents and separates binding eviction settings from forecast size and model limits (#40028).
+- Clarify when proactive history eviction applies and identify the snapshot's covering Turn Boundary log row in Next Request (#40028).
+- Usage now groups provider limits into responsive account cards, labels the used percentage and model call impact, and shows the last report time after a reset has passed. Plan, Trend and Keeper metrics have separate views; press `v` to change views and `w` to change the Trend range. (#40121).
+- Move TUI Board list, compose and reading screens into a dedicated renderer with an explicit frame interface, preserving read-cache and scroll behavior. (#40150)
+- Give TUI Code drawing and cursor viewport one explicit module owner, keeping Code and Resources on shared pane title geometry. (#40154)
+- Separate Keeper health counts from the title and show the selected Board post title above the table. CI captures wide, narrow, short and NO_COLOR fixture screens with source and full-terminal pixel evidence (#40155).
+- Check Board title, selection, table divisions, visible fixture posts and the reserved lower frame edge across the width sweep without pinning obsolete content row numbers. (#40155)
+- Move MCP resource document rendering into a dedicated TUI module while preserving MIME formatting, pane layout and normalized scroll behavior. (#40159)
+- Give TUI command-palette actions, candidate generation and matching a dedicated model interface, with direct consumers and shared search ownership. (#40169)
+- Describe the Sangokushi III ending evidence as a forced loader experiment, so the Skill distinguishes the observed file-access failure from an unverified campaign unification (#40170).
+- The default Keeper prompt now calls "about two minutes" an example of how small a pre-release check should be, not a time limit or a pass/fail rule. It matches `docs/constitution.xml`. (#40363)
+- Removed `resolve_keeper_wake_target`, which documented an `agent_name` binding lookup but returned the requested Keeper name in every branch. `dispatch_keeper_wake` and `cancel_keeper_schedules` use the payload's Keeper name directly. A metadata read failure for an unregistered name no longer holds the wake at this step; `read_owner_meta` handles it as before (#40407).
+- Board attention settles a Jev relevant or not-relevant answer whose confidence reaches `[typesafeai] board_attention_confidence_floor` (default 0.3) without asking the `board_attention_exact` LLM lane. A Jev answer of either decision below the floor goes to the lane, so a low-confidence relevant answer, which used to settle, is now judged by the lane; uncertain and failed answers still go to the lane. The terminal entry's `jev.answer = not_relevant` now means Jev settled the candidate; a re-judged answer is `low_confidence`. #40413
+- A Jev answer that settles a Board attention candidate records its confidence on the terminal entry, so `[typesafeai] board_attention_confidence_floor` can be re-tuned from the logs. #40420
+- Keepers retrieve stored memories through search and paged snapshot artifacts instead of loading every stored fact into each turn. Complete facts and source validation remain preserved. The Memory screen now labels this size as stored knowledge. ([#40473](https://github.com/jeong-sik/masc/pull/40473))
+- Clarify Recall source-read uncertainty and document deletion receipts among the four task-number allocation inputs. #40497
+- Board attention asks Jev with the current signal alone in the state and names the keeper and its board interests in the question. With the keeper's role in the state, Jev answered relevant far more often than the judge rule allows; a blind evaluation sided with the new shape in 23 of 26 disagreements. #40505
+- Batch Jev questions for newly pushed Board attention candidates; retain durable partition ownership, owner delivery and worker fallback. (#40521)
+- Librarian can create descriptive memory categories and reuse existing names. (#40740)
+- Dynamic category names survive persistence, TUI display, dashboard filters, distributions and pass journals. (#40740)
+- Candle grade IDs, grading criteria, share rounding, remainder ties and deduction rounding are explicit operator policy in candle.toml. Payments retain distribution policy and unallocated milli for ledger replay (#40848).
+- Verifier retries now retain the actual transient candidate identities and resume when the earliest candidate can recover, rather than waiting for the final fallback quota window. (#40997)
+- Goal proofs now retry typed transient verifier failures on the same request, while drop and explicit wakes invalidate pending retry timers. (#41003)
+- Align Memory OS Recall, Keeper task-list, and Candle glossary terms with current projection, filtering, payout-order, and per-Keeper wallet behavior. (#41024)
+- Remove remaining source-shape, copied schema-generation, fixed-layout and fixture-inventory gates while retaining feature behavior and protocol boundaries (#41032).
+- Share the Task status vocabulary across JSON and published schemas, require explicit raw-trace dispatch, and verify portrait placement, installer credential transport and dashboard operator signals through behavior tests (#41032).
+- Remove checker, CI, build-verification and benchmark-harness self-tests, source-shape gates, and obsolete compatibility cases; retain feature behavior tests and direct build, installation, credential and runtime checks (#41034).
+- Consolidate boot-consumer, environment-priority and provider-field regression coverage on the canonical configuration implementation. (#41129)
+
+### Removed
+
+- `/play qr` is gone. The QR code of an issued invite link is drawn only on the invite card that `/play invite` opens and `/play link` reopens, so the one-time link no longer appears in a chat row, the footer or the event log. The card draws its QR only on a terminal with 256 colours or more, so with `NO_COLOR` or on a 16-colour terminal it shows the link text alone (#39877).
+
+### Fixed
+
+- Preserve the Home journey and current Play invite state, dependencies and independent PTY rules when integrating current main. (#39817)
+- Hiding a chat's Keeper list or narrowing the window returns keyboard focus to the composer and preserves the current conversation and draft. Showing the list again does not steal focus. (#39883).
+- On Kitty-protocol terminals, a Keeper portrait in chat or in the Keeper detail is no longer sent again in full each time text beside it changes, such as a running turn's progress mark, a streaming reply or typing. The pixels are sent once; a row written over the picture puts it back by its image id in a few dozen bytes, and only a cleared screen or a changed picture sends the pixels again. (#39883).
+- Codex host stops at completed or deferred terminal tool boundaries and
+  repeated tool calls are logged at INFO, like Claude Code. Failed terminal
+  effects remain at WARN; Codex failure logs now include error details (#39983).
+- Reject negative payout shares before multiplication, including at a zero deduction coefficient, so a 63-bit wrapped negative input cannot become a positive payment. Report weight-sum and multiplication overflow through the same typed arithmetic error. (#39985)
+- Keep Candle payouts pending when a completed Task has unreadable contributor evidence, so repairing its assignee can recover the payout instead of leaving it permanently unattributed. (#39988)
+- Bind Candle payout snapshots and candidates to the confirmed verifier run so a failed same-second attempt cannot supply another run's contribution evidence. (#39993)
+- Isolate concurrent Goal appraisals, distinguish event retries from maintenance retries, and refuse payments after disable, outside durable candidate ownership, or beyond cumulative integer balances. (#40004)
+- Retain an explicit failed appraisal receipt when prompt rendering fails, with no provider dispatch or invented prompt bytes. (#40004)
+- Keep the exact-lane refusal contract fixture complete when the Candle appraiser is registered; preserve unknown-lane rejection and unchanged preference storage. (#40004)
+- Project authoritative equipment to server PNGs, portrait previews, dashboard and remote TUI; include it in cache identities and refresh mounted images after changes or failed-read recovery. Unreadable ledger data cannot serve a stale picture or trigger repair from a read. (#40010)
+- Refresh equipment after execution and briefing HTTP caches, preserving prepared response bytes only while their gear observation still matches the ledger. (#40010)
+- Preserve shared Goal due-date and priority audit history when integrating the current catalog parent, including explicit append-failure receipts after the Goal edit commits. (#40010)
+- Keep Info Mosaic accessories visible while preserving compact bare-body and dish geometry. Verify equipment against bare portraits in the same projection. (#40010)
+- Candle baseline reports count recorded Goal due-date and priority changes by actor from explicit before/after events, state when edit evidence was not observed, and omit ownership statistics for shared Goals. The archived baseline stays unchanged. (#40017)
+- Items keeps the selected accessory visible when navigating a short pane and uses the full list width when a portrait would clip accessory names. (#40020)
+- Withdraw active Keeper voice capture when workspace authority changes; ignore late completion after returning to the original workspace and retain microphone ownership until capture finishes (#40021).
+- Render remote and unconfirmed workspace log diagnostics without treating them as storage failures (#40021).
+- Withdraw unavailable currency observations without hiding healthy Keeper lifecycle controls, and refresh wallet, supply and equipment together beyond dashboard response caches. (#40024)
+- Keep cache and terminal layout fixtures faithful to the public Candle observation and Keeper roster, preserving prepared-byte reuse checks and the measured portrait layout. (#40024)
+- Candle uses only spare Overview rows, keeping the existing attention and task allocation on short terminals. Crowded views name the observed state, with full wrapped diagnostics and exact supply amounts in the global help sheet and Keeper Info (#40024).
+- Check Candle short-screen summaries at the supported 15- and 16-row terminal sizes, and verify the compact resize guidance below the shared viewport floor (#40024).
+- Withdraw prior Candle amounts before a booting or unread server authority and apply a ready refresh identity before its new roster values (#40024).
+- Reject scoped currency reads from before an authority withdrawal, including same-workspace recovery and A/B/A switches (#40024).
+- Withdraw Dashboard Candle supply and Keeper wallet amounts during reconnect and current execution warm-up, preserve the Keeper lifecycle roster, and ignore older warm-up or failure responses after recovery. (#40024)
+- Verify Next Request wording across the current visible Context rows and stop the PTY scenario at its reported scroll boundary. (#40028)
+- Label carried tokens as the retained, eviction-adjusted ledger baseline rather than the latest request usage. (#40028)
+- Withdraw Item balances and pending reads when server identity is unread, booting or changes; delayed responses cannot restore an earlier account after reconnecting. (#40029)
+- Bind Item account reads to the accepted workspace and connection authority, withdrawing stale balances, ownership, prices and errors across workspace changes and reconnects. (#40033)
+- Withdraw the Item account during execution warm-up and reload it only after the canonical workspace is observed again. (#40033)
+- Show the Item request failure reason without its internal HTTP endpoint. (#40033)
+- #40039 Keep the dashboard Item account current after free purchases and Candle price edits by publishing a revision of the authoritative balance, ownership and catalog with each Keeper observation.
+- #40039 Preserve short Dashboard summaries by fitting the complete Candle block only into spare rows; show its typed status in Health and full diagnostics and exact amounts in global Help. (#40039)
+- Use the Keepers navigation command in the account-login PTY fixture after Dashboard navigation changed. (#40039)
+- Check Candle short-screen summaries at the supported 15- and 16-row terminal sizes, and verify the compact resize guidance below the shared viewport floor (#40039).
+- Withdraw Candle observations at server authority changes, booting and failed refreshes, and reject delayed scoped rosters across A/B/A workspace returns. (#40039)
+- Withdraw Dashboard summary and Keeper wallet observations at unknown workspace, epoch invalidation, reconnect and current warm-up responses. (#40039)
+- Keeper guidance connects task-based Skill discovery to exact argument loading and Composition execution, including async completion checks and valid search syntax (#40049).
+- Cancel pending /task creation across workspace changes, revalidate identity before MCP initialization and task creation, and scope completion to its original workspace; revalidate verification verdicts before sending. (#40053)
+- Withdraw Verification rows, evidence and approval confirmation at workspace changes; scope reads and cancel pending verdict jobs so successor workspaces require a fresh review and confirmation. (#40053)
+- Populate remote TUI Keeper lists from the server roster, retaining lifecycle controls while showing unavailable metadata and activity honestly. (#40053)
+- Clear stale Keeper conversation views and destructive confirmation state when the server workspace changes, preserving unsent drafts and the matching-workspace boundary for chat files. (#40053)
+- Show metrics as unavailable for remote or unconfirmed workspaces without inventing a local storage failure or reporting an empty successful read. (#40053)
+- Bind scoped Keeper observations and chained lifecycle/queue requests to the observed workspace authority, withdrawing superseded detail and Changes caches and stopping voice capture. Preserve queued input for explicit resume in its original workspace, and retain staged composer text, attachments, references and recency under their workspace and Keeper. (#40053)
+- Cancel scoped mutations while they wait to connect and check workspace authority before each POST, including provider refresh and deletion retry successors; already admitted server effects remain separate. (#40053)
+- Retire the old observer session, replay cursor and Activity events; close runtime selection and clear schedule confirmation and request ownership when workspace authority changes. Disable lifecycle writes until identity is observed. (#40053)
+- Keep invalid remote Keeper identities selectable for their supported controls and show observed remote rows in Activity without claiming a local metadata read. (#40053)
+- Discard HTTP surface bundles when their before/after workspace identities differ; withdraw Ask drafts and pending answers at the boundary, scope GitHub credential jobs, and recheck workspace identity after the settings editor before saving. (#40053)
+- Withdraw connector projections, confirmations and pause offers at workspace changes; cancel owned unbind batches, recheck each request, and reject connector editor writes against a replacement workspace. (#40053)
+- Withdraw verification approval arms and runtime parameter forms at workspace changes; cancel their reads and writes, and recheck task creation after MCP initialization before sending it. (#40053)
+- Bind retained chat inputs and drafts to both base path and MASC root. Cancel superseded Tools, journal and resource requests, recheck their continuations, and clear their cached projections and pending owners when workspace authority changes. (#40053)
+- Replay stored Candle payments from their recorded allocations without applying the current rounding or remainder rules. Receipt decoding still rejects invalid ranges, duplicate recipients and inconsistent totals; every new Paid append validates current arithmetic. (#40066)
+- Record one parsed response per successful Candle HTTP appraisal while preserving the CLI raw and parsed response pair. (#40066)
+- Reserve Work task state, assignee and priority space before abbreviating long titles, including Korean titles, on narrow terminals (#40089).
+- Wrap TUI Usage rows before calculating the scroll window so metric coverage remains reachable on narrow terminals and after resizing (#40091).
+- Fold auxiliary System log and Workspace table columns as the terminal narrows, keeping log messages and repository paths aligned with their headers (#40094).
+- Edit inline and dotted model/binding declarations in the runtime dashboard, report assignment changes consistently, and remove dependent runtime references when deleting a provider. #40096
+- Keep lane and elapsed time visible beside long Answering names, preserve navigation through unavailable entries, and reject opening selections outside the visible viewport. (#40098)
+- Keep Agenda schedule pages readable without snapping back to an actionable row; explicit row navigation follows the selected action and Enter opens only a visible action. Preserve the navigation state and independent PTY rules when updating current main. (#40102)
+- Keep complete Memory claims and provenance readable in narrow detail frames, preserving fixtures through the current decoder owner when composing main. (#40103)
+- Keep Item account refresh coverage for changed durable revisions, free purchases and price-only edits, while preserving pending reads under unchanged observations (#40106).
+- Preserve shared Keeper-list currency privacy and strict Item admission when integrating the newer Candle policy; currency-unavailable Gate observations retain lifecycle controls (#40106).
+- Restore compilation after integrating main: keep strict memory-object validation with its decoder and handle reasoning-effort admission failure before turn dispatch (#40106).
+- Withdraw Keeper detail and Item balances, prices and ownership when server workspace authority changes; invalidate pending detail reads so late replies cannot cross that boundary. (#40111)
+- Project the authoritative Item account revision through the public Keeper roster and retry a settled transient Item read on ordinary refresh even when that revision is unchanged. (#40111)
+- Draw selected Item accessories in Mosaic previews and observed accessories in Info while retaining the compact bare Keeper portrait. (#40111)
+- Withdraw Item facts and pending readers when the roster loses their revision owner; dashboard Item reads now follow workspace and execution publication changes. #40111
+- Withdraw retained Item facts while the server is booting, and admit the canonical nullable account revision in every strict Gate Keeper wire variant. #40111
+- Treat malformed roster account revisions as unavailable and withdraw retained Item facts until a valid revision is observed. (#40111)
+- Require the current roster's explicit account revision and bind Item responses to one immutable account/catalog observation; retry failed Dashboard reads only after a new accepted roster observation. (#40111)
+- Withdraw retained Item accounts and reject pending replies after an execution refresh fails; recover only from a newly accepted execution workspace observation. (#40111)
+- Correct Item authority PTY recovery scenarios to observe detail withdrawal and reopen Items only after a ready roster; preserve late-reply rejection checks. (#40111)
+- Keep foreign-workspace Item refusal and late-response checks in B, and exercise failure, Off and recovery after returning to admitted A in the authority PTY fixture. (#40111)
+- #40114 Keep Candle and portrait observation readers out of the dashboard’s eager Effect schema dependency while preserving strict wire validation; reject trailing line terminators in monetary amounts and account revisions.
+- #40114 Show the Item request failure reason without exposing its internal HTTP endpoint in the account panel.
+- Preserve text, images and image references as a complete Keeper-specific draft when leaving and returning to a conversation; switching recipients cannot reuse another Keeper's unsent media. #40116
+- Keep the Voice wizard input tail and caret visible, and give Keeper and Voice assignment selections independent viewport windows when navigating or resizing (#40117).
+- Restore the Voice assignment header buffer and validate each fixed selection header’s role, position and value while preserving resize and exact assignment checks. (#40117)
+- Keep failed Keeper creation declarations editable, handle malformed JSON safely, and open the confirmed Keeper's conversation for an explicit first request. #40120
+- Keep Home's Recent pane closed by default on wide terminals while preserving explicit pane choices, and prioritize decision and continuation destinations on short Home frames. #40130
+- Keep long Keeper Info and Channels metadata readable through wrapped detail rows, including paths, references, channel names and CJK errors. #40131
+- Preserve metadata SGR styling on independently drawn continuation rows. Keep interactive channel binding rows single-line while the selected Binding target and metadata retain full wrapping. #40131
+- Wrap learned names independently of binding selection, cover an unbound long mapping, and link the PTY suite to the styled wrapping module. #40131
+- Keep complete Task metadata, verification evidence, Done notes, cancellation reasons, and history reachable in a physical-row reader; scope cancellation to the visible Task detail (#40133).
+- Expose Task contract inspection/verification evidence, predecessor, execution references, reclaim facts and exact attached Skill references in its scrolling detail. #40133
+- Show the handoff-specific reclaim policy, update time and editor separately from Task-level reclaim metadata. (#40133)
+- Keep the rendered colon separators in Task handoff viewport expectations so metadata checks reach the navigation and state-transition assertions. (#40133)
+- Reset the Task viewport on reference navigation and wait for the loaded Task palette entry before entering the metadata fixture. (#40133)
+- Show complete runtime parameter keys, current/default values and contracts in a scrollable detail window while keeping selection and type-aware editing stable at narrow terminal sizes. #40135
+- Preserve the detail reading position at selection boundaries and show current/default string values as JSON so boundary whitespace and empty strings remain visible. #40135
+- Home and End continue to scroll Runtime parameter details while their inline editor is open. #40135
+- Preserve exact JSON whitespace and separators by rendering each parameter choice as its own literal value. #40135
+- Play invite creation checks and publishes the credential in one Auth transaction, so an invite cannot overwrite a concurrently renewed credential. Revoking a present unreadable or mismatched credential now refuses the request and preserves its controller. Controller recovery uses the same file-presence authority and keeps the holder when the name is a dangling symlink or cannot be checked. (#40136)
+- Preserve complete Presets descriptions, source paths and restore results on narrow terminals, with physical-row paging and selection retention during refresh (#40141).
+- Keep full Goal detail metadata, every linked Task, and complete activity IDs and timestamps reachable through a wrapped reader in narrow or short terminals; preserve visible action commands and reject actions for removed Goals (#40142).
+- Present active Goal confirmation evidence ahead of metadata and surface transition refusals through the action notice. #40142
+- Keep Goal lifecycle arming instructions pinned beside action keys throughout scrolling. #40142
+- Show active Goal confirmation and submission status before measurement evidence, including measurements longer than the viewport. (#40142)
+- Require a presented frame containing the complete proof-binding end before Goal confirmation, and keep overfull pinned actions behind a too-small frame until the reader fits (#40142).
+- Fit Keeper runtime picker names, routes and warning facts within narrow terminal widths, preserve distinguishing name tails, and suppress assignment/default-reset keys while the compact frame hides the picker. #40143
+- Separate head-bound source approvals from ordinary CI, while retaining independent review and current formal change-request state for integration (#40144).
+- Use the current formal review state for source change requests, so resolving or dismissing one does not leave a historical integration failure (#40144).
+- Keep command palette selection inside the list and show its origin and explicit Code question before execution. Lane Add-ons uses `:` for the shared palette and `A` for advanced commands; Escape preserves the prior screen (#40151).
+- Prepare Home selection and request-window state before rendering, retaining ready-source focus and pure drawing. (#40152)
+- Keep Home operator Task cards and their exact reader when an unrelated archive or Goal-link source fails. Home and Agenda share the primary backlog reading and do not offer backup-only tasks as current requests. (#40152)
+- Wrap complete Keeper log facts and storage diagnostics before scrolling, making long costs and ASCII/CJK tool names readable in narrow terminals with consistent newest-first row navigation. (#40160)
+- Open Keeper logs at newest facts and diagnostics, retain diagnostic severity and raw cost precision, and reset to the newest row when wrapping width changes. #40160
+- Handle Keeper log frame scroll receipts when reading current position and routing wheel input through the existing bounded log navigation. (#40160)
+- Keep complete Schedule metadata, recurrence, wake failures, and fence evidence readable in narrow or short terminals; preserve due/target/recurrence list priorities and bind actions to the visible schedule after refresh (#40167).
+- Associate schedule cancellation failures with the requested schedule and only show them in that schedule detail. #40167
+- Guard macOS Keychain fixture Security headers and API calls with `__APPLE__`; non-Apple foreign stubs still compile and fail explicitly if called (#40170).
+- Credentials now reject malformed expiry timestamps and normalize RFC3339 offsets and fractions to UTC whole seconds. Static bearer checks, OAuth bootstrap checks, Play seats and token inventory share one expiry rule, keeping a credential valid throughout its expiry second and out of the prune set until that second ends. Malformed in-memory inventory entries are reported as invalid and retained for repair. #40171
+- Retain persisted malformed expiry and credential read failures in token inventory and Play invite listings; invalid Player records return a typed HTTP 503 instead of disappearing. (#40171)
+- Preserve credential-directory access failures, reject alias fallback for unreadable exact credentials, and allow explicit retirement of malformed named records. (#40171)
+- Refuse revocation through redirect aliases while allowing malformed-expiry canonical owners, and unlink dangling named credential paths instead of reporting a false success. (#40171)
+- Retain and validate embedded UUID retirement targets even when the canonical owner has malformed expiry; refuse foreign targets before any deletion. (#40171)
+- Report nonregular credential inventory entries and redirect targets as unreadable without waiting for FIFO writers, preserving the failure in token and Play invite listings. (#40171)
+- Preserve the selected Codex account's supported reasoning efforts and default
+  in model discovery. Admit explicit effort against the account's live model
+  list before sending a turn, and propagate configured effort through Fusion.
+  Metadata refusal releases a pre-dispatch Keeper claim instead of requiring
+  operator recovery. #40172
+- Admit explicit effort before creating a persistent Codex thread, and
+  keep API-only catalog rows out of native Codex model-list suggestions while
+  retaining the explicit model-info fallback. #40172
+- Token prune discovers and retires current credentials in one Auth transaction, preserving concurrent renewals and ambiguous redirect files. Preview reports no effects; failed or partial deletion is reported separately from successful retirement. #40174
+- Read prune credential JSON through the owned regular-file reader, refusing special files and symbolic links before deletion without waiting for a FIFO writer under the shared credential transaction. (#40174)
+- Preserve canonical retirement authority through cleanup failures, include validated redirect aliases, serialize raw-token publication with pruning, and keep absent-store previews free of filesystem writes. (#40174)
+- Exclude the canonical credential by its stored path when retiring aliases, preserving retry authority for normalized Keeper names. (#40174)
+- Retire validated alias raw-token sidecars before their redirect files, retaining canonical and alias retry authority if sidecar cleanup fails. (#40174)
+- Shared credential token rotation reads and publishes under one Auth transaction, preserving concurrent renewals and revocations. Rotation validates all credential write targets before publication and reports partial raw-token and credential effects explicitly. #40182
+- Detect shared groups across all current owners before selecting rotation targets, reject UUID targets shared with unselected owners, and serialize Keeper and supplied-token publishers with rotation. (#40182)
+- Preserve recoverable supplied tokens after a failed credential write, allow retry of same-owner UUID partial publication, refuse noncanonical UUID filenames and share one admitted token index across startup Keeper sync. (#40182)
+- Publish the replacement named authority before retiring its prior UUID payload, and use the observed paired-publication recovery for Keeper, supplied-token and rotation writers. (#40182)
+- Reuse verified nonblocking credential reads for diagnostic listing, and accept redirect objects with additional fields consistently with authentication. (#40182)
+- Use nonblocking descriptor-verified reads for paired publication snapshots/observation and Keeper preflight, refusing special files before the admitted operation can wait on them. (#40182)
+- Index only exact named credential owners, so partial or retired UUID payloads cannot grant bearer authority; validate unselected UUID owners before scoped rotation on case-insensitive stores. (#40182)
+- Preserve normalized credential owners in bearer lookup, remint every selected initial sharer, and rebuild admitted authority after a failed Keeper before continuing unrelated batch entries. (#40182)
+- Refuse Keeper credential publication through another owner's alias or UUID before writing raw tokens, preserve same-owner partial UUID retries, and refresh batch ownership after uncertain publication. (#40182)
+- Cover normalized uppercase and punctuation UUID-backed owners through real bearer lookup, retaining alias and orphan-payload exclusion. (#40182)
+- Refresh normalized-owner bearer lookup tests through the public credential publisher, preserving alias and orphan fixtures without depending on private Auth modules. (#40182)
+- Refuse unencodable capture strings with a tool error while keeping the stdio worker alive (#40184).
+- Refuse nested non-finite capture values without stopping the package worker and create exported Fusion snapshots exclusively with private permissions (#40184).
+- Reject contradictory Fusion status/stage/progress, failure fields and producer origins or missing recorded bodies; preserve large valid bodies once in the manifest-bounded MCP response. (#40184)
+- Describe retained Fusion evidence in MCP text only when a result row exists, and distinguish status-only and empty captures (#40184).
+- Reject duplicate snapshot object keys before retaining evidence. Bound the namespaced host observation by the declared reply envelope before allocating prefixes, and keep retained source/output reads bounded. Near-limit worker replies can be explicitly refused when host prefixes no longer fit; relation count does not enlarge the limit (#40184).
+- Reject integer timestamp overflow as invalid input while keeping the MCP worker available for subsequent valid captures (#40184).
+- Reject unencodable request IDs and custom text summaries safely, with regressions for nested surrogate keys and values, valid Unicode, and continued stdio requests (#40184).
+- Traverse JSON without Python recursion and keep the worker responsive to deeply nested requests; serialize snapshot bytes before claiming the exclusive export path so an unencodable capture can be retried (#40184).
+- Keep complete stop commands for other Keepers visible in narrow TUI chat panes, and reserve their wrapped rows above the composer (#40186).
+- Guard macOS Keychain fixture Security headers and API calls with `__APPLE__`; non-Apple foreign stubs still compile and fail explicitly if called (#40186).
+- Keep the sending-row age regression on the shared status producer and its renderer, checking elapsed ages for local and foreign requests. (#40186)
+- Pin labelled inputs across scene interactions, retain delegated content and rendered label separators, and expose mixed/selected state using the first recognized ARIA role. (#40187)
+- Coalesce adjacent rendered block/cell boundaries, expose associated labels only when their native checkbox/radio is unobservable, and distinguish ARIA checked versus selected verification (#40187).
+- Preserve explicit label click handlers, normalize ARIA mixed states by role, and read admitted control labels through browser-rendered text without exposing filtered descendants (#40187).
+- Pin every nullable native label association before activation, retain boxless label text geometry across Scene, Elements and interactions, and carry typed choice state into TUI deltas and labels. (#40187)
+- Bind native Fusion acquisition to the authenticated installation Keeper and reject another owner before retaining run or Board evidence; persistent operator configuration remains explicitly distinguished. (#40189)
+- Preserve exact Fusion ownership in strict durable read visibility and transitive output consumers; enforce verified HTTP identity, declaration ownership and retained subscription access, including uniform foreign/unknown denial. (#40189)
+- Retain authenticated declaration ownership independently of source retention and TOML validity, with durable pending admission before the source write. Preserve other Keepers' hidden subscriptions during saves and make hidden/absent producer notices indistinguishable (#40189).
+- Exercise both Keepers editing their filtered subscriptions before empty-save removal, preserving the other owner and operator replacement. (#40189)
+- Bind completed declaration ownership to its admitted source revision: the Keeper can read that revision after Fusion registry eviction and submit a live-authorized repair for changed bytes without seeing an unadmitted valid or malformed replacement. A failed repair retains only the prior admitted revision, so a stale compare-and-swap cannot expose the replacement. Keep operator reassignment explicit and refuse oversized Fusion envelopes before retaining blobs. (#40189)
+- Verify a retained Board post's Fusion producer and author against the current run owner before sending the post or its metadata to an add-on. (#40189)
+- Keep the exact published v0.48.0 shared Lane binding envelope readable after restart when the authoritative retained producer graph proves shared visibility. Missing, ambiguous, cyclic or private dependencies and malformed or partial authority records are refused; recognized reads do not rewrite stored bytes or grant operator acquisition authority. (#40189)
+- Revoke private declaration ownership on shared/operator transitions, preserve admitted worker visibility through recreation, and keep shared Keeper/tokenless-local saves nonexclusive. (#40189)
+- Preserve durable Fusion terminal history for delayed Add-on acquisition after recent-cache eviction and restart, retaining exact owner checks and rejecting malformed or reused unfinished lifecycles. Fusion keeps its bounded recent in-memory list; its JSONL history now remains on disk across ordinary restarts. (#40189)
+- Index authoritative Fusion observer history incrementally, reconcile private ownership when an unconfirmed shared save installed its receipt revision, and distinguish initially rejected missing runs from unavailable captures after admission. (#40189)
+- Dashboard Keeper Items follows the accepted workspace identity, withdraws previous accounts during workspace changes and reconnects, and admits only current account responses. (#40190)
+- Run the A/B/A workspace browser scenario with the existing Item browser CI
+  capture and record the published source files in its audit manifest. (#40190)
+- Keep browser picker selection fixed until client discovery completes. #40194
+- Pan long Code diff lines with Shift-arrow keys while keeping line numbers fixed and preserving the original file's position. (#40196)
+- Refuse duplicate Fusion source aliases before generating conflicting report row identities (#40201).
+- Require paired Fusion status and result rows to share their exact source coordinates, and keep reports incomplete when status evidence is absent (#40201).
+- Validate paired status/result relations and upstream source coverage before completing Fusion reports; regenerate preview evidence from the final workers and provide its browser capture command (#40201).
+- Reject contradictory Board evidence, retain shared input provenance once with linked report rows, keep complete analysis bodies within the declared reply envelope, and regenerate fixture previews from the final workers (#40201).
+- Give Fusion reports an 8 MiB reply allocation so a complete 4 MiB producer result remains readable with Markdown and retained provenance; keep explicit oversize refusals and verify actual producer admission at the boundary (#40201).
+- Keep failed Fusion reports incomplete when their selected evidence lacks the status row that carries the retained failure reason. (#40201)
+- Require consistent Fusion producer identity and exact instance/sequence coordinates before accepting report lineage. (#40201)
+- Match every recognized Fusion row to its upstream source and incarnation coverage before reporting completeness, including result-only ports. (#40201)
+- Require paired rows to cite one immutable snapshot, keep Board post IDs bound to one Fusion run, and validate that the producer's output selection includes every reported row. (#40201)
+- Read long recorded and repository diff bodies with Shift-arrow panning while preserving change markers and line-number gutters. (#40208)
+- Read complete link preview URLs, instructions and refusal details in narrow TUI modals using terminal-safe wrapped rows. (#40209)
+- Keeper, operator and CLI login credentials publish their recoverable bearer and credential under the same Auth transaction, preserving current ownership, opaque token bytes, and explicit bootstrap and lifetime policies. (#40214)
+- Reject whitespace and ASCII control bytes before file-backed bearer publication or matching Keeper reuse, without normalizing accepted bytes or changing direct token APIs. (#40214)
+- Refuse nonregular credential and raw-token targets before opening them under admission, preserving symlinks to regular files. (#40214)
+- Recheck every current bearer owner under admission before Keeper reuse; a colliding bearer is replaced without rewriting the unselected owner. (#40214)
+- Restore the previous raw bearer after failed paired publication only when the named authority is unchanged and the new credential is not current; otherwise retain the matching new bearer and report observed publication state. (#40214)
+- Preserve regular symlink compatibility in file-backed admission and Keeper batch lookup using a nonblocking verified descriptor; prune and rotation retain their stricter owned-leaf reader. (#40214)
+- Keep Runtime candidate identities and route/probe status visible in narrow lists by sharing measured header/data columns and dropping auxiliary fields first. (#40220)
+- Keep mobile Keeper commands visible and scroll the menu within the actual space below its anchor, including short landscape screens; give runtime alerts the full detail row (#40224).
+- Fit Workspace Activity file identities and outcomes into narrow listings and provide a fully scrollable selected-record context reader. (#40230)
+- Stage the complete split keyboard helper closure for Surface Studio and remove obsolete automatic CI selector metadata. (#40234)
+- Code memos wrap their complete author and literal text at the current file-pane width, preserve Markdown punctuation, and scroll by physical rows after resize (#40240).
+- Dashboard Candle and Portrait observations share strict validation between the existing pure domains and lazy API schemas, preserve canonical account revisions, and retain immutable observations while rejecting missing roster rows. (#40241)
+- Resolve focused Board comments and every displayed reply's ancestors from one server snapshot, preserving loaded ranges across refresh and reconciling page changes before displaying new totals. (#40241)
+- Let failed full-history Board reads toggle back to the newest comment page. (#40241)
+- Read paginated TUI comment ancestors from the server context, refuse mixed revisions in full history, and reset ordinary Dashboard comments and subsequent requests when route focus is cleared (#40241).
+- Keep recently active reply threads visible, clear stale focus on ordinary reopen, and bind comment revisions to ordered IDs and parent links rather than votes (#40241).
+- Open ancestor-enriched TUI threads at the newest numeric-page reply and keep history mode stable while its refresh is in flight (#40241).
+- The TUI Code history wraps complete commit and Keeper metadata, exposes file/scope and action notes, and resolves Enter from the record owning the first visible row. Every record remains selectable even when the document fits the pane (#40247). History preserves literal metadata symbols, and diff/notes footers omit the unsupported Enter action.
+- Retain regression coverage for committed shared Goal creation when its audit event append fails, including the failed receipt, actor, stored Goal and recording-path evidence (#40248).
+- Dashboard Item wallets and catalog prices share Candle's canonical millicandle predicate, removing duplicated validation while preserving the existing accepted values, explicit zero prices and exact large amounts. (#40252)
+- Include the parent Candle account revision decoder repair so the Item amount change can generate the dashboard bundle. (#40252)
+- Point the Item account schema directly at the existing Candle domain amount predicate when composing the refreshed domain parent. (#40252)
+- Verify generic Auth/OAuth reads on a nonblocking opened descriptor and reject replacement during the read; refresh current source/evidence hash manifests (#40256).
+- Auth and OAuth metadata readers reject nonregular files without waiting for a FIFO writer, and credential publishers refuse unreadable configuration before effects while retaining secure defaults for genuinely absent configuration. (#40256)
+- Credential diagnostic listings use the same regular-file boundary for direct entries and redirect targets, preserving typed unreadable rows without opening a FIFO. (#40256)
+- Static bearer authentication uses each owner's current named credential after cold or stale-cache rebuilds. Intact old UUID payloads remain readable as data while losing authority after the named credential is removed, unreadable or replaced; current roles and supported aliases are preserved. (#40259)
+- Token verification and permission checks through a UUID or stored alias also require the full credential to match its current named owner; surviving old payloads do not retain Admin authority. (#40259)
+- Serve the public Play agent guide over HTTP/2 and explain guide refusals consistently across both transports. (#40262)
+- Tools wraps complete paths, diagnostics and provenance at the frame width, preserves literal revisions and recorded timestamps, and exposes composition nodes and dependencies in usage cards (#40263).
+- Reject missing requested Dashboard feature test files before invoking Vitest, with an explicit path diagnostic. (#40272)
+- Review and Verdict details wrap complete metadata, evidence references and goal metrics at the pane width, preserve literal reasons and recorded creation timestamps, and retain full armed/action-error details in the scrolling document (#40277).
+- Bind approved CI candidate composition to the reviewed base and native stack scope; fetch missing objects from the selected repository and roll back failed receipt close without deleting concurrently moved refs (#40279).
+- Voice metadata wraps to the available pane width. Keeper and voice selectors stay visible while their complete identities scroll below; setup keeps the active input and caret visible while full input, draft and probe details remain readable. (#40282)
+- Keep leader-selected ordinary compilation on the Core library and explicit minimal behavior suites; reserve full checks for Release/Tag verification (#40290).
+- Let read-only approved-candidate checks use Actions installation tokens without an authenticated-user lookup; review and approval checks still require caller identity (#40290).
+- Treat the two-minute check size as an example rather than an enforced job deadline; preserve existing stalled-job and runner hang safeguards separately (#40290).
+- Runtime v opens complete default and ordered media route metadata, boot admission differences and read/action/probe diagnostics in a scrollable read-only detail, including when no candidate exists. (#40293)
+- Repository diff responses are tied to reader, repository scope, file and request generation. Patch review keeps its own data and errors rather than showing a cached diff from another reader. (#40296)
+- Patch review supports Shift+Left/Right to pan long lines while old/new coordinates and diff markers stay fixed. Horizontal position is visible and clamps to actual content and pane width, resetting on reopen. (#40301)
+- Patch review and Keeper voice assignment can open help without losing their reader state. Help starts with the active nested reader controls, and patch/Runtime detail footers use the same binding tables. Voice assignment also names metadata paging and edges. (#40304)
+- Runtime Enter/Right only opens a row from the listing. Open row and route/status readers retain their identity and scroll position even when refresh reorders the hidden listing. (#40306)
+- Keep Goal membership explicitly unknown in Task detail and verdict context when the link registry is unreadable, while retaining authoritative Home Task cards. (#40307)
+- Keep recovered Goal-link registries noncurrent: valid populated or empty backups cannot establish Task membership or absence while the primary is unreadable (#40307).
+- Integrate responsive Runtime list columns with the stacked route/status reader, active help and stable detail identity. Candidate identity and route/probe share the available pane width while auxiliary columns fold first. (#40309)
+- Keep Goal-link failures in their authoritative reading, retain current Task flow on Home, and show independent link coverage in Work and Planning instead of claiming unavailable Tasks or absent links (#40311).
+- Report failed Task backlog reads before unread Goal links in Planning, and restore empty-link reporting after refresh without treating archive coverage warnings as primary failures (#40311).
+- Build the Task-to-Goal index once per successful registry load and reuse it across Task, Harness and active-task projections; failed reads and workspace changes replace the cached reading (#40311).
+- Integrate responsive Workspace Activity rows and full selected-record Context into the TUI stack; preserve reader ownership and show active Activity help. (#40316)
+- Integrate complete literal Code memo reading and physical-row navigation into the TUI stack, with shared active memo help/footer bindings. (#40319)
+- Integrate full Code history metadata and visible-row Enter ownership into the TUI stack, preserving memo navigation and adding active history help. (#40320)
+- Keep Enter owned by the focused file tree when History remains open in the other pane. (#40320)
+- Integrate complete Tools metadata, revision and timestamp reading plus composition dependencies into the TUI stack, using physical rows for display and navigation. (#40325)
+- Integrate complete Prompt registry and runtime asset detail documents with physical-row paging and edge navigation into the TUI stack. (#40327)
+- Keep the selected Tools Skill visible above every tab and show its complete source, package and revision in the document; display and Enter/edit share the same typed selection. (#40328)
+- Preserve numeric Task identifiers and distinguish oversized opaque identifiers in narrow Work lists; keep complete identifiers and metadata reachable in Task detail. Usage wrapping retains indentation, meter padding and per-row styles. (#40331)
+- Give unused short-title cells to Task assignees, distinguish shortened IDs from bare numeric IDs, and include the shared layout helper in Usage PTY selection. (#40331)
+- Keep Work list navigation active after refresh removes the Task whose detail was open (#40336).
+- Integrate complete Task metadata and transition evidence into one physical-row document; page movement and cancel keys follow the visible Task reader. Preserve current Home decision navigation and load the fixture Task roster through Work. (#40336)
+- Show retained handoff reclaim policy and update actor/time in Task detail, and start followed Task references at the first document row. (#40336)
+- Keep the TUI chat queue summary visible through submission and server admission, excluding started or settled batch inputs. Preserve local NEXT previews and queue actions at 80 columns, and distinguish awaiting receipts and delivery rechecks from confirmed queued input. #40340
+- Preserve and reset Goal action styling across wrapped rows so it cannot leak into adjacent panes (#40341).
+- Keep full Goal detail metadata, every linked Task, and complete activity IDs and timestamps reachable through a wrapped reader in narrow or short terminals; preserve visible action commands and reject actions for removed Goals (#40341).
+- Present active Goal confirmation evidence ahead of metadata and surface transition refusals through the action notice. #40341
+- Keep Goal lifecycle arming instructions pinned beside action keys throughout scrolling. #40341
+- Keep the Goal phase and ID in the pinned detail header, and reset a scrolled proof reader when confirmation submission begins so the in-flight state remains visible (#40341).
+- Check wrapped Goal text sanitization against the terminal-text module that owns the renderer's sanitizer (#40341).
+- Pin the complete Goal identity on wrapped header rows when the pane is narrow and share that row count with scroll geometry. (#40341)
+- Ctrl-O in Keeper chat now reopens retained image attachments from loaded history, keeps queued attachments available even when server and client clocks disagree, and preserves the staged draft when a delayed history load provides no newer arrival evidence. Settled local images no longer hide newer saved images in a bounded history tail. Artifact responses are checked against their recorded digest and byte count before decoding; HTTP requests stay on the Eio fiber while successful payload decoding runs in a worker (#40345).
+- Expandable textareas preserve input made immediately after mounting or a parent value reset (#40346).
+- Reject conflicting benchmark comparison modes before starting any harness or comparison job, including Vision with TUI, server or checkpoint history (#40348).
+- Preserve quoted Skills and Tools source declarations so edited OCaml owners continue to select their PTY scenarios (#40348).
+- Keep retained Candle evidence audits active under optimized Python and bind historical rubric interpretations to their frozen prompt and committed corpus (#40352).
+- Preserve the current committed operator Grade anchor while distinguishing it from the earlier unlabelled measurement (#40352).
+- Bind retained evaluation metadata to the recorded CI executable hash, verify each comparison receipt against frozen prompt bytes, and reject unknown or inconsistent survey failure outcomes (#40352).
+- Validate compared decisions and disjoint run identities, bind the original baseline and survey binary to frozen provenance, match registry failure details, and refresh auditor checksums without changing retained measurements (#40352).
+- Run evidence regressions through the dedicated test alias, audit each comparison bundle against its artifact and durable run records, and reject inconsistent corpus counts or duplicate case IDs without changing retained measurements (#40352).
+- Bind evidence audits to complete frozen inputs, JSON types, exact output schemas, retained successful exits, and registry-backed trial order (#40352).
+- Reject invalid successful answers, contradictory response observations, mismatched runtime declarations and failed-run slots; mark historical prompt commit attribution unverified and join survey failure details to registry records (#40352).
+- Preserve both retained-evidence audits and Keeper continuity admission checks when integrating current main, without changing frozen measurements or rubric authority. (#40352)
+- Refuse contradictory failed attempts, TOML numeric type changes, and all-zero successful Weights in retained Candle candidate audits. (#40352)
+- Start a new off-feed Board detail request when the route changes during another post's pending read, retaining rejection of stale responses. (#40353)
+- Load older Board comment pages until a focused reply and its full ancestor chain are available, preserving conversation context across pagination. (#40353)
+- Deduplicate overlapping comment pages and load missing ancestors when an already visible reply receives route focus. (#40353)
+- Keep focused Board detail requests stable across remounts and action refreshes, retaining the loaded post and successful comment pages if ancestor enrichment fails. (#40353)
+- Clear retained comment focus on ordinary post opens, and retry incomplete settled ancestry when a focused detail is revisited (#40353).
+- Clear focused-route ancestry when restoring a retained compact Board thread, so comment action refreshes stay on its current page (#40353).
+- Retry an initially failed focused Board detail read on a later visit, while reusing pending reads and retaining successfully loaded offset-zero comments (#40353).
+- Keeper event-queue snapshots encode on an independent worker so an owner-lock holder cannot wait behind a recovery worker needing the same lock. Codec shutdown releases protected writers waiting to submit, and strict durability confirmation uses the same state encoder (#40357).
+- A Keeper that runs on an official client (Codex) no longer has every Librarian continuity snapshot refused after the model call. Snapshot capture and restore find the covering line through `Keeper_turn_boundaries.witness_line`, so the start state of a turn covers the prefix when no end line carries an atom position. Only lines of the history's current generation count, so an earlier generation that ended at the same atom and digest does not hide the current start state (#40359).
+- Admit Ultra as Max for Claude Code and reject unadmitted Ultra before CLI launch; scope GPT-6 Sol Responses effort to its supported ladder while preserving Codex Ultra and existing model limits. (#40361)
+- A Keeper on Codex no longer loses its turn when the model spawns a Codex sub-agent. Every app-server client now starts with `agents.enabled=false` and `features.multi_agent_v2=false`. `features.multi_agent=false` alone did not work: the model catalog declares `gpt-6.1-sol` as v2 and outranks it (#40364).
+- Account reads and purchases refuse corrupt or incomplete Candle ledger data without invoking startup recovery. Replaying stored purchases keeps their original prices after configuration changes. (#40365)
+- Classify Candle shop calls as generic tool completions, without attributing them to appraiser execution or browser/machine changes. (#40365)
+- Order unlisted Goal titles by the exact committed store version retained in creation/update snapshots; report unknown or conflicting ordering without inventing a latest title. (#40369)
+- Keep the Verification and Harness PTY layout selector scoped to the renderers those views exercise. (#40370)
+- Keep frozen evaluation provenance and comparison checks active under optimized Python, and remove duplicate or misnamed Candle release fragments (#40371).
+- A Librarian continuity-only run whose snapshot the store refused is now recorded as `Failed` with code `continuity_not_committed`. It was recorded as `Succeeded`, so the lane list showed 100% while the snapshot never committed (#40373).
+- Select the focused Code diff-pan, history and memo PTY scenarios when the existing Code response owner changes. (#40376)
+- Restore the recorded diff-pan scenario’s double-quoted watch paths for the actual Code result implementation and interface. (#40376)
+- Connect Dashboard namespace Pause and Resume controls to the existing operator confirmation actions, and verify namespace state before reporting success (#40378).
+- Require admin authority for Dashboard namespace actions and confirm their outcome with a current Workspace pause-status read (#40378).
+- Preserve admin-only namespace controls and direct pause readback when incorporating concurrent refresh changes; an awaited urgent refresh now queues its follow-up behind an in-flight read. (#40378)
+- Refresh the isolated Chromium fixture for authoritative pause-status readback, including failed and disagreeing readbacks, and record current source hashes and browser evidence (#40378).
+- Revalidate cached running Workspace pause status, and return namespace confirmation receipts/direct readback without waiting for auxiliary Dashboard projections. (#40378)
+- Revalidate forced-refresh Running state, preserve authoritative pause readback across projection updates, and queue one post-action read behind pending operator projections (#40378).
+- Select the focused Resources success and read-error PTY scenarios when the extracted Resources response owner changes. (#40380)
+- Select focused Resources PTY scenarios for changes to the extracted list and content request owner. (#40381)
+- Recognize native GitHub Stack merge scope, check every included PR before submission, and teach coding agents and Keepers the native API workflow (#40383).
+- Show local TUI chat input by its Queue position without guessing that accepted requests are running or inferring precedence from submission counters. #40384
+- Show the actual destination branch in Native Stack admission, merge receipts and queue context so branch integration is not mistaken for a main merge (#40389).
+- Report the queue destination from the successful merge-guard snapshot, escape Markdown stack targets without altering TSV, and label asynchronous receipts with their preflight target rather than an unconfirmed accepted destination (#40389).
+- PR patrol reads every page of the open-PR inventory and retains native stack metadata when selecting review work (#40389).
+- Resolve Play participants and control authority from current canonical credential bindings, propagate authority read failures, and serialize departures with credential changes. #40395
+- Use Pad fallback only for an absent override; reject malformed, unreadable, dangling or nonregular sources before applying input or state changes, including FIFO replacement during open. #40395
+- Validate the invite redirect’s exact owner and UUID binding inside credential admission before deletion, preserving unrelated credentials and controller effects on refusal (#40395).
+- Preserve current named Play authority while integrating strict Auth readers, retryable prune and rotation fixes; invalid current Player expiry remains a typed refusal while stale UUID diagnostics cannot override a healthy current owner. (#40395)
+- Keep macOS Keychain fixture C sources out of Linux compilation while retaining the native Keychain integration test. (#40395)
+- Retain Lane Add-on publication evidence and reserved sequence after rename uncertainty without replaying effects; reject invalid producer phases and confirmed receipts without result objects. #40396
+- Confirm the exact observation/cursor file and directory durability before accepting a receipt; permit reconfirmation of the exact current cursor without consuming another sequence. #40396
+- Preserve original publication errors during descriptor cleanup and perform blocking transactions outside the Eio domain. #40396
+- Reject malformed matching owner peers and recover observation high-water after failed binding persistence. (#40396)
+- A Board attention candidate whose judging lane failed on the network before the request was dispatched (DNS, refused connection, connect timeout) is no longer quarantined as `Exact_lane_exhausted`. It stays Ready and is woken on the maintenance pulse, like a rate-limited candidate. A failure after the dispatch started is still not at rest (#40397).
+- Link the chat queue regression test to its existing answering library so release candidate checks can compile the Queue assertions. #40399
+- `deployment_preflight_helper validate-stores` reads every keeper chat transcript with the read that append-once deliveries run. A row that read refuses now fails the preflight with the file and line, instead of surfacing as `transcript_persist_failed` when a keeper is next messaged. An existing transcript directory that cannot be listed also fails with its path and reason (#40402).
+- Refuse native stack merge readiness when an included prerequisite was closed without merging, while preserving already merged and out-of-scope members. #40406
+- Store a whitespace-only board hearth as no hearth (#40417). A board post created with a hearth of only whitespace was persisted as an empty-string hearth; the list filter trims and lowercases before matching, so a stored empty hearth identifies a hearth that no `hearth=` filter value can select. Normalize the hearth at the persist boundary: trim, lowercase, and drop the value when it becomes empty.
+- Keep GitHub authentication renderer paths compatible with the edited-test selector in both keyboard PTY shards. (#40421)
+- Report zero directly edited test sources for asset-only PRs while preserving attributed suite selection. (#40422)
+- Refuse deployment preflight when the transcript directory cannot be inspected or listed, while allowing a genuinely absent directory. #40423
+- Retain optional manual source/configuration syntax and committed-credential checks alongside leader-selected CI without automatic triggers or a two-minute cap. (#40424)
+- Run the shared duplicate-key YAML validator and repository-wide TOML syntax checker in the manual source/config job. (#40424)
+- Include all tracked YAML configuration in strict syntax validation and exercise credential-scanner detection and allowlist checks in the explicit manual job. (#40424)
+- Repair malformed fragment headings and bullets while retaining the original entries. (#40425)
+- Keep implicit executable selection inside the physical requested checkout, including symlinks. Explicit external paths remain supported; invalid explicit paths fail. Log selected-path provenance. (#40426)
+- Task GC appends the tasks it archives to `tasks-archive.json` before it commits the backlog that removes them, so a crash between the two writes leaves them in both files instead of neither (#40427). GC stops with `Task_archive_failed` and leaves the backlog unchanged when the archive cannot be read or written. A task being archived replaces an archive row with the same id, including a row that does not decode as a Task and a stale non-terminal copy, and GC no longer restores that stale copy into the backlog. `append_archive_tasks` refuses an archive file that is blank, unparsable or has no `tasks` list instead of replacing it, and keeps every archive row it does not replace, rows with no id included.
+- A Board attention candidate an operator requeued from a quarantine asks Jev first, like a pending candidate, instead of going straight to the `board_attention_exact` LLM lane. #40428
+- Retain the dictionary payload type so backfill and failing-journal fixtures can index and mutate it without erasing it to object. (#40429)
+- Align the catalog with supported benchmark profiles, fix jq profile filtering, and validate selected profiles and prompt assets before server creation. Add --check-live-plan for inspection without server/model calls. (#40430)
+- The Tools screen now pages through its reading with PgUp and PgDn, including entries below the first screen (#40442).
+- Code history now shows both Left and Esc as back keys, matching its actual controls (#40447).
+- Task Review keeps its scroll position and verdict actions visible at narrow terminal widths (#40448).
+- Task Review displays Created in the terminal timezone while preserving the complete value when scrolling (#40449).
+- The cached Board list, hearth counts and memory projection are dropped after an edit, thread change, pin, close, reopen or delete of a post, so a read right after the write no longer answers with the list from before it for up to 15 seconds (#40451). `Board_dispatch.set_board_write_hook` is called once for each of those writes that the store took.
+- Cite #40028 in its last changelog bullet so `changelog-fragments.py assemble` accepts the fragment (#40453).
+- Verify independent CI test-wave limits from actual runner calls instead of a wall-clock sleep race, retaining real timeout cancellation coverage. (#40457)
+- Decode complete TUI chat SSE events with optional data-field spacing, multiline payloads and standard line endings through the shared wire module. #40462
+- Remove the always-true runtime-order invariant from Keeper composite responses and dashboard displays, retaining the measured ownership and phase checks. #40463
+- #40466 Withdraw the Item account and accessory preview during execution warm-up, refuse old held replies, and reload the account after workspace recovery.
+- Preserve owner-stop and input-rejection recovery failures in dashboard sessions and history, and offer previous-session retry only when a previous settlement exists. #40467
+- Fix TUI compilation by using the public terminal text sanitizer for Keeper log entries and metrics diagnostics (#40469).
+- Codex now receives the runtime's declared context window when starting or resuming a Keeper, Fusion, or verification session. Previously, the client could keep its account default while MASC reported the configured window. (#40472)
+- Use the blob library’s public modules and explicit dependency in the real Recall artifact-reader regressions. (#40473)
+- Respect tool-disabled requests when offering memory retrieval and reuse unchanged, integrity-checked durable recall artifacts instead of rewriting them each turn. (#40473)
+- Autonomous Codex turns wake on durable queued input even while waiting for a provider frame, preserve active tool results, and wait for normal completion before delivering the queued message. (#40474)
+- Fix the TUI build by routing Keeper log clock timestamps through the public terminal-text module and updating the existing terminal-safety AST checks. (#40478)
+- Librarian source reassignment no longer gives a new working context the same identity as an existing context. Explicitly continued contexts retain their identity, while new contexts use the observed snapshot version. (#40481)
+- Preserve persisted message metadata, including reasoning-source provenance, when Keeper history is restored; reject malformed present metadata instead of erasing it. #40482
+- Canonicalize accepted Skill activation ledger fields in server serialization order before Python revision hashing, preserving event order and strict evidence validation. #40483
+- Report malformed Skill projection shapes as ledger faults without a fictitious event-log row, while retaining specific invariant faults (#40483).
+- Show inline and dotted TOML lane declarations in Keeper assignment options while preserving standard-table candidate editing. #40484
+- Return HTTP 504 for Dashboard timeout envelopes from both HTTP/2 JSON-value response paths, preserving explicit non-200 statuses. #40485
+- Skip unchanged Board post or comment snapshots during flush while retaining parent reply-count updates and failed-write retries. #40488
+- Keep non-UTF-8 Execute output in byte-preserving artifacts so binary output and byte-cut Unicode cannot corrupt JSON tool results or retained traces. (#40490)
+- Preserve producer artifact descriptors in post-effect failure responses when result manifest storage fails, so already-exported bytes remain reusable. #40491
+- Bound applied-effect manifest failures by the caller’s output policy, preserving fitting descriptors and explicitly reporting omitted payloads or artifact handles without replaying projection. (#40491)
+- Preserve Unicode boundaries and the shared cut mark in TUI HTTP error previews and Board mention hints, fitting hints to the available terminal cells. #40495
+- Fit Planning Goal errors and Harness gate fields to their actual framed width so padding no longer produces a false truncation mark. #40498
+- Preserve Codex accepted-turn timeout evidence for fleet candidate ordering while fencing uncertain timeout, process-exit, and partial-write attempts from same-turn replay. (#40500)
+- Keep a multi-provider Keeper lane on its fresh walk's retry schedule instead of applying the last candidate's quota deadline to every provider. Single-path and deferred waits retain their existing behavior. (#40503)
+- A keeper purge removes the keeper's Board attention candidate and partition ledgers, so a keeper recreated under the same name no longer inherits the old queue and quarantines. #40508
+- Remove the nonexistent `keeper_status` tool, the retired `generation` field, older proposals and two pointers to tools a Keeper cannot call from the text Keepers read (#40510).
+- Require `MASC_URL` in `benchmarks/quick-bench.sh` and `benchmarks/benchmark.sh` instead of defaulting to the production port, and drop the call to the `masc_agents` tool that no registry lists (#40512).
+- Fix Keeper observation ownership: delayed cleanup and tool-count callbacks from an earlier turn cannot modify the successor observation or clear its wakeup signal. (#40524)
+- Bind Keeper live progress, FSM, model and measurement callbacks to the originating observation attempt so delayed callbacks cannot update a successor turn. (#40530)
+- Isolate Keeper preview and streaming redaction state per execution so late callbacks cannot alter a successor preview; retain native tool start/stop attribution through the per-execution stream. (#40537)
+- The Code history footer keeps its H close hint beside the back key when a search query crowds a 100-column screen (#40539).
+- Consolidate TUI chat work, waiting inputs, and acknowledged priority into one quiet status summary, while keeping failures and stop controls visible (#40540).
+- Preserve available Full diagnostic details, retain dispatched priority requests through chat controls until completion, and show folded status counts in compact/results summaries (#40540).
+- Settle overlapping chat controls by their own generation, so an older confirmed control cannot lose its priority supersession when a newer control fails (#40540).
+- Keep Code definition/hover answers attached to their originating workspace scope, source-file reading and latest question. Scope changes discard the old source reading so jump-back reloads equal relative paths from the correct workspace; stale and duplicate answers no longer change notes or navigation. #40543
+- Isolate Keeper event intake by a fresh execution scope before subscriber queue admission, preserving the captured producer/subscriber bus and excluding foreign tool events. (#40544)
+- Distinguish configured context requests from same-turn client reports; use reported windows for occupancy and mark missing reports unmeasured. (#40554)
+- Repair TUI compilation by using the terminal-text sanitizer owner for interrupt hints. (#40555)
+- Preserve Librarian working-context artifacts through blob GC, repair missing or corrupt snapshots, and prevent stale readers from replacing newer retention pins (#40557).
+- Use the actual roster visibility accessor when reserving chat status rows and in the existing activity test, restoring the main TUI build after the roster preference migration. #40559
+- Fix TUI compilation and the chat activity regression test by reading effective roster visibility through the existing preference helper. (#40561)
+- Finish foreground process-group cleanup with a single blocking reap outside the Eio scheduler, preserving exit status and preventing competing signals after PID release. (#40563)
+- Show reported account usage exhaustion in Runtime lists and details, retaining the warning across successful probes and reset times until a new usage report arrives. Unavailable usage no longer appears ready. (#40565)
+- Keep confirmed Candle payout obligations pending after permanent appraisal request, authentication or configuration refusals without repeating model stages on maintenance pulses; retry on a new payout event. #40566
+- Preserve pulse recovery for temporary server, connection, timeout, quota and interrupted-provider failures, and retain refusal evidence across unsuccessful fallbacks and receipt errors. #40566
+- Retry payout appraisal after transient Exact flow bookkeeping failures while retaining the terminal flow boundary and typed permanent refusal suppression. (#40566)
+- Source TUI restarts now preserve the requested workspace, server port and refresh interval. The README explains how to rebuild and restart the TUI while checking its exit log. (#40570)
+- Verify exact retained Lane action receipt bytes, file identity and parent directory durability before reporting status or accepting a repeated request, including after detachment or restart. #40573
+- Retain live uncertainty and received package results when both terminal receipt publication and the finalizer fallback fail, without repeating the action. #40573
+- Publish hot action uncertainty before receipt reconfirmation and sync action directory ancestors before accepting queued receipts. (#40573)
+- Keep Play handoff participant discovery, departed-holder recovery and the actual DOS controller change under one Auth credential admission so a target cannot be revoked between its eligibility check and handoff. #40577
+- Use the shared admitted handoff through HTTP, MCP, Keeper descriptor and Keeper fallback dispatch, while publishing queued Board notices after the Auth lock is released. #40577
+- Keep the dashboard Keeper roster readable when shared discovery omits private Candle balances and account revisions, while validating revisions when supplied. #40580
+- Retry a refused portrait when a newer account observation returns to the same outfit, and preserve both name and row lists in compact operator Gate responses. #40580
+- Keep permanent Candle appraisal RPC, payment-required and frozen admission refusals pending without repeating model work on maintenance pulses; preserve retries for transient preparation failures and hard quotas with a usable recovery window. (#40581)
+- Preserve maintenance recovery whenever any declared appraisal route remains transiently unavailable, retain opaque provider failures as retryable, and report a missing Claude executable as invalid configuration. (#40581)
+- Link the chat queue wiring test against the TUI key library so its folded-turn expansion assertion compiles. #40589
+- Keep Candle payout eligibility, appraisal recovery and observation matches exhaustive over their closed domain variants so focused compilation does not fail on fragile catch-all patterns. (#40595)
+- Bind Lane Add-on observation publication failures to the atomic file writer's error type so compilation preserves before/after-rename handling without ambiguous record-label inference. (#40596)
+- Match the channel-gate tool JSON responder interface to its existing optional projection parameter so authenticated Keeper-list projection compiles. (#40599)
+- Declare the Keeper portrait library directly for chat rendering so equipped portrait readings compile without relying on transitive module visibility. (#40600)
+- Restore compilation of the shared skill-ledger revision fixture and chat activity test by using the existing revision string projection and declaring the transcript library directly. (#40602)
+- Repair compact Queue PTY row inspection and wait for settled chat navigation before quitting. (#40608)
+- Read Dashboard namespace Pause/Resume state through a non-mutating HTTP endpoint instead of the unavailable operator-only MCP pause-status tool. Invalid or unreadable workspace state remains unchanged and returns no authoritative pause value. (#40610)
+- Synchronize the narrow Queue PTY resize on pending input data instead of the elided chat breadcrumb. (#40611)
+- Keep pending delivery reconciliation counts visible by removing the same request's duplicate compact status warning, while retaining warnings for other reconciling executions. (#40612)
+- Update retained-input and FIFO PTY waits to the current compact chat status markers without changing admission, retention, identity, or ordering assertions. (#40615)
+- Open full diagnostics before verifying grouped server-batch status in the PTY test, preserving the batch-size and single-row assertions. (#40617)
+- Clear Fusion read owners, retained runs, and priority receipts when TUI workspace authority changes, preventing delayed results from reviving the previous workspace's state (#40625).
+- Restore process manager compilation by explicitly matching every signal group phase instead of triggering fatal warning 4. (#40630)
+- Restore main executable builds after decoder and runtime integration: share strict memory-health field validation, retain pre-dispatch fallback and retryable Candle appraisals, declare the TUI core dependency, and resolve Goal/log renderer variants and workspace request declaration order. (#40633)
+- Fix Keeper thinking streams dropping whitespace-only deltas and leading indentation, preserving provider text across chunk boundaries (#40640).
+- Preserve GitHub login SSE output and completion when a CRLF delimiter is split across network chunks. (#40642)
+- Preserve terminal failure observations for official-client invocations after prompt transmission, so Keeper receipts include failed attempt evidence (#40647).
+- Repair the section and PR reference in the thinking-stream whitespace changelog fragment (#40647).
+- Let continuity and queued Librarian work run after a committed history range when more work is waiting, while preserving the unread cursor and exposing the yielded state in Memory health. (#40652)
+- Preserve failed OPAM pin commands' exit status after retries and stop before later pins or installation (#40656).
+- Restore extracted TUI request timestamps, the Answering text sanitizer owner, and the subscription test-wrapper signature after Native Stack integration. Compare subscription fixture objects independently of JSON key order. (#40657)
+- Refuse the unimplemented A2A benchmark pattern before session setup or result creation, instead of reporting completion without a measurement. (#40658)
+- Restore portrait HTTP integration coverage with current Candle dependencies and request-authority binding, preserving strict authentication and equipment assertions. (#40660)
+- Require an explicit caller-selected sandbox for fresh continuity-harness Keepers, send current Keeper-up fields, and preserve the validation purpose in their instructions. (#40666)
+- Clarify contributor delivery evidence, review reuse, and handoff records; align release verification and publication instructions with the current workflows. (#40667)
+- Require distinct enabled runtimes with environment credentials when preparing the manual Keeper collaboration scenario; reject missing bindings and unsupported provider model sets before creating its base directory. (#40668)
+- Reconsider rejected Candle payouts on the normal maintenance pulse after publishing a changed appraiser lane declaration, preserving recovery during an in-flight refusal and avoiding retries for unchanged or unrelated declarations. Same-slot provider, credential and prompt changes remain outside this recovery scope. #40670
+- Reject successful Librarian runs with unanswered preflight evidence routing fields without their preflight observation, and HTTP failures attributed to a different endpoint. (#40766)
+- Require a selected execution slot on successful full-generation Librarian runs while preserving failures and cancellations before selection. (#40766)
+- Apply Librarian route and execution-slot invariants to intended successes when completion persistence fails or its durability is unknown. (#40766)
+- TUI Memory shows observed stored byte units separately from turn recall, and derives current row state, fleet count and color from current Librarian outcomes while retaining historical errors as history (#40827).
+- Clear recovered Keeper chat-history errors without overwriting action errors or the result of a newer overlapping history request. (#40861)
+- Resync reopened Lane store roots and recover intact model outcome blobs without rewriting them (#40862).
+- Keep MCP response byte limits off outgoing client requests while preserving complete sampling reply bounds (#40865).
+- Keep host and provider metadata in retained sampling outcomes, expose only sampling references to packages, and validate the host metadata from retained evidence (#40867).
+- Restore Fusion fixture imports and declare the complete focused test sandbox inputs, including the results manifest (#40868).
+- Return structured invalid-input errors for Python JSON decoder resource limits and numeric conversion overflow while preserving the worker connection (#40870).
+- Enforce runtime numeric types in retained survey audits and keep the heavy audit suite available only through its dedicated test alias. (#40872)
+- Use the declared TUI detail recovery state and remove an unused scoped-refresh helper with stale declaration-order and authority dependencies. (#40873)
+- Refuse promoting a Lane candidate already first, normalize replacement source IDs, and align routing parser errors with their tests (#40874).
+- Reload the model catalogue when opening Lane candidate replacement search, disable cached replacement choices and show slot IDs until model details have been read successfully, and close lane editors when leaving their surface. (#40875)
+- Keep Runtime refresh available while the media-failover editor is open. (#40875)
+- Keep Play controller read failures visible, disable input while ownership is unknown, and restore controls after a successful retry (#40896).
+- Retain unread connector messages when attention storage fails, so completing unrelated Keeper work cannot acknowledge messages that were never delivered. (#40897)
+- Retain missing referenced connector items without blocking readable messages behind them. (#40897)
+- Select the first readable connector conversation and summarize missing pointers once per intake. (#40897)
+- Preserve a single base64 image-only model completion as MCP sampling image content, and reject unsupported image-only output shapes (#40903).
+- Skip sampling candidates without image-input support before dispatching image requests to the provider (#40905).
+- Use the captured runtime binding and model settings for each sampling attempt so a configuration reload cannot change its dispatch target or outcome attribution (#40908).
+- Return bounded protocol errors for invalid request IDs and unencodable package results while preserving the worker connection when the error fits the response frame (#40909).
+- Keeper delegate status returns the full original completed reply to its requester, avoiding repeated delegation or Board relay for shortened previews (#40910).
+- Read and Grep tool results report the admitted sandbox profile for microVM and remote SSH execution instead of labeling every sandbox read as Docker (#40921).
+- Reject extra outer or nested model-evidence claims before Fusion judge sampling so only retained request and outcome references enter validation. #40923
+- Reject Fusion sampling temperatures outside the declared 0–2 range before calling the host, with matching installation schema bounds. #40928
+- Validate Fusion judge source requirements when loading declarations, using supported exact-one schema alternatives while preserving panel sources. #40934
+- Preserve captured child diagnostics alongside failed MCP tool matrix payloads so runner reports include the underlying I/O cause (#40941).
+- Keep Librarian cancellation failure journaling independent of the stopping shared executor, preserving cancellation receipts and journal evidence (#40944).
+- Keep TUI lane capture ttyd logs in a temporary file, report bounded startup diagnostics, and reap the capture process even if browser cleanup fails (#40964).
+- Register wire parse dump assertions with Dune runtest (#40970).
+- Mask configured bearer and operator command fields before byte-bounding TUI capture startup diagnostics, including overlapping values and incomplete tokens at log EOF (#40974).
+- Restore the `@check` build on main: drop merge-leftover duplicate definitions in `lane_addon_store` and the Keeper portrait mosaic test, re-wire test executables against the current library layout, and follow the moved TUI/auth APIs the stale suites still referenced (#40978).
+- Cover the candle appraiser `Execution_rejected` variant and the typed tool-error record in the suites that predate them, so those suites compile and their refusal paths stay checked (#40978).
+- Browser host documentation now directs binary-only installations to the downloaded extension manifest when connecting a Firefox/Zen profile. (#41002)
+- Commit approval delivery obligations with Task completion, retry durable Keeper queue delivery after failures or restarts, and render each approved outcome once in Keeper turn input. (#41004)
+- Align the chat queue wiring test with the documented settle contract (RFC-0412 §2.1): settling replaces the live running output with the settled reply row, so the final stage now asserts the replacement instead of expecting the running text to survive (#41005).
+- Live chat request rows show the dispatch-to-now span (`16:38→`) again: the request's opening row now carries the span clock that the layout folds into its body beside the opening rail (#41006).
+- The purchase flow test no longer expects an empty `[shop]` table to disable the Candle policy: no price configured refuses the purchase as `unpriced_item`, which the product already did (#41007 — see PR body).
+- Typed provider refusals of the appraisal request (bad input, auth, billing, capacity) now classify as `Execution_rejected` per the variant's own contract, and the observation's `invalid_output` no longer answers for request refusals; an unusable model output stays `Invalid_response` (#41008).
+- Show unreported Skill and Tool byte counts as unknown while preserving reported zero values (#41016).
+- Keep Runtime lane rename drafts intact and refuse overlapping writes until the previous write settles (#41016).
+- Display the Runtime snapshot's recorded time and retain it when a refresh fails (#41016).
+- Preserve attachments, source-turn links, viewer votes and reactions when opening Board posts outside the loaded feed. #41020
+- Preserve Vixie cron day matching for wildcard steps and leading wildcards in lists, and reject impossible calendar dates under the same rule. #41021
+- Preserve all model configuration fields in the TUI Models pane when a narrow terminal cannot fit the fixed table. #41026
+- Correct runtime cached-input percentages to count cache reads once and compare matched usage reports. (#41027)
+- Preserve literal special characters, spaces and Unicode in IDE LSP document URIs for workspace roots and filenames. #41035
+- Encode the workspace URI sent when initializing the language server, so special-character roots and literal percent sequences remain intact beyond the browser connection. #41035
+- Keep Execute output snapshots and live SSE valid UTF-8 for malformed command output while preserving raw bytes and counters. (#41039)
+- Retain the typed Board audience with post creation and edits across persistence; read authorization enforcement remains separate. #41041
+- Render IDE inlay hints at their own positions, preserve tied hint order and show standard composite labels with whole-hint and part tooltips. #41042
+- Keeper TOML boot settings now reach their actual consumers and effective-value display. (#41047)
+- Enforce shared supervisor bounds and the supported backup floor, and validate strict environment settings at boot before Keeper work. (#41047)
+- Runtime provider tables reject unknown fields instead of silently omitting shared model bindings. (#41048)
+- Lane composition imports preserve newer file selections and edits when file reads finish out of order. (#41050)
+- Queue inventory distinguishes pending inputs, running operations and future reservations, and live turns remain visible beside lifecycle state. (#41051)
+- Persist Goal proof audit and notification obligations with their phase, then recover failed audit and recipient deliveries without repeating verification. #41053
+- IDE CodeLens titles use informational styling and a read-only tooltip instead of suggesting unavailable command execution. #41057
+- Read approval verdict lines without a SIGPIPE-prone pipeline, preserving multiline review evidence and existing validation (#41088).
+- Keep observed Keeper Item balances and pending reads during partial roster refreshes, while failed authority still rejects retries and late replies. (#41091)
+- Keep sampling callback metadata private, retain bounded failure receipts, and recover terminal primary records from the independent outcome journal. (#41091)
+- Honor zero and reduced Keeper auxiliary JSONL backup retention on rotation, preserving unrelated files and symlink targets and refusing directory cleanup; identify the actual settings consumer (#41096).
+- Retain chat text, attachments and references when a workspace check refuses the first POST, restoring editable drafts when the original workspace returns without overwriting newer input or automatically resending retained requests. (#41098)
+- Account model variants preserve provider identity and context (#41106).
+- Subscription setup groups models under their verified account (#41107).
+- Keep macOS Keychain fixture C sources out of Linux compilation while retaining the native Keychain integration test (#41107).
+- Saved subscription accounts become usable in the current session (#41108).
+- Usage preserves dollar amounts and follows current accounts (#41109).
+- Chat Context shows candidate order with account and context (#41110).
+- Runtime detail shows attributable success cache and specification readings (#41113).
+- Standalone Lane and Runtime open the same model settings form (#41115).
+- Runtime status columns and selected account evidence remain readable (#41116).
+- Existing model connections share an account group and retain separate editable IDs (#41117).
+- Keep date-sharded Keeper metrics recording past 999 same-day rotations, with numeric read and pruning order. (#41125).
+- Goal cancellation retains its audit intent across delivery failures and retries it without duplicating the transition. (#41134)
+- Keep Goal notifications passive when their text contains Keeper mentions, and reject malformed durable notification identities before Goal mutation. (#41136)
+- Allow model Edit and Copy to select reasoning effort by replacing the mutually exclusive uncontrolled mode while preserving the source variant. (#41138)
+- Refuse interactive CLI connections before provider reuse and retain operator-named account selection through built-in aliases. (#41139)
+- Keep pending account-model save receipts alive after the login panel closes, activate from the actual receipt, and distinguish existing-account relogin from isolated new-account creation. (#41140)
+- Preserve successful empty daily usage reports and per-source history, and omit unsupported usage-reader account cards. (#41141)
+- Preserve yielded runtime outcomes, last-good metrics on read failure, platform-valid timestamps, and retained rotated decision logs. (#41142)
+- Use consistent credential/quota scope identifiers across Setup, Runtime and Usage; retain response-local correlation and Lane columns in narrow terminals. (#41143)
+- Reuse selected inline-credential HTTP accounts when adding models, preserve operator settings, and revalidate the selected credential before saving. (#41146)
+- Retain the selected saved Antigravity account and its custom timeout while cleaning discovery credential copies on save or cancellation. (#41148)
+- Preserve each account's previously resolved installation default when adding models, including inline, dotted and model-set binding declarations. (#41149)
+- Retire the Memory facts browser and its detail navigation when workspace authority changes, then require a fresh scoped health row before reopening facts. The regression waits for applied workspace identity and verifies late A replies stay absent while fresh B facts reach the browser. (#41179)
+
+### Performance
+
+- The TUI asks before reading a dashboard answer again: it sends the entity tag of its last answer from the same address as `If-None-Match`, and a `304` answers the read with the value it parsed last time, with no body sent. On 2026-09-30 the board list, `keepers/composite` (193 KB), scheduled automation, goals, briefing and planning changed at most once in five two-second polls, and parsing one of those bodies took the TUI 0.38 ms to 1.86 ms (medians). Kept answers follow the full refresh passes: an answer that no read got back during two passes is dropped, and a pass that outlives several ticks still counts as one. (#40079)
+- The TUI reuses the grapheme layout of a non-ASCII text that the current or the previous frame laid out, instead of splitting the text into clusters again. While a keeper turn runs the TUI redraws every 150 ms, and splitting non-ASCII text was 14% of an idle TUI's busy samples on its main thread. On the lines of a copy of the live board (1,000 lines, 684 of them non-ASCII), fitting every line to 80 cells took 2.96–3.00 ms per frame and now takes 0.46–0.49 ms. The first layout of a text costs more, because its pieces are kept: 5.0 µs instead of 4.1 µs for 40 Hangul syllables, and 1,000 such texts keep 1.6 MB until a frame passes without them. ASCII text, escapes included, is laid out as before and not kept. (#40080)
+- Each runtime row of `GET /api/v1/runtime/resolved` reads its output ceiling and declared reasoning effort from the runtime it renders. Over 117 configured runtimes, looking each one up again by id took about 47 µs of every request, and the lookup read the loaded state a second time. `Runtime.max_output_tokens_of_runtime` takes the runtime. (#40087)
+
+### Documentation
+
+- Propose server-generated fixtures for client decoder tests, with expected-value assertions for every consumed field and contrasting present/null schedule values (#40000).
+- Define deterministic encoder inputs, separately encoded response cases, unknown-discriminator rejection and existing standalone TUI decoder coverage; retain immutable source evidence for the proposal (#40000).
+- Add repository strategy and English/Korean contributor workflows for people, external AI sessions and Keeper lanes; align CONTRIBUTING with current CI and review procedures. #40109
+- Add RFC board-attention-asks-jev-once-per-event: ask Jev once per Board event with one question per eligible keeper, move task verification off the shared GLM slots, and record the before and after measurements of the Jev confidence gate. #40450
+- Preserve Item frontend browser captures, preview failure/restoration behavior and the separately observed historical HTTP404 (missing route versus unknown Keeper not distinguished), including exact source provenance and verification limits. (#40461)
+- Verify the selected preview URL and hold the observed portrait response until restoration settles to the fixture badge fallback. (#40461)
+- Preserve relevant browser-source blobs, qualify unretained cold-run and installed-route claims, redact operator paths, and reset page scroll for future captures (#40461).
+- Retain the separately executed scroll-corrected Chromium captures and their exact scenario/component hashes, including the failed server-start attempt. (#40461)
+- Describe Candle equipment events in the ledger, the keeper_candle_equip tool, and candle.toml configuration lifecycle invariants in the glossary (#40471).
+- Record in RFC board-attention-asks-jev-once-per-event that one Jev request carrying 21 to 24 keeper questions was accepted for 13 real events in 0.24 to 0.55 s, and that the keeper purge plan leaves the Board attention ledgers behind. #40507
+- Clarify TUI glossary terms for compact Keeper face icons, conversation ownership, and workspace Candle supply versus personal balance (#40889).
+- Align the glossary with deferred Memory commits after failed absorption judgment and current TUI portrait placement and sizes. (#40901)
+- Register glossary entries for exact-output lane slot replacement and move and for official-client failure observation after a reported prompt transmission. #41009
+- Verification instructions now match leader-selected CI and RC publication; Core no longer treats the two-minute scale example as a hard timeout. (#41049)
+
+### Internal
+
+- CI selects directly linked test executables when an edited test source belongs to an explicitly declared Dune library, including included stanzas, while preserving direct-test priority (#39904).
+- `Candle_config` reads `candle.toml` and answers whether the Candle reward currency is on: no file is off, a file with no key is enabled, and a path that cannot be examined or read, a file that is not TOML, or holds a key this build does not know is disabled with a reason. The server keeps running in every case (#39928).
+- Add PTY coverage for Planning list and detail footer hints while opening and stepping through goals, returning to the list, and changing its filter (#39967).
+- Add paired CI measurements and raw trace receipts for vision artifact storage and load (#39990).
+- Cover cancellation of a queued vision artifact store with a domain-pool regression test (#40016).
+- Preserve the explicit-outcome Candle rubric as an evaluation candidate,
+  including intrinsic difficulty of a single capability. Keep the prior runtime
+  prompt until human calibration is measured, and verify failed evaluation rows
+  against their retained exact receipts (#40027).
+- Verify the real Goal confirmation and payout worker path keeps one payment across pending reopen/drop, re-verification and worker restart; retain scoped integration evidence. (#40047)
+- Align chat cancellation AST checks with the workspace job owner, and make remote PTY refusals and authority-changing detail selection wait for their actual visible transitions. (#40053)
+- Extend the registered PTY scenarios with held Context, admission and scoped-roster boundaries, staged media ownership, schedule/runtime withdrawal and live observer retirement, invalid remote rows and lifecycle plan withdrawal; execution evidence remains scoped to the run that actually executes them. (#40053)
+- Add real PTY scenarios for remote portrait refresh, roster failure and recovery, workspace-bound confirmation, and delayed history responses with draft retention. (#40053)
+- Keep the runtime identity column visible in the held-history PTY and retain complete integrated native evidence, including both original failures. (#40053)
+- Retire Tools inventory, catalog, async observations, and pending generations when workspace authority changes so same-named Keepers cannot inherit old responses. (#40053)
+- Retire Board/Goal confirmations, Runtime lane editors, Add-on work and System Logs when workspace authority changes. Scope their requests and completions, recheck a Schedule editor save, and accept canonical spellings of the same workspace. (#40053)
+- Retire retained task cancellation, preset restore, Fusion launch, DOS polling, and runtime configuration forms across workspace changes; recheck editor and chained request identity before sending, and keep every trace failure reachable after the folded overview. (#40053)
+- Verify equipped Keeper portraits through a real remote-workspace TUI process: replay actual server roster receipts, compare terminal PNG pixels with native HTTP PNGs, and retain refreshed images plus PTY evidence in CI artifacts. (#40053)
+- Await the client-visible applied fresh roster before checking retained equipment pixels, using a held response and a labelled native-receipt fixture derivative. (#40053)
+- Bind Task history to workspace-owned cancellation and completion, and revalidate the endpoint before and after scoped surface collection, including synchronous fallback reads. (#40053)
+- Compare a test-registered PostToolUse callback with the Lane snapshot source adapter using the same WKBL MCP worker and verify retained source bytes (#40059).
+- Cover literal payment receipts through ledger recovery, balance projection and new-append refusal, including malformed rows that must reject the entire read. (#40066)
+- Move terminal escaping, text previews and timestamp presentation into Tui_terminal_text with direct callers (#40097).
+- Preserve the shared-foundation Candle Grade rubric and operator Epic anchor as an evaluation-only candidate. Keep the previous runtime prompt until the required measurement and human calibration are supplied. (#40099)
+- Move operator question types and decoding into Tui_decode_asks and isolate the server's pure question projection (#40100).
+- Move shared TUI JSON field readers into Tui_decode_fields and direct consumers to their owning module (#40104).
+- Move Fusion wire types and decoding into Tui_decode_fusion and update transport, rendering and test consumers (#40105).
+- Give TUI async reply payloads and mailbox message contracts their own OCaml module, preserving event identities and loop-owned effects (#40132).
+- Keep runtime probe rendering on its extracted decoder owner throughout the stack. (#40132)
+- Preserve the public Palette owner for both Approvals gate-mode labels after renderer extraction. (#40132)
+- Move materialized runtime values, credential admission and frozen dispatch properties into Runtime_instance with direct callers, keeping catalog and durable commit authority in Runtime (#40139).
+- Move terminal voice setup session state and pure transitions into a dedicated module with direct consumers and a public interface (#40195).
+- Delegate the source-selectable voice wizard PTY alias to its existing family so full tests execute it once. #40195
+- Separate terminal approval rows and per-source reading status from shared Types, with dedicated surface navigation and direct consumer interfaces (#40203).
+- Associate the extracted Home, Approvals and surface-navigation owners with their existing focused PTY suites (#40203).
+- Register Home decision, receipt, layout, viewport and Goal confirmation suites against the extracted Home implementation and interface (#40203).
+- Add a manual macOS arm64 runtime probe with relocatable companions, source identity, dependency metadata, and artifact checksums. #40205
+- Move approval queue, approval detail and question-reader rendering into a dedicated executable module with frame and viewport interfaces (#40211).
+- Declare the extracted renderer as a source input of the PTY approval-selection, detail, question and Home-to-Approvals scenarios so edited-source selection reaches their actual runnable owners. (#40211)
+- Track the Approvals renderer in the Dashboard operator-menu PTY and timestamp-zone source guard. (#40211)
+- Include the Approvals renderer in the body-budget source guard and declare every scanned renderer as a test input. (#40211)
+- Select the registered agenda navigation PTY suite when either extracted Approvals renderer source or interface changes. (#40211)
+- Move runtime reference, lane and capacity validation into a dedicated owner while preserving config transaction authority and validation order (#40213).
+- Move immutable approval queue identity, deduplication, restart classification, workspace selection, append-log delta, and ordering calculations into `Keeper_approval_queue_state`, keeping persistence and dispatch in the queue owner (#40229).
+- Move the seven integrated Home PTY consumers to their split harness, approval, chat and Keeper helper owners so fixture construction reaches the terminal boundary. (#40234)
+- Split the keyboard PTY scenarios into area modules with explicit Dune dependencies while preserving scenario bodies and family selection (#40234).
+- Update incoming layout PTY suites to import their split helper owners and declare the full helper dependency graph. (#40234)
+- Preserve the public helper imports used by tracked capture scripts, repair the search-count helper reference, and regenerate split proof against the current merged parent. (#40234)
+- Port incoming queue visibility, stored image, and chat portrait PTY suites to their split helpers while preserving the current main assertions. (#40234)
+- Keep the shared settled-key helper in the terminal harness so Lane and Voice PTY scenarios can both call it. (#40234)
+- Inventory module-level executable state in the keyboard split verifier, and replace stale current-equivalence claims with a hash-bound difference report and scoped Python results. (#40234)
+- Restore 37 explicitly owned helper exports used by current standalone/capture consumers and declare the complete entry import closure in six remaining PTY rules. (#40234)
+- Use the split terminal harness in all three Item portrait scenarios, preserving fixture constructors, response types and interaction assertions. (#40234)
+- Bind screen-capture manifests to loaded fixture sources, preserve the Candle capture helper imports, and refresh the Python evidence against the repaired dependency rules. (#40234)
+- Preserve current-main fixture bodies while moving their helper references to split owners, normalize fixture workspace paths, and stage helper dependencies for incoming viewport and workspace suites. (#40234)
+- Update focused-scenario guidance to use the split harness and its imported dependency closure. (#40234)
+- Move Tools inventory and workspace Skill catalog models and decoders into their own module, share existing field readers, and update renderer and PTY consumers to the actual model owners (#40242).
+- Move Memory fact models, strict snapshot decoding and fleet projection to their own module, updating consumers and PTY dependencies without changing fact readings. (#40255)
+- Separate pure runtime TOML transformations and route-edit references from filesystem config transactions, with direct consumer interfaces (#40362).
+- Extract Code directory, file, diff, history and language-server request dispatch into its own module while preserving response ownership, and select both focused diff PTY suites for its implementation and interface changes (#40377).
+- Core and syntax checks use two-minute manual gates; native qualification and publication require explicit Release actions. (#40411).
+- Keep the shipped commit hook free of automatic local builds (#40412).
+- Offer native Fusion qualification only with its probe, Dune target and Dockerfiles in the source-owning #40410/#40614 branch; remove the unavailable target from this workflow (#40412).
+- Record live checkpoint save timing, stage, outcome, and canonical file size for performance diagnosis (#40454).
+- Select the keyboard Board-terminal PTY family when the TUI key handler changes, covering the Board selection scenarios through the existing edited-tests selector. #40465
+- Run the execution warm-up browser scenario in manual Item capture, preserving its own manifest and current focused-test source receipt. (#40466)
+- Ignore delayed warm-up/error responses after a newer execution publication was accepted, preserving its Item account authority (#40466).
+- Verify that a superseded warm-up reply also preserves current Candle balance and does not schedule a stale retry. (#40466)
+- Delete the Overview Team row computation and `Tui_decode.keeper_phase_band`, which nothing reads since the Team block was removed (#40516).
+- Remove references to the CI scanners deleted in #40265, #40267, #40271 and #40298 from docs and comments, and delete the three list files only those scanners read (#40517).
+- Declare the Queue wiring test's Fusion core and fetched-state dependencies, and explicitly exercise detailed and compact status modes in its running-turn fixtures (#40649).
+- Wait for visible workspace authority revocation before manual reads in held Instructions and Sandbox PTY scenarios (#40819).
+- Validated the verifier retry and durable approval-delivery stack with 223 focused tests; aligned the notice test with postcommit publication and included the main pick-list API build fix. (#41013)
+- Removed TUI tests that fixed source layout and call counts, and allowed failed workspace-identity probes to stop before reading approval data. (#41028)
+- Include a global process snapshot in CI failure diagnostics so processes outside the active command tree remain visible (#41036).
+- Align the execution cache scope test with the resolved fixture semantics: only an enabled `execution_smoke` fixture bypasses the default bytes. (#41215)
+
 ## [0.49.0] - 2026-10-04
 
 ### Upgrade notes

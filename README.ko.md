@@ -53,14 +53,14 @@ MASC의 여러 기능은 에이전트가 목표와 지금까지의 과정을 이
 바이너리 릴리스는 macOS(Apple Silicon·Intel)와 Linux(x86_64·ARM64)를 대상으로
 합니다. 바이너리를 설치할 때는 OCaml이나 Node.js 개발 도구가 필요하지 않습니다.
 [플랫폼 요구사항](docs/INSTALL.md#platforms-and-prerequisites)과
-[배포된 파일](https://github.com/jeong-sik/masc/releases/tag/v0.49.0)을 확인하세요.
+[배포된 파일](https://github.com/jeong-sik/masc/releases/tag/v0.50.0)을 확인하세요.
 모델 연결은 별도로 준비합니다. 지원하는 CLI 로그인, API 인증 정보 또는 접속 가능한
 로컬 모델 서버가 필요합니다. 기본 Keeper 샌드박스에는 Docker를 설치하세요.
 
-> Installation target: v0.49.0 (check tag availability on GitHub Releases).
+> Installation target: v0.50.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.49.0
+TAG=v0.50.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG"

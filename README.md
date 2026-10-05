@@ -57,14 +57,14 @@ capabilities from guarantees still to be demonstrated.
 Binary releases target macOS (Apple Silicon and Intel) and Linux (x86_64 and
 ARM64). You do not need an OCaml or Node.js toolchain for a binary install.
 Check the [platform requirements](docs/INSTALL.md#platforms-and-prerequisites)
-and [release assets](https://github.com/jeong-sik/masc/releases/tag/v0.49.0).
+and [release assets](https://github.com/jeong-sik/masc/releases/tag/v0.50.0).
 Model access is separate: bring a supported CLI login, an API credential, or a
 reachable local model server. For the default Keeper sandbox, install Docker.
 
-> Installation target: v0.49.0 (check tag availability on GitHub Releases).
+> Installation target: v0.50.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.49.0
+TAG=v0.50.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG"

@@ -283,8 +283,54 @@ let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root d
   | Ok document -> check string "same enumerated source can be opened" ".toml" document.file_name
   | Error e -> fail e.message)
 
+let browser_activity_snapshot () = with_fixture (fun _env sw config root _directory ->
+  let previous = Runtime.For_testing.snapshot () in
+  let startup = Runtime_startup_state.get () in
+  Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore previous;
+    Runtime_startup_state.set startup);
+  Server_browser_configuration.install_activity_observer ~sw;
+  let path = Filename.concat root "runtime.toml" in
+  let load enabled =
+    write path (Printf.sprintf {|[providers.snapshot]
+protocol="openai-compatible-http"
+endpoint="http://127.0.0.1:9"
+[models.sample]
+api-name="snapshot-model"
+max-context=4096
+[snapshot.sample]
+[runtime]
+default="snapshot.sample"
+[browser.live]
+enabled=%b
+[browser.automation]
+enabled=%b
+[browser.stagehand]
+enabled=%b
+|} enabled enabled enabled);
+    match Runtime.init_default ~config_path:path with Ok () -> () | Error detail -> fail detail in
+  load true;
+  let locked, signal_locked = Eio.Promise.create () in
+  let release, signal_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () -> Eio.Mutex.use_rw ~protect:true Browser_lane.clients_mutex (fun () ->
+    Eio.Promise.resolve signal_locked (); Eio.Promise.await release));
+  Eio.Promise.await locked;
+  let result = Eio.Fiber.fork_promise ~sw (fun () -> Inventory.snapshot ~config |> Inventory.to_json) in
+  (* The snapshot reaches the held Live backend mutex before the new publication. *)
+  Eio.Fiber.yield ();
+  load false;
+  Eio.Promise.resolve signal_release ();
+  let json = match Eio.Promise.await result with Ok value -> value | Error exn -> raise exn in
+  let activities snapshot = values "rows" snapshot |> List.filter_map (fun row ->
+    if text "kind" (member "selection" row) = "browser" then
+      Some (text "activity" (member "state" row)) else None) in
+  check (list string) "one inventory retains one captured Browser configuration"
+    ["on";"on";"on"] (activities json);
+  check (list string) "next inventory observes the new Browser configuration"
+    ["off";"off";"off"] (activities (Inventory.snapshot ~config |> Inventory.to_json)))
+
 let () = run "operator lane inventory" ["read boundaries",[
   test_case "machine activity and publication serialize independently" `Quick machine_wire_preserves_both_readings;
+  test_case "Browser activity captures one configuration" `Quick browser_activity_snapshot;
   test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;
   test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;
   test_case "suffix-only declaration stays editable" `Quick suffix_only_declaration_is_editable;

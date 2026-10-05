@@ -32,12 +32,35 @@ let ( let* ) = Result.bind
 
 (* {1 Declaration table} *)
 
+(* A table that maps one path to two tools would route a shell line to a
+   single winner and silently strand the other, so the duplicate is a
+   declaration bug — refused when the table builds, naming both tools —
+   not a lookup-time guess. *)
+let reject_duplicate_paths (declared : (string list * string) list) : unit =
+  let rec check = function
+    | [] -> ()
+    | (path, tool) :: rest ->
+        List.iter
+          (fun (other_path, other_tool) ->
+             if path = other_path then
+               failwith
+                 (Printf.sprintf
+                    "shell command declarations: %s (%s) and %s (%s) declare the same shell_command path; the later tool would be unreachable on the shell surface"
+                    (String.concat " " path) tool
+                    (String.concat " " other_path) other_tool)
+             else ())
+          rest;
+        check rest
+  in
+  check declared
+
 (* One parse of the embedded tool tree, on first ask — the files are
    crunched into the binary, so a second parse reads the same bytes to
    the same answer (the pattern [Tool_loading_declarations] set). *)
 let entries : (string list * string) list Lazy.t =
   lazy
-    (List.filter_map
+    (let declared =
+       List.filter_map
        (fun path ->
           match Filename.dirname path, Filename.extension path with
           | "tools", ".toml" -> (
@@ -53,7 +76,10 @@ let entries : (string list * string) list Lazy.t =
                 loaded.Tool_definition_toml.shell_command
                 |> Option.map (fun words -> words, name)))
           | _, _ -> None)
-       Embedded_config.file_list)
+       Embedded_config.file_list
+     in
+     reject_duplicate_paths declared;
+     declared)
 
 (* {1 argv to tool arguments} *)
 

@@ -4,7 +4,7 @@ let expect label wanted actual = Alcotest.(check int) label wanted actual
 
 let runtime id : Masc.Tui_decode.runtime_option =
   { ro_id = id; ro_provider = "provider"; ro_provider_id = "provider"; ro_model = "model";
-    ro_exact_slot_group = Exact_http_slots;
+    ro_exact_slot_group = Exact_http_slots; ro_exact_body_deadline_missing = false;
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
@@ -60,6 +60,31 @@ let test_schema_less_client_is_refused_only_for_exact_lane () =
   (match runtime_pick_availability (Pick_conversation_lane "primary") muse with
    | Pick_available -> ()
    | Pick_refused _ -> Alcotest.fail "normal Keeper routing must remain available")
+
+(* Rule 3 (#38779): the server's listing marks an HTTP runtime whose
+   provider declares no exact-body-timeout-s. An exact lane refuses it before
+   anything is sent and names the provider table to fix; every other route
+   still offers it. *)
+let test_http_slot_without_body_deadline_is_refused_for_exact_lane () =
+  let gap = { (runtime "openrouter.deepseek") with
+    ro_provider_id = "openrouter"; ro_exact_body_deadline_missing = true } in
+  (match runtime_pick_availability (Pick_exact_lane Standalone_lane.Librarian) gap with
+   | Pick_refused No_exact_body_deadline -> ()
+   | Pick_refused _ | Pick_available ->
+     Alcotest.fail "a slot the save would refuse was offered to an exact lane");
+  let contains affix text =
+    let n = String.length affix in
+    let rec scan i = i + n <= String.length text && (String.sub text i n = affix || scan (i + 1)) in
+    scan 0 in
+  Alcotest.(check bool) "the reason names the provider table and the key" true
+    (let text = runtime_pick_refusal_text No_exact_body_deadline gap in
+     contains "[providers.openrouter]" text && contains "exact-body-timeout-s" text);
+  (match runtime_pick_availability (Pick_conversation_lane "primary") gap with
+   | Pick_available -> ()
+   | Pick_refused _ -> Alcotest.fail "normal Keeper routing must remain available");
+  (match runtime_pick_availability (Pick_exact_lane Standalone_lane.Librarian) (runtime "keyed.model") with
+   | Pick_available -> ()
+   | Pick_refused _ -> Alcotest.fail "a keyed HTTP slot must remain available")
 
 let test_picker_and_refusal_keep_footer_space () =
   let state = state () in
@@ -1670,4 +1695,6 @@ let () = Alcotest.run "runtime list geometry"
         test_the_keeper_picker_cursor_clamps_to_a_shorter_list; Alcotest.test_case "keeper picker window follows the cursor" `Quick
         test_the_keeper_picker_window_follows_the_cursor; Alcotest.test_case "schema-less client only refuses exact lanes" `Quick
         test_schema_less_client_is_refused_only_for_exact_lane
+        ;Alcotest.test_case "HTTP slot without a body deadline is refused for an exact lane" `Quick
+          test_http_slot_without_body_deadline_is_refused_for_exact_lane
 ]]

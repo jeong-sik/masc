@@ -10240,6 +10240,7 @@ let lane_picker_existing_slots (state : state) = function
    front of its row, and Enter on it sends nothing. *)
 type runtime_pick_refusal =
   | No_output_schema_channel
+  | No_exact_body_deadline
   | Wrong_candidate_group
 
 type runtime_pick_availability =
@@ -10252,6 +10253,12 @@ let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
     Pick_refused Wrong_candidate_group
   | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Tui_decode.Exact_output_unsupported ->
     Pick_refused No_output_schema_channel
+  (* Rule 3 (#38779): an HTTP slot needs its provider's exact-body-timeout-s.
+     The server's runtime listing says when it is missing; the save would
+     refuse it, so the picker refuses it first and says why. *)
+  | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Tui_decode.Exact_http_slots
+    when runtime.Tui_decode.ro_exact_body_deadline_missing ->
+    Pick_refused No_exact_body_deadline
   | (Pick_exact_lane _ | Pick_exact_lane_replacement _), (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
@@ -10263,6 +10270,7 @@ let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
    any other until Enter refused it. *)
 let runtime_pick_refusal_tag = function
   | No_output_schema_channel -> "no output schema"
+  | No_exact_body_deadline -> "no exact-body-timeout-s"
   | Wrong_candidate_group -> "different candidate group"
 
 (* The sentence Enter on a refused row draws. *)
@@ -10270,6 +10278,11 @@ let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   match refusal with
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+  | No_exact_body_deadline ->
+    (* One notice row: the table to fix and the key come first and, with the
+       notice prefix and a typical provider id, fit in about 85 columns. *)
+    Printf.sprintf "[providers.%s] needs exact-body-timeout-s for exact lanes"
+      runtime.Tui_decode.ro_provider_id
   | Wrong_candidate_group ->
     "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
 

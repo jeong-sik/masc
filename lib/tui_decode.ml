@@ -1716,6 +1716,7 @@ type runtime_option = {
   ro_provider_id : string;
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
+  ro_exact_body_deadline_missing : bool;
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -1919,6 +1920,15 @@ let decode_runtime_option ~usage ~default_id json =
     | None -> Ok Exact_output_unsupported
     | Some group -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
   in
+  (* Whether an exact HTTP slot on this runtime would be refused on save
+     (its provider declares no exact-body-timeout-s). Optional: an older
+     server's rows lack it, and absence keeps the pickers' previous reading. *)
+  let* ro_exact_body_deadline_missing =
+    match optional_bool_field json "exact_body_deadline_missing" with
+    | Ok (Some value) -> Ok value
+    | Ok None -> Ok false
+    | Error detail -> Error detail
+  in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
@@ -1972,6 +1982,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_provider_id
     ; ro_model
     ; ro_exact_slot_group
+    ; ro_exact_body_deadline_missing
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens
@@ -2098,6 +2109,8 @@ let decode_runtime_resolved_snapshot json =
                 && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
                 && default.ro_exact_slot_group = listed.ro_exact_slot_group
+                && Bool.equal default.ro_exact_body_deadline_missing
+                     listed.ro_exact_body_deadline_missing
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens

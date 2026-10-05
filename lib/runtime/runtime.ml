@@ -615,6 +615,23 @@ let exact_output_target_source ?(env = Env_config_core.raw_value_opt) () =
   | Some path -> Replacement_catalog_targets { path }
 ;;
 
+(* Whether [r], named as an HTTP slot of an exact-output lane, is a rule-3
+   gap. This one predicate decides both the save refusal below and the
+   runtime listing editors read, so a picker can refuse the candidate before
+   anything is sent instead of learning it from the write's 400. *)
+let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source) (r : t) =
+  match target_source with
+  | Replacement_catalog_targets { path = _ } -> false
+  | Runtime_binding_targets ->
+    (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
+     | Runtime_execution.Agent_core _, None -> true
+     | Runtime_execution.Agent_core _, Some (_ : float) -> false
+     | ( Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ ), (Some _ | None) -> false)
+;;
+
 (* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
    built from its binding, and its whole-request deadline is the provider's
    [exact-body-timeout-s]. Without it plan admission refuses every request on
@@ -645,18 +662,11 @@ let exact_slot_body_deadline_gaps_of
   =
   let gap_of (lane : Runtime_schema.exact_output_lane_decl) slot_id =
     match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
-    | None -> None
-    | Some r ->
-      (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
-       | Runtime_execution.Agent_core _, None ->
-         Some
-           ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
-            : exact_slot_body_deadline_gap)
-       | Runtime_execution.Agent_core _, Some (_ : float) -> None
-       | ( Runtime_execution.Codex_app_server _
-         | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _
-         | Runtime_execution.Muse_serve _ ), (Some _ | None) -> None)
+    | Some r when exact_slot_lacks_body_deadline ~target_source r ->
+      Some
+        ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
+         : exact_slot_body_deadline_gap)
+    | Some _ | None -> None
   in
   match target_source with
   | Replacement_catalog_targets { path = _ } -> []

@@ -93,9 +93,20 @@ let retained_address (reference : evidence) =
       else Error "evidence is not retained in this Lane store"
   | _ -> Error "evidence is not retained in this Lane store"
 let sequence_path hash = Filename.concat "sequences" (hash ^ ".json")
-type read_budget = { mutable remaining : int }
+type read_budget = {
+  mutable remaining : int;
+  (* Address -> body size of every blob this budget has already charged. A
+     journal record may carry an inline copy of one of those blobs; that read
+     may exceed [remaining] by the largest charged body and credits the
+     duplicate back once it parses the same digest, so the same logical bytes
+     are charged once whichever address the caller visits first. *)
+  charged : (string, int) Hashtbl.t;
+}
 type bounded_read_error = Read_limit_exceeded | Read_failed of string
-let read_budget ~max_bytes = { remaining = max 0 max_bytes }
+let read_budget ~max_bytes =
+  { remaining = max 0 max_bytes; charged = Hashtbl.create 8 }
+let largest_charged budget =
+  Hashtbl.fold (fun _ size largest -> max largest size) budget.charged 0
 let bounded_protect f =
   match protect (fun () -> Ok (f ())) with
   | Ok result -> result | Error detail -> Error (Read_failed detail)
@@ -127,21 +138,26 @@ let read_file_bounded ~budget ~ownership_root path = bounded_protect (fun () ->
         else Ok contents.content
   end)
 let read_blob_bounded ~budget t reference =
-  let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
-  let read relative =
-    let* bytes = read_file_bounded ~budget ~ownership_root:t.root (Filename.concat t.root relative) in
-    if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch") in
-  match kind with
-  | Sequence -> read (sequence_path hash)
-  | Blob ->
-      let canonical = blob_path hash in
-      let* kind = canonical_blob_kind t hash
-        |> Result.map_error (fun detail -> Read_failed detail) in
-      (match kind with
-       | Fs_compat.Exact_kind Unix.S_REG -> read canonical
-       | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR -> read (recovery_blob_path hash)
-       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-           Error (Read_failed "retained evidence is not a regular file"))
+  let result =
+    let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
+    let read relative =
+      let* bytes = read_file_bounded ~budget ~ownership_root:t.root (Filename.concat t.root relative) in
+      if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch") in
+    match kind with
+    | Sequence -> read (sequence_path hash)
+    | Blob ->
+        let canonical = blob_path hash in
+        let* kind = canonical_blob_kind t hash
+          |> Result.map_error (fun detail -> Read_failed detail) in
+        (match kind with
+         | Fs_compat.Exact_kind Unix.S_REG -> read canonical
+         | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR -> read (recovery_blob_path hash)
+         | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+             Error (Read_failed "retained evidence is not a regular file")) in
+  (match result with
+   | Ok bytes -> Hashtbl.replace budget.charged reference.uri (String.length bytes)
+   | Error _ -> ());
+  result
 let read_blob ?(max_bytes=max_int) t reference =
   read_blob_bounded ~budget:(read_budget ~max_bytes) t reference
   |> Result.map_error (function
@@ -691,7 +707,8 @@ let read_durable_record_bounded ~sync_file ~sync_parent ~budget path = bounded_p
     let stat = Unix.fstat fd in
     if stat.Unix.st_kind <> Unix.S_REG then
       Error (Read_failed "retained file is not a regular file")
-    else if stat.Unix.st_size > budget.remaining then Error Read_limit_exceeded
+    else if stat.Unix.st_size > budget.remaining + largest_charged budget then
+      Error Read_limit_exceeded
     else begin
       budget.remaining <- budget.remaining - stat.Unix.st_size;
       read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
@@ -724,6 +741,17 @@ let load_sampling_request_bounded_unlocked ~sync_file ~sync_parent ~budget t ~in
          a directory scan, test helper or repeated provider call. *)
       let* inline = sampling_inline_outcome json
         |> Result.map_error (fun detail -> Read_failed detail) in
+      (* If an earlier read already charged this exact outcome blob, the
+         journal's inline copy is a duplicate. Credit it back so the same
+         logical bytes are charged once whichever address the caller visited
+         first, and refuse the record when the net charge still overruns. *)
+      let* () = match inline with
+        | Some (reference, bytes) when Hashtbl.mem budget.charged reference.uri ->
+            budget.remaining <- budget.remaining + String.length bytes;
+            Hashtbl.remove budget.charged reference.uri;
+            Ok ()
+        | _ -> Ok () in
+      let* () = if budget.remaining < 0 then Error Read_limit_exceeded else Ok () in
       let* () = match inline with
         | None -> Ok ()
         | Some (reference, bytes) ->

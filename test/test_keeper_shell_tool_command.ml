@@ -148,5 +148,35 @@ let () =
      assert (mentions "command substitution")
    | Ok _ -> assert false)
 
+(* Duplicate [shell_command] declarations are refused when the table
+   builds, not discovered at lookup time: the failure names the path and
+   both tools, and distinct paths — including a prefix relationship,
+   which the split orders by longest match — all stand. *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  (match
+     K.reject_duplicate_paths
+       [ ([ "board"; "list" ], "masc_board_list")
+       ; ([ "board"; "list" ], "masc_board_list_renamed")
+       ]
+   with
+   | exception Failure message -> assert (String.length message > 0)
+   | () -> assert false);
+  (* The same refusal whichever declaration comes first. *)
+  (match
+     K.reject_duplicate_paths
+       [ ([ "lane"; "status" ], "keeper_lane_status")
+       ; ([ "lane"; "status" ], "masc_lane_status")
+       ]
+   with
+   | exception Failure _ -> ()
+   | () -> assert false);
+  (* Distinct paths stand, even when one is a prefix of another. *)
+  K.reject_duplicate_paths
+    [ ([ "board"; "list" ], "masc_board_list")
+    ; ([ "board"; "post"; "get" ], "masc_board_post_get")
+    ; ([ "lane" ], "a_lane_tool")
+    ]
+
 let () =
   print_endline "[test_keeper_shell_tool_command] all tests passed"

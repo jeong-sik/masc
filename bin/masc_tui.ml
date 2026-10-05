@@ -5025,6 +5025,7 @@ let open_lane_run_detail state ~mailbox ~(lane : Standalone_lane.t) ~run_id =
   state.lane_run_detail <- None;
   state.lane_run_detail_error <- None;
   state.lane_run_detail_scroll <- 0;
+  state.lane_run_preflight_details <- false;
   state.lane_run_detail_content_height <- 0;
   launch_lane_run_detail_load state ~mailbox ~run_id
 
@@ -22220,6 +22221,15 @@ and is loaded on demand through keeper_skill.
              Masc_tui_types.next_memory_overview_sort state.memory_overview_sort;
            state.memory_health_cursor <- 0;
            state.memory_health_scroll <- 0
+       | Some ("d" | "D")
+         when state.view = Memory && Option.is_some state.memory_facts_keeper ->
+           toggle_memory_facts_categories ~cols:terminal_columns state
+       | Some ("d" | "D")
+         when state.view = Lanes && (match state.lanes_mode, state.lane_run_detail with
+           | Lanes_run_detail (_, _), Some {Tui_decode.lrd_librarian_preflight=Some _;_} -> true
+           | _ -> false) ->
+           state.lane_run_preflight_details <- not state.lane_run_preflight_details;
+           state.lane_run_detail_scroll <- 0
        | Some ("d" | "D")
          when state.view = Memory
               && Option.is_none state.memory_facts_keeper ->

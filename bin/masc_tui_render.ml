@@ -10906,36 +10906,69 @@ let provider_history_lines ~cols (state : state) =
                       (String.length scope_id)))
         | Some account -> Overview_providers.scope_name account
       in
+      let width = max 1 (cols - 7) in
+      let minimum_card_cells = max 64 (7 + days * 2 + 4) in
+      let paired = width >= 2 * minimum_card_cells + 2 in
+      let card_width = if paired then (width - 2) / 2 else width in
+      let inner = max 1 (card_width - 4) in
+      let wrap text = Message_layout.wrap_words ~max_cells:inner text in
       let chart (row : Masc_tui_usage_trend.row) =
+        let account = List.find_opt (fun account ->
+          String.equal (Overview_providers.scope_id account) row.scope_id) scopes in
+        let email = Option.bind account (Overview_providers.account_email
+          ~account_emails:state.overview_account_emails) in
         let limit = Option.fold ~none:"" ~some:(fun id -> id ^ " ") row.limit_id in
-        let width = max 1 (cols - 7) in
-        let heading = Masc_tui_message_layout.fit_middle width (label row.scope_id) in
-        let window = Terminal_text.single_line limit ^ Terminal_text.single_line row.kind in
-        ("   " ^ Theme.info () ^ Ansi.bold ^ heading ^ Ansi.reset)
-        :: List.map (fun line -> "   " ^ line)
-             (Masc_tui_message_layout.wrap_words ~max_cells:width window)
-        @ [ Printf.sprintf "   %s  %d/%d UTC days reported" row.marks row.reported_days days; "" ]
+        let latest = match Masc_tui_usage_trend.latest row with
+          | None -> "No reports in this window"
+          | Some sample ->
+            let time = Unix.gmtime sample.observed_at in
+            Printf.sprintf "Latest report %s · %02d-%02d %02d:%02d UTC"
+              (match sample.report with
+               | Masc_tui_usage_trend.Measured (value, _) -> Overview_providers.utilization_text value
+               | Masc_tui_usage_trend.Reported_no_windows -> "reported no windows")
+              (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min in
+        let body = wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
+          @ (match email with None -> [] | Some email -> wrap email)
+          @ wrap latest
+          @ Masc_tui_usage_trend.plot ~width:inner trend row
+          @ wrap (Printf.sprintf "%d/%d UTC days reported" row.reported_days days) in
+        let heading = Message_layout.fit_middle inner (label row.scope_id) in
+        let line text = Theme.recede () ^ Ansi.box_v ^ Ansi.reset ^ " "
+          ^ Message_layout.fit_width text inner ^ " " ^ Theme.recede () ^ Ansi.box_v ^ Ansi.reset in
+        (Theme.info () ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ heading ^ Ansi.reset ^ Theme.info ()
+         ^ " " ^ draw_hline (max 0 (card_width - Message_layout.display_width heading - 4))
+         ^ Ansi.box_tr ^ Ansi.reset)
+        :: List.map line body
+        @ [Theme.recede () ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset]
       in
+      let rec arrange = function
+        | [] -> []
+        | left :: right :: rest when paired ->
+          let left = chart left and right = chart right in
+          let height = max (List.length left) (List.length right) in
+          let row lines index = Option.value ~default:(String.make card_width ' ') (List.nth_opt lines index) in
+          List.init height (fun index -> "   " ^ row left index ^ "  " ^ row right index)
+          @ [""] @ arrange rest
+        | row :: rest -> List.map (fun line -> "   " ^ line) (chart row) @ [""] @ arrange rest in
+      let first = Unix.gmtime (trend.generated_at -. float_of_int (days - 1) *. 86400.0) in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report · ○ means reported no windows · $ means uncapped USD use"
-         days
-         (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
-         as_of.Unix.tm_hour as_of.Unix.tm_min)
+         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC"
+         days (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min)
+      :: Printf.sprintf " %02d-%02d → %02d-%02d UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
+           (first.Unix.tm_mon + 1) first.Unix.tm_mday (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
+      :: " ↓ below zero · ↑ above limit"
       :: (match trend.unreadable_reports with
           | 0 -> []
-          | count ->
-              [ Printf.sprintf
-                  "   %d stored report%s could not be read; a day they held reads as no report"
-                  count (if count = 1 then "" else "s") ])
+          | count -> [Printf.sprintf "   %d stored reports could not be read; missing days stay absent" count])
       @ (match trend.rows with
          | [] -> [ "   No reports recorded in this window" ]
-         | rows -> List.concat_map chart rows)
+         | rows -> arrange rows)
 
 let usage_lines ~cols (state : state) =
   let open Masc.Tui_decode_usage in
   let scopes =
     match Overview_providers.section
-            ~providers:state.overview_providers ~runtimes:state.overview_quota
+            ~providers:state.overview_providers ~history:state.provider_history ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
     | Some section -> section.title :: section.lines

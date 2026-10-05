@@ -12051,7 +12051,11 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
                 | Goal_phase.Public_action.Request_complete ->
                     "request completion of"
                 | Goal_phase.Public_action.Drop -> "drop"
-                | Goal_phase.Public_action.Reopen -> "reopen")
+                | Goal_phase.Public_action.Reopen -> "reopen"
+                | Goal_phase.Public_action.Pause -> "pause"
+                | Goal_phase.Public_action.Resume -> "resume"
+                | Goal_phase.Public_action.Block -> "block"
+                | Goal_phase.Public_action.Unblock -> "unblock")
                goal_id))
   | Planning_list -> ()
 
@@ -23602,6 +23606,14 @@ and is loaded on demand through keeper_skill.
                 report_action state "system"
                   (Printf.sprintf "u 를 한 번 더 누르면 %s 로 되돌립니다" name)
               end)
+       | Some key when state.view = Planning
+           && Option.is_some (goal_detail_on_screen state)
+           && Option.is_some (planning_action_of_key key) ->
+           (* Detail actions take precedence over global refresh/navigation.
+              The displayed keys and parser share one owner. *)
+           Option.iter
+             (fun action -> handle_goal_action_key state ~mailbox:async_messages ~action)
+             (planning_action_of_key key)
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            Masc_tui_theme_choice.invalidate_cache ();
@@ -25560,18 +25572,6 @@ and is loaded on demand through keeper_skill.
        | Some ("a" | "A") when state.view = Planning
            && Option.is_some (goal_detail_on_screen state) ->
            handle_goal_confirmation_key state ~mailbox:async_messages
-       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning
-           && Option.is_some (goal_detail_on_screen state) ->
-           (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
-              letters stay navigation-free there. The first press arms, the
-              same press submits; the server owns the phase rules. *)
-           let action =
-             match key with
-             | Some ("c" | "C") -> Goal_phase.Public_action.Request_complete
-             | Some ("x" | "X") -> Goal_phase.Public_action.Drop
-             | _ -> Goal_phase.Public_action.Reopen
-           in
-           handle_goal_action_key state ~mailbox:async_messages ~action
        | Some "c" | Some "C" when state.view = Board ->
            (* Reply to the post being read. Same pane as a new post; the
               reply target decides the payload and where the operator

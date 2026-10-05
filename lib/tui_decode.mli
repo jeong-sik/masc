@@ -126,6 +126,8 @@ type planning_rollup = {
   pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
+  pr_paused : int;
+  pr_blocked : int;
 }
 
 type planning_backlog = {

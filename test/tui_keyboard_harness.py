@@ -1455,6 +1455,7 @@ def empty_runtime_resolved_fixture() -> HttpResponse:
         "generated_at_iso": "2026-09-23T00:00:00Z",
         "source": RUNTIME_RESOLVED_PATH,
         "config_path": None,
+        "default_route": None,
         "default_runtime": None,
         "media_failover": [],
         "media_failover_declared": [],

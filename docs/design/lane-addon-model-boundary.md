@@ -1,10 +1,18 @@
 # Model access for isolated Lane packages
 
-The next Fusion execution boundary uses standard
+The implemented connection primitive for isolated Lane packages is standard
 [MCP sampling](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling):
 the package sends a typed `sampling/createMessage` request over its existing
 stdio connection. The host chooses model access and returns the response.
 Provider credentials and model-runtime configuration do not enter the package.
+
+> **Specification status.** The 2026-07-28 MCP specification marks sampling as
+> deprecated: new implementations SHOULD NOT adopt it, and existing ones SHOULD
+> move to direct provider API calls. This document describes the primitive MASC
+> already implements (`Agent_core.Mcp.connect` with a `sampling_handler`) and
+> the package/worker contract built on it. It is not a recommendation to extend
+> sampling to new boundaries. See the glossary's
+> [MCP Sampling](../spec/00-glossary.md) entry.
 
 ## Implemented connection primitive
 

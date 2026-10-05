@@ -350,8 +350,11 @@ type runtime_option = {
       (** The [providers.<id>] table key; [ro_provider] is its display name. *)
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
-  ro_exact_body_deadline_missing : bool;
       (** The declared list an exact-lane append writes. *)
+  ro_exact_body_deadline_missing : bool;
+      (** An exact HTTP slot on this runtime would be refused on save: its
+          provider declares no [exact-body-timeout-s] (rule 3, #38779). [false]
+          when an older server's row omits it. *)
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;

@@ -10248,9 +10248,10 @@ let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
   | No_exact_body_deadline ->
-    Printf.sprintf
-      "[providers.%s] declares no exact-body-timeout-s; add it before using %s in an exact lane"
-      runtime.Tui_decode.ro_provider_id runtime.Tui_decode.ro_id
+    (* One notice row: the table to fix and the key come first and, with the
+       notice prefix and a typical provider id, fit in about 85 columns. *)
+    Printf.sprintf "[providers.%s] needs exact-body-timeout-s for exact lanes"
+      runtime.Tui_decode.ro_provider_id
   | Wrong_candidate_group ->
     "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
 

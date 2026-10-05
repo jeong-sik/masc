@@ -1653,6 +1653,13 @@ type librarian_preflight_status =
   | Preflight_judged of
       Typesafeai_librarian_preflight.decision Typesafeai_types.decoded_choice
 type librarian_generation_path = Generation_not_entered | Generation_full_lane | Generation_jev_no_change
+type librarian_memory_result =
+  | Librarian_memory_unchanged of int * int
+  | Librarian_memory_rewritten of { revision : int; facts : int; added : int; removed : int }
+type librarian_side_write_status =
+  | Side_not_attempted | Side_answer_missing | Side_withheld | Side_outcome_unconfirmed
+  | Side_committed | Side_answer_refused of string | Side_failed of string
+type librarian_side_write_kind = Context_write | Continuity_write
 type librarian_preflight_reading =
   { lp_status : librarian_preflight_status
   ; lp_generation_path : librarian_generation_path
@@ -1660,6 +1667,9 @@ type librarian_preflight_reading =
   ; lp_elapsed_s : float option
   ; lp_model : string option
   ; lp_domain_rejection : string option
+  ; lp_memory_result : librarian_memory_result option
+  ; lp_context_only : bool
+  ; lp_side_writes : (librarian_side_write_kind * librarian_side_write_status) list
   }
 
 type lane_run_detail =

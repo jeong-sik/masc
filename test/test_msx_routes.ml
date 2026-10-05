@@ -518,7 +518,7 @@ let status_of_response response =
   | _ -> failf "could not parse response status: %S" response
 ;;
 
-let test_activity_read_and_tick_refusal () =
+let test_activity_read_and_route_refusals () =
   with_tick_machine (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
     Executor_pool_ref.For_testing.with_pool pool (fun () ->
@@ -530,6 +530,14 @@ let test_activity_read_and_tick_refusal () =
         let status,body = Route.tick_response ~body:"{}" in
         check bool "known activity refusal is HTTP 409" true (status=`Conflict);
         check bool "closed refusal code" true (body=`Assoc ["ok",`Bool false;"code",`String code]);
+        let press_status,press_body =
+          Route.press_response
+            ~config:(Lazy.force unwatched_config)
+            ~who:"unit-presser"
+            ~body:{|{"keys":["space"]}|}
+        in
+        check bool "press answers the same activity refusal as tick" true
+          (press_status = status && press_body = body);
         check int "refusal never advances" before (current_frame_number ()))
         [Machine_configuration.Disabled,"off","activity_disabled";
          Machine_configuration.Unobserved,"unobserved","activity_unobserved"];
@@ -906,7 +914,7 @@ let () =
             test_press_route_names_the_resolved_actor
         ] )
     ; ( "tick"
-      , [ test_case "activity reads and typed refusals preserve the machine" `Quick test_activity_read_and_tick_refusal
+      , [ test_case "activity reads and typed refusals preserve the machine" `Quick test_activity_read_and_route_refusals
         ; test_case "activity route follows read authority without execution" `Quick test_activity_route_read_authority
         ; test_case
             "retained pixels keep atomic advancement and fresh metadata"

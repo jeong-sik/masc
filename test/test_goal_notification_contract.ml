@@ -9,11 +9,15 @@ let rec remove_tree path =
     Unix.rmdir path)
   else Sys.remove path
 
+(* The server enables the guard before any delivery runs. With the guard off,
+   [Eio_guard.with_mutex] runs its body without a lock, so a store call made
+   from a system thread passes here and raises [Non_eio_mutex_context] there. *)
 let with_workspace run = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   let base_dir = Filename.temp_file "goal-notification-contract-" "" in
   Sys.remove base_dir; Unix.mkdir base_dir 0o700;
-  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+  Fun.protect ~finally:(fun () -> Eio_guard.disable (); remove_tree base_dir) (fun () ->
     let config = Workspace_utils.default_config_uncached base_dir in
     Fs_compat.mkdir_p (Workspace_utils.masc_dir config);
     run config)

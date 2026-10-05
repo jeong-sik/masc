@@ -83,6 +83,10 @@ let scrolled_surface state surface =
       let terminal_rows, cols = get_terminal_size () in
       let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
       Masc_tui_types.runtime_scrolled ~rows ~cols state
+  (* The models pane's document depends on the pane width: narrow panes draw
+     one wrapped item per binding, taller than the table it replaces. *)
+  | Config when state.config_pane = Config_models ->
+      Some (Masc_tui_render.config_models_scrolled state)
   | _ ->
       (* The Lanes overview's chrome counts the rows a multi-line refusal
          wraps to, so it is read at the terminal width like the Memory
@@ -23311,6 +23315,22 @@ and is loaded on demand through keeper_skill.
                 preview_theme_under_cursor state
             (* The models table is read by a cursor [e] acts on, and the
                drawing brings the window to the cursor. *)
+            (* Stacked items are taller than a page of bindings, so there the
+               page keys walk the document and the cursor stays on its
+               binding: that is how an item's body is read. *)
+            | Config
+              when state.config_pane = Config_models
+                   && Masc_tui_render.config_models_stacked state ->
+                (match scrolled_surface state state.view with
+                 | None -> ()
+                 | Some scrolled ->
+                     let height = surface_body_height ~rows:(surface_rows state) scrolled in
+                     let move =
+                       if direction > 0 then Masc_tui_scroll.page_down
+                       else Masc_tui_scroll.page_up
+                     in
+                     state.config_scroll <-
+                       move ~count:scrolled.sc_count ~height state.config_scroll)
             | Config when state.config_pane = Config_models ->
                 state.config_models_cursor <-
                   Masc_tui_scroll.cursor_move

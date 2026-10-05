@@ -362,10 +362,9 @@ models = ["sol", "astra"]
   Alcotest.(check bool) "generated models do not become explicit overrides" false
     (Otoml.find_opt (toml_of overridden) Fun.id [ "codex_2"; "astra" ] <> None)
 
-(* Layouts the append cannot carry. A [[table array]] under the base is
-   printed after the copy's own keys, not over them; a providers table
-   written inline cannot take a section after it, so that is refused rather
-   than written as TOML another reader rejects. *)
+(* Reject invalid provider fields before copying an account. A providers table
+   written inline cannot take a section after it, so that layout is refused
+   rather than written as TOML another reader rejects. *)
 let test_layouts_the_append_cannot_carry () =
   let with_notes =
     parsed
@@ -385,10 +384,13 @@ tools-support = true
 [cc.sonnet]
 |}
   in
-  Alcotest.(check (option string)) "account-home is not swallowed by the table array"
-    (Some "/home/op/.cc2")
-    (toml_string (declared with_notes ~base:"cc" ~id:"cc_2" ~location:"/home/op/.cc2")
-       [ "providers"; "cc_2"; "account-home" ]);
+  (match D.declare ~inherited_home with_notes ~base:(base_named with_notes "cc")
+      ~id:"cc_2" ~location:"/home/op/.cc2" with
+   | Error (D.Rejected errors) ->
+     Alcotest.(check bool) "unknown provider table is rejected at its source path" true
+       (List.exists (fun (error : Runtime_toml.parse_error) ->
+          String.equal error.path "providers.cc.notes") errors)
+   | _ -> Alcotest.fail "an account with an unknown provider table must be refused");
   let inline =
     parsed
       {|providers = { cc = { protocol = "claude-code", command = "claude", is-non-interactive = true } }

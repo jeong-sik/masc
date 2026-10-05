@@ -37,6 +37,17 @@ let test_image_only_completion_is_sampling_content () =
     (Result.is_error (project (response [block;url_image])));
   check bool "URL-only image cannot become MCP base64 content" true
     (Result.is_error (project (response [url_image])));
+  List.iter (fun extra ->
+    check bool "unsupported content beside image is rejected" true
+      (Result.is_error (project (response [block;extra]))))
+    [L.Audio {media_type="audio/wav";data="YQ==";source_type=L.Base64};
+     L.Document {media_type="application/pdf";data="YQ==";source_type=L.Base64}];
+  List.iter (fun data ->
+    check bool "invalid or empty base64 is rejected" true
+      (Result.is_error (project (response [L.Image {
+        media_type="image/png";data;source_type=L.Base64}])))) ["";"%%%";"a"];
+  check bool "reasoning metadata may accompany a valid image" true
+    (project (response [L.Thinking {content="reason";signature=None};block]) = Ok actual);
   check bool "empty completion remains an error" true
     (Result.is_error (project (response [])))
 

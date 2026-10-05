@@ -760,6 +760,10 @@ def run_exact_refusal_crowded(executable: str) -> None:
             raise AssertionError(
                 f"the footer left the frame under a crowded multi-line refusal; screen tail={screen[-1600:]!r}"
             )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE (80x30 crowded) =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
         os.write(fd, b"\x1b")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")

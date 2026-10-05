@@ -2411,3 +2411,11 @@
  (wrapped false)
  (modules masc_tui_model_form)
  (libraries masc_tui_model_runtime_table masc_tui_message_layout masc.runtime masc.runtime_toml_namespace masc.toml_line_editor masc.agent_core.llm_provider otoml))
+(executable
+ (name masc_librarian_preflight_eval)
+ (modules masc_librarian_preflight_eval)
+ (public_name masc-librarian-preflight-eval)
+ (package masc)
+ (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
+  masc.masc_eio_context masc.http_client masc.masc_log masc.fs_compat
+  masc.agent_core masc.prompt_registry masc.time_compat masc.masc_types digestif eio eio_main yojson))

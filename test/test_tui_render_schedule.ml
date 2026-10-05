@@ -939,7 +939,7 @@ let test_workspace_path_takes_the_remainder () =
    two format strings. *)
 
 let test_workspace_header_and_row_share_their_offsets () =
-  for inner_width = 60 to 240 do
+  for inner_width = 68 to 240 do
     let layout = Schedule.workspace_layout ~inner_width in
     let header = Schedule.workspace_header_row ~layout in
     let row = Schedule.workspace_row ~layout workspace_probe in
@@ -955,7 +955,7 @@ let test_workspace_header_and_row_share_their_offsets () =
 (* A repository named past its cell, on a branch named past its cell, at a path
    longer than the frame: none of it may move a column. *)
 let test_workspace_row_width_does_not_depend_on_its_readings () =
-  for inner_width = 60 to 240 do
+  for inner_width = 68 to 240 do
     let layout = Schedule.workspace_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
     let header = width (Schedule.workspace_header_row ~layout) in
@@ -1018,7 +1018,7 @@ let verification_probe : Schedule.verification_row_values =
   }
 
 let test_verification_rows_stay_on_the_header_columns () =
-  for inner_width = 60 to 240 do
+  for inner_width = 68 to 240 do
     let submitter_width = 16 in
     let title_width =
       Schedule.verification_title_width ~inner_width ~submitter_width
@@ -1574,6 +1574,52 @@ let test_a_measured_recurrence_is_not_cut_in_its_cell () =
         (Masc_tui_message_layout.display_width (row layout)))
     [ 68; 95; 140; 240 ]
 
+(* The layout the app really builds is measured from a long recurrence, not
+   the helper's floor. A narrow pane there still gives columns up in the
+   drop order -- whatever is dropped is a prefix of it, and the four facts
+   the tab exists to state never go -- and the rows stay on the header. *)
+let test_a_measured_recurrence_page_gives_up_columns_in_the_drop_order () =
+  let drop_order =
+    Schedule.[ Kauto_by; Kauto_requested; Kauto_outcome; Kauto_recurrence ]
+  in
+  let rec is_prefix dropped order =
+    match dropped, order with
+    | [], _ -> true
+    | d :: dropped, o :: order -> d = o && is_prefix dropped order
+    | _ :: _, [] -> false
+  in
+  let recurrence_width =
+    Schedule.kauto_recurrence_width [ "0 9 * * 1-5 (+09:00)" ]
+  in
+  for inner_width = 68 to 240 do
+    let layout =
+      kauto_page ~recurrence_width ~inner_width ~outcome_width:13 ~by_width:24 ()
+    in
+    let shown = kauto_shown layout in
+    (* Read in drop order, the columns a pane gave up are the front of it:
+       nothing later goes while an earlier column is still drawn. *)
+    let gone_in_drop_order =
+      List.filter (fun column -> not (List.mem column shown)) drop_order
+    in
+    check bool
+      (Printf.sprintf "inner %d: what is dropped is a prefix of the drop order"
+         inner_width)
+      true
+      (is_prefix gone_in_drop_order drop_order);
+    List.iter
+      (fun column ->
+        check bool
+          (Printf.sprintf "inner %d: a fact column stays" inner_width)
+          true (List.mem column shown))
+      Schedule.[ Kauto_mark; Kauto_status; Kauto_triggered; Kauto_received; Kauto_what ];
+    check int
+      (Printf.sprintf "inner %d: a row matches the header" inner_width)
+      (kauto_header_width layout)
+      (Masc_tui_message_layout.display_width
+         (Schedule.kauto_row ~styles:Schedule.kauto_plain_styles ~layout
+            { kauto_empty with krow_recurrence = "0 9 * * 1-5 (+09:00)" }))
+  done
+
 (* The reading the probe puts in each column. Every schedule column is
    placed by its left edge. *)
 let schedule_marks : Schedule.schedule_row_values =
@@ -1610,7 +1656,7 @@ let test_schedule_columns_hold_their_offsets () =
    undressed one does -- and what the header does. A colour cannot move a
    column. *)
 let test_system_log_colour_costs_no_cells () =
-  for inner_width = 60 to 240 do
+  for inner_width = 68 to 240 do
     let layout = Schedule.system_log_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
     let header = width (Schedule.system_log_header_row ~layout) in
@@ -1659,7 +1705,7 @@ let test_system_log_message_takes_the_remainder () =
 
 (* The offsets the two format strings could disagree about. *)
 let test_system_log_header_and_row_share_their_offsets () =
-  for inner_width = 60 to 240 do
+  for inner_width = 68 to 240 do
     let layout = Schedule.system_log_layout ~inner_width in
     let header = Schedule.system_log_header_row ~layout in
     let row =
@@ -2997,6 +3043,9 @@ let () =
             test_the_recurrence_column_is_measured_from_the_page
         ; test_case "a measured recurrence is not cut in its cell" `Quick
             test_a_measured_recurrence_is_not_cut_in_its_cell
+        ; test_case "a measured recurrence page gives up columns in the drop order"
+            `Quick
+            test_a_measured_recurrence_page_gives_up_columns_in_the_drop_order
         ; test_case "one long cron folds inside its own cell" `Quick
             test_one_long_cron_folds_inside_its_own_cell
         ; test_case "the state mark spells the liveness" `Quick

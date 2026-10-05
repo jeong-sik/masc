@@ -1191,7 +1191,45 @@ let test_default_route_picker_keeps_the_lane_name () =
   let rows, selected, _ = drawn state in
   Alcotest.(check (list string)) "filter finds the route name" ["primary"] rows;
   Alcotest.(check (option string)) "the lane is the selectable row"
-    (Some "primary") selected
+    (Some "primary") selected;
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "resolved routes are unread"
+   | Some snapshot ->
+     let lanes = List.map (fun lane ->
+       if lane.Tui_decode.rrl_id = "primary" then
+         { lane with rrl_id = "a"; rrl_runtime_ids = ["b"; "a"] }
+       else lane) state.runtime_lanes in
+     state.runtime_lanes <- lanes;
+     state.runtime_surface <- Some {snapshot with rss_resolved =
+       {snapshot.rss_resolved with rrs_lanes = lanes}});
+  let _, _, collision_choices = runtime_picker_rows state Pick_route_default in
+  Alcotest.(check int) "a colliding route has one selectable row" 1
+    (List.length (List.filter (fun choice -> runtime_picker_choice_id choice = "a") collision_choices));
+  Alcotest.(check bool) "the colliding route preserves lane precedence" true
+    (match List.find_opt (fun choice -> runtime_picker_choice_id choice = "a") collision_choices with
+     | Some (Lane_choice lane) -> lane.rrl_runtime_ids = ["b"; "a"]
+     | Some (Runtime_choice _) | None -> false)
+
+let test_default_route_picker_uses_refreshed_lanes () =
+  let state = lane_state () in
+  open_runtime_lane_pick state Pick_route_default;
+  (* The catalogue read finishes after the picker opens; the surface still
+     carries primary and solo, while the fresh inventory has a colliding a. *)
+  state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
+  state.runtime_lanes <-
+    [{rrl_id = "a"; rrl_runtime_ids = ["b"; "a"]; rrl_declared = true}];
+  let check label =
+    let _, _, choices = runtime_picker_rows state Pick_route_default in
+    Alcotest.(check (list string)) label ["a"; "b"; "c"]
+      (List.map runtime_picker_choice_id choices);
+    Alcotest.(check bool) "the fresh lane shadows runtime a" true
+      (match choices with
+       | Lane_choice lane :: _ -> lane.rrl_runtime_ids = ["b"; "a"]
+       | Runtime_choice _ :: _ | [] -> false)
+  in
+  check "stale surface does not replace fresh lanes";
+  state.runtime_surface <- None;
+  check "fresh lanes are offered without a surface"
 
 (* The operator types part of a runtime id and the drawn choices are the ones
    that carry it; the header says how many of the catalogue those are. *)
@@ -1620,7 +1658,8 @@ let () = Alcotest.run "runtime list geometry"
         `Quick test_the_route_editor_will_not_write_from_a_stale_list; Alcotest.test_case "the writes a stale list can undo are named once"
         `Quick test_the_writes_a_stale_list_can_undo_are_named_once; Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
         test_the_route_editor_keeps_an_unresolved_entry_in_place; Alcotest.test_case "default route picker keeps the lane name" `Quick
-         test_default_route_picker_keeps_the_lane_name; Alcotest.test_case "a typed filter narrows the drawn choices" `Quick
+         test_default_route_picker_keeps_the_lane_name; Alcotest.test_case "default route picker uses refreshed lanes" `Quick
+         test_default_route_picker_uses_refreshed_lanes; Alcotest.test_case "a typed filter narrows the drawn choices" `Quick
         test_a_typed_filter_narrows_the_drawn_choices; Alcotest.test_case "an empty match is not an unread catalogue" `Quick
         test_an_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "the filter matches the drawn text" `Quick
         test_the_filter_matches_the_drawn_text; Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick

@@ -1,5 +1,5 @@
-(** Durable rejection delivery to the producer Keeper after a system completion
-    authority rejects submitted evidence. *)
+(** Durable verdict delivery to the producer Keeper after a completion
+    authority settles submitted evidence. *)
 
 type delivery =
   | Signaled of { keeper_name : string }
@@ -189,7 +189,7 @@ let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejec
   | Ok Workspace_task.Task_absent -> Ok `Task_absent
 ;;
 
-let reconcile_pending ~config =
+let reconcile_rejections ~config =
   match Workspace_task_rejection_outbox.pending config with
   | Error detail -> Error detail
   | Ok pending ->
@@ -265,4 +265,56 @@ let reconcile_pending ~config =
         { report with retained = report.retained + 1 }
     in
     Ok (List.fold_left deliver { delivered = 0; unroutable = 0; retained = 0 } pending)
+;;
+
+(* Approval is terminal, so an unroutable producer is not released back to Todo.
+   Lookup/queue/ack failures are still retryable: Done cannot be used to infer
+   that its producer received the outcome. *)
+let reconcile_approvals ~config =
+  let open Result.Syntax in
+  let* pending = Workspace_task_approval_outbox.pending config in
+  let deliver report (item : Masc_domain.pending_completion_approval) =
+    let outcome =
+      match Keeper_task_outcome_wake.wake_approved_producer
+              ~config ~producer:item.producer ~task_id:item.task_id
+              ~verification_id:item.verification_id ~authority:item.authority with
+      | Keeper_task_outcome_wake.Signaled _
+      | Keeper_task_outcome_wake.Durable_deferred _ -> Ok `Queued
+      | Keeper_task_outcome_wake.Durable_wake_failed { keeper_name; detail } ->
+        Log.Misc.warn "approval queued; live wake failed task_id=%s keeper=%s detail=%s"
+          item.task_id keeper_name detail;
+        Ok `Queued
+      | Keeper_task_outcome_wake.Unroutable_producer _ -> Ok `Unroutable
+      | Keeper_task_outcome_wake.Producer_identity_lookup_failed { detail; _ }
+      | Keeper_task_outcome_wake.Durable_queue_failed { detail; _ } -> Error detail
+    in
+    let acknowledged = Result.bind outcome (fun outcome ->
+      Workspace_task_approval_outbox.acknowledge config
+        ~task_id:item.task_id ~verification_id:item.verification_id
+      |> Result.map (fun () -> outcome)) in
+    match acknowledged with
+    | Ok `Queued ->
+      Log.Misc.info "completion approval delivered task_id=%s verification_id=%s producer=%s"
+        item.task_id item.verification_id item.producer;
+      { report with delivered = report.delivered + 1 }
+    | Ok `Unroutable ->
+      Log.Misc.warn "completion approval has no producer Keeper task_id=%s verification_id=%s producer=%s"
+        item.task_id item.verification_id item.producer;
+      { report with unroutable = report.unroutable + 1 }
+    | Error detail ->
+      Log.Misc.error
+        "completion approval remains pending task_id=%s verification_id=%s producer=%s detail=%s"
+        item.task_id item.verification_id item.producer detail;
+      { report with retained = report.retained + 1 }
+  in
+  Ok (List.fold_left deliver { delivered = 0; unroutable = 0; retained = 0 } pending)
+;;
+
+let reconcile_pending ~config =
+  let open Result.Syntax in
+  let* rejected = reconcile_rejections ~config in
+  let* approved = reconcile_approvals ~config in
+  Ok { delivered = rejected.delivered + approved.delivered
+     ; unroutable = rejected.unroutable + approved.unroutable
+     ; retained = rejected.retained + approved.retained }
 ;;

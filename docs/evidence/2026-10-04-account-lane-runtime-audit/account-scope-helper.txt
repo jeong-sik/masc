@@ -1,0 +1,6 @@
+PASS: production account display helper 4 assertions; shared scope, distinct scope, explicit fallback, refreshed response scope
+File "/private/tmp/masc-runtime-account-scope-check-20261004/account-display-pure.ml", line 12, characters 13-82:
+12 | let second = {first with ro_quota_scope=Some "account:2"; ro_provider_id="second"}
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 23 [useless-record-with]: all the fields are explicitly listed in this record:
+  the with clause is useless.

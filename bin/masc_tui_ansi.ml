@@ -878,11 +878,7 @@ let box_line_styled buf cols ~style content =
    exact-body-timeout-s to [providers.openrouter]") is what the operator
    needs and it sits at the end of a long line. *)
 let box_lines_wrapped ~cols content =
-  let inner = framed_inner_width cols in
-  List.concat_map
-    (fun line ->
-       Masc_tui_message_layout.wrap_words ~max_cells:(Int.max 1 (inner - 2)) line)
-    (String.split_on_char '\n' content)
+  Masc_tui_message_layout.boxed_rows ~inner:(framed_inner_width cols) content
 
 let box_lines_styled buf cols ~style content =
   List.iter
@@ -895,15 +891,17 @@ let box_lines_row_count ~cols content = List.length (box_lines_wrapped ~cols con
    leads with "lane write refused: HTTP 400:" and ends with the actionable
    "add exact-body-timeout-s to [providers.<id>]", so when the frame cannot
    hold every row keep the first row and the tail, and mark the cut between
-   them. *)
+   them. The head, the cut mark and at least one tail row are the least that
+   keeps that promise; a budget below three cannot show all three, so it is
+   raised to three rather than silently dropping the tail. *)
 let box_lines_styled_bounded buf cols ~style ~budget content =
   let rows = box_lines_wrapped ~cols content in
-  let budget = Int.max 1 budget in
+  let budget = Int.max 3 budget in
   let shown =
     if List.length rows <= budget
     then rows
     else (
-      let keep_tail = Int.max 0 (budget - 2) in
+      let keep_tail = budget - 2 in
       let dropped = List.length rows - keep_tail in
       List.hd rows
       :: "… more; enlarge the terminal"

@@ -3412,7 +3412,7 @@ let render_exact_lane_provider_editor (state : state) editor =
      box_line_styled buf cols ~style:(Theme.info ()) "  Reloading saved candidate order..."
    | Masc_tui_types.Lane_write_idle -> ());
   (match Masc_tui_types.runtime_picker_projection
-     ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows) state with
+     ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows ~cols) state with
    | Some picker ->
      let action = match picker.Masc_tui_types.rlp_pick with
        | Masc_tui_types.Pick_exact_lane_replacement _ -> "Replace selected candidate", "Enter replace"
@@ -4004,7 +4004,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let layout = lanes_scrolled state in
+  let layout = lanes_scrolled state ~cols in
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep

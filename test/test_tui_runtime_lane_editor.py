@@ -705,6 +705,73 @@ def run_exact_refusal(executable: str) -> None:
     )
 
 
+def run_exact_refusal_crowded(executable: str) -> None:
+    """The same multi-line refusal, but with a catalogue that fills the picker's
+    page. The picker reserves rows for the refusal before it decides how many
+    candidates fit; if it counts the refusal's server lines instead of the rows
+    they wrap to, the extra rows push the footer off the frame. Twelve
+    candidates at 80x24 is the shape the operator's real catalogue has, and the
+    frame is small enough that the page is bounded by the frame rather than by
+    the candidate count -- which is what makes the row budget bind."""
+    store = LaneStore()
+    for index in range(12):
+        store.body["runtimes"].append(
+            _keyboard_runtime.runtime_resolved_runtime(
+                f"crowd-{index}", f"Crowd {index}", f"model-crowd-{index}"
+            )
+        )
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+    store.exact_refusal = EXACT_REFUSAL
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-a default", start=mark, timeout=5.0)
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"lane write refused: HTTP 400", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        for needle in EXACT_REFUSAL_LINES:
+            if needle not in screen:
+                raise AssertionError(
+                    f"the refusal lost {needle!r}; screen tail={screen[-1600:]!r}"
+                )
+        # The picker's page is bounded by the frame here, so the rows it
+        # reserved for the refusal decide whether the footer survives. Counting
+        # the refusal's server lines instead of the rows they wrap to leaves the
+        # extra rows to push [q:quit] off the frame.
+        if b"q:quit" not in screen:
+            raise AssertionError(
+                f"the footer left the frame under a crowded multi-line refusal; screen tail={screen[-1600:]!r}"
+            )
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="A crowded picker keeps the footer under a multi-line refusal",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+        terminal_cols=80,
+        terminal_rows=24,
+    )
+
+
 def run_exact_picker_refusal(executable: str) -> None:
     """The candidate picker refuses a candidate the save would refuse: its
     provider declares no exact-body-timeout-s (Runtime_config_text rule 3,
@@ -1606,6 +1673,7 @@ if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
     run_exact_refusal(os.path.abspath(sys.argv[1]))
+    run_exact_refusal_crowded(os.path.abspath(sys.argv[1]))
     run_exact_picker_refusal(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))
     run_empty_cli_group(os.path.abspath(sys.argv[1]))

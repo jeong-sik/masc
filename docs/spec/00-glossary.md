@@ -1078,6 +1078,17 @@ status: reference
   불변식; #39077).
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
+**Default Route (기본 경로)**
+: `[runtime].default`가 파일에 적힌 그대로의 값 — 선언된 lane의 id이거나 runtime의 id다.
+  배정이 없는 Keeper는 이 route로 해석된다. `Runtime.resolve_assignment`를 거쳐 해석되므로,
+  route가 lane을 이름하면 그 lane의 후보 순서를 걷는다. **Entry runtime**은 그 route가
+  진입하는 runtime이고, route가 lane을 이름하면 그 lane의 head 후보다.
+  `Runtime.get_default_route`는 파일이 적은 route를, `Runtime.get_default_runtime_id`는
+  진입 runtime을 답한다. 둘은 원래 한 값이었다 — default가 runtime만 이름할 수 있었고,
+  그래서 배정 없는 Keeper가 lane을 걷으려면 lane이 그 runtime의 id를 달고 있어야 했다.
+  Runtime 편집기는 설정된 default route를 그 entry runtime과 따로 보여준다(#40824).
+  → [Runtime.get_default_route](../../lib/runtime/runtime.mli) · [config/runtime.toml](../../config/runtime.toml)
+
 **Exact Lane Slot 교체·이동 (Exact lane slot replacement and move)**
 : Dashboard 런타임 편집기가 exact-output lane의 선언된 후보 하나를 자리
   그대로 다른 후보로 바꾸거나(`Runtime_route_exact_slot_replaced`,

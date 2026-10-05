@@ -166,8 +166,10 @@ let write path value =
   Fun.protect ~finally:(fun () -> close_out channel)
     (fun () -> output_string channel value)
 
+(* A symlink is unlinked, never followed: a fixture that links a namespace to
+   an external directory must not have its cleanup walk through that link. *)
 let rec remove_tree path =
-  if Sys.is_directory path then begin
+  if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then begin
     Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
     Unix.rmdir path
   end else Sys.remove path
@@ -1798,6 +1800,75 @@ let sampling_retry_path store instance_id request_id =
   Filename.concat (Store.root store)
     ("sampling-recovery/" ^ Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json")
 
+let test_sampling_discovery_rejects_symlink_namespace ~outcomes () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "linked-namespace") in
+  let instance_id = "linked-instance" and request_id = "external" in
+  let terminal, _, _, outcome_bytes = sampling_retry_case store ~instance_id ~request_id "external result" in
+  let namespace = if outcomes then "sampling-outcomes" else "sampling" in
+  let save = if outcomes then Store.save_sampling_outcome else Store.save_sampling_request in
+  sampling_require (save store ~instance_id ~request_id terminal);
+  let parent = Filename.concat (Store.root store) namespace in
+  let leaf = Store.digest instance_id in
+  let external_dir = Filename.concat dir "external-journals" in
+  Unix.mkdir external_dir 0o700;
+  Unix.rename (Filename.concat parent leaf) (Filename.concat external_dir leaf);
+  Unix.rmdir parent; Unix.symlink external_dir parent;
+  Fun.protect ~finally:(fun () ->
+    Unix.unlink parent; Unix.mkdir parent 0o700;
+    Unix.rename (Filename.concat external_dir leaf) (Filename.concat parent leaf)) (fun () ->
+    let reads = ref [] in
+    let report = Store.For_testing.discover_sampling_requests ~on_read:(fun path -> reads := path :: !reads)
+      store ~instance_id ~max_reply_bytes:65536 in
+    check bool "external namespace discovery is rejected" true (Result.is_error report.outcome);
+    check int "external journals are never read" 0 (List.length !reads);
+    check bool "external inline outcome cannot be retained" false
+      (Sys.file_exists (Filename.concat (Store.root store) ("evidence/" ^ Store.digest outcome_bytes ^ ".json")))))
+
+let test_sampling_recovery_promotes_terminal_before_marker_retirement () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "promote-terminal") in
+  let instance_id = "promote-instance" and request_id = "completed" in
+  let terminal, compact, _, _ = sampling_retry_case store ~instance_id ~request_id "finished result" in
+  let pending = match compact with
+    | `Assoc fields -> `Assoc (("state", `String "pending") :: ("outcome", `Null)
+        :: List.remove_assoc "outcome" (List.remove_assoc "state" fields))
+    | _ -> fail "fixture terminal must be an object" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id pending);
+  sampling_require (Store.save_sampling_outcome store ~instance_id ~request_id terminal);
+  check bool "primary publication failure is explicit" true (Result.is_error
+    (Store.For_testing.save_sampling_request ~after_marker:(fun () -> raise (Sys_error "injected primary publication failure"))
+      store ~instance_id ~request_id terminal));
+  sampling_require (Store.recover_sampling_requests store ~instance_id ~max_reply_bytes:65536);
+  check bool "finished recovery retires marker" false (Sys.file_exists (sampling_retry_path store instance_id request_id));
+  let journal = Filename.concat (Store.root store)
+    ("sampling-outcomes/" ^ Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json") in
+  Unix.unlink journal;
+  let record = sampling_require (Store.load_sampling_request_bounded
+    ~budget:(Store.read_budget ~max_bytes:65536) store ~instance_id ~request_id
+    |> Result.map_error (function Store.Read_failed detail -> detail | Store.Read_limit_exceeded -> "limit")) in
+  check bool "primary index retains the completed row after terminal removal" true (match record with
+    | Some (`Assoc fields) -> List.assoc_opt "state" fields = Some (`String "finished")
+    | _ -> false))
+
+let test_sampling_recovery_contains_deep_corrupt_json () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "deep-json") in
+  let instance_id = "deep-instance" in
+  let good, _, outcome, bytes = sampling_retry_case store ~instance_id ~request_id:"good" "valid result" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"good" good);
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"bad" good);
+  let corrupt = String.make 1800000 '[' ^ "0" ^ String.make 1800000 ']' in
+  let path = Filename.concat (Store.root store)
+    ("sampling/" ^ Store.digest instance_id ^ "/" ^ Store.digest "bad" ^ ".json") in
+  write path corrupt;
+  let report = try Some (Store.recover_sampling_requests store ~instance_id ~max_reply_bytes:1048576)
+    with Stack_overflow -> None in
+  check bool "bounded corrupt JSON cannot abort recovery with stack overflow" true (Option.is_some report);
+  check bool "corrupt record remains an explicit error" true (match report with Some (Error _) -> true | _ -> false);
+  check string "valid peer still recovers" bytes (sampling_require (Store.read_blob store outcome));
+  check bool "corrupt record remains pending" true (Sys.file_exists (sampling_retry_path store instance_id "bad")))
+
 let test_sampling_retry_two_stores_and_concurrent_writer () = with_fixture (fun _ sw dir _ ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "retry-store") in
@@ -1972,7 +2043,7 @@ let test_sampling_discovery_keeps_namespace_progress ~healthy_outcomes () = with
   check bool "incomplete namespace discovery remains pending" false report.discovery_complete;
   check string "healthy namespace result becomes durable" good_bytes
     (sampling_require (Store.read_blob store good_reference));
-  check bool "healthy request marker is fully retired" false
+  check bool "marker remains while an owned primary promotion is unavailable" healthy_outcomes
     (Sys.file_exists (sampling_retry_path store instance_id "healthy"));
   let healthy_path = Filename.concat (directory good_namespace) (Store.digest "healthy" ^ ".json") in
   List.iter (fun () ->
@@ -1980,7 +2051,15 @@ let test_sampling_discovery_keeps_namespace_progress ~healthy_outcomes () = with
     check bool "blocked namespace remains a visible error on retry" true
       (Result.is_error (Store.For_testing.retry_sampling_requests ~on_read:(fun path -> reads := path :: !reads)
         (Store.create ~root:(Store.root store)) ~instance_id ~max_reply_bytes:65536));
-    check bool "completed namespace history is not read again" false (List.mem healthy_path !reads)) [();()];
+    if healthy_outcomes then (
+      check bool "only the still-marked terminal promotion is retried" true (List.mem healthy_path !reads);
+      check bool "completed outcome discovery checkpoint is preserved" true
+        (Sys.file_exists (Filename.concat (Filename.dirname (sampling_retry_path store instance_id "healthy"))
+          ".discovery-outcomes-complete")))
+    else check bool "completed namespace history is not read again" false (List.mem healthy_path !reads);
+    check bool "external primary journals are never read" false
+      (List.exists (String.starts_with ~prefix:(blocked ^ Filename.dir_sep)) !reads);
+    check int "retry never writes through the external namespace" 0 (Array.length (Sys.readdir outside))) [();()];
   let next_reference,next_bytes = save save_good "new-public-write" "new indexed write" in
   ignore (Store.retry_sampling_requests (Store.create ~root:(Store.root store)) ~instance_id ~max_reply_bytes:65536);
   check string "completed discovery does not hide a new public writer" next_bytes
@@ -1988,7 +2067,63 @@ let test_sampling_discovery_keeps_namespace_progress ~healthy_outcomes () = with
   Unix.unlink blocked; Unix.rename saved blocked;
   sampling_require (Store.retry_sampling_requests (Store.create ~root:(Store.root store)) ~instance_id ~max_reply_bytes:65536);
   check string "unfinished namespace resumes after repair" bad_bytes
-    (sampling_require (Store.read_blob store bad_reference))))
+    (sampling_require (Store.read_blob store bad_reference));
+  check bool "owned primary promotion permits healthy marker retirement" false
+    (Sys.file_exists (sampling_retry_path store instance_id "healthy"));
+  if healthy_outcomes then (
+    let primary = Yojson.Safe.from_string (Fs_compat.load_file
+      (Filename.concat (directory "sampling") (Store.digest "healthy" ^ ".json"))) in
+    check bool "restored primary contains the authoritative finished outcome" true (match primary with
+      | `Assoc fields -> List.assoc_opt "state" fields = Some (`String "finished")
+          && List.assoc_opt "outcome" fields = Some (Types.evidence_to_json good_reference)
+      | _ -> false))))
+
+(* CR5410658368: a symlinked namespace directory (sampling or
+   sampling-outcomes) whose hashed child is a real directory passed the
+   final-component check, so recovery read and rewrote records outside the
+   store. Every component below the root is now checked. *)
+let test_sampling_recovery_rejects_symlinked_namespace ~namespace () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir ("symlinked-" ^ namespace)) in
+  let instance_id = "symlinked-namespace-instance" and request_id = "outside" in
+  let terminal, _, _, _ = sampling_retry_case store ~instance_id ~request_id "must stay outside" in
+  let save = if namespace = "sampling" then Store.save_sampling_request else Store.save_sampling_outcome in
+  sampling_require (save store ~instance_id ~request_id terminal);
+  Unix.unlink (sampling_retry_path store instance_id request_id);
+  let owned = Filename.concat (Store.root store) namespace in
+  let outside = Filename.concat dir ("outside-" ^ namespace) in
+  Unix.rename owned outside;
+  Unix.symlink outside owned;
+  let record = Filename.concat outside
+    (Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json") in
+  let before = Fs_compat.load_file record in
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "a symlinked namespace stays an explicit error" true (Result.is_error report.outcome);
+  check bool "discovery through it is not complete" false report.discovery_complete;
+  check string "the record outside the store is not rewritten" before (Fs_compat.load_file record);
+  check bool "no recovery marker is published for it" false
+    (Sys.file_exists (sampling_retry_path store instance_id request_id)))
+
+(* CR5410764242: a journal record inside the byte budget can nest deeply.
+   Startup recovery parses it at a boundary that turns parser exhaustion
+   (Json_error or Stack_overflow) into a record error, so one such file is
+   reported while the sweep still recovers the healthy record beside it. *)
+let test_sampling_recovery_isolates_deeply_nested_record () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "nested-record") in
+  let instance_id = "nested-record-instance" in
+  let terminal, _, reference, bytes =
+    sampling_retry_case store ~instance_id ~request_id:"healthy" "healthy answer survives" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"healthy" terminal);
+  Unix.unlink (sampling_retry_path store instance_id "healthy");
+  let depth = 20_000 in
+  let nested = String.make depth '[' ^ String.make depth ']' in
+  let namespace = Filename.concat (Store.root store) ("sampling/" ^ Store.digest instance_id) in
+  write (Filename.concat namespace (Store.digest "nested" ^ ".json")) nested;
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "the nested record stays a visible error" true (Result.is_error report.outcome);
+  check string "the healthy record beside it is still recovered" bytes
+    (sampling_require (Store.read_blob store reference)))
 
 let test_sampling_cold_read_keeps_optional_compaction () = with_fixture (fun _ _ dir _ ->
   let module Store = Masc.Lane_addon_store in
@@ -2147,6 +2282,11 @@ let test_relative_store_root ~sequence () =
         (require (Store.read_blob (Store.create ~root) reference))))
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "startup recovery rejects outcome symlink ancestor" `Quick (test_sampling_discovery_rejects_symlink_namespace ~outcomes:true);
+  test_case "startup recovery rejects request symlink ancestor" `Quick (test_sampling_discovery_rejects_symlink_namespace ~outcomes:false);
+  test_case "startup recovery promotes terminal before marker retirement" `Quick test_sampling_recovery_promotes_terminal_before_marker_retirement;
+  test_case "startup recovery contains deep corrupt JSON" `Quick test_sampling_recovery_contains_deep_corrupt_json;
+
   test_case "bounded sampling root loop returns error" `Quick test_sampling_bounded_root_loop_is_error;
   test_case "cold read preserves optional marked compaction" `Quick test_sampling_cold_read_keeps_optional_compaction;
   test_case "request namespace progress survives outcome discovery failure" `Quick
@@ -2168,6 +2308,12 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
     (test_canonical_parent_owns_recovery ~journal:true ~directory:true);
   test_case "relative store root blob roundtrip" `Quick (test_relative_store_root ~sequence:false);
   test_case "relative store root sequence roundtrip" `Quick (test_relative_store_root ~sequence:true);
+  test_case "sampling recovery isolates a deeply nested record" `Quick
+    test_sampling_recovery_isolates_deeply_nested_record;
+  test_case "sampling recovery rejects symlinked request namespace" `Quick
+    (test_sampling_recovery_rejects_symlinked_namespace ~namespace:"sampling");
+  test_case "sampling recovery rejects symlinked outcome namespace" `Quick
+    (test_sampling_recovery_rejects_symlinked_namespace ~namespace:"sampling-outcomes");
   test_case "sampling publication rejects canonical parent symlink" `Quick
     (test_sampling_publication_rejects_symlink_parent `Canonical);
   test_case "sampling publication rejects recovery parent symlink" `Quick

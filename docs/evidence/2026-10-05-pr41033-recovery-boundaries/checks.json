@@ -1,0 +1,68 @@
+{
+  "checked_at": "2026-10-04T23:36:08.533704+00:00",
+  "baseline_head": "4a9c05e7d049c562d59c7776446a17dae92fbf48",
+  "source": {
+    "lib/lane_addon/lane_addon_store.ml": "a0f1f38ab255a5f43864b1c7b33f3f09a5e1056c8fc955f43120821b6a0bb8ef",
+    "test/test_lane_addon_worker.ml": "d1e63df65b7d060c105ad18e4a19533c0d7a0c8b13ec00bb9642528549f879b5"
+  },
+  "binaries": {
+    "_build/default/test/test_lane_addon_worker.exe": "48211128770978a9b9c3ddfc20b8a3aad3eda7574481fd2c098923bbd24d736d",
+    "_build/default/test/test_lane_addon.exe": "e109244723f4f132320a6be34a47c249ec5ca5d043b6cabbe0351141cdc6317d"
+  },
+  "raw": {
+    "deep-json-limited-stack-red.output": "9d7f001edc460183bfa6bc3d9fc84ccfc496ef68566c0b85da98b51264901e19",
+    "initial-docker-create-timeout.output": "4cfe73fcb84b01cfe9cd13a16dd13e52076cc90d04cb2593816e8a34d540f38d",
+    "initial-progress-contract-failure.output": "2ee61344711d91bf59794f252024d6f2cdfa70c2fc497d16bce57dadb91ab03c",
+    "outcome-ancestor-red.output": "1a306ad4f3d136229b23a5e05771d7409f9a5994fd0218b3a22be930d0f0ad7d",
+    "pr41033-boundaries-fixture-final-build.log": "360f6118bb0338333c8ed35c545dcbacac4d15277f438076da99f91b4b4fa102",
+    "pr41033-boundaries-green-build-final.log": "360f6118bb0338333c8ed35c545dcbacac4d15277f438076da99f91b4b4fa102",
+    "pr41033-boundaries-green-build.log": "360f6118bb0338333c8ed35c545dcbacac4d15277f438076da99f91b4b4fa102",
+    "pr41033-boundaries-red-build.log": "6649fe86de708738b62170e222c36277897f989da60d77fdacfb8f69c69f5f62",
+    "pr41033-boundaries-red-build2.log": "4e02de5a353b9bb957d72ce8628b5e3a35ce7ef3419fe04d5bba427a59be0703",
+    "pr41033-boundaries-red-build3.log": "360f6118bb0338333c8ed35c545dcbacac4d15277f438076da99f91b4b4fa102",
+    "pr41033-boundaries-red-build4.log": "360f6118bb0338333c8ed35c545dcbacac4d15277f438076da99f91b4b4fa102",
+    "pr41033-boundaries-red-final.log": "792462b9a786d3b5ca1fe13ac17742c881ed8077fdfcc786f0d56da6aabbe7bc",
+    "pr41033-boundaries-red.log": "5c3b844b2a6746563736068c74b140549cb4d8fbe931a2fb6b89688a9ffb0b9c",
+    "pr41033-boundaries-runtime-build.log": "13f86345d0380219365fef846ab9f85a9b1ff55bd02000689e95e920d788445c",
+    "pr41033-boundaries-runtime-green.log": "e672967db4d20235dd47444f10f5f610c5c44c7dbea1a941406ecc917904186d",
+    "pr41033-boundaries-worker-final.log": "2b9af9df118c226cc074c1ae39fa662b919f5ab4b0ca5815425ed07e0d126fdf",
+    "pr41033-boundaries-worker-green.log": "24abafb87ed572b58c5646d579ffffefefd4668f09635bde55b430cd2c0f250d",
+    "pr41033-deep-json-limited-stack-green.log": "f2ddc430d2f8c87ba184b51efe7646f9acb52adf3e29764542f7a4b099afba9e",
+    "pr41033-deep-json-limited-stack-red.log": "6783b67ecda985db4d4c839f820d028ab0ef9aefec200f10d19d079062e1abef",
+    "request-ancestor-red.output": "1a306ad4f3d136229b23a5e05771d7409f9a5994fd0218b3a22be930d0f0ad7d",
+    "terminal-promotion-red.output": "37d9006722d8f0204aee0edc775e45105d899159844b1c03fca7027130bc2044"
+  },
+  "results": {
+    "worker": {
+      "passed": 55,
+      "total": 55
+    },
+    "runtime": {
+      "passed": 25,
+      "total": 25
+    },
+    "limited_stack_case": {
+      "passed": 1,
+      "environment": "OCAMLRUNPARAM=l=262144"
+    },
+    "baseline_default": {
+      "failed": 3,
+      "passed": 1
+    },
+    "baseline_limited_stack": {
+      "failed": 1
+    },
+    "focused_build_exit_code": 0,
+    "focused_targets_built": 2
+  },
+  "unchanged_docker_function_sha256": "4959fea387a11e353231009781644e1b85a445c999d89d32c2311eb34ca377e1",
+  "commands": [
+    "DUNE_JOBS=2 opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_lane_addon_worker.exe",
+    "DUNE_JOBS=2 opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_lane_addon.exe",
+    "cd test; DUNE_SOURCEROOT=<worktree> ../_build/default/test/test_lane_addon_worker.exe",
+    "cd test; DUNE_SOURCEROOT=<worktree> ../_build/default/test/test_lane_addon.exe",
+    "cd test; OCAMLRUNPARAM=l=262144 DUNE_SOURCEROOT=<worktree> ../_build/default/test/test_lane_addon_worker.exe test lifecycle 3"
+  ],
+  "native_scope": "two focused executables, not whole repository/CI",
+  "published": false
+}

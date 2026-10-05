@@ -19,6 +19,15 @@ let protect f =
   | Unix.Unix_error (error, call, path) ->
       Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
   | Yojson.Json_error message -> Error message
+(* Sampling journals are bounded by bytes, not by nesting: a record within its
+   byte budget can still nest deeply enough for the parser to exhaust the
+   stack. Startup recovery parses them before the server is ready, so that is
+   a record error the sweep isolates, never an exception that escapes it.
+   [protect] deliberately leaves Stack_overflow alone elsewhere. *)
+let parse_journal_json bytes =
+  try Ok (Yojson.Safe.from_string bytes) with
+  | Yojson.Json_error message -> Error message
+  | Stack_overflow -> Error "sampling journal nesting exceeds parser capacity"
 (* Also sync existing ancestors: they may have been created by a preceding
    attempt whose parent sync failed. A retry must establish the entire path. *)
 let sync_parent_directory parent =
@@ -711,8 +720,8 @@ let load_sampling_request_bounded_unlocked ~sync_file ~sync_parent ~budget t ~in
       let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget:journal_budget path in
       let* () = sync_sampling_root ~sync_parent t pending_root
         |> Result.map_error (fun detail -> Read_failed detail) in
-      let* json = try Ok (Yojson.Safe.from_string bytes)
-        with Yojson.Json_error detail -> Error (Read_failed detail) in
+      let* json = parse_journal_json bytes
+        |> Result.map_error (fun detail -> Read_failed detail) in
       let* () = match json with
         | `Assoc fields
           when List.assoc_opt "instance_id" fields = Some (`String instance_id)
@@ -792,11 +801,19 @@ type sampling_recovery_report = {
 }
 let keep_first_sampling_error first next = match first with
   | Ok () -> next | Error _ -> first
+(* Recovery reads, rewrites and retires journal entries below [t.root]. Every
+   component from the root down must be a real directory: checking only the
+   last one lets a symlinked [sampling] or [sampling-outcomes] parent carry
+   the sweep -- and its writes -- outside the store. *)
+let owned_sampling_directory t directory =
+  Fs_compat.inspect_owned_directory_chain ~ownership_root:t.root directory
+  |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
 let scan_sampling_directory t relative ~f = protect (fun () ->
   let path = Filename.concat t.root relative in
-  match Fs_compat.exact_path_kind ~follow:false path with
-  | Fs_compat.Exact_missing -> Ok ()
-  | Fs_compat.Exact_kind Unix.S_DIR ->
+  match owned_sampling_directory t path with
+  | Error detail -> Error ("sampling recovery directory is not an owned directory: " ^ detail)
+  | Ok Fs_compat.Owned_directory_missing -> Ok ()
+  | Ok (Fs_compat.Owned_directory _) ->
       let handle = Unix.opendir path in
       Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
         let rec next result = match Unix.readdir handle with
@@ -805,25 +822,35 @@ let scan_sampling_directory t relative ~f = protect (fun () ->
               let observed = protect (fun () -> f name) in
               next (keep_first_sampling_error result observed)
           | exception End_of_file -> result in
-        next (Ok ()))
-  | _ -> Error "sampling recovery directory is not an owned directory")
+        next (Ok ())))
 let remove_sampling_marker t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
+  let* _ = owned_sampling_directory t (Filename.dirname path) in
   Unix.unlink path;
   sync_parent_directory (Filename.dirname path);
   Ok ())
 let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative name = protect (fun () ->
   let max_record_bytes = sampling_recovery_record_limit ~max_reply_bytes in
   let path = Filename.concat t.root (Filename.concat relative name) in
+  let* _ = owned_sampling_directory t (Filename.dirname path) in
   match Fs_compat.exact_path_kind ~follow:false path with
-  | Fs_compat.Exact_missing -> Ok ()
+  | Fs_compat.Exact_missing -> Ok None
   | _ ->
       let pending_root = if t.root_parent_pending then
         Some (Unix.lstat t.root, Unix.stat (Filename.dirname t.root)) else None in
+      let* _ = Fs_compat.inspect_owned_directory_chain ~ownership_root:t.root (Filename.dirname path)
+        |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string in
       on_read path;
+      let* owned = Fs_compat.load_owned_regular_file_range ~ownership_root:t.root
+        ~offset:0 ~max_bytes:max_record_bytes path
+        |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+      let* owned = match owned with Some value -> Ok value
+        | None -> Error "sampling recovery record disappeared during read" in
       let* raw = bounded_file ~max_bytes:max_record_bytes path in
+      let* () = if raw = owned.content then Ok ()
+        else Error "sampling recovery record changed after owned read" in
       let* () = sync_sampling_root ~sync_parent:Unix.fsync t pending_root in
-      let json = Yojson.Safe.from_string raw in
+      let* json = parse_journal_json raw in
       let* fields = match json with
         | `Assoc fields -> Ok fields | _ -> Error "invalid sampling recovery record" in
       let* request_id = match List.assoc_opt "request_id" fields with
@@ -834,7 +861,7 @@ let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative na
         else Error "sampling recovery record identity mismatch" in
       let* inline = sampling_inline_outcome json in
       match List.assoc_opt "state" fields, List.assoc_opt "outcome" fields, inline with
-      | Some (`String "pending"), Some `Null, None -> Ok ()
+      | Some (`String "pending"), Some `Null, None -> Ok (Some json)
       | Some (`String "finished"), Some outcome, inline ->
           let* reference = evidence_of_json outcome in
           let* _ = retained_address reference in
@@ -850,8 +877,9 @@ let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative na
                       | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR ->
                           Filename.concat t.root (recovery_blob_path hash)
                       | _ -> canonical in
-                    verify_sampling_blob ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
-                      t ~max_bytes:max_reply_bytes ~expected:reference path)
+                    let* () = verify_sampling_blob ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+                      t ~max_bytes:max_reply_bytes ~expected:reference path in
+                    Ok (Some json))
            | Some (_, bytes) ->
                let* () = if String.length bytes <= max_reply_bytes then Ok ()
                  else Error "sampling outcome exceeds producer reply envelope" in
@@ -859,7 +887,8 @@ let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative na
                  | Some value -> evidence_of_json value
                  | None -> Error "sampling recovery request reference is missing" in
                let* _ = retained_address request in
-               let* () = match Yojson.Safe.from_string bytes with
+               let* terminal = parse_journal_json bytes in
+               let* () = match terminal with
                  | `Assoc terminal when
                      List.assoc_opt "kind" terminal = Some (`String "model_outcome")
                      && List.assoc_opt "instance_id" terminal = Some (`String instance_id)
@@ -867,8 +896,9 @@ let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative na
                  | _ -> Error "sampling outcome contradicts its recovery record" in
                let* () = retain_sampling_inline ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
                  ~repair_corrupt:true t ~expected:reference bytes in
-               write t (Filename.concat relative name)
-                 (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
+               let compact = `Assoc (List.remove_assoc "outcome_bytes" fields) in
+               let* () = write t (Filename.concat relative name) (Yojson.Safe.to_string compact) in
+               Ok (Some compact))
       | _ -> Error "invalid sampling recovery state"
 )
 let sampling_discovery_checkpoints = [".discovery-outcomes-complete"; ".discovery-requests-complete"]
@@ -886,7 +916,28 @@ let retry_sampling_markers ~on_read t ~instance_id ~max_reply_bytes =
         (sampling_outcome_directory instance_id) name in
       let primary = recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes
         (sampling_directory instance_id) name in
-      let* () = keep_first_sampling_error terminal primary in
+      (* The terminal journal is only needed to promote its row into a primary
+         row that is still pending. A verified finished primary row leaves
+         nothing to promote, so an unreadable terminal namespace must not hold
+         this request's marker; that namespace's own error stays visible
+         through discovery. *)
+      let primary_finished = match primary with
+        | Ok (Some (`Assoc fields)) ->
+            List.assoc_opt "state" fields = Some (`String "finished")
+        | Ok _ | Error _ -> false in
+      let terminal = match terminal with
+        | Error _ when primary_finished -> Ok None
+        | other -> other in
+      let* terminal = terminal in
+      let* primary = primary in
+      let* () = match terminal with
+        | Some (`Assoc fields as json) when primary <> terminal
+            && List.assoc_opt "state" fields = Some (`String "finished") ->
+            (* The terminal journal is authoritative. Keep recovery pending
+               until its row is durably available in the primary index too. *)
+            save_sampling_unlocked ~after_marker:(fun () -> ()) t ~instance_id ~name
+              ~directory:(sampling_directory instance_id) json
+        | _ -> Ok () in
       remove_sampling_marker t relative))
 let discover_sampling_requests_with ~on_read t ~instance_id ~max_reply_bytes =
   if max_reply_bytes <= 0 then

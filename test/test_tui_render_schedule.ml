@@ -1295,9 +1295,10 @@ let test_a_narrow_schedule_gives_up_columns_in_its_order () =
    widths its renderer measures: the contract's status words (9, its widest),
    the stamp format's clock (19), and the page's own outcome and actor
    words. *)
-let kauto_page ~inner_width ~outcome_width ~by_width =
+let kauto_page ?(recurrence_width = Schedule.kauto_minimum_recurrence_width)
+    ~inner_width ~outcome_width ~by_width () =
   Schedule.kauto_layout ~inner_width ~status_width:9 ~clock_width:19
-    ~outcome_width ~by_width
+    ~outcome_width ~recurrence_width ~by_width
 
 (* A page of one-shot requests and patrol recurrences, with the readings the
    tab was rewritten to state on every row. *)
@@ -1349,7 +1350,7 @@ let kauto_every_column =
    screen makes, which is the one this tab did not make before. *)
 let test_kauto_rows_stay_on_the_header_columns () =
   for inner_width = 68 to 240 do
-    let layout = kauto_page ~inner_width ~outcome_width:13 ~by_width:24 in
+    let layout = kauto_page ~inner_width ~outcome_width:13 ~by_width:24 () in
     let width text = Masc_tui_message_layout.display_width text in
     let header = kauto_header_width layout in
     List.iter
@@ -1380,7 +1381,7 @@ let test_kauto_rows_stay_on_the_header_columns () =
    the state, the two clocks and the summary never go -- they are the four
    facts the tab exists to state. *)
 let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
-  let at inner_width = kauto_shown (kauto_page ~inner_width ~outcome_width:13 ~by_width:24) in
+  let at inner_width = kauto_shown (kauto_page ~inner_width ~outcome_width:13 ~by_width:24 ()) in
   check bool "at 68 only the four facts and the summary remain" true
     (at 68
      = Schedule.
@@ -1426,7 +1427,7 @@ let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
   for inner_width = 20 to 240 do
     let header =
       Schedule.kauto_header_row
-        ~layout:(kauto_page ~inner_width ~outcome_width:13 ~by_width:24)
+        ~layout:(kauto_page ~inner_width ~outcome_width:13 ~by_width:24 ())
     in
     check bool
       (Printf.sprintf "inner %d: TRIGGERED stays named" inner_width)
@@ -1444,7 +1445,7 @@ let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
    still gone, so the cron's fold is the one reading being fitted. *)
 let test_one_long_cron_folds_inside_its_own_cell () =
   let cron = "cron 0,5,10,15,20,25,30,35,40,45,50,55 * * * * UTC" in
-  let layout = kauto_page ~inner_width:88 ~outcome_width:13 ~by_width:24 in
+  let layout = kauto_page ~inner_width:88 ~outcome_width:13 ~by_width:24 () in
   let width text = Masc_tui_message_layout.display_width text in
   let header = kauto_header_width layout in
   check bool "at 88 the recurrence is on the row" true
@@ -1517,6 +1518,61 @@ let test_the_by_column_is_measured_from_the_page () =
     Schedule.kauto_maximum_by_width
     (Schedule.kauto_by_width
        [ "e-masc-the-leader-and-its-kind (automated_actor)" ])
+
+(* The RECURRENCE column is measured from the recurrences on the page, the
+   way BY is: a fixed twelve cells cut "every 30 minutes" to "eve… minutes"
+   on any frame, however wide (#task-2123). *)
+let test_the_recurrence_column_is_measured_from_the_page () =
+  let width = Masc_tui_message_layout.display_width in
+  check int "an empty page keeps the floor"
+    Schedule.kauto_minimum_recurrence_width (Schedule.kauto_recurrence_width []);
+  check int "every 30 minutes is held whole" (width "every 30 minutes")
+    (Schedule.kauto_recurrence_width [ "every 30 minutes" ]);
+  check int "a wider recurrence on the page sets the width"
+    (width "0 9 * * 1-5 (+09:00)")
+    (Schedule.kauto_recurrence_width
+       [ "every 30 minutes"; "0 9 * * 1-5 (+09:00)" ]);
+  check int "one very long cron stops at the cap"
+    Schedule.kauto_maximum_recurrence_width
+    (Schedule.kauto_recurrence_width
+       [ String.concat "" (List.init 12 (fun _ -> "every 300s ")) ])
+
+let has_substring ~sub text =
+  let n = String.length sub and m = String.length text in
+  let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
+  at 0
+
+(* The row reads its recurrence whole once the column was measured, and the
+   old fixed width is the control that cuts it. *)
+let test_a_measured_recurrence_is_not_cut_in_its_cell () =
+  let recurrence = "every 30 minutes" in
+  let row layout =
+    Schedule.kauto_row ~styles:Schedule.kauto_plain_styles ~layout
+      { kauto_empty with krow_recurrence = recurrence }
+  in
+  let measured =
+    kauto_page
+      ~recurrence_width:(Schedule.kauto_recurrence_width [ recurrence ])
+      ~inner_width:200 ~outcome_width:13 ~by_width:24 ()
+  in
+  check bool "the measured column spells the number" true
+    (has_substring ~sub:recurrence (row measured));
+  let fixed = kauto_page ~inner_width:200 ~outcome_width:13 ~by_width:24 () in
+  check bool "the control: twelve cells cut it" false
+    (has_substring ~sub:recurrence (row fixed));
+  List.iter
+    (fun inner_width ->
+      let layout =
+        kauto_page
+          ~recurrence_width:(Schedule.kauto_recurrence_width [ recurrence ])
+          ~inner_width ~outcome_width:13 ~by_width:24 ()
+      in
+      check int
+        (Printf.sprintf "inner %d: the measured row matches the header"
+           inner_width)
+        (kauto_header_width layout)
+        (Masc_tui_message_layout.display_width (row layout)))
+    [ 68; 95; 140; 240 ]
 
 (* The reading the probe puts in each column. Every schedule column is
    placed by its left edge. *)
@@ -2937,6 +2993,10 @@ let () =
         ; test_case "a narrow keeper automation page gives up columns in its order"
             `Quick
             test_a_narrow_kauto_page_gives_up_columns_in_its_order
+        ; test_case "the recurrence column is measured from the page" `Quick
+            test_the_recurrence_column_is_measured_from_the_page
+        ; test_case "a measured recurrence is not cut in its cell" `Quick
+            test_a_measured_recurrence_is_not_cut_in_its_cell
         ; test_case "one long cron folds inside its own cell" `Quick
             test_one_long_cron_folds_inside_its_own_cell
         ; test_case "the state mark spells the liveness" `Quick

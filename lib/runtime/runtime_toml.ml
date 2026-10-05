@@ -25,6 +25,22 @@ type parse_error =
 
 let error path message = [ { path; message } ]
 
+let unknown_table_keys ~(path : string) ~(expected : string list) (entries : (string * Otoml.t) list) =
+  List.concat_map
+    (fun (key, _) ->
+       if List.mem key expected
+       then []
+       else
+         error
+           (path ^ "." ^ key)
+           (Printf.sprintf
+              "unknown [%s] key %S; expected %s"
+              path
+              key
+              (String.concat ", " expected)))
+    entries
+;;
+
 (** [typed_find kind path tbl key getter] wraps [Otoml.find_opt] so that a
     type mismatch produces a structured [parse_error] instead of raising
     [Otoml.Type_error] past the parser boundary. *)
@@ -791,10 +807,30 @@ let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
                value))
 ;;
 
+(* This is the provider table's field contract. Nested tables retain their
+   own decoders; arbitrary HTTP header names are not provider keys. Model-set
+   is consumed later when bindings are materialized and still belongs here. *)
+let provider_keys =
+  [ "enabled"; "display-name"; "provider-name"; "protocol"; "endpoint"; "command"
+  ; "is-non-interactive"; "credentials"; "capabilities"; "healthcheck"; "headers"
+  ; "kind"; "max-context"; "account-home"; "request-path"; "model-set"; usage_read_key
+  ; Runtime_schema.connect_timeout_s_key; Runtime_schema.exact_body_timeout_s_key
+  ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
+;;
+
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
   let path = Ns.(path Providers) id in
+  let ( let* ) = Result.bind in
+  let* () =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      (match unknown_table_keys ~path ~expected:provider_keys entries with
+       | [] -> Ok ()
+       | errors -> Error errors)
+    | _ -> Error (error path "provider must be a TOML table")
+  in
   let enabled_result =
     typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
   in
@@ -3056,21 +3092,6 @@ let typesafeai_keys =
 
 let typesafeai_destination_keys = [ "endpoint"; "model"; "api_key_env" ]
 
-let unknown_table_keys ~(path : string) ~(expected : string list) (entries : (string * Otoml.t) list) =
-  List.concat_map
-    (fun (key, _) ->
-       if List.mem key expected
-       then []
-       else
-         error
-           (path ^ "." ^ key)
-           (Printf.sprintf
-              "unknown [%s] key %S; expected %s"
-              path
-              key
-              (String.concat ", " expected)))
-    entries
-;;
 
 let result_errors = function
   | Ok _ -> []

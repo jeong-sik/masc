@@ -44,7 +44,7 @@ module type Backend = sig
 end
 
 module type S = sig
-  val backend_via : string
+  val backend_via : meta:Keeper_meta_contract.keeper_meta -> string
 
   val container_path_of_host :
     config:Workspace.config ->
@@ -91,8 +91,8 @@ module type S = sig
 end
 
 module Make (Backend : Backend) = struct
-  let backend_via =
-    Keeper_sandbox_runner.route_label Keeper_sandbox_runner.Sandbox_backend
+  let backend_via ~(meta : Keeper_meta_contract.keeper_meta) =
+    Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile
 
   let container_path_of_host = Backend.container_path_of_host
   let read_complete_file = Backend.read_complete_file

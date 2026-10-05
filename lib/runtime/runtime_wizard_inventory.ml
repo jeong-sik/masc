@@ -67,6 +67,12 @@ let account_fields ~include_credential_references account_home =
      | Some home when include_credential_references -> ["account_home", `String home]
      | Some _ | None -> [])
 
+let provider_timeout_fields (provider : Runtime_schema.provider) =
+  match provider.antigravity_cli with
+  | Some options -> ["provider_timeout_s", `Float options.timeout_s]
+  | None -> []
+;;
+
 let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
@@ -86,7 +92,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
         ~verification_supported:true
-        (fields @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
+        (fields @ provider_timeout_fields provider @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
     List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
@@ -135,6 +141,47 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         (match command with None -> [] | Some command -> [ "command", `String command ])))
   in
   `List (configured @ prototypes @ clients)
+;;
+
+(* Reuse the runtime's selected credential location, never a display name or
+   email. This groups connections; it does not identify the provider account
+   currently authenticated at that location. *)
+let account_scope (provider : Runtime_schema.provider) =
+  let native home scope = Option.bind home (fun home ->
+    match Runtime_account_home.of_string home with
+    | Ok home -> Some (scope home) | Error _ -> None) in
+  match provider.api_format with
+  | Codex_app_server_runtime ->
+      native (Runtime_codex_app_server.effective_account_home provider.account_home)
+        (fun home -> Runtime_quota_window.scope_of_codex_home (Some home))
+  | Claude_code_runtime ->
+      native (Runtime_claude_code.effective_account_home provider.account_home)
+        (fun home -> Runtime_quota_window.scope_of_claude_code_home (Some home))
+  | Muse_serve_runtime -> native provider.account_home Runtime_quota_window.scope_of_muse_home
+  | Antigravity_cli_runtime ->
+      (match provider.credentials with
+       | Some (Runtime_schema.File _) ->
+           Some (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
+       | Some (Env _ | Inline _) | None -> None)
+  | Chat_completions_api | Messages_api | Ollama_api | Gemini_api | Vertex_gemini_api -> None
+;;
+
+let account_groups_json (config : Runtime_schema.config) =
+  let groups = List.fold_left (fun groups (provider : Runtime_schema.provider) ->
+    match account_scope provider with
+    | None -> groups
+    | Some scope ->
+      if List.exists (fun (known, _) -> Runtime_quota_window.scope_equal scope known) groups then
+        List.map (fun (known, ids) -> known,
+          if Runtime_quota_window.scope_equal scope known then ids @ [provider.id] else ids) groups
+      else groups @ [scope, [provider.id]]) [] config.providers in
+  `List (List.map (fun (scope, ids) ->
+    let id = Runtime_quota_window.scope_id scope in
+    let runtimes = List.filter_map (fun (binding : Runtime_schema.binding) ->
+      if List.mem binding.provider_id ids then Some (`String (Runtime_schema.binding_key binding)) else None) config.bindings in
+    `Assoc ["id", `String id;
+      "integration_ids", `List (List.map (fun id -> `String id) ids);
+      "runtime_ids", `List runtimes]) groups)
 ;;
 
 let to_json ?(include_credential_references=false) (config : Runtime_schema.config) =
@@ -188,6 +235,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                     @ transport
                     @ account_fields ~include_credential_references provider.account_home
                     @ http_fields provider
+                    @ provider_timeout_fields provider
                     @ credential))
            | _ -> None))
       config.bindings
@@ -209,6 +257,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
     ; "model_release_catalog", Model_release_evidence.default_catalog_json ()
     ; "runtimes", `List runtimes
     ; "integrations", integrations_json ~include_credential_references config
+    ; "account_groups", account_groups_json config
     ]
 ;;
 

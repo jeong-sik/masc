@@ -9313,6 +9313,8 @@
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
 
+(include stanzas/test_librarian_preflight_report.inc)
+
 (rule
  (alias runtest-test_candle_evidence_audits)
  (deps test_candle_evidence_audits.py

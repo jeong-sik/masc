@@ -541,6 +541,8 @@ let kind_to_string : Usage.window_kind -> string = function
 let utilization_to_string : Usage.utilization -> string = function
   | Fraction value -> Printf.sprintf "fraction %g" value
   | Percent value -> Printf.sprintf "percent %d" value
+  | Usd { used; limit } -> Printf.sprintf "usd %g limit=%s" used
+      (Option.fold ~none:"none" ~some:(Printf.sprintf "%g") limit)
 ;;
 
 let role_to_string : Usage.window_role -> string = function
@@ -574,18 +576,25 @@ let refused decode body =
 
 let test_openrouter_key () =
   check (list string) "windows"
-    [ "limit=- label \"credit limit\" fraction 1 resets=- role=gates"
+    [ "limit=- label \"credit limit\" usd 100 limit=100 resets=- role=gates"
     ; "limit=- label \"free model requests, daily\" fraction 0 resets=- role=other"
     ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        openrouter_key_response);
   check (list string) "a stated reset period is not part of the label, which keys the row"
-    [ "limit=- label \"credit limit\" fraction 0.25 resets=- role=gates" ]
+    [ "limit=- label \"credit limit\" usd 5 limit=20 resets=- role=gates" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
   check (list string) "a null limit has no credit window" []
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null}}|});
+  check (list string) "uncapped all-time USD usage is retained"
+    [ "limit=- label \"credit usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
+    (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
+       {|{"data":{"limit":null,"limit_remaining":null,"usage":12.3456}}|});
+  check string "invalid USD totals do not become zero"
+    "openrouter-key.data.usage must be a finite nonnegative USD amount"
+    (refused Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":-1}}|});
   check string "limit_remaining as a string is refused with its path"
     "openrouter-key.data.limit_remaining must be a number"
     (refused Usage.decode_openrouter_key
@@ -600,6 +609,24 @@ let test_openrouter_key () =
     "openrouter-key.data.free_model_daily_requests.used must be within 0..1000"
     (refused Usage.decode_openrouter_key
        {|{"data":{"limit":null,"free_model_daily_requests":{"used":1001,"limit":1000}}}|})
+;;
+
+let test_openrouter_amounts_reach_operator_api () =
+  with_runtimes (fun () ->
+    let scope = Runtime_quota_window.scope_of_credential
+        ~provider_id:"usage_openrouter_amounts" None in
+    let report = decode_ok (Usage.decode_openrouter_key (Yojson.Safe.from_string
+        {|{"data":{"limit":20,"limit_remaining":15}}|})) in
+    Usage.record ~scope ~observed_at:1790600000.0 report;
+    let reading = match Tui_decode_usage.decode_provider_usage_windows (resolved ()) with
+      | Ok reading -> reading | Error detail -> fail detail in
+    let account = List.find (fun (account : Tui_decode_usage.provider_usage_account) ->
+      account.pua_scope_id = Server_provider_usage_history.scope_id scope) reading.puws_accounts in
+    match account.pua_state with
+    | Tui_decode_usage.Account_reported ({ puw_utilization = Utilization_usd { used; limit }; _ }, []) ->
+        check (float 0.0001) "USD use survives provider to wire to TUI" 5.0 used;
+        check (option (float 0.0001)) "USD cap survives provider to wire to TUI" (Some 20.0) limit
+    | _ -> fail "operator projection lost USD credit values")
 ;;
 
 let test_zai_quota_limit () =
@@ -817,6 +844,7 @@ let http_readable ~provider_id ~url ~key ~refresh_s =
 let reported scope =
   match Usage.state ~scope with
   | Usage.Reported _ -> true
+  | Usage.Reported_no_windows _ -> true
   | Usage.Not_reported_since_start -> false
 ;;
 
@@ -834,6 +862,30 @@ let antigravity_exec : Runtime_execution.antigravity_cli =
   }
 
 let no_antigravity ~scope:_ _ = fail "an Antigravity read was asked for"
+
+let test_http_empty_report_replaces_old_limit () =
+  let account =
+    { Read.scope = Runtime_quota_window.scope_of_credential
+        ~provider_id:"usage_http_empty_report" None
+    ; how = Read.Http
+        { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string "fixture-key"
+        ; usage_read = { shape = Runtime_schema.Openrouter_key;
+            url = "https://usage.invalid/key"; refresh_s = None }
+        }
+    } in
+  let read body =
+    Read.read_scopes ~codex:(fun ~scope:_ _ -> fail "unexpected Codex read")
+      ~antigravity:no_antigravity ~fetch:(fun ~api_key:_ _ -> Ok body) [account] in
+  read {|{"data":{"limit":20,"limit_remaining":0}}|};
+  (match Usage.state ~scope:account.scope with
+   | Usage.Reported ({ window = { utilization = Usd { used; limit = Some limit }; _ }; _ }, []) ->
+       check (float 0.) "initial HTTP report has a spent credit cap" limit used
+   | _ -> fail "initial HTTP credit report was not recorded");
+  read {|{"data":{"limit":null}}|};
+  match Usage.state ~scope:account.scope with
+  | Usage.Reported_no_windows { source = Openrouter_key_read; _ } -> ()
+  | _ -> fail "successful empty HTTP report left its old credit cap behind"
+;;
 
 let test_failed_background_schedule_releases_scope () =
   Eio_main.run (fun _env ->
@@ -1070,6 +1122,63 @@ let test_a_raising_repeat_does_not_end_the_repeats () =
   check bool "the later read recorded its answer" true (reported readable.scope)
 ;;
 
+let test_catalogue_publication_wakes_usage_reads () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let clock = env#clock in
+  let current = ref [] and revision = ref 0 in
+  let changed = Eio.Condition.create () and read_done = Eio.Condition.create () in
+  let http_count = ref 0 and codex_count = ref 0 in
+  let publish accounts =
+    current := accounts;
+    incr revision;
+    Eio.Condition.broadcast changed
+  in
+  let await_change ~after = Eio.Condition.loop_no_mutex changed (fun () ->
+    if !revision > after then Some !revision else None) in
+  let await_count count expected = Eio.Condition.loop_no_mutex read_done (fun () ->
+    if !count >= expected then Some () else None) in
+  let codex ~scope:_ _ =
+    incr codex_count;
+    Eio.Condition.broadcast read_done;
+    Ok () in
+  let fetch ~api_key:_ _ =
+    incr http_count;
+    Eio.Condition.broadcast read_done;
+    Ok ollama_usage_response in
+  let http = http_readable ~provider_id:"usage_added_after_setup"
+      ~url:"https://ok.invalid/added" ~key:"k" ~refresh_s:(Some changed_period_s) in
+  let codex_account =
+    { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id:"usage_added_codex" None
+    ; how = Codex codex_exec } in
+  Eio.Fiber.first
+    (fun () -> Read.watch_readables ~clock ~codex ~antigravity:no_antigravity ~fetch
+      ~catalogue:(fun () -> !current) ~revision:(fun () -> !revision) ~await_change)
+    (fun () ->
+      Eio.Fiber.yield ();
+      check int "an empty initial catalogue makes no HTTP request" 0 !http_count;
+      publish [codex_account];
+      await_count codex_count 1;
+      publish [http];
+      await_count http_count 1;
+      await_count http_count 2;
+      check int "new HTTP account repeats without restarting the worker" 2 !http_count;
+      publish [];
+      Eio.Fiber.yield ();
+      publish [http];
+      await_count http_count 3;
+      check int "restored account gets an immediate read" 3 !http_count)
+;;
+
+let test_runtime_publication_is_visible_before_wait () =
+  Eio_mock.Backend.run_full @@ fun _env ->
+  let before = Runtime.catalogue_revision () in
+  with_runtimes (fun () ->
+    let published = Runtime.catalogue_revision () in
+    check bool "runtime publication advances revision" true (published > before);
+    check int "a publication before subscribe is not lost" published
+      (Runtime.await_catalogue_change ~after:before))
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -1095,6 +1204,7 @@ let () =
         ] )
     ; ( "http usage endpoints"
       , [ test_case "openrouter-key" `Quick test_openrouter_key
+        ; test_case "OpenRouter USD reaches operator API" `Quick test_openrouter_amounts_reach_operator_api
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
         ; test_case "ollama-usage" `Quick test_ollama_usage
@@ -1106,14 +1216,20 @@ let () =
         ; test_case "version" `Quick test_antigravity_version
         ] )
     ; ( "reading scopes"
-      , [ test_case "a raising scope does not stop the rest" `Quick
+      , [ test_case "empty HTTP report removes old credit limits" `Quick
+            test_http_empty_report_replaces_old_limit
+        ; test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
         ; test_case "failed background schedule releases the account" `Quick
             test_failed_background_schedule_releases_scope
         ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
         ] )
     ; ( "repeating a read"
-      , [ test_case "repeats follow the catalogue and end when it drops the account" `Quick
+      , [ test_case "new and restored catalogue accounts start reading" `Quick
+            test_catalogue_publication_wakes_usage_reads
+        ; test_case "runtime publication has no lost wake" `Quick
+            test_runtime_publication_is_visible_before_wait
+        ; test_case "repeats follow the catalogue and end when it drops the account" `Quick
             test_repeats_follow_the_catalogue_and_end_when_it_drops_the_account
         ; test_case "only accounts that can answer repeat, each on its period" `Quick
             test_only_accounts_that_can_answer_repeat_each_on_its_period

@@ -1,0 +1,30 @@
+Testing `Keeper metrics rotation'.
+This run has ID `HJB5SPY2'.
+
+  [OK]          stdlib filesystem          0   no rotation under threshold.
+  [OK]          stdlib filesystem          1   rotation at threshold.
+  [OK]          stdlib filesystem          2   rotation shifts existing backups.
+  [OK]          stdlib filesystem          3   nonexistent file safe.
+  [OK]          stdlib filesystem          4   append triggers rotation.
+  [OK]          stdlib filesystem          5   zero retention removes backups.
+  [OK]          stdlib filesystem          6   reduced retention prunes and s...
+  [OK]          stdlib filesystem          7   unrelated names survive cleanup.
+  [OK]          stdlib filesystem          8   symlink targets survive cleanup.
+  [OK]          stdlib filesystem          9   directories refuse cleanup.
+  [OK]          stdlib filesystem         10   directories refuse shifting.
+  [OK]          stdlib filesystem         11   zero size disables cleanup.
+  [OK]          Eio filesystem             0   no rotation under threshold.
+  [OK]          Eio filesystem             1   rotation at threshold.
+  [OK]          Eio filesystem             2   rotation shifts existing backups.
+  [OK]          Eio filesystem             3   nonexistent file safe.
+  [OK]          Eio filesystem             4   append triggers rotation.
+  [OK]          Eio filesystem             5   zero retention removes backups.
+  [OK]          Eio filesystem             6   reduced retention prunes and s...
+  [OK]          Eio filesystem             7   unrelated names survive cleanup.
+  [OK]          Eio filesystem             8   symlink targets survive cleanup.
+  [OK]          Eio filesystem             9   directories refuse cleanup.
+  [OK]          Eio filesystem            10   directories refuse shifting.
+  [OK]          Eio filesystem            11   zero size disables cleanup.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-metrics-retention-native-_x8wkrkb/candidate/_build/_tests/Keeper metrics rotation'.
+Test Successful in 0.075s. 24 tests run.

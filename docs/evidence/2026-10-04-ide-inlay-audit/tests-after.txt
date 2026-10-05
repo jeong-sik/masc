@@ -1,0 +1,52 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-audit-ide-inlay-hints-20261004/dashboard
+
+ ✓ src/components/ide/ide-lsp-client.test.ts > resolveLspDiagnosticFilePath > keeps safe relative diagnostic URIs as IDE file paths 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > resolveLspDiagnosticFilePath > maps absolute diagnostic URIs only when they match the current IDE file suffix 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > resolveLspDiagnosticFilePath > ignores missing or unsafe diagnostic URIs instead of falling back to the current file 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > clearLspDiagnosticSnapshot > clears only the normalized diagnostic snapshot for the previous file 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > publishes typed masc/lspStatus notifications 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > rejects malformed masc/lspStatus payloads without mutating the snapshot 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > clears the rejection once a readable payload arrives 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > settles pending requests when the socket closes 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > ignores stale socket events after reconnecting 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > cancels scheduled reconnect when disposed 2ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > uses exponential reconnect delays while the LSP socket stays down 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > recovers diagnostics after a prolonged transport outage 40ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > does not reconnect after terminal LSP close codes 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > notifies readiness after initial connect and reconnect initialize 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > declares the repository scope on the connection URL 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > declares a keeper workspace without fabricating an overlay scope 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > declares no scope when none is published 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > carries the dashboard bearer as a query token, since a WebSocket cannot send headers 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > names documents with an absolute URI under the advertised root 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/masc, src/hash#part.ml) 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/masc, src/percent%20name.ml) 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/space #?%/한글, src/한글 ?name.ml) 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > preserves literal path characters in document traffic (/workspace/unused, /workspace/masc/src/hash#part.ml) 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > sends no document request before the workspace root is known 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > LspConnection > routes notification send failures through reconnect instead of throwing 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > places unsorted same-line hints at their own offsets and keeps ties in response order 34ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > renders composite labels and safely displays whole-hint and per-part markup tooltips 15ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":-1},"label":"invalid offset"} 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":1.5},"label":"fractional offset"} 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":{"value":"not an array"}} 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":[{"value":""}]} 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > inlay hints in the editor > rejects malformed inlay data before producing decorations: {"position":{"line":0,"character":3},"label":"type","tooltip":{"kind":"html","value":"<b>bad</b>"}} 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > sends actual source on open and monotonic full changes on store updates 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > discards a delayed old-version pull and distinguishes failed diagnostics from true empty 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > rejects mismatched URI/version and keeps unversioned server reports explicitly unconfirmed 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > changes repository scope even without a CodeMirror transaction and rejects old socket evidence 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > does not report degraded empty responses as clean diagnostics 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > synchronizes the full CM document including lines beyond the display inventory 9ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > selected document LSP continuity > uses the proxy server language for JSX status and old editor cleanup cannot erase its successor 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > remounts the actual editor for a fresh same-path workspace snapshot even when null is batched away 39ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > hover contents > reads every Hover.contents shape the protocol defines 1ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > hover contents > renders a fenced block as code with its line breaks 0ms
+ ✓ src/components/ide/ide-lsp-client.test.ts > hover contents > shows nothing for an empty or unknown hover 0ms
+
+ Test Files  1 passed (1)
+      Tests  43 passed (43)
+   Start at  02:43:11
+   Duration  1.09s (transform 32%, environment 23%, setup 20%, tests 16%, import 8%, worker 1%)
+

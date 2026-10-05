@@ -496,8 +496,8 @@ def runtime_surface_interaction(
                 "primary",
                 "1/2 runtime-a",
                 "Resolved A / model-a",
-                "ready / reachable",
-                "CLI not probed",
+                "usage unknown / reachable",
+                "usage unknown / CLI not probed",
                 # The lane fact says why this candidate is the one the lane
                 # walks: head, fallback #n, or single candidate.
                 "fallback #1",
@@ -622,9 +622,9 @@ def runtime_surface_interaction(
             all_list = screen_text(bytes(output))
             if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Runtime lanes (3 lanes, 5 slots)" not in all_list:
-                raise AssertionError("Runtime catalog counted runtimes as lane slots")
-            if b"ready / reachable" not in all_list:
+            if b"All runtimes (5)" not in all_list:
+                raise AssertionError("Runtime catalog omitted its own runtime count")
+            if b"usage unknown / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
             catalog_detail = send_and_wait(
                 process,

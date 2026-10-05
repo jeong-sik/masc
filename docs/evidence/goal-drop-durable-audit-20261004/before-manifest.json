@@ -1,0 +1,15 @@
+{
+  "scope": "complete actual Workspace_goals implementation, unchanged compiled public interface, cached lower dependencies; registered suite with module alias; real temporary files and fresh process",
+  "baseline_ref": "389224c1dbbaf8a64787740d0da160769ce135a7",
+  "source_sha256": {
+    "lib/workspace_goals.ml": "fb580e69fa1015ab505ecc704c6b85e44aa8100b2d76bf697e60a987a218c589",
+    "test/test_goal_drop_delivery.ml": "ca40aceb6dacf00cb7487a58f6c463bbd0016837784ae4989e2f4d985bff95cd"
+  },
+  "native_source_sha256": {
+    "masc__Workspace_goals.ml": "fb580e69fa1015ab505ecc704c6b85e44aa8100b2d76bf697e60a987a218c589",
+    "masc__Workspace_goals.mli": "ead31376c1842276df70081f6d6fe26437503a25416d3b4e1f77475965eaea23",
+    "test_goal_drop_delivery.ml": "ce647dc2bc3068e4afa8e8a3ee7123d76ad4d024966f8d12ccd07e26a624892b"
+  },
+  "binary_sha256": "f6f8a86d4497f9ca83a2b4bc76ac4656738d28b86e5361cf8d46e5c1e4fe5612",
+  "result": "2 failures of 5"
+}

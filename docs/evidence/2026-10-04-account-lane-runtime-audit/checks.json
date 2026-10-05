@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "compiler": "OCaml 5.5.1",
+  "link_method": "changed focused modules compiled against pre-existing cached dependencies; no Dune/full build",
+  "checks": [
+    {
+      "scope": "model table and exact Runtime lookup",
+      "count": 17,
+      "result": "pass",
+      "run": "JVUN21SH",
+      "source_commit": "143508f1a3",
+      "executor": "parent"
+    },
+    {
+      "scope": "model variant form",
+      "count": 4,
+      "result": "pass",
+      "run": "3IOU32ZT",
+      "source_commit": "143508f1a3",
+      "executor": "parent"
+    },
+    {
+      "scope": "Runtime setup specification and account grouping",
+      "count": 11,
+      "result": "pass",
+      "source_commit": "370a6bb098736794f418731e02ed44c2b66a7c4f",
+      "executor": "review_account_setup"
+    },
+    {
+      "scope": "TUI account login and grouped-account selection",
+      "count": 33,
+      "result": "pass",
+      "source_commit": "370a6bb098736794f418731e02ed44c2b66a7c4f",
+      "executor": "review_account_setup"
+    },
+    {
+      "scope": "provider snapshot lifecycle",
+      "count": 3,
+      "result": "pass",
+      "run": "V22HUPRN",
+      "source_commit": "3ef60ac0cc12d41582c61290d3b6014eaff02cfa",
+      "executor": "review_usage",
+      "note": "Final successful-empty-read guard change received source review; added producer test not claimed executed."
+    },
+    {
+      "scope": "Usage frontend tests",
+      "count": 28,
+      "result": "pass",
+      "executor": "review_usage"
+    },
+    {
+      "scope": "next-request Context projection",
+      "count": 26,
+      "result": "pass",
+      "source_commit": "046fb45a1c",
+      "executor": "parent"
+    },
+    {
+      "scope": "runtime metrics producer",
+      "count": 46,
+      "result": "pass",
+      "run": "AZE6HHNY",
+      "source_commit": "f917ba5f0416bc0ead4f97fee5c56c1a8da67bad",
+      "executor": "respond_login_activation"
+    },
+    {
+      "scope": "runtime evidence projection",
+      "count": 3,
+      "result": "pass",
+      "run": "8EAFET5W",
+      "source_commit": "f917ba5f0416bc0ead4f97fee5c56c1a8da67bad",
+      "executor": "respond_login_activation"
+    },
+    {
+      "scope": "frontend setup picker",
+      "count": 21,
+      "result": "pass",
+      "source_commit": "370a6bb098736794f418731e02ed44c2b66a7c4f",
+      "executor": "review_account_setup"
+    },
+    {
+      "scope": "full dashboard TypeScript typecheck",
+      "result": "pass",
+      "command": "tsc --noEmit",
+      "executor": "review_account_setup"
+    },
+    {
+      "scope": "existing compiled TUI Runtime baseline",
+      "result": "pass",
+      "binary_commit": "2b230357cb72586fe0c20d5a07490a43cb93ecab",
+      "binary_sha256": "da31ce5a0f46f8f32e3ff125ffcf8c458aeee0fdd72c4befca0a8e7c04f1fc29",
+      "note": "After obsolete fixture expectation repair; does not execute new code."
+    },
+    {
+      "scope": "existing compiled TUI status clipping",
+      "result": "reproduced_failure",
+      "binary_commit": "2b230357cb72586fe0c20d5a07490a43cb93ecab",
+      "detail": "132-column status truncated to usage unknown / reach…; new status source not executed."
+    },
+    {
+      "scope": "existing compiled TUI standalone replacement/promote",
+      "result": "unverified_version_mismatch",
+      "binary_commit": "2b230357cb72586fe0c20d5a07490a43cb93ecab",
+      "detail": "Timed out awaiting runtime catalogue loading; held HTTP fixture cleanup also failed. No routing-write success claimed. Subsequent CLI editor scenario not run."
+    },
+    {
+      "scope": "new integrated TUI/server binary and full PTY",
+      "result": "not_run",
+      "note": "External session follows constitution execution_protocol: no local Dune/full build, no CI watch or automatic full CI."
+    },
+    {
+      "scope": "live Runtime repair",
+      "result": "pass",
+      "before_runtimes": 83,
+      "after_runtimes": 89,
+      "codex_runtimes": 6,
+      "account_homes": 2,
+      "note": "Existing authenticated preview/write API; removed one unsupported capability key. No new binary deployed."
+    },
+    {
+      "scope": "account scope helper",
+      "result": "pass",
+      "assertions": 4,
+      "method": "OCaml interpreter using production helper source; no full TUI module linking",
+      "source_commit": "653f6981ed0392f2608361fa86bcdda33941dde5",
+      "executor": "review_account_setup"
+    },
+    {
+      "scope": "model source read identity repair",
+      "result": "syntax_pass",
+      "source_commit": "be6d277599844a6a9651ca7f4729edf1d87c0f6d",
+      "executor": "respond_login_activation",
+      "note": "OCaml parse/Python compile/discovery/fixture TOML checks; delayed response PTY not executed."
+    }
+  ]
+}

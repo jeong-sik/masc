@@ -265,6 +265,36 @@ let test_a_refused_write_opens_edits_at_once () =
   Alcotest.(check string) "the refusal is drawn" "refuse: HTTP 400: no"
     (notice_text state.runtime_lane_notice)
 
+(* The refusal detail is the server's own message and can carry its line
+   breaks: the exact-lane save refusal names the [providers.<id>] table and the
+   missing key on their own lines. The listing draws one row per line plus a
+   divider, so the chrome must count the lines rather than assume one. *)
+let test_a_multiline_refusal_counts_every_line () =
+  Alcotest.(check int) "no notice spends no rows" 0
+    (runtime_lane_notice_row_count ~cols:check_cols None);
+  Alcotest.(check int) "a one-line refusal spends a row and a divider" 2
+    (runtime_lane_notice_row_count ~cols:check_cols (Some (Lane_write_refused "HTTP 400: no")));
+  Alcotest.(check int) "a three-line refusal spends three rows and a divider" 4
+    (runtime_lane_notice_row_count ~cols:check_cols
+       (Some (Lane_write_refused "line one\nline two\nline three")))
+
+(* A server line longer than the frame wraps, so the row budget must count the
+   rows the drawing spends, not the lines the server sent. A single long line
+   is one server line but more than one drawn row. *)
+let test_a_long_refusal_line_wraps_and_is_counted () =
+  let long =
+    String.concat " " (List.init 60 (fun i -> Printf.sprintf "word%02d" i)) in
+  let notice = Lane_write_refused long in
+  let drawn =
+    List.length
+      (Masc_tui_message_layout.boxed_rows
+         ~inner:(Masc_tui_frame.inner_width ~cols:check_cols)
+         (runtime_lane_notice_text notice))
+  in
+  Alcotest.(check bool) "the line wraps to more than one row" true (drawn > 1);
+  Alcotest.(check int) "the notice count is the rows the drawing spends" drawn
+    (runtime_lane_notice_lines ~cols:check_cols (Some notice))
+
 let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
@@ -745,31 +775,31 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
 let test_lanes_overview_and_exact_picker_count_every_notice_line () =
   let refusal = "line one\nline two\nline three" in
   Alcotest.(check int) "a three-line action error spends three rows" 3
-    (lanes_action_error_row_count (Some refusal));
+    (lanes_action_error_row_count ~cols:check_cols (Some refusal));
   Alcotest.(check int) "a three-line notice spends three rows" 3
-    (runtime_lane_notice_lines (Some (Lane_write_refused refusal)));
+    (runtime_lane_notice_lines ~cols:check_cols (Some (Lane_write_refused refusal)));
   (* The lanes overview's chrome counts them. *)
   let state = lane_state () in
   state.lanes_mode <- Lanes_overview;
   state.runtime_lane_notice <- None;
   state.lanes_action_error <- None;
-  let base = (lanes_scrolled state).sc_chrome in
+  let base = (lanes_scrolled state ~cols:check_cols).sc_chrome in
   state.runtime_lane_notice <- Some (Lane_write_refused refusal);
   expect "the lanes overview counts a three-line notice as three rows"
-    (base + 3) (lanes_scrolled state).sc_chrome;
+    (base + 3) (lanes_scrolled state ~cols:check_cols).sc_chrome;
   state.runtime_lane_notice <- None;
   state.lanes_action_error <- Some refusal;
   expect "the lanes overview counts a three-line action error as three rows"
-    (base + 3) (lanes_scrolled state).sc_chrome;
+    (base + 3) (lanes_scrolled state ~cols:check_cols).sc_chrome;
   (* The exact picker gives the notice's lines to the notice, not to the
      picker: a three-line notice leaves one fewer two-row choice than a
      one-line one. *)
   let picker = slot_editor_state () in
   picker.view <- Lanes;
   picker.runtime_lane_notice <- Some (Lane_write_refused "one line");
-  let page_one = runtime_exact_picker_page picker ~terminal_rows:40 in
+  let page_one = runtime_exact_picker_page picker ~terminal_rows:40 ~cols:check_cols in
   picker.runtime_lane_notice <- Some (Lane_write_refused refusal);
-  let page_three = runtime_exact_picker_page picker ~terminal_rows:40 in
+  let page_three = runtime_exact_picker_page picker ~terminal_rows:40 ~cols:check_cols in
   expect "the exact picker gives a three-line notice two more rows than a one-line one"
     (page_one - 1) page_three
 
@@ -1691,6 +1721,8 @@ let () = Alcotest.run "runtime list geometry"
         Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
         Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
         Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;
+        Alcotest.test_case "a multi-line refusal counts every line" `Quick test_a_multiline_refusal_counts_every_line;
+        Alcotest.test_case "a long refusal line wraps and is counted" `Quick test_a_long_refusal_line_wraps_and_is_counted;
         Alcotest.test_case "a failed re-read refuses candidate edits with a line" `Quick test_a_failed_reread_refuses_candidate_edits_with_a_line;
         Alcotest.test_case "a stale line holds until its list loads" `Quick test_a_stale_line_holds_until_its_list_loads;
         Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;

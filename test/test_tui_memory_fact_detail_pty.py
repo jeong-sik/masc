@@ -8,10 +8,8 @@ terminal it was given, the window marker under it says how much of the claim is
 on screen, j scrolls that window instead of the list behind it, and Esc gives
 the list back whole.
 
-SOURCE_MODULES names the files this scenario stands over. PR CI picks the suite
-up from those paths, so a change to the key wiring, the surface state or the
-overlay render has to pass here, and so does the wheel: a notch over the
-reading moves it, not the list it covers.
+The wheel is scoped to the reading: a notch over it moves the detail, not the
+list it covers.
 """
 import os
 import re
@@ -19,7 +17,6 @@ import sys
 
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_memory as _keyboard_memory
-
 
 
 DETAIL_ROWS_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
@@ -63,7 +60,12 @@ def detail_window(output: bytearray) -> tuple[int, int, int]:
 
 def run(executable: str) -> None:
     fixtures = _keyboard_memory.memory_facts_http_fixtures()
-    status, payload = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    response = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    if not isinstance(response, tuple):
+        raise AssertionError("memory fixture must be a status/payload response")
+    status, payload = response
+    if not isinstance(payload, dict):
+        raise AssertionError("memory fixture payload must be an object")
     for fact in payload["ordinary"]["facts"]:
         fact["claim"] = CLAIM
     for fact in payload["source_bound"]["facts"]:
@@ -91,6 +93,25 @@ def run(executable: str) -> None:
                 raise AssertionError(
                     f"the fact browser never drew {needle!r}: "
                     f"{plain_screen(output)[-900:]!r}")
+
+        # Category navigation is opt-in; it must give the fact width back.
+        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=38, columns=240,
+                          needle=b"MASC Memory", final_cursor=b"\x1b[?25l")
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" in plain_screen(output):
+            raise AssertionError("Category rail must be closed by default")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"d", b"CATEGORIES")
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" not in plain_screen(output):
+            raise AssertionError("d did not open Category navigation")
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"d", LIST_STRIP)
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" in plain_screen(output):
+            raise AssertionError("d did not restore the full-width fact list")
+        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=38,
+                          columns=_keyboard_harness.ACTING_PANE_NARROW_TERMINAL_COLUMNS,
+                          needle=b"MASC Memory", final_cursor=b"\x1b[?25l")
+        _keyboard_harness.drain_until_quiet(process, master_fd, output)
 
         # Recency opens on the dropped row, whose facts carry no claim; one step
         # down lands on an ordinary fact, and the list's block under that row is

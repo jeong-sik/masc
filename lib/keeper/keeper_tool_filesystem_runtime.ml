@@ -452,7 +452,7 @@ let handle_read_file_with_outcome
                ; "content", `String slice.window_content
                ]
                @ optional_fields
-               @ [ "via", `String Keeper_sandbox_read_runner.backend_via ]))
+               @ [ "via", `String (Keeper_sandbox_read_runner.backend_via ~meta) ]))
     in
     let refused failure_class message =
       Read_refused

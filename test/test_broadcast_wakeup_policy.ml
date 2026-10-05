@@ -536,7 +536,7 @@ let retry_after_uncommitted_attempt ?(fleet_delivery=Workspace_broadcast.Immedia
     check int "failed primary attempt was followed by one real commit" 2 !writes;
     let expected_fanouts=match fleet_delivery with
       | Workspace_broadcast.Immediate_fleet -> 1
-      | Workspace_broadcast.Deferred_fleet -> 0 in
+      | Workspace_broadcast.Deferred_fleet | Workspace_broadcast.Deferred_passive_fleet -> 0 in
     check int "only immediate committed attempts reach inline fleet projection" expected_fanouts !fanouts;
     let replay = match send () with
       | Ok receipt -> receipt

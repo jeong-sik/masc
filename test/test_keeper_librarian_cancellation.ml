@@ -18,8 +18,12 @@ let check_json label expected actual =
   Alcotest.(check string) label
     (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
 
-let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
+let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~registry stage () =
   Eio_main.run @@ fun env ->
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect ~finally:(fun () -> match previous_pool with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool) @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
@@ -33,6 +37,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
     | After_completion -> "cancel-after-completion"
     | After_failed_completion -> "cancel-after-failed-completion" in
   let keeper_id = if observer_checks then keeper_id else keeper_id ^ "-deferred" in
+  let keeper_id = if closed_pool then keeper_id ^ "-closed-pool" else keeper_id in
   let commits_memory = stage = After_commit || stage = After_completion in
   let expected_status = match stage with
     | After_completion -> "succeeded"
@@ -154,6 +159,18 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
   (match stage with
    | Provider | Second_judgment ->
      await "the selected HTTP request did not block" blocked;
+     if closed_pool then (
+       (* Leave the process reference installed while its actual worker scope
+          exits. The closed queue makes a bad cleanup submission fail promptly
+          instead of hanging this test until a process watchdog kills it. *)
+       Eio.Switch.run (fun pool_sw ->
+         let pool = Domain_pool.create ~sw:pool_sw ~domain_count:1
+             (Eio.Stdenv.domain_mgr env) in
+         Domain_pool_ref.set pool);
+       let refused = try
+           Domain_pool_ref.submit_io_or_inline (fun () -> ()); false
+         with Invalid_argument _ -> true in
+       Alcotest.(check bool) "fixture executor no longer accepts work" true refused);
      Eio.Cancel.cancel cc Operator_cancelled
    | After_commit | After_completion | After_failed_completion -> ());
   (match await "cancelled Librarian did not return" worker with
@@ -294,6 +311,8 @@ let () =
       [ "durable cancellation",
         [ Alcotest.test_case "pending provider preserves terminal evidence" `Quick
             (test_cancel ~base_path ~registry Provider)
+        ; Alcotest.test_case "provider cancellation journals after shared workers exit" `Quick
+            (test_cancel ~closed_pool:true ~base_path ~registry Provider)
         ; Alcotest.test_case "later JEV cancellation preserves completed evaluation" `Quick
             (test_cancel ~base_path ~registry Second_judgment)
         ; Alcotest.test_case "post-commit cancellation retains Memory commit evidence" `Quick

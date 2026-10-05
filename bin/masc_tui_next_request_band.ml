@@ -90,7 +90,7 @@ let walk_sentence ~safe (walk : Inspector.forecast_walk)
   Printf.sprintf "Walks %s: %s%s." (ordinal candidate.place.walks_at) why rest
 ;;
 
-let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
+let candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
     (candidate : Inspector.forecast_candidate) =
   let tokens_of_bytes = Masc_tui_token_scale.estimate scale in
   let approx bytes = "\xe2\x89\x88" ^ signed_tokens (tokens_of_bytes bytes) in
@@ -198,11 +198,12 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
                              blocks)))
                slots)
   in
-  head @ prose (walk_sentence ~safe walk candidate) @ parts_line @ carried_lines
+  head @ List.concat_map (fun line -> fact (safe line)) (runtime_details candidate.runtime_id)
+  @ prose (walk_sentence ~safe walk candidate) @ parts_line @ carried_lines
   @ settings_lines @ assembly_lines
 ;;
 
-let lines ~prose ~fact ~safe ~scale
+let lines ?(runtime_details = fun _ -> []) ~prose ~fact ~safe ~scale
     (forecast : (Inspector.forecast, string) result) =
   match forecast with
   | Error detail ->
@@ -220,8 +221,9 @@ let lines ~prose ~fact ~safe ~scale
            [ Theme.bad () ^ "  Next request not walked: " ^ safe refusal ^ Ansi.reset ]
            @ checkpoint
        | Ok walk ->
-           List.concat_map
-             (candidate_lines ~prose ~fact ~safe ~scale ~walk)
+           fact (Printf.sprintf "Lane %s · %d candidates · execution order" (safe walk.lane_id) (List.length forecast.Inspector.candidates))
+           @ List.concat_map
+             (candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~walk)
              forecast.Inspector.candidates
            @ checkpoint
            @ prose "Figures marked ≈ estimate token equivalents from bytes; they are not provider usage."

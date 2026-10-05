@@ -1990,6 +1990,32 @@ let test_sampling_discovery_keeps_namespace_progress ~healthy_outcomes () = with
   check string "unfinished namespace resumes after repair" bad_bytes
     (sampling_require (Store.read_blob store bad_reference))))
 
+(* CR5410658368: a symlinked namespace directory (sampling or
+   sampling-outcomes) whose hashed child is a real directory passed the
+   final-component check, so recovery read and rewrote records outside the
+   store. Every component below the root is now checked. *)
+let test_sampling_recovery_rejects_symlinked_namespace ~namespace () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir ("symlinked-" ^ namespace)) in
+  let instance_id = "symlinked-namespace-instance" and request_id = "outside" in
+  let terminal, _, _, _ = sampling_retry_case store ~instance_id ~request_id "must stay outside" in
+  let save = if namespace = "sampling" then Store.save_sampling_request else Store.save_sampling_outcome in
+  sampling_require (save store ~instance_id ~request_id terminal);
+  Unix.unlink (sampling_retry_path store instance_id request_id);
+  let owned = Filename.concat (Store.root store) namespace in
+  let outside = Filename.concat dir ("outside-" ^ namespace) in
+  Unix.rename owned outside;
+  Unix.symlink outside owned;
+  let record = Filename.concat outside
+    (Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json") in
+  let before = Fs_compat.load_file record in
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "a symlinked namespace stays an explicit error" true (Result.is_error report.outcome);
+  check bool "discovery through it is not complete" false report.discovery_complete;
+  check string "the record outside the store is not rewritten" before (Fs_compat.load_file record);
+  check bool "no recovery marker is published for it" false
+    (Sys.file_exists (sampling_retry_path store instance_id request_id)))
+
 let test_sampling_cold_read_keeps_optional_compaction () = with_fixture (fun _ _ dir _ ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "optional-compaction") in
@@ -2168,6 +2194,10 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
     (test_canonical_parent_owns_recovery ~journal:true ~directory:true);
   test_case "relative store root blob roundtrip" `Quick (test_relative_store_root ~sequence:false);
   test_case "relative store root sequence roundtrip" `Quick (test_relative_store_root ~sequence:true);
+  test_case "sampling recovery rejects symlinked request namespace" `Quick
+    (test_sampling_recovery_rejects_symlinked_namespace ~namespace:"sampling");
+  test_case "sampling recovery rejects symlinked outcome namespace" `Quick
+    (test_sampling_recovery_rejects_symlinked_namespace ~namespace:"sampling-outcomes");
   test_case "sampling publication rejects canonical parent symlink" `Quick
     (test_sampling_publication_rejects_symlink_parent `Canonical);
   test_case "sampling publication rejects recovery parent symlink" `Quick

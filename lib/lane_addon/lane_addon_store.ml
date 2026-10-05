@@ -769,11 +769,19 @@ type sampling_recovery_report = {
 }
 let keep_first_sampling_error first next = match first with
   | Ok () -> next | Error _ -> first
+(* Recovery reads, rewrites and retires journal entries below [t.root]. Every
+   component from the root down must be a real directory: checking only the
+   last one lets a symlinked [sampling] or [sampling-outcomes] parent carry
+   the sweep -- and its writes -- outside the store. *)
+let owned_sampling_directory t directory =
+  Fs_compat.inspect_owned_directory_chain ~ownership_root:t.root directory
+  |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
 let scan_sampling_directory t relative ~f = protect (fun () ->
   let path = Filename.concat t.root relative in
-  match Fs_compat.exact_path_kind ~follow:false path with
-  | Fs_compat.Exact_missing -> Ok ()
-  | Fs_compat.Exact_kind Unix.S_DIR ->
+  match owned_sampling_directory t path with
+  | Error detail -> Error ("sampling recovery directory is not an owned directory: " ^ detail)
+  | Ok Fs_compat.Owned_directory_missing -> Ok ()
+  | Ok (Fs_compat.Owned_directory _) ->
       let handle = Unix.opendir path in
       Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
         let rec next result = match Unix.readdir handle with
@@ -782,16 +790,17 @@ let scan_sampling_directory t relative ~f = protect (fun () ->
               let observed = protect (fun () -> f name) in
               next (keep_first_sampling_error result observed)
           | exception End_of_file -> result in
-        next (Ok ()))
-  | _ -> Error "sampling recovery directory is not an owned directory")
+        next (Ok ())))
 let remove_sampling_marker t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
+  let* _ = owned_sampling_directory t (Filename.dirname path) in
   Unix.unlink path;
   sync_parent_directory (Filename.dirname path);
   Ok ())
 let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative name = protect (fun () ->
   let max_record_bytes = sampling_recovery_record_limit ~max_reply_bytes in
   let path = Filename.concat t.root (Filename.concat relative name) in
+  let* _ = owned_sampling_directory t (Filename.dirname path) in
   match Fs_compat.exact_path_kind ~follow:false path with
   | Fs_compat.Exact_missing -> Ok ()
   | _ ->

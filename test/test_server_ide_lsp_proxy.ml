@@ -47,6 +47,28 @@ let test_initialize_handshake_is_read_only () =
      | None -> None)
 ;;
 
+let test_language_server_initialize_preserves_workspace_path () =
+  List.iter
+    (fun workspace_root ->
+      let params = Lsp.language_server_initialize_params ~workspace_root in
+      let uri =
+        match member "rootUri" params with
+        | Some (`String value) -> Uri.of_string value
+        | _ -> fail "language server initialize must name the workspace"
+      in
+      check (option string) "file scheme" (Some "file") (Uri.scheme uri);
+      check (option string) "no fragment" None (Uri.fragment uri);
+      check (list (pair string (list string))) "no query" [] (Uri.query uri);
+      check string "decoded root URI" workspace_root
+        (Uri.pct_decode (Uri.path uri));
+      check (option string) "legacy root path remains literal" (Some workspace_root)
+        (match member "rootPath" params with
+         | Some (`String value) -> Some value
+         | _ -> None))
+    [ "/workspace/masc"; "/workspace/space #?%/한글";
+      "/workspace/literal%20name" ]
+;;
+
 let test_workspace_root_initialize_stays_in_base () =
   let base_path = "/workspace/masc" in
   check
@@ -698,6 +720,8 @@ let () =
     [ ( "lsp_proxy"
       , [ test_case "initialize handshake is read-only" `Quick
             test_initialize_handshake_is_read_only
+        ; test_case "language server initialize preserves workspace path" `Quick
+            test_language_server_initialize_preserves_workspace_path
         ; test_case "initialize root stays inside workspace" `Quick
             test_workspace_root_initialize_stays_in_base
         ; test_case "file uri resolution is workspace scoped" `Quick

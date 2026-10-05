@@ -310,6 +310,23 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                     self.assertNotIn("structuredContent", replies[2]["result"])
                 self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 3, "result": {}})
 
+    def test_temperature_bounds_before_host_sampling(self):
+        with tempfile.TemporaryDirectory() as root:
+            for temperature in (-0.1, 2.1):
+                with self.subTest(invalid=temperature):
+                    host = Host(root)
+                    configured = binding()
+                    configured["temperature"] = temperature
+                    self.assertTrue(call(host, [source()], configured)["isError"])
+                    self.assertEqual(host.calls, [])
+            for temperature in (0, 2):
+                with self.subTest(boundary=temperature):
+                    host = Host(root)
+                    configured = binding()
+                    configured["temperature"] = temperature
+                    self.assertFalse(call(host, [source()], configured)["isError"])
+                    self.assertEqual(host.calls[0]["params"]["temperature"], temperature)
+
     def test_decoder_limits_in_host_terminal_keep_next_ping_available(self):
         class DecoderLimitHost(Host):
             def answer(self, request):
@@ -706,6 +723,18 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
             host = Host(root)
             self.assertTrue(call(host, [upstream(wrong)], binding("judge"))["isError"])
             self.assertEqual(host.calls, [])
+
+    def test_judge_rejects_extra_model_evidence_before_sampling(self):
+        with tempfile.TemporaryDirectory() as root:
+            panel = call(Host(root), [source()])["structuredContent"]
+            for key, value in (("provider_key", "invented"),
+                               ("billing", {"account": "invented"})):
+                with self.subTest(key=key):
+                    wrong = copy.deepcopy(panel)
+                    wrong["rows"][0]["fields"]["model_evidence"][key] = value
+                    judge = Host(root)
+                    self.assertTrue(call(judge, [upstream(wrong)], binding("judge"))["isError"])
+                    self.assertEqual(judge.calls, [])
 
     def test_retained_arbitrary_artifacts_cannot_forge_host_sampling(self):
         with tempfile.TemporaryDirectory() as root:

@@ -22,15 +22,10 @@
     verdict without a stated reason is not a judgment: nothing is committed and
     the pending row stays durable.
 
-    Failure keeps evidence: an unavailable evaluator, a malformed reply after
-    all slots failed, or a refused commit leaves the pending row durable and
-    stops. Nothing re-runs the same review on a clock — the next scan comes
-    from a Keeper requesting completion or from another review committing a
-    verdict. So a deferral of a Goal still waiting on the same request is
-    posted to the Board through {!Verification_protocol.notify_stalled_verification},
-    the notice a Task review that stops without a verdict already uses, and
-    a Keeper chooses whether to ask again. No wall-clock expiry and no retry
-    timer anywhere. *)
+    Failure keeps evidence. Typed transient provider failures retry the same
+    request after the earliest candidate rest; permanent or unclassified
+    failures wait for an explicit completion request or configuration recovery.
+    Every retry rechecks the request identity. No wall-clock expiry. *)
 
 type pending_work = { goal_id : string }
 
@@ -42,6 +37,7 @@ type deferral =
       { gate : string
       ; detail : string
       ; evaluator_runtime : string option
+      ; retryable_runtimes : string list
       }
   | Verdict_without_reason
   | Commit_refused of { detail : string }
@@ -329,15 +325,9 @@ let defer ~goal_id deferral =
   Deferred deferral
 ;;
 
-(* A deferral writes no ledger row, so no scan follows it and the Goal waits
-   in Verifying until a Keeper asks again. The Board notice is how a Keeper
-   learns that. The verifier arms no retry, and [Goal_review] carries no
-   disposition, so the post always reads [No_retry_armed]; the notice posts
-   once per (Goal, request, gate). The
-   notice is a projection: an ordinary exception out of the Board is logged
-   and changes neither the outcome nor the pending row. Cancellation is not
-   contained. *)
-let announce_deferral ~goal_id ~request_id deferral =
+(* Report the scheduling owner's actual disposition. The Board neither arms
+   retries nor supplies their authority. *)
+let announce_deferral ~goal_id ~request_id ~disposition deferral =
   let evaluator_runtime =
     match deferral with
     | Not_reviewed { evaluator_runtime; _ } -> evaluator_runtime
@@ -347,7 +337,7 @@ let announce_deferral ~goal_id ~request_id deferral =
   match
     Verification_protocol.notify_stalled_verification_with_runtime
       ~authority:Workspace_goals.verifier_authority
-      ~subject:(Verification_protocol.Goal_review { goal_id; request_id })
+      ~subject:(Verification_protocol.Goal_review { goal_id; request_id; disposition })
       ~gate:(deferral_gate deferral)
       ~detail:(deferral_detail deferral)
       ~evaluator_runtime
@@ -429,19 +419,15 @@ let process_pending_work_inner
                | Some reason -> reason
                | None -> Task.Anti_rationalization.gate_to_string result.gate
              in
-             (* No verdict was committed. The row stays durable and nothing
-                rescans it on its own: the next scan comes from a Keeper
-                requesting completion, from another review committing a
-                verdict, or from a freed worker slot whose Goal received a
-                wake while its review ran ([release_review] reports that
-                held wake). A slot that frees with no held wake starts no
-                scan. *)
+             (* The unchanged pending request retains transient candidate
+                identities for the daemon's retry scheduler. *)
              defer
                ~goal_id:work.goal_id
                (Not_reviewed
                   { gate = Task.Anti_rationalization.gate_to_string result.gate
                   ; detail
                   ; evaluator_runtime = Some result.evaluator_runtime
+                  ; retryable_runtimes = result.retryable_runtimes
                   })
            | Some review_verdict ->
              let evidence =
@@ -487,21 +473,20 @@ let process_pending_work_inner
     in
     match outcome with
     | Committed | Superseded -> outcome
-    | Deferred deferral ->
+    | Deferred _ ->
       (* Re-read the Goal under its lock. A newer request supersedes this
-         review; the same request still standing is a Goal nothing will
-         rescan, so the Board is told why it waits. A Goal that left
+         review; only the same request may schedule a retry or announce a stall. A Goal that left
          Verifying has nothing to wait for. *)
       (match bind_review config ~goal_id:work.goal_id with
        | Ok (_, (current_request_id, _, _))
          when not (String.equal request_id current_request_id) -> Superseded
-       | Ok _ ->
-         announce_deferral ~goal_id:work.goal_id ~request_id deferral;
-         outcome
+       | Ok _ -> outcome
        | Error _ -> outcome)
 ;;
 
-let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
+let process_pending_work ?(sw : Eio.Switch.t option = None)
+    ?(schedule_retry = fun ~goal_id:_ ~request_id:_ _ -> Verification_protocol.No_retry_armed)
+    config (work : pending_work)
   : process_outcome
   =
   match bind_review config ~goal_id:work.goal_id with
@@ -570,6 +555,14 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
         work
     in
     complete outcome;
+    (match outcome with
+     | Deferred deferral ->
+       (match bind_review config ~goal_id:work.goal_id with
+        | Ok (_, (current, _, _)) when String.equal current request_id ->
+          let disposition = schedule_retry ~goal_id:work.goal_id ~request_id deferral in
+          announce_deferral ~goal_id:work.goal_id ~request_id ~disposition deferral
+        | Ok _ | Error _ -> ())
+     | Committed | Superseded -> ());
     outcome
   with
   | Eio.Cancel.Cancelled _ as exn ->
@@ -617,8 +610,8 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
    Mirrors {!Completion_authority_agent}: a condition-variable wake installed
    as {!Workspace_hooks.goal_verification_pending_fn} and bounded concurrency
    via a semaphore. A committed verdict requests another scan; a deferral
-   stays durable and waits for an explicit completion request or another
-   committed review. No wall-clock expiry or retry timer. *)
+   stays durable. Transient evaluator failures arm a request-scoped retry.
+   Other deferrals wait for an explicit wake. No wall-clock expiry. *)
 
 (* One claimed review. [requested] retains a wake that arrived while the
    review ran. [abandon] is resolved when the Goal leaves [Verifying] through
@@ -636,6 +629,8 @@ type claim =
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
+  ; retries : (string * string * string) list Atomic.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
   ; in_flight : claim list Atomic.t
@@ -687,9 +682,56 @@ let request_scan (runtime : runtime) =
   Eio.Condition.broadcast runtime.wake
 ;;
 
+let remove_retry (runtime : runtime) key =
+  let rec loop () =
+    let current = Atomic.get runtime.retries in
+    if not (List.mem key current) then false
+    else if Atomic.compare_and_set runtime.retries current (List.filter ((<>) key) current)
+    then true else loop ()
+  in loop ()
+;;
+
+let clear_retries (runtime : runtime) ~goal_id =
+  Atomic.get runtime.retries |> List.iter (fun ((id, _, _) as key) ->
+    if String.equal id goal_id then ignore (remove_retry runtime key))
+;;
+
+let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
+  if List.exists (fun claim -> String.equal claim.work.goal_id goal_id && claim.requested)
+       (Atomic.get runtime.in_flight)
+  then Verification_protocol.No_retry_armed
+  else match deferral with
+  | Not_reviewed {retryable_runtimes = _ :: _ as runtimes; _} ->
+    let key = goal_id, request_id, Random_id.uuid_v7 () in
+    let rec admit () =
+      let current = Atomic.get runtime.retries in
+      if List.exists (fun (id, request, _) -> String.equal id goal_id && String.equal request request_id) current then false
+      else if Atomic.compare_and_set runtime.retries current (key :: current) then true
+      else admit ()
+    in
+    if not (admit ()) then Verification_protocol.Retry_scheduled {delay=Shared_timer}
+    else (
+      let seconds = Verification_retry.delay
+          ~retry_interval_sec:Env_config.Timeouts.maintenance_pulse_interval_sec
+          ~now:(Eio.Time.now runtime.clock) runtimes in
+      Eio.Fiber.fork_daemon ~sw:runtime.sw (fun () ->
+        Eio.Time.sleep runtime.clock seconds;
+        if remove_retry runtime key then (
+          match bind_review runtime.config ~goal_id with
+          | Ok (_, (current, _, _)) when String.equal current request_id ->
+            retain_active_wake runtime ~goal_id;
+            request_scan runtime
+          | Ok _ | Error _ -> ());
+        `Stop_daemon);
+      Verification_protocol.Retry_scheduled {delay=Full_interval {seconds}})
+  | Not_reviewed _ | Review_not_bound _ | Proof_lookup_unavailable _
+  | Verdict_without_reason | Commit_refused _ -> Verification_protocol.No_retry_armed
+;;
+
 (* Resolve the abandon promise of the Goal's claimed review, if one runs.
    A Goal with no claimed review has nothing to cancel. *)
 let abandon_review (runtime : runtime) ~goal_id =
+  clear_retries runtime ~goal_id;
   Atomic.get runtime.in_flight
   |> List.iter (fun claim ->
     if String.equal claim.work.goal_id goal_id
@@ -701,12 +743,9 @@ let abandon_review (runtime : runtime) ~goal_id =
           goal_id))
 ;;
 
-(* Rescanning is driven by what happened, not by a clock. A committed verdict
-   changes the ledger, so whatever else was queued deserves another look, and
-   the worker slot this fiber held has just come free. A run that committed
-   nothing changes nothing: scanning again would read the same rows and defer
-   them again, so it stops and waits for a real wake — a Keeper requesting
-   completion, or another worker committing. *)
+(* A completed review or an armed retry frees capacity for other Goals.
+   Waiting retries are excluded from scans until their own timer or an explicit
+   request wakes them. Permanent deferrals do not request another scan. *)
 let process_goal_work (runtime : runtime) (claim : claim) work =
   match work with
   | [] -> ()
@@ -737,10 +776,12 @@ let process_goal_work (runtime : runtime) (claim : claim) work =
                         (match
                            process_pending_work
                              ~sw:(Some work_sw)
+                             ~schedule_retry:(schedule_retry runtime)
                              runtime.config
                              item
                          with
                          | Committed | Superseded -> loop true rest
+                         | Deferred (Not_reviewed {retryable_runtimes = _ :: _; _}) -> true
                          | Deferred _ -> committed)
                     in
                     loop false work)))
@@ -772,7 +813,9 @@ let process_pending (runtime : runtime) =
       |> List.filter (function
         | [] -> false
         | representative :: _ ->
-          not (List.exists (fun candidate -> pending_work_same_goal representative candidate.work) active))
+          not (List.exists (fun candidate -> pending_work_same_goal representative candidate.work) active)
+          && not (List.exists (fun (id, _, _) -> String.equal id representative.goal_id)
+                    (Atomic.get runtime.retries)))
     in
     let selected = take_items available eligible in
     List.iter
@@ -812,6 +855,7 @@ let install_callback (runtime : runtime) =
        else if String.equal (String.trim goal_id) ""
        then Log.Misc.error "goal verifier rejected an empty goal id"
        else (
+         clear_retries runtime ~goal_id;
          retain_active_wake runtime ~goal_id;
          request_scan runtime;
          Log.Misc.info "goal verifier scheduled goal_id=%s" goal_id));
@@ -825,11 +869,13 @@ let install_callback (runtime : runtime) =
            goal_id)
 ;;
 
-let start ~sw ~(config : Workspace_utils_backend_setup.config) =
+let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
   Eio.Switch.check sw;
   let runtime =
     { config
     ; sw
+    ; clock
+    ; retries = Atomic.make []
     ; wake = Eio.Condition.create ()
     ; pending = Atomic.make true
     ; in_flight = Atomic.make []
@@ -876,6 +922,11 @@ let start ~sw ~(config : Workspace_utils_backend_setup.config) =
 ;;
 
 module For_testing = struct
+  let retry_pending ~goal_id =
+    match Atomic.get active_runtime with
+    | None -> false
+    | Some runtime -> List.exists (fun (id, _, _) -> String.equal id goal_id) (Atomic.get runtime.retries)
+
   let scan_active_once () =
     match Atomic.get active_runtime with
     | None -> false
@@ -885,7 +936,7 @@ module For_testing = struct
       true
 
   let collect_pending = collect_pending
-  let process_pending_work = process_pending_work
+  let process_pending_work ?(sw = None) config work = process_pending_work ~sw config work
   let drain_once = drain_once
 
   type nonrec pending_work = pending_work = { goal_id : string }
@@ -897,6 +948,7 @@ module For_testing = struct
       { gate : string
       ; detail : string
       ; evaluator_runtime : string option
+      ; retryable_runtimes : string list
       }
     | Verdict_without_reason
     | Commit_refused of { detail : string }

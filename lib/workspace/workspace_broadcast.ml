@@ -449,37 +449,13 @@ let reconcile_persisted_mention config message =
     None
 
 let outbox_filename_suffix = ".json"
-let workspace_request_prefix = "wmsg-"
-let workspace_request_hex_length = 32
-
 let current_request_id_of_filename name =
-  let is_safe_filename_char = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> true
-    | _ -> false
-  in
-  let is_lower_hex = function
-    | '0' .. '9' | 'a' .. 'f' -> true
-    | _ -> false
-  in
-  if not (String.for_all is_safe_filename_char name)
-     || not (Filename.check_suffix name outbox_filename_suffix)
-  then None
+  if not (Filename.check_suffix name outbox_filename_suffix) then None
   else
-    let request_id = Filename.chop_suffix name outbox_filename_suffix in
-      let prefix_length = String.length workspace_request_prefix in
-      let expected_length = prefix_length + workspace_request_hex_length in
-      if String.length request_id <> expected_length
-         || not (String.starts_with ~prefix:workspace_request_prefix request_id)
-      then None
-      else
-        let rec valid_hex index =
-          if index = expected_length
-          then true
-          else if is_lower_hex request_id.[index]
-          then valid_hex (index + 1)
-          else false
-        in
-      if valid_hex prefix_length then Some request_id else None
+    Filename.chop_suffix name outbox_filename_suffix
+    |> Workspace_request_id.of_string
+    |> Result.to_option
+    |> Option.map Workspace_request_id.to_string
 
 let authoritative_directory_names config directory =
   match key_of_path config directory with
@@ -844,7 +820,7 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
         Error (Broadcast_dependency_unavailable detail))
 ;;
 
-type fleet_delivery_mode = Immediate_fleet | Deferred_fleet
+type fleet_delivery_mode = Immediate_fleet | Deferred_fleet | Deferred_passive_fleet
 
 let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_delivery ~msg_type ~audience
     config ~from_agent ~content ~pre_extract_mention ~deferred_by_predecessor =
@@ -860,7 +836,7 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
   let seq = Workspace_state.next_seq config in
   let request_id = match request_id with
     | Some request_id -> request_id
-    | None -> Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
+    | None -> Workspace_request_id.create () |> Workspace_request_id.to_string in
   let mention = pre_extract_mention in
   (* Stored as written. This used to HTML-escape the content, so a message
      containing a double quote was persisted as [&quot;] and every consumer
@@ -985,13 +961,14 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
        ~mention ();
      let mention_delivery =
        match fleet_delivery, deferred_by_predecessor with
-       | Deferred_fleet, _ -> Passive
+       | (Deferred_fleet | Deferred_passive_fleet), _ -> Passive
        | Immediate_fleet, None -> deliver_committed_mention ~audience config msg
        | Immediate_fleet, Some reason -> Deferred reason
      in
      observe stored_msg_type;
      Ok { delivery with mention_delivery; fanout_state=(match fleet_delivery with
-       | Immediate_fleet -> Fanout_finished | Deferred_fleet -> Fanout_not_started) })
+       | Immediate_fleet -> Fanout_finished
+       | Deferred_fleet | Deferred_passive_fleet -> Fanout_not_started) })
 
 let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = "broadcast") ?task_cache_signal
       ~audience config ~from_agent ~content =
@@ -1001,7 +978,9 @@ let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery
      so sequence assignment, commit, intake materialization, and wake request
      cannot overtake an older explicit mention. Passive fanout remains
      unsynchronized. *)
-  let pre_extract_mention = Mention.extract content in
+  let pre_extract_mention = match fleet_delivery with
+    | Deferred_passive_fleet -> None
+    | Immediate_fleet | Deferred_fleet -> Mention.extract content in
   match rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content with
   | Error _ as error -> error
   | Ok (content, msg_type) ->
@@ -1135,14 +1114,24 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
   let open Result.Syntax in
   let* () = match fleet_delivery with
     | Deferred_fleet -> validate_deferred_fleet_content content
-    | Immediate_fleet -> Ok () in
-  let lookup () = find_broadcast_message ~request_id config ~from_agent ~content in
+    | Immediate_fleet | Deferred_passive_fleet -> Ok () in
+  let lookup () =
+    let* found = find_broadcast_message ~request_id config ~from_agent ~content in
+    match fleet_delivery with
+    | Immediate_fleet | Deferred_fleet -> Ok found
+    | Deferred_passive_fleet ->
+        match found with
+        | None -> Ok None
+        | Some (message, _) ->
+            if message.mention <> None || message.mention_delivery <> Mention_passive then
+              Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
+            else Ok found in
   let replay message delivery =
     (* Each Keeper's transcript projects by the persisted request ID. Replaying
        fills recipients missed by cancellation/restart and deduplicates those
        already written. A passive row proves commit, not completed fanout. *)
     let run () = match fleet_delivery with
-      | Deferred_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
+      | Deferred_fleet | Deferred_passive_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
       | Immediate_fleet -> Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message;
           fanout_state=Fanout_finished} in
     match message.mention with
@@ -1156,7 +1145,7 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
     match existing with
     | Some (message, delivery) ->
         (match fleet_delivery with
-         | Deferred_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
+         | Deferred_fleet | Deferred_passive_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
          | Immediate_fleet -> match admit_exact_request key with
          | Active_request _ -> Ok delivery
          | Own_request operation -> own operation (fun () ->

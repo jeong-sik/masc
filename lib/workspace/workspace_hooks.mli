@@ -233,7 +233,7 @@ val verification_notify_verdict_fn :
    unit) Atomic.t
 
 
-(** Acceleration hint after the verdict and its delivery obligation commit.
+(** Acceleration hint for either verdict after its delivery obligation commits.
     The runtime owns retries; an absent callback never loses the obligation. *)
 val rejection_delivery_requested_fn :
   (Workspace_utils_backend_setup.config -> unit) Atomic.t

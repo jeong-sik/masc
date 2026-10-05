@@ -6452,8 +6452,10 @@ let test_runtime_raw_save_rejects_stale_source_without_write () =
   in
   let revision text = Runtime.config_source_revision_to_string
     (Runtime.config_observation ~path:runtime_path text).source_revision in
-  let body source revision = Yojson.Safe.to_string
-    (`Assoc ["source_text", `String source; "expected_source_revision", `String revision]) in
+  let body_at path source revision = Yojson.Safe.to_string
+    (`Assoc ["source_text", `String source; "expected_source_path", `String path;
+             "expected_source_revision", `String revision]) in
+  let body source revision = body_at runtime_path source revision in
   let original_revision = revision config_sync_runtime_toml in
   let winner = "# first editor\n" ^ config_sync_runtime_toml in
   let loser = "# second editor\n" ^ config_sync_runtime_toml in
@@ -6483,19 +6485,48 @@ let test_runtime_raw_save_rejects_stale_source_without_write () =
     let raw, _ = post invalid_body in
     expect_http_status label 400 raw;
     check string (label ^ " preserves source") winner (read_file runtime_path))
-    [ "missing revision", Yojson.Safe.to_string (`Assoc ["source_text", `String loser]);
+    [ "missing revision", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser; "expected_source_path", `String runtime_path]);
+      "missing source path", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser;
+                 "expected_source_revision", `String (revision winner)]);
+      "empty source path", body_at "" loser (revision winner);
+      "wrong source path type", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser; "expected_source_path", `Int 1;
+                 "expected_source_revision", `String (revision winner)]);
+      "duplicate source path", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser;
+                 "expected_source_path", `String runtime_path;
+                 "expected_source_path", `String (runtime_path ^ ".other");
+                 "expected_source_revision", `String (revision winner)]);
       "malformed revision", body loser "bad";
       "uppercase revision", body loser (String.make 64 'A');
       "wrong revision type", Yojson.Safe.to_string
-        (`Assoc ["source_text", `String loser; "expected_source_revision", `Int 1]);
+        (`Assoc ["source_text", `String loser; "expected_source_path", `String runtime_path;
+                 "expected_source_revision", `Int 1]);
       "duplicate source", Yojson.Safe.to_string
         (`Assoc ["source_text", `String loser; "source_text", `String winner;
+                 "expected_source_path", `String runtime_path;
                  "expected_source_revision", `String (revision winner)]);
       "duplicate revision", Yojson.Safe.to_string
         (`Assoc ["source_text", `String loser;
+                 "expected_source_path", `String runtime_path;
                  "expected_source_revision", `String (revision winner);
                  "expected_source_revision", `String original_revision]) ];
   check bool "invalid revisions add no audit entry" true
+    (Lib.Audit_log.read_entries config = audit_before);
+  (* CR5409010805: the same bytes read from another file are not this base.
+     The current revision with a different source path is a conflict that
+     names the file the server resolves now, and nothing is written. *)
+  let elsewhere = Filename.concat (Filename.dirname runtime_path) "elsewhere.toml" in
+  let moved_raw, moved_json = post (body_at elsewhere loser (revision winner)) in
+  expect_http_status "editor base from another path conflicts" 409 moved_raw;
+  check string "path conflict code" "revision_conflict"
+    (moved_json |> member "code" |> to_string);
+  check string "path conflict names the resolved file" runtime_path
+    (moved_json |> member "current" |> member "source_path" |> to_string);
+  check string "path conflict preserves source" winner (read_file runtime_path);
+  check bool "path conflict adds no audit entry" true
     (Lib.Audit_log.read_entries config = audit_before);
   let fresh_raw, _ = post (body loser (current |> member "source_revision" |> to_string)) in
   expect_http_status "editor can save after reading current revision" 200 fresh_raw;

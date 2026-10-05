@@ -5,6 +5,7 @@ import { RuntimeTomlRevisionConflict, saveRuntimeTomlConfig } from './dashboard-
 vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => undefined) }))
 
 const revision = 'a'.repeat(64)
+const base = { sourcePath: '/synthetic/runtime.toml', sourceRevision: revision }
 const current = { source_path: '/synthetic/runtime.toml', source_text: '# other writer\n', source_revision: 'b'.repeat(64) }
 const conflict = { error: 'runtime.toml changed', code: 'revision_conflict', current }
 
@@ -21,7 +22,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 describe('raw runtime.toml revision-checked write', () => {
   it('sends the read revision with the draft and exposes the 409 current source without retrying', async () => {
     const fetchMock = reply(conflict)
-    await expect(saveRuntimeTomlConfig('# draft\n', revision)).rejects.toMatchObject({
+    await expect(saveRuntimeTomlConfig('# draft\n', base)).rejects.toMatchObject({
       name: 'RuntimeTomlRevisionConflict', current,
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -29,13 +30,21 @@ describe('raw runtime.toml revision-checked write', () => {
     expect(path).toBe('/api/v1/runtime/config/raw')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      source_text: '# draft\n', expected_source_revision: revision,
+      source_text: '# draft\n', expected_source_path: base.sourcePath, expected_source_revision: revision,
     })
   })
 
   it.each(['', 'not-a-revision', 'A'.repeat(64)])('rejects invalid write revision %s before POST', async invalid => {
     const fetchMock = reply(conflict)
-    await expect(saveRuntimeTomlConfig('# draft\n', invalid)).rejects.toThrow('저장 기준 revision')
+    await expect(saveRuntimeTomlConfig('# draft\n', { ...base, sourceRevision: invalid }))
+      .rejects.toThrow('저장 기준 revision')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a write base without the path its text was read from before POST', async () => {
+    const fetchMock = reply(conflict)
+    await expect(saveRuntimeTomlConfig('# draft\n', { ...base, sourcePath: '' }))
+      .rejects.toThrow('저장 기준 경로')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -46,7 +55,7 @@ describe('raw runtime.toml revision-checked write', () => {
     { ...conflict, code: 'io_error' },
   ])('does not authorize a malformed or unrelated failure as a usable conflict', async body => {
     reply(body)
-    const error = await saveRuntimeTomlConfig('# draft\n', revision).catch(error => error)
+    const error = await saveRuntimeTomlConfig('# draft\n', base).catch(error => error)
     expect(error).toBeInstanceOf(ApiRequestError)
     expect(error).not.toBeInstanceOf(RuntimeTomlRevisionConflict)
   })
@@ -54,6 +63,6 @@ describe('raw runtime.toml revision-checked write', () => {
   it('keeps a network failure indeterminate instead of inventing a current revision', async () => {
     const failure = new TypeError('connection lost')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure))
-    await expect(saveRuntimeTomlConfig('# draft\n', revision)).rejects.toBe(failure)
+    await expect(saveRuntimeTomlConfig('# draft\n', base)).rejects.toBe(failure)
   })
 })

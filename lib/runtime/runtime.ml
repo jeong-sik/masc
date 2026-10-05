@@ -3070,11 +3070,21 @@ let save_config_text ?runtime_config_path content =
     content
 ;;
 
-let save_config_text_if_current ?runtime_config_path ~expected_source_revision content =
+let save_config_text_if_current
+    ?runtime_config_path
+    ~expected_source_path
+    ~expected_source_revision
+    content
+  =
   let failed detail = Config_edit_failed detail in
   let* () =
     if String_util.is_lowercase_sha256_hex expected_source_revision then Ok ()
     else Error (failed "expected_source_revision must be lowercase SHA-256 hex")
+  in
+  let* () =
+    if String.equal expected_source_path "" then
+      Error (failed "expected_source_path must name the file the editor read")
+    else Ok ()
   in
   let* path = runtime_config_path_result ?runtime_config_path () |> Result.map_error failed in
   let* locked =
@@ -3082,8 +3092,12 @@ let save_config_text_if_current ?runtime_config_path ~expected_source_revision c
       (fun () ->
         let* current_text = load_file_result path |> Result.map_error failed in
         let current = config_observation ~path current_text in
-        if not (String.equal expected_source_revision
-                  (config_source_revision_to_string current.source_revision))
+        (* The editor's base is a document: these bytes at this path. The
+           revision names the bytes only, so a resolved path that moved to
+           another file holding the same text would otherwise pass. *)
+        if not (String.equal expected_source_path current.path
+                && String.equal expected_source_revision
+                     (config_source_revision_to_string current.source_revision))
         then Error (Config_source_conflict current)
         else
           let* () =

@@ -5098,6 +5098,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     let current_observation = Runtime.config_observation ~path degraded in
     let stale_state = Runtime.exact_output_registry_stale () in
     (match Runtime.save_config_text_if_current ~runtime_config_path:path
+             ~expected_source_path:path
              ~expected_source_revision:original_revision replacement with
      | Error (Runtime.Config_source_conflict current) ->
        check string "conflict carries current path" path current.path;
@@ -5115,6 +5116,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check bool "source conflict preserves registry staleness" true
       (Runtime.exact_output_registry_stale () = stale_state);
     (match Runtime.save_config_text_if_current ~runtime_config_path:path
+             ~expected_source_path:path
              ~expected_source_revision:"invalid" replacement with
      | Error (Runtime.Config_edit_failed _) -> ()
      | Error (Runtime.Config_source_conflict _) | Ok _ ->
@@ -5122,6 +5124,41 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check string "malformed revision preserves file" degraded (Fs_compat.load_file path);
     check bool "malformed revision preserves registry" true
       (registry_exn () == after_degraded);
+    (* CR5409010805: the editor read [path]; the resolved config path then
+       moved to another file holding the same bytes. The revision alone
+       matches, but the base is a different document, so the save conflicts
+       and names the file the path resolves to now. *)
+    let moved_path = path ^ ".moved" in
+    Fs_compat.save_file moved_path degraded;
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter (fun file -> if Sys.file_exists file then Sys.remove file)
+          [ moved_path; moved_path ^ ".lock" ])
+      (fun () ->
+         (match Runtime.save_config_text_if_current ~runtime_config_path:moved_path
+                  ~expected_source_path:path
+                  ~expected_source_revision:
+                    (Runtime.config_source_revision_to_string current_observation.source_revision)
+                  replacement with
+          | Error (Runtime.Config_source_conflict current) ->
+            check string "path conflict names the file the path resolves to now"
+              moved_path current.path;
+            check string "path conflict carries that file's source" degraded current.source_text
+          | Error (Runtime.Config_edit_failed detail) -> failf "expected path conflict: %s" detail
+          | Ok _ -> fail "an edit of one file must not be written into another with the same text");
+         check string "path conflict preserves the other file" degraded
+           (Fs_compat.load_file moved_path);
+         check string "path conflict preserves the edited file" degraded (Fs_compat.load_file path);
+         check bool "path conflict preserves registry" true (registry_exn () == after_degraded));
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+             ~expected_source_path:""
+             ~expected_source_revision:
+               (Runtime.config_source_revision_to_string current_observation.source_revision)
+             replacement with
+     | Error (Runtime.Config_edit_failed _) -> ()
+     | Error (Runtime.Config_source_conflict _) | Ok _ ->
+       fail "an edit without its source path must fail admission");
+    check string "missing source path preserves file" degraded (Fs_compat.load_file path);
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
     Fun.protect
@@ -5146,6 +5183,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
               ~lane_id:"hitl_auto_judge"
               after_write_failure));
     (match Runtime.save_config_text_if_current ~runtime_config_path:path
+             ~expected_source_path:path
              ~expected_source_revision:
                (Runtime.config_source_revision_to_string current_observation.source_revision)
              replacement with

@@ -317,17 +317,24 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
         return
       }
     }
+    if (config.path === null) {
+      setError('편집 중인 runtime.toml 경로를 알 수 없어 저장하지 않았습니다. 현재 파일을 다시 읽으세요.')
+      return
+    }
     setSaving(true)
     setError(null)
     setNotice(null)
     try {
-      const saved = await saveRuntimeTomlConfig(nextSourceText, config.source_revision)
+      const saved = await saveRuntimeTomlConfig(nextSourceText,
+        { sourcePath: config.path, sourceRevision: config.source_revision })
       await adoptSavedRuntimeConfig(saved)
     } catch (err: unknown) {
       if (err instanceof RuntimeTomlRevisionConflict && err.current.source_path === config.path) {
         setCurrentSource(err.current)
         setSection('toml')
         setError(`${err.message} 저장하지 않았습니다. 초안과 기존 저장 기준을 유지했습니다.`)
+      } else if (err instanceof RuntimeTomlRevisionConflict) {
+        setError(`설정 파일 경로가 ${err.current.source_path}(으)로 바뀌어 저장하지 않았습니다. 초안은 유지됩니다. 편집 중이던 파일과 다른 파일입니다.`)
       } else {
         setError(`${errorToString(err)} 초안은 유지됩니다. 파일 변경 여부를 확인하지 못했습니다. 현재 파일을 읽고 비교한 뒤 다시 저장하세요.`)
       }

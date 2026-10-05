@@ -9,11 +9,17 @@ type dispatch =
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t option
 
-val reject_duplicate_paths : (string list * string) list -> unit
+val reject_duplicate_paths : (string list * string) list -> (unit, string) result
 (** Refuse a [shell_command] declaration list that maps the same path to
     more than one tool.  The split answers the longest declared path, so a
-    duplicate strands the later tool — raised when the declaration table
-    builds, naming the path and both tools. *)
+    duplicate strands the later tool — answered as a typed error naming the
+    path and both tools, not raised, so a bad tool file cannot poison the
+    declaration table's [lazy] with a cached exception. *)
+
+val declaration_error : string option Lazy.t
+(** The duplicate refusal of the embedded declaration table, or [None] when
+    it is well formed.  {!rewrite} answers this as a typed error before any
+    lookup, so every shell line gets the same named refusal. *)
 
 val split_words : string list -> (string * string list) option
 (** Match literal words against the closed [shell_command] declaration table.

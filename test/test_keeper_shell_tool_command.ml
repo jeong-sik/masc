@@ -149,9 +149,11 @@ let () =
    | Ok _ -> assert false)
 
 (* Duplicate [shell_command] declarations are refused when the table
-   builds, not discovered at lookup time: the failure names the path and
-   both tools, and distinct paths — including a prefix relationship,
-   which the split orders by longest match — all stand. *)
+   builds, not discovered at lookup time: the refusal is a typed error
+   naming the path and both tools, and distinct paths — including a prefix
+   relationship, which the split orders by longest match — all stand.  The
+   refusal is a value rather than an exception so a bad tool file cannot
+   poison the table's [lazy] and take the whole shell surface down. *)
 let () =
   let module K = Masc.Keeper_shell_tool_command in
   (match
@@ -160,8 +162,8 @@ let () =
        ; ([ "board"; "list" ], "masc_board_list_renamed")
        ]
    with
-   | exception Failure message -> assert (String.length message > 0)
-   | () -> assert false);
+   | Error message -> assert (String.length message > 0)
+   | Ok () -> assert false);
   (* The same refusal whichever declaration comes first. *)
   (match
      K.reject_duplicate_paths
@@ -169,14 +171,21 @@ let () =
        ; ([ "lane"; "status" ], "masc_lane_status")
        ]
    with
-   | exception Failure _ -> ()
-   | () -> assert false);
+   | Error _ -> ()
+   | Ok () -> assert false);
   (* Distinct paths stand, even when one is a prefix of another. *)
-  K.reject_duplicate_paths
-    [ ([ "board"; "list" ], "masc_board_list")
-    ; ([ "board"; "post"; "get" ], "masc_board_post_get")
-    ; ([ "lane" ], "a_lane_tool")
-    ]
+  (match
+     K.reject_duplicate_paths
+       [ ([ "board"; "list" ], "masc_board_list")
+       ; ([ "board"; "post"; "get" ], "masc_board_post_get")
+       ; ([ "lane" ], "a_lane_tool")
+       ]
+   with
+   | Ok () -> ()
+   | Error _ -> assert false);
+  (* The real crunched tree declares no duplicate, so the shell surface
+     answers normally: the typed refusal is absent. *)
+  assert (Lazy.force K.declaration_error = None)
 
 let () =
   print_endline "[test_keeper_shell_tool_command] all tests passed"

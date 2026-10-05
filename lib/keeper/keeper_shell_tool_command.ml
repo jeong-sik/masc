@@ -36,21 +36,23 @@ let ( let* ) = Result.bind
    single winner and silently strand the other, so the duplicate is a
    declaration bug — refused when the table builds, naming both tools —
    not a lookup-time guess. *)
-let reject_duplicate_paths (declared : (string list * string) list) : unit =
+let reject_duplicate_paths (declared : (string list * string) list) :
+    (unit, string) result =
   let rec check = function
-    | [] -> ()
+    | [] -> Ok ()
     | (path, tool) :: rest ->
-        List.iter
-          (fun (other_path, other_tool) ->
-             if path = other_path then
-               failwith
-                 (Printf.sprintf
-                    "shell command declarations: %s (%s) and %s (%s) declare the same shell_command path; the later tool would be unreachable on the shell surface"
-                    (String.concat " " path) tool
-                    (String.concat " " other_path) other_tool)
-             else ())
-          rest;
-        check rest
+        let rec scan = function
+          | [] -> check rest
+          | (other_path, other_tool) :: more ->
+              if path = other_path then
+                Error
+                  (Printf.sprintf
+                     "shell command declarations: %s (%s) and %s (%s) declare the same shell_command path; the later tool would be unreachable on the shell surface"
+                     (String.concat " " path) tool
+                     (String.concat " " other_path) other_tool)
+              else scan more
+        in
+        scan rest
   in
   check declared
 
@@ -59,8 +61,7 @@ let reject_duplicate_paths (declared : (string list * string) list) : unit =
    the same answer (the pattern [Tool_loading_declarations] set). *)
 let entries : (string list * string) list Lazy.t =
   lazy
-    (let declared =
-       List.filter_map
+    (List.filter_map
        (fun path ->
           match Filename.dirname path, Filename.extension path with
           | "tools", ".toml" -> (
@@ -76,10 +77,17 @@ let entries : (string list * string) list Lazy.t =
                 loaded.Tool_definition_toml.shell_command
                 |> Option.map (fun words -> words, name)))
           | _, _ -> None)
-       Embedded_config.file_list
-     in
-     reject_duplicate_paths declared;
-     declared)
+       Embedded_config.file_list)
+
+(* The duplicate refusal is a value, not an exception.  A [lazy] that
+   raised would cache the exception and re-raise it on every later force,
+   taking the whole shell command surface down with it; here the refusal
+   is answered by {!rewrite} as a typed error instead. *)
+let declaration_error : string option Lazy.t =
+  lazy
+    (match reject_duplicate_paths (Lazy.force entries) with
+     | Ok () -> None
+     | Error message -> Some message)
 
 (* {1 argv to tool arguments} *)
 
@@ -235,6 +243,16 @@ let refuse_reserved_command (ir : Shell_ir.t) =
 ;;
 
 let rec rewrite ~(lookup : string -> Keeper_tool_descriptor.t option)
+      ~(dispatch : dispatch) (ir : Shell_ir.t)
+  : (Shell_ir.t, string) result =
+  (* A duplicate declaration is refused as a typed error before any lookup,
+     so a bad tool file answers every shell line with the same named
+     refusal instead of poisoning the table's [lazy] with an exception. *)
+  match Lazy.force declaration_error with
+  | Some message -> Error message
+  | None -> rewrite_ir ~lookup ~dispatch ir
+
+and rewrite_ir ~(lookup : string -> Keeper_tool_descriptor.t option)
       ~(dispatch : dispatch) (ir : Shell_ir.t)
   : (Shell_ir.t, string) result =
   match ir with

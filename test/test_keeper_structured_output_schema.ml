@@ -103,55 +103,77 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
 
 let test_fusion_judge_schema_uses_parser_wire_contract () =
   let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
-  check
-    (list string)
-    "fusion judge required fields"
-    (List.sort
-       String.compare
-       [ Fusion_judge_parse.wire_field_decision
-       ; Fusion_judge_parse.wire_field_resolved_answer
-       ])
-    (required_strings schema);
-  let decision_branches =
-    match
-      schema
-      |> schema_property Fusion_judge_parse.wire_field_decision
-      |> schema_member "oneOf"
-    with
+  (* The conclusion constraint depends on the decision: Answer/Recommend
+     require content, while Insufficient may leave resolved_answer empty.
+     Inspect each complete synthesis branch, preserving the consumer checks. *)
+  let branches =
+    match schema_member "oneOf" schema with
     | Some (`List branches) -> branches
-    | _ -> fail "fusion decision schema has no oneOf branches"
+    | _ -> fail "fusion synthesis schema has no oneOf branches"
   in
-  check
-    (list string)
-    "fusion decision variants"
-    (List.sort
-       String.compare
+  let branch_kind branch =
+    branch
+    |> schema_property Fusion_judge_parse.wire_field_decision
+    |> schema_property Fusion_judge_parse.wire_field_decision_kind
+    |> enum_strings
+  in
+  check (list string) "fusion decision variants"
+    (List.sort String.compare
        [ Fusion_judge_parse.wire_decision_answer
        ; Fusion_judge_parse.wire_decision_insufficient
-       ; Fusion_judge_parse.wire_decision_recommend
-       ])
-    (decision_branches
-     |> List.map (fun branch ->
-       branch
-       |> schema_property Fusion_judge_parse.wire_field_decision_kind
-       |> enum_strings)
-     |> List.concat
-     |> List.sort String.compare);
-  let _consensus_text_schema =
-    schema
-    |> schema_property Fusion_judge_parse.wire_field_consensus
-    |> schema_items
-    |> schema_property Fusion_judge_parse.wire_field_consensus_text
+       ; Fusion_judge_parse.wire_decision_recommend ])
+    (List.concat_map branch_kind branches |> List.sort String.compare);
+  let check_nonblank field =
+    check (list string) "nonblank conclusion requires a string" ["string"]
+      (type_strings field);
+    match schema_member "pattern" field with
+    | Some (`String pattern) ->
+      check string "conclusion excludes Unicode White_Space"
+        "[^\t\n\011\012\r \u{0085}\u{00a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}]" pattern
+    | _ -> fail "conclusion has no nonblank constraint"
   in
-  let _position_stance_schema =
-    schema
-    |> schema_property Fusion_judge_parse.wire_field_contradictions
-    |> schema_items
-    |> schema_property Fusion_judge_parse.wire_field_positions
-    |> schema_items
-    |> schema_property Fusion_judge_parse.wire_field_stance
-  in
-  ()
+  List.iter (fun branch ->
+    check (list string) "fusion judge required fields"
+      (List.sort String.compare
+         [ Fusion_judge_parse.wire_field_decision
+         ; Fusion_judge_parse.wire_field_resolved_answer ])
+      (required_strings branch);
+    check bool "synthesis branch explicitly forbids additional properties" true
+      (schema_member "additionalProperties" branch = Some (`Bool false));
+    let decision = schema_property Fusion_judge_parse.wire_field_decision branch in
+    let resolved = schema_property Fusion_judge_parse.wire_field_resolved_answer branch in
+    (match branch_kind branch with
+     | ["answer"] ->
+       check_nonblank resolved;
+       check_nonblank (schema_property Fusion_judge_parse.wire_field_answer decision)
+     | ["recommend"] ->
+       check_nonblank resolved;
+       check_nonblank (schema_property Fusion_judge_parse.wire_field_recommend_action decision);
+       check_nonblank (schema_property Fusion_judge_parse.wire_field_recommend_rationale decision)
+     | ["insufficient"] ->
+       check (list string) "insufficient conclusion remains a string" ["string"]
+         (type_strings resolved);
+       check bool "insufficient need not invent an answer" true
+         (schema_member "pattern" resolved = None)
+     | _ -> fail "synthesis branch does not name exactly one known decision");
+    let consensus_text_schema =
+      branch
+      |> schema_property Fusion_judge_parse.wire_field_consensus
+      |> schema_items
+      |> schema_property Fusion_judge_parse.wire_field_consensus_text
+    in
+    let position_stance_schema =
+      branch
+      |> schema_property Fusion_judge_parse.wire_field_contradictions
+      |> schema_items
+      |> schema_property Fusion_judge_parse.wire_field_positions
+      |> schema_items
+      |> schema_property Fusion_judge_parse.wire_field_stance
+    in
+    check (list string) "consensus text remains a string" ["string"]
+      (type_strings consensus_text_schema);
+    check (list string) "position stance remains a string" ["string"]
+      (type_strings position_stance_schema)) branches
 ;;
 
  let test_librarian_claim_schema_is_closed () =

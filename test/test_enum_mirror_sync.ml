@@ -398,7 +398,7 @@ let test_goal_tool_enum_mirrors () =
         (Printf.sprintf "Goal property %s matches its variant" property)
         (List.sort_uniq String.compare owner)
         (advertised_values_for_schemas Tool_schemas_workspace_extra.schemas ~property))
-    [ "phase", List.map Goal_phase.to_string Goal_phase.all
+    [ "phase", List.map Goal_phase.Kind.to_string Goal_phase.Kind.all
     ; ( "action"
       , List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all )
     ]

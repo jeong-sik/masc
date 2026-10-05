@@ -137,6 +137,11 @@ def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | N
         judge = canonical_judge(post)
         if run_state is RunState.COMPLETED and isinstance(judge, JudgeFailure):
             raise InvalidInput("Completed Fusion run cannot carry a failed canonical judge")
+        if run_state is RunState.FAILED:
+            if not isinstance(judge, JudgeFailure):
+                raise InvalidInput("Failed Fusion run requires a failed canonical judge")
+            if judge.failure_code != run["failure_code"] or judge.error != run["error"]:
+                raise InvalidInput("Failed canonical judge must agree with the Fusion run failure")
     elif post is not None:
         raise InvalidInput("Unrecorded Fusion evidence must have a null post")
     return run, run_state, evidence_state, post

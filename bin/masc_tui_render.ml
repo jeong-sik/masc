@@ -4253,14 +4253,14 @@ let lane_run_payload_availability_lines ~width availability payload =
 let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
   lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
 
-let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
+let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) =
   let preflight_lines = match detail.lrd_librarian_preflight with
     | None -> []
     | Some reading ->
       let decision = match reading.lp_status with
         | Tui_decode.Preflight_awaiting -> "응답 대기"
         | Tui_decode.Preflight_not_called reason -> "호출하지 않음 · " ^ reason
-        | Tui_decode.Preflight_failed reason -> "호출 실패 · " ^ reason
+        | Tui_decode.Preflight_failed reason -> if details then "호출 실패 · " ^ reason else "호출 실패"
         | Tui_decode.Preflight_invalid reason -> "답변 거절 · " ^ reason
         | Tui_decode.Preflight_judged judgment ->
           Masc.Typesafeai_librarian_preflight.decision_label judgment.choice in
@@ -4280,10 +4280,29 @@ let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
       let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
       let rejection = match reading.lp_domain_rejection with
         | None -> [] | Some reason -> ["검증 거절 → 생성 Lane · " ^ reason] in
+      let memory = match reading.lp_memory_result with
+        | None -> "기억 snapshot: 적용 결과가 기록되지 않음"
+        | Some (Tui_decode.Librarian_memory_unchanged (revision, facts)) ->
+          Printf.sprintf "기억 snapshot: 변경 없음 · revision %d · %d facts" revision facts
+        | Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
+          Printf.sprintf "기억 snapshot: +%d / -%d · revision %d · %d facts" added removed revision facts in
+      let side_writes = List.map (fun (kind, status) ->
+        let label = match kind with
+          | Tui_decode.Context_write -> "Context"
+          | Tui_decode.Continuity_write -> "Continuity" in
+        let outcome = match status with
+          | Tui_decode.Side_not_attempted -> "not attempted"
+          | Tui_decode.Side_answer_missing -> "answer missing"
+          | Tui_decode.Side_withheld -> "withheld"
+          | Tui_decode.Side_outcome_unconfirmed -> "outcome unconfirmed"
+          | Tui_decode.Side_committed -> "committed"
+          | Tui_decode.Side_answer_refused detail -> "answer refused · " ^ detail
+          | Tui_decode.Side_failed detail -> "failed · " ^ detail in
+        label ^ ": " ^ outcome) reading.lp_side_writes in
       let document = String.concat "\n"
-        (["JEV PREFLIGHT · " ^ decision; path]
-         @ model @ elapsed @ probabilities @ rejection
-         @ ["기억 저장 결과는 아래 after/absorption 및 실행 상태에서 확인"; ""]) in
+        ([path; memory] @ side_writes @ ["JEV 판정 · " ^ decision] @ rejection
+      @ (if details then model @ elapsed @ probabilities @ [""; "원문 실행 증거"]
+         else ["d: 모델·확률·원문 펼치기"])) in
       let document =
         if String.length document <= lane_run_preview_source_max_bytes then document
         else
@@ -4296,11 +4315,14 @@ let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
           Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
           |> List.map (fun line -> Theme.info (), line))
   in
-  preflight_lines @
+  let fold_memory_evidence = match detail.lrd_librarian_preflight with
+    | Some {lp_context_only=false;_} -> true
+    | _ -> false in
+  preflight_lines @ (if not details && fold_memory_evidence then [] else
   match detail.lrd_output_availability, detail.lrd_output with
   | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]
   | Some availability, output ->
-    lane_run_payload_availability_lines ~width availability output
+    lane_run_payload_availability_lines ~width availability output)
 
 module Continuity_report = Masc.Librarian_continuity_report
 
@@ -4456,17 +4478,17 @@ let inspection_input_lines ~width = function
   | Inspection_lane detail -> lane_run_input_lines ~width detail
   | Inspection_measurement (sha256, report) -> measurement_input_lines ~width ~sha256 report
 
-let inspection_output_lines ~width = function
-  | Inspection_lane detail -> lane_run_output_lines ~width detail
+let inspection_output_lines ~details ~width = function
+  | Inspection_lane detail -> lane_run_output_lines ~details ~width detail
   | Inspection_measurement (_, measurement) -> measurement_output_lines ~width measurement.report
 
-let lane_run_stacked_lines ~width detail =
+let lane_run_stacked_lines ~details ~width detail =
   let input_title, output_title = inspection_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
   @ indent (inspection_input_lines ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
-  @ indent (inspection_output_lines ~width detail)
+  @ indent (inspection_output_lines ~details ~width detail)
 
 let lane_run_split_line buf cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
@@ -4543,17 +4565,21 @@ let render_lane_run_detail (state : state) ~run_id =
       0, None, 0
     | Some detail, (Some _ | None) ->
       let summary = inspection_summary_lines detail in
+      let compact_preflight = match detail with
+        | Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_} -> not state.lane_run_preflight_details
+        | _ -> false in
+      let split = cols >= keeper_split_threshold_cols && not compact_preflight in
       let payload_rows =
         max 0
           (rows - List.length summary - lane_run_chrome_rows - chrome_rows_for_error)
       in
-      let title_rows = if cols >= keeper_split_threshold_cols then 1 else 0 in
+      let title_rows = if split then 1 else 0 in
       let content_height = max 0 (payload_rows - title_rows) in
       List.iter
         (fun (style, line) -> box_line_styled buf cols ~style line)
         summary;
       box_divider buf cols;
-      if cols >= keeper_split_threshold_cols then begin
+      if split then begin
         let inner = framed_inner_width cols in
         let divider_width = 3 in
         let left_width = max 1 ((inner - divider_width) / 2) in
@@ -4561,7 +4587,7 @@ let render_lane_run_detail (state : state) ~run_id =
         let input_lines =
           inspection_input_lines ~width:left_width detail
         in
-        let output_lines = inspection_output_lines ~width:right_width detail in
+        let output_lines = inspection_output_lines ~details:state.lane_run_preflight_details ~width:right_width detail in
         if payload_rows = 0
         then 0, None, content_height
         else begin
@@ -4611,7 +4637,9 @@ let render_lane_run_detail (state : state) ~run_id =
       end
       else begin
         let lines =
-          lane_run_stacked_lines ~width:(max 1 (cols - 8)) detail
+          if compact_preflight then
+            inspection_output_lines ~details:false ~width:(max 1 (cols - 8)) detail
+          else lane_run_stacked_lines ~details:state.lane_run_preflight_details ~width:(max 1 (cols - 8)) detail
         in
         let max_scroll =
           if content_height = 0
@@ -4633,7 +4661,10 @@ let render_lane_run_detail (state : state) ~run_id =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ?position ~hints:Masc_tui_keys.footer_hints_lanes_run_detail);
+       ?position ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail_for
+         ~preflight:(match detail with
+           | Some (Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_}) -> true
+           | _ -> false)));
   finish_surface state ~clamped:(Lane_run_detail_scroll { scroll; content_height })
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 

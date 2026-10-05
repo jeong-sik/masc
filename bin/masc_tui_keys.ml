@@ -62,7 +62,7 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under System", None
   ; b Act "e" "edit"
-      ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
     (* One item, because they are one action: on params [e] and [Enter] both
        open the same type-aware field ([handle_runtime_param_edit_open]
@@ -71,6 +71,8 @@ let config_bindings =
        80 cells, the only other thing the pane does. A reader left with
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
+  ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
+  ; b Act "m" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]
@@ -1184,7 +1186,8 @@ let patch_review_bindings =
   ]
 
 let runtime_detail_bindings =
-  [ b Navigate "j/k" "scroll"
+  [ b Act "e" "model settings"
+  ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
   ; b Navigate "Home/End" "edges"
   ; b Act "Left / Esc" "list"
@@ -1493,6 +1496,13 @@ let footer_hints_lanes_run_detail =
      ]
      @ listing_meta)
 
+let preflight_detail_binding =
+  b Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
+
+let footer_hints_lanes_run_detail_for ~preflight =
+  if preflight then hints_of_bindings [preflight_detail_binding] ^ "  " ^ footer_hints_lanes_run_detail
+  else footer_hints_lanes_run_detail
+
 let footer_hints_git_changes =
   hints_of_bindings
     ([ b Navigate "j/k" "move"
@@ -1529,6 +1539,7 @@ let bindings_memory_facts =
   ; b Act "Enter" "detail"
       ~help:"read the whole fact in a wide overlay that owns the terminal"
   ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
+  ; b Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
   ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
   ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
   ; b Search "/" "filter" ~help:"live text filter / search"
@@ -1767,6 +1778,7 @@ let help_sections ?current () =
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
+           | Lanes -> entries [preflight_detail_binding]
            | _ -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))

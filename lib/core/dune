@@ -26,6 +26,7 @@
   system_error_class
   executable_path
   safe_identifier
+  keeper_runtime_root_entry
   list_util
   set_util
   read_drop_reason

@@ -37,6 +37,9 @@ type window_kind =
 type utilization =
   | Fraction of float  (** Claude Code: [0.67] is 67 %. Not clamped. *)
   | Percent of int  (** Codex [usedPercent]. Not clamped. *)
+  | Usd of { used : float; limit : float option }
+      (** USD-denominated credit use. [None] means no key cap was reported,
+          so no percentage can be calculated. *)
 
 type source =
   | Claude_code_rate_limit_event
@@ -60,7 +63,7 @@ type window_role =
   | Counts_other_use
       (** It counts something a model call does not need: Z.AI's
           TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
-          requests. *)
+          requests, and uncapped credit usage totals. *)
   | Unclassified_limit
       (** A Z.AI limit type this decoder does not know. *)
 
@@ -135,9 +138,10 @@ val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) resu
 
 val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
 (** OpenRouter [GET /api/v1/key].  A numeric [data.limit] above 0 gives one
-    {!Provider_label} window "credit limit" used by
-    [(limit - limit_remaining) / limit], with [limit_remaining] within
-    [0..limit]; a null [limit] means no cap and no window.  [limit_reset] is
+    {!Provider_label} window "credit limit" with {!Usd} use
+    [limit - limit_remaining] and its cap, with [limit_remaining] within
+    [0..limit]. With a null [limit], a reported [usage] gives an uncapped
+    "credit usage (all time)" window; absent usage gives no window. [limit_reset] is
     not read.  [data.free_model_daily_requests] gives "free model requests,
     daily" as [used / limit], with [used] within [0..limit].  Neither states
     a reset time.
@@ -191,6 +195,8 @@ type recorded =
 
 type scope_state =
   | Not_reported_since_start
+  | Reported_no_windows of { source : source; observed_at : float }
+      (** A complete provider report states no applicable windows. *)
   | Reported of recorded * recorded list
 
 val recording_since : float
@@ -198,10 +204,18 @@ val recording_since : float
     process start).  Every {!Not_reported_since_start} means "nothing heard
     since this time". *)
 
+type report_shape = Complete_snapshot | Sparse_update
+val report_shape : source -> report_shape
+(** Whether absent windows revoke earlier observations from this source.
+    Durable readers use the same contract as the live table. *)
+
 val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit
-(** Keep each window of [report] as the latest for
-    [(scope, limit_id, kind)]. An older or equal [observed_at] does not
-    replace the one held. A report with no windows changes nothing. *)
+(** HTTP and Antigravity reads are complete snapshots: windows omitted by a
+    newer report from the same source are removed. Claude/Codex events and
+    Codex reads allow absent windows, so they merge only stated values.
+    An older or equal observation cannot replace a window or restore one
+    removed by a newer complete report. Empty complete reports retain their
+    observation time; empty sparse updates change nothing. *)
 
 val set_record_observer :
   (scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit) -> unit
@@ -218,5 +232,5 @@ val state : scope:Runtime_quota_window.scope -> scope_state
 (** The windows held for [scope], ordered by limit then kind. *)
 
 val recorded_scopes : unit -> Runtime_quota_window.scope list
-(** Every scope with at least one window, so a projection can show a scope
-    that is no longer configured but did report. *)
+(** Every scope that reported, including complete reports without windows,
+    so a projection can show one that is no longer configured. *)

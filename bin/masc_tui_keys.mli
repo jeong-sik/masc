@@ -230,6 +230,7 @@ val footer_hints_lanes_run_list : string
 (** The Lanes run-list footer: the drill-down under a standalone lane row. *)
 
 val footer_hints_lanes_run_detail : string
+val footer_hints_lanes_run_detail_for : preflight:bool -> string
 (** The Lanes run-detail footer. The window the stacked Input/Output list drew
     travels the way the Fusion detail footer's does; the split panes name
     theirs in their own titles and pass none. *)

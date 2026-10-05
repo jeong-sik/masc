@@ -95,7 +95,8 @@ def run(binary):
             with server.lock:
                 assert server.text == CURRENT, "conflict overwrote the concurrent file"
                 assert server.saves == [{"source_text": DRAFT,
-                                         "expected_source_revision": revision(SOURCE)}]
+                                         "expected_source_revision": revision(SOURCE),
+                                         "expected_source_path": PATH}]
             h.send_and_wait(process, fd, output, b"C", b"concurrent operator change")
             h.send_and_wait(process, fd, output, b"u", b"draft text retained")
             assert b"retained operator draft" in h.screen_text(bytes(output))
@@ -103,7 +104,8 @@ def run(binary):
             with server.lock:
                 assert server.text == DRAFT
                 assert server.saves[-1] == {"source_text": DRAFT,
-                                            "expected_source_revision": revision(CURRENT)}
+                                            "expected_source_revision": revision(CURRENT),
+                                            "expected_source_path": PATH}
             os.write(fd, b"q")
 
         h.run_terminal_scenario(binary,

@@ -19,3 +19,12 @@ val cache_metadata :
 
 (** [json] with [metadata] appended as its [cache] field. *)
 val json_with_cache_metadata : Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+
+module For_testing : sig
+  type cache
+  val create_cache : unit -> cache
+  val cached_json :
+    now:(unit -> float) -> sync_first:bool -> sw:Eio.Switch.t ->
+    cache:cache -> key:string -> placeholder:Yojson.Safe.t ->
+    compute:(unit -> (Yojson.Safe.t, string) result) -> Yojson.Safe.t
+end

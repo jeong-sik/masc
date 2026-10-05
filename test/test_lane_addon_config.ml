@@ -357,9 +357,45 @@ let assembled_fusion_declarations () =
     check bool "the shipped installation has an enforceable binding schema" true
       (Option.is_some loaded.package.binding_schema)) ["panel-a";"panel-b";"judge";"report"]
 
+let judge_source_schema_is_enforced () =
+  let loaded = unwrap (Config.load_file ~path:(repo_file
+    "docs/examples/lane-addons/fusion-compute/judge.toml")) in
+  let schema = Option.get loaded.package.binding_schema in
+  let validate value = Lane_addon_action.validate_value ~schema ~name:"binding" value in
+  check bool "shipped judge source contract is accepted" true (Result.is_ok (validate loaded.binding));
+  let snapshot = `Assoc ["source_id",`String "input";"kind",`String "snapshot_file";
+    "path",`String "/fixture/snapshot.json"] in
+  let change role = match loaded.binding with
+    | `Assoc fields -> `Assoc (("role",`String role)::("sources",`List [snapshot])::
+        (List.remove_assoc "role" (List.remove_assoc "sources" fields)))
+    | _ -> fail "binding must be an object" in
+  check bool "judge snapshot is rejected before worker start" true (Result.is_error (validate (change "judge")));
+  check bool "panel snapshot remains accepted" true (Result.is_ok (validate (change "panel")));
+  with_directory (fun _root _packages declarations ->
+    let path = Filename.concat declarations "role.toml" in
+    let declaration role = Printf.sprintf "id = \"role-check\"\nrun_id = \"role-check\"\nmanifest_path = %S\n[binding]\nanalysis_id = \"a\"\nrole = %S\nprompt = \"compare\"\ninstructions = \"judge evidence\"\nmax_tokens = 8\nmodel_route = \"declared\"\n[[binding.sources]]\nsource_id = \"input\"\nkind = \"snapshot_file\"\npath = \"snapshot.json\"\n" loaded.manifest_path role in
+    write path (declaration "judge");
+    check bool "Config.load_file rejects unusable judge snapshot declaration" true (Result.is_error (Config.load_file ~path));
+    write path (declaration "panel");
+    check bool "Config.load_file accepts panel snapshot declaration" true (Result.is_ok (Config.load_file ~path)));
+  let branch = `Assoc ["type",`String "string"] in
+  let union branches = `Assoc ["type",`String "string";"oneOf",`List branches] in
+  check bool "oneOf rejects overlapping alternatives" true
+    (Result.is_error (Lane_addon_action.validate_value ~schema:(union [branch;branch]) ~name:"value" (`String "x")));
+  check bool "oneOf rejects no matching alternative" true
+    (Result.is_error (Lane_addon_action.validate_value ~schema:(union [branch]) ~name:"value" (`Int 1)));
+  let unconstrained = `Assoc ["type",`String "object";"properties",`Assoc [];
+    "additionalProperties",`Bool false] in
+  check bool "pure union cannot silently ignore object constraints" true
+    (Result.is_error (Lane_addon_action.validate_value_schema (`Assoc [
+      "type",`String "object";"oneOf",`List [unconstrained];"required",`List [`String "x"]])));
+  check bool "empty union is not an advertised enforceable schema" true
+    (Result.is_error (Lane_addon_action.validate_value_schema (union [])))
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
+    [test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
+     test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
      test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;

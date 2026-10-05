@@ -1813,6 +1813,15 @@ let runtime_lane_notice_text = function
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
 
+(* The refusal detail is the server's own message and can carry its line
+   breaks (the exact-lane save refusal names the [providers.<id>] table and the
+   missing key on their own lines). The listing draws one row per line plus a
+   divider, so the chrome counts the lines rather than assuming one. *)
+let runtime_lane_notice_row_count = function
+  | None -> 0
+  | Some notice ->
+      1 + List.length (String.split_on_char '\n' (runtime_lane_notice_text notice))
+
 (* Whether a list on screen carries the last lane write. It is not about a
    key, so it is kept apart from the notice: only a load of that list sets it.
    The awaited re-read failing leaves the order from before the write on
@@ -2886,7 +2895,7 @@ let runtime_listing_chrome
       ()
   =
   listing_chrome ~error + 1 + max 1 authority_rows
-  + (if Option.is_some action_error then 2 else 0)
+  + runtime_lane_notice_row_count action_error
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
   + route_rows

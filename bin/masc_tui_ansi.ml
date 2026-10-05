@@ -869,6 +869,19 @@ let box_line_styled buf cols ~style content =
   Buffer.add_string buf
     (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
 
+(* A notice or refusal detail can carry the server's own line breaks: the
+   exact-lane save refusal names the [providers.<id>] table and the missing
+   key on their own lines. [box_line_styled] fits one row and folds those
+   breaks into it, so everything after the first line is cut off. Draw one
+   body row per line instead, so every line the server sent stays visible. *)
+let box_lines_styled buf cols ~style content =
+  List.iter
+    (fun line -> box_line_styled buf cols ~style ("  " ^ line))
+    (String.split_on_char '\n' content)
+
+let box_lines_row_count content =
+  List.length (String.split_on_char '\n' content)
+
 (* A row of three parts: a lead, one field that takes what the row has left,
    and a tail. [fit_width] pads as well as cuts, so a field fitted to a
    hand-counted width carries the row past {!framed_inner_width} whenever the

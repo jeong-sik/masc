@@ -1360,7 +1360,7 @@ status: reference
   충분히 넓고 목록이 비어 있지 않을 때만, 그림은 그만큼 좁아진다.
   → [Lane_activity](../../lib/lane_activity/lane_activity.mli),
   [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
-  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
+  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.ml),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
 
 **Agent Core Hook**

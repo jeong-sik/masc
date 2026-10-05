@@ -2016,6 +2016,27 @@ let test_sampling_recovery_rejects_symlinked_namespace ~namespace () = with_fixt
   check bool "no recovery marker is published for it" false
     (Sys.file_exists (sampling_retry_path store instance_id request_id)))
 
+(* CR5410764242: a journal record inside the byte budget can nest deeply.
+   Startup recovery parses it at a boundary that turns parser exhaustion
+   (Json_error or Stack_overflow) into a record error, so one such file is
+   reported while the sweep still recovers the healthy record beside it. *)
+let test_sampling_recovery_isolates_deeply_nested_record () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "nested-record") in
+  let instance_id = "nested-record-instance" in
+  let terminal, _, reference, bytes =
+    sampling_retry_case store ~instance_id ~request_id:"healthy" "healthy answer survives" in
+  sampling_require (Store.save_sampling_request store ~instance_id ~request_id:"healthy" terminal);
+  Unix.unlink (sampling_retry_path store instance_id "healthy");
+  let depth = 20_000 in
+  let nested = String.make depth '[' ^ String.make depth ']' in
+  let namespace = Filename.concat (Store.root store) ("sampling/" ^ Store.digest instance_id) in
+  write (Filename.concat namespace (Store.digest "nested" ^ ".json")) nested;
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "the nested record stays a visible error" true (Result.is_error report.outcome);
+  check string "the healthy record beside it is still recovered" bytes
+    (sampling_require (Store.read_blob store reference)))
+
 let test_sampling_cold_read_keeps_optional_compaction () = with_fixture (fun _ _ dir _ ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "optional-compaction") in
@@ -2194,6 +2215,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
     (test_canonical_parent_owns_recovery ~journal:true ~directory:true);
   test_case "relative store root blob roundtrip" `Quick (test_relative_store_root ~sequence:false);
   test_case "relative store root sequence roundtrip" `Quick (test_relative_store_root ~sequence:true);
+  test_case "sampling recovery isolates a deeply nested record" `Quick
+    test_sampling_recovery_isolates_deeply_nested_record;
   test_case "sampling recovery rejects symlinked request namespace" `Quick
     (test_sampling_recovery_rejects_symlinked_namespace ~namespace:"sampling");
   test_case "sampling recovery rejects symlinked outcome namespace" `Quick

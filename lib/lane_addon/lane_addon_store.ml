@@ -18,6 +18,15 @@ let protect f =
   | Unix.Unix_error (error, call, path) ->
       Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
   | Yojson.Json_error message -> Error message
+(* Sampling journals are bounded by bytes, not by nesting: a record within its
+   byte budget can still nest deeply enough for the parser to exhaust the
+   stack. Startup recovery parses them before the server is ready, so that is
+   a record error the sweep isolates, never an exception that escapes it.
+   [protect] deliberately leaves Stack_overflow alone elsewhere. *)
+let parse_journal_json bytes =
+  try Ok (Yojson.Safe.from_string bytes) with
+  | Yojson.Json_error message -> Error message
+  | Stack_overflow -> Error "sampling journal nesting exceeds parser capacity"
 (* Also sync existing ancestors: they may have been created by a preceding
    attempt whose parent sync failed. A retry must establish the entire path. *)
 let sync_parent_directory parent =
@@ -703,8 +712,8 @@ let load_sampling_request_bounded_unlocked ~sync_file ~sync_parent ~budget t ~in
       let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget path in
       let* () = sync_sampling_root ~sync_parent t pending_root
         |> Result.map_error (fun detail -> Read_failed detail) in
-      let* json = try Ok (Yojson.Safe.from_string bytes)
-        with Yojson.Json_error detail -> Error (Read_failed detail) in
+      let* json = parse_journal_json bytes
+        |> Result.map_error (fun detail -> Read_failed detail) in
       let* () = match json with
         | `Assoc fields
           when List.assoc_opt "instance_id" fields = Some (`String instance_id)
@@ -809,7 +818,7 @@ let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative na
       on_read path;
       let* raw = bounded_file ~max_bytes:max_record_bytes path in
       let* () = sync_sampling_root ~sync_parent:Unix.fsync t pending_root in
-      let json = Yojson.Safe.from_string raw in
+      let* json = parse_journal_json raw in
       let* fields = match json with
         | `Assoc fields -> Ok fields | _ -> Error "invalid sampling recovery record" in
       let* request_id = match List.assoc_opt "request_id" fields with
@@ -845,7 +854,8 @@ let recover_sampling_record ~on_read t ~instance_id ~max_reply_bytes relative na
                  | Some value -> evidence_of_json value
                  | None -> Error "sampling recovery request reference is missing" in
                let* _ = retained_address request in
-               let* () = match Yojson.Safe.from_string bytes with
+               let* terminal = parse_journal_json bytes in
+               let* () = match terminal with
                  | `Assoc terminal when
                      List.assoc_opt "kind" terminal = Some (`String "model_outcome")
                      && List.assoc_opt "instance_id" terminal = Some (`String instance_id)

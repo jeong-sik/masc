@@ -537,7 +537,7 @@ let test_activity_read_and_route_refusals () =
             ~body:{|{"keys":["space"]}|}
         in
         check bool "press answers the same activity refusal as tick" true
-          (press_status = status && press_body = body);
+          (press_status = `Conflict && press_body = body);
         check int "refusal never advances" before (current_frame_number ()))
         [Machine_configuration.Disabled,"off","activity_disabled";
          Machine_configuration.Unobserved,"unobserved","activity_unobserved"];

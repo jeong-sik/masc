@@ -1,0 +1,46 @@
+{
+    "version": "1.1.409",
+    "time": "1791125835004",
+    "generalDiagnostics": [
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41179-applied-workspace-barrier-20261004/test/test_tui_memory_facts_authority_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"() -> RawHttpResponse\" cannot be assigned to parameter \"value\" of type \"HttpFixture\" in function \"__setitem__\"\n  Type \"() -> RawHttpResponse\" is not assignable to type \"HttpFixture\"\n    \"MethodType\" is not assignable to \"tuple[int, object]\"\n    \"MethodType\" is not assignable to \"RawHttpResponse\"\n    \"MethodType\" is not assignable to \"StreamingHttpResponse\"\n    \"MethodType\" is not assignable to \"DroppedHttpResponse\"\n    \"MethodType\" is not assignable to \"RequestHttpResponse\"\n    \"MethodType\" is not assignable to \"MethodHttpResponse\"\n    \"MethodType\" is not assignable to \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 88,
+                    "character": 4
+                },
+                "end": {
+                    "line": 88,
+                    "character": 23
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41179-applied-workspace-barrier-20261004/test/test_tui_memory_facts_authority_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"() -> RawHttpResponse\" cannot be assigned to parameter \"value\" of type \"HttpFixture\" in function \"__setitem__\"\n  Type \"() -> RawHttpResponse\" is not assignable to type \"HttpFixture\"\n    \"MethodType\" is not assignable to \"tuple[int, object]\"\n    \"MethodType\" is not assignable to \"RawHttpResponse\"\n    \"MethodType\" is not assignable to \"StreamingHttpResponse\"\n    \"MethodType\" is not assignable to \"DroppedHttpResponse\"\n    \"MethodType\" is not assignable to \"RequestHttpResponse\"\n    \"MethodType\" is not assignable to \"MethodHttpResponse\"\n    \"MethodType\" is not assignable to \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 89,
+                    "character": 4
+                },
+                "end": {
+                    "line": 89,
+                    "character": 30
+                }
+            },
+            "rule": "reportArgumentType"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 2,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.246
+    }
+}
+

@@ -8582,6 +8582,39 @@ let test_exact_slot_group_is_typed () =
        (Tui_decode.decode_runtime_resolved
           (change_second_runtime (`String "other") runtime_resolved_json)))
 
+(* The listing's rule-3 flag is optional: an older server's rows lack it
+   and read as no gap, a present flag is kept, and a mistyped one refuses
+   the catalog rather than guessing. *)
+let test_exact_body_deadline_flag_is_optional () =
+  let mark value = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, v) ->
+              match key, v with
+              | "runtimes", `List [ first; `Assoc second ] ->
+                key, `List [ first; `Assoc (("exact_body_deadline_missing", value) :: second) ]
+              | _ -> key, v)
+           fields)
+    | json -> json
+  in
+  (match Tui_decode.decode_runtime_resolved runtime_resolved_json with
+   | Ok (runtimes, _) ->
+     List.iter
+       (fun (r : Tui_decode.runtime_option) ->
+          Alcotest.(check bool) "an older server's row reads as no gap" false
+            r.ro_exact_body_deadline_missing)
+       runtimes
+   | Error detail -> Alcotest.fail detail);
+  (match Tui_decode.decode_runtime_resolved (mark (`Bool true) runtime_resolved_json) with
+   | Ok ([ _; marked ], _) ->
+     Alcotest.(check bool) "the listed gap is kept" true marked.ro_exact_body_deadline_missing
+   | Ok _ -> Alcotest.fail "expected two runtimes"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "a mistyped flag refuses the catalog" true
+    (Result.is_error
+       (Tui_decode.decode_runtime_resolved (mark (`String "yes") runtime_resolved_json)))
+
 (* [declared] tells a lane a table declares from the single candidate an
    assignment naming a runtime rests on. The two are the same shape otherwise,
    so a surface built without the field would read the second as a lane that
@@ -12542,6 +12575,8 @@ let () =
           test_decode_runtime_resolved_full;
         Alcotest.test_case "exact slot destination is typed" `Quick
           test_exact_slot_group_is_typed;
+        Alcotest.test_case "exact body deadline flag is optional" `Quick
+          test_exact_body_deadline_flag_is_optional;
         Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
           test_decode_unavailable_runtime_assignment;
         Alcotest.test_case "a lane says whether a table declares it" `Quick

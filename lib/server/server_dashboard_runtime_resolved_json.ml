@@ -76,6 +76,14 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
     ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
     ; "exact_slot_group", string_opt_json exact_slot_group
+      (* An exact HTTP slot on this runtime would be refused on save: its
+         provider declares no exact-body-timeout-s (rule 3, #38779). The
+         lane pickers read this instead of discovering it from the 400. *)
+    ; ( "exact_body_deadline_missing"
+      , `Bool
+          (Runtime.exact_slot_lacks_body_deadline
+             ~target_source:(Runtime.exact_output_target_source ())
+             rt) )
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime_instance.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime_instance.max_output_tokens_of_runtime rt)

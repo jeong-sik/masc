@@ -468,6 +468,12 @@ val exact_output_registry_stale : unit -> exact_output_registry_stale option
 val exact_slot_degradation : unit -> exact_slot_degradation
 (** The gaps of the loaded file and the lanes they empty. *)
 
+val exact_slot_lacks_body_deadline : target_source:exact_output_target_source -> t -> bool
+(** Whether this runtime, named as an HTTP slot of an exact-output lane, is a
+    rule-3 gap: a configured HTTP runtime whose provider declares no
+    [exact-body-timeout-s], under binding targets. The save refusal and the
+    runtime listing both read this predicate. *)
+
 val exact_slot_body_deadline_gaps : unit -> exact_slot_body_deadline_gap list
 (** The exact slots the loaded file declares on a provider without
     [exact-body-timeout-s], computed when the file was loaded. Boot does not

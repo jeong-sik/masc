@@ -1577,7 +1577,11 @@ let test_a_measured_recurrence_is_not_cut_in_its_cell () =
 (* The layout the app really builds is measured from a long recurrence, not
    the helper's floor. A narrow pane there still gives columns up in the
    drop order -- whatever is dropped is a prefix of it, and the four facts
-   the tab exists to state never go -- and the rows stay on the header. *)
+   the tab exists to state never go -- and the rows stay on the header.
+
+   The sweep starts at 68, where the other Automation fold tests start: below
+   it the four facts and the summary no longer fit together, so there is no
+   drop order left to read. *)
 let test_a_measured_recurrence_page_gives_up_columns_in_the_drop_order () =
   let drop_order =
     Schedule.[ Kauto_by; Kauto_requested; Kauto_outcome; Kauto_recurrence ]

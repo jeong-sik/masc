@@ -38,6 +38,32 @@ let runner_tick_sec = 1.0
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
+(* Direct execution (not through dune) does not inherit the (env ...) block in
+   test/dune, so the sandbox preflight would default on and every config POST
+   would answer docker_preflight_failed in a Docker-less sandbox. Pin the same
+   value the dune stanza uses, unless the caller set it explicitly. *)
+let () =
+  match Sys.getenv_opt "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" with
+  | Some _ -> ()
+  | None -> Unix.putenv "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false"
+
+(* Resolve a checkout-root-relative path no matter where the binary is launched
+   from: dune exports DUNE_SOURCEROOT, and a direct run walks up from the
+   working directory to the checkout root (the directory holding dune-project). *)
+let checkout_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when String.length root > 0 -> root
+  | _ ->
+    let rec up dir =
+      if Sys.file_exists (Filename.concat dir "dune-project") then dir
+      else
+        let parent = Filename.dirname dir in
+        if String.equal parent dir then dir else up parent
+    in
+    up (Sys.getcwd ())
+
+let checkout_file path = Filename.concat (checkout_root ()) path
+
 module Lib = Masc
 module Auth = Auth
 module Workspace = Masc.Workspace
@@ -1944,7 +1970,7 @@ let test_schedule_exact_lookup_rejects_blank_id () =
     (field "generated_at")
 
 let schedule_lookup_dashboard_fixture =
-  "../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"
+  checkout_file "dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"
 
 (* The Dashboard reads this envelope with an exact key list. #32273 added the
    wake history to it without touching the Dashboard, and from then on every

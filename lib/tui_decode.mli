@@ -350,6 +350,7 @@ type runtime_option = {
       (** The [providers.<id>] table key; [ro_provider] is its display name. *)
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
+  ro_exact_body_deadline_missing : bool;
       (** The declared list an exact-lane append writes. *)
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;

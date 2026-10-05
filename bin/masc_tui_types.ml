@@ -10209,6 +10209,7 @@ let lane_picker_existing_slots (state : state) = function
    front of its row, and Enter on it sends nothing. *)
 type runtime_pick_refusal =
   | No_output_schema_channel
+  | No_exact_body_deadline
   | Wrong_candidate_group
 
 type runtime_pick_availability =
@@ -10221,6 +10222,9 @@ let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
     Pick_refused Wrong_candidate_group
   | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Tui_decode.Exact_output_unsupported ->
     Pick_refused No_output_schema_channel
+  | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Tui_decode.Exact_http_slots
+    when runtime.Tui_decode.ro_exact_body_deadline_missing ->
+    Pick_refused No_exact_body_deadline
   | (Pick_exact_lane _ | Pick_exact_lane_replacement _), (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
@@ -10232,6 +10236,7 @@ let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
    any other until Enter refused it. *)
 let runtime_pick_refusal_tag = function
   | No_output_schema_channel -> "no output schema"
+  | No_exact_body_deadline -> "no body deadline"
   | Wrong_candidate_group -> "different candidate group"
 
 (* The sentence Enter on a refused row draws. *)
@@ -10239,6 +10244,10 @@ let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   match refusal with
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+  | No_exact_body_deadline ->
+    Printf.sprintf
+      "provider %s has no exact-body-timeout-s; add it to its [providers] table first"
+      runtime.Tui_decode.ro_provider_id
   | Wrong_candidate_group ->
     "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
 

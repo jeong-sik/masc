@@ -1716,6 +1716,7 @@ type runtime_option = {
   ro_provider_id : string;
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
+  ro_exact_body_deadline_missing : bool;
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -1918,6 +1919,14 @@ let decode_runtime_option ~usage ~default_id json =
     | None -> Ok Exact_output_unsupported
     | Some group -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
   in
+  (* Optional: an older server's row lacks it, and absence reads as no refusal,
+     the answer every picker gave before the field existed. *)
+  let* ro_exact_body_deadline_missing =
+    match optional_bool_field json "exact_body_deadline_missing" with
+    | Ok (Some value) -> Ok value
+    | Ok None -> Ok false
+    | Error detail -> Error detail
+  in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
@@ -1971,6 +1980,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_provider_id
     ; ro_model
     ; ro_exact_slot_group
+    ; ro_exact_body_deadline_missing
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens

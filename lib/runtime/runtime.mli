@@ -220,6 +220,12 @@ val exact_output_target_source :
     decides which catalog the exact-output registry reads, at boot and on
     every config commit. A blank value names no file. *)
 
+val exact_slot_body_deadline_missing : Runtime_instance.t -> bool
+(** Whether rule 3 would refuse this runtime as an exact-output slot: an HTTP
+    runtime whose provider declares no [exact-body-timeout-s]. [false] for an
+    official-client runtime and under a replacement catalog, where the rule
+    does not apply. *)
+
 type missing_catalog_model =
   { runtime_id : string
   ; provider_id : string

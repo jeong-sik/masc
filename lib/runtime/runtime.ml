@@ -667,6 +667,23 @@ let exact_slot_body_deadline_gaps_of
       decls
 ;;
 
+(* The same rule 3 as [exact_slot_body_deadline_gaps_of], asked of one runtime
+   before any lane names it: would a save that puts this runtime in an
+   exact-output lane be refused. A picker reads it so the refusal is drawn on
+   the row, not after Enter as an HTTP 400. *)
+let exact_slot_body_deadline_missing (runtime : t) : bool =
+  match exact_output_target_source () with
+  | Replacement_catalog_targets { path = _ } -> false
+  | Runtime_binding_targets ->
+    (match runtime.execution, runtime.provider.Runtime_schema.exact_body_timeout_s with
+     | Runtime_execution.Agent_core _, None -> true
+     | Runtime_execution.Agent_core _, Some (_ : float) -> false
+     | ( Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ ), (Some _ | None) -> false)
+;;
+
 let same_exact_slot_body_deadline_gap
     (left : exact_slot_body_deadline_gap)
     (right : exact_slot_body_deadline_gap)

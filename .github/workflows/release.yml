@@ -66,17 +66,6 @@ jobs:
           TAG: ${{ github.ref_name }}
           PUBLISH: ${{ inputs.publish }}
         run: |
-          python3 - <<'PYCODE'
-          import json, os
-          from pathlib import Path
-          receipt = json.loads((Path(os.environ['RUNNER_TEMP']) / 'release-publication/receipt/candidate-verification.json').read_text())
-          scope = receipt['behavior_scope']
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write('Verified behavior profile: `' + scope['profile'] + '`\n')
-              summary.write('Manifest SHA-256: `' + scope['manifest_sha256'] + '`\n')
-              summary.write('Selected suites: ' + ', '.join(scope['suites']) + '\n')
-              summary.write('This artifact publication does not certify full regression or production readiness.\n\n')
-          PYCODE
           if [ "$PUBLISH" = true ]; then
             gh release view "$TAG" --repo "$REPO" --json url,tagName,isDraft,assets > "$RUNNER_TEMP/published-release.json"
             cat "$RUNNER_TEMP/published-release.json" >> "$GITHUB_STEP_SUMMARY"

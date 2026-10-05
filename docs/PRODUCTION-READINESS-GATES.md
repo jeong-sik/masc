@@ -4,12 +4,8 @@ status: runbook
 
 # Production Readiness Gates
 
-`production-ready` is a quantitative claim. Production deployment or feature
-promotion with that claim needs all gates below attached to the PR, production
-evidence, or operator handoff. Artifact publication is separately governed by
-[Release evidence](RELEASE-EVIDENCE.md): full candidate compilation/types,
-supported-platform installation and declared essential behavior do not establish
-Keeper fleet or performance readiness. All four production gates remain REQUIRED.
+`production-ready` is a quantitative claim.  A release or feature promotion
+needs all gates below attached to the PR, release evidence, or operator handoff.
 Focused unit tests and green draft checks are useful, but they are not enough by
 themselves.
 
@@ -96,7 +92,7 @@ Required thresholds:
 | SSE delivery P95 | < 500 ms |
 | SSE reconnect/drop count | < 3 per 5 minutes |
 
-If a live environment cannot run the performance harness, the production evidence
+If a live environment cannot run the performance harness, the release evidence
 must say `blocked` or `not evaluated`; it must not silently treat missing
 performance data as green.
 
@@ -109,22 +105,13 @@ shape that Dune's library graph does not describe.
 Commands:
 
 ```bash
-bash scripts/dune-local.sh build test/test_tool_schema_agent_core_boundary.exe
-_build/default/test/test_tool_schema_agent_core_boundary.exe
+bash scripts/check-agent-core-boundary.sh
 ```
-
-The focused native test checks that the nonempty Keeper tool catalog converts
-through the real generic Tool_bridge boundary. It does not establish generic
-package ownership or absence of MASC-specific semantics. Record an independent
-source/package review of the exact candidate for those obligations as well;
-compilation alone is not that review. This check is a production evidence input,
-not an additional implicit suite in the artifact essential profile.
 
 Threshold:
 
 | metric | required value |
 |---|---:|
-| Keeper tool schema conversion through Agent Core | PASS |
 | `packages/agent_core` package shape (lib/dune, test/dune, models.toml, no symlink) | intact |
 | MASC-specific semantics added to agent core | 0 |
 

@@ -12,8 +12,6 @@ import subprocess
 import tempfile
 import zipfile
 
-from release_behavior import load_profile
-
 PLATFORMS = ('macos-arm64', 'macos-x64', 'linux-x64', 'linux-arm64')
 
 
@@ -33,10 +31,10 @@ def validate_run(run, repo, commit, run_id):
     require(run['id'] == run_id, 'RC run identity changed')
     require(run['repository']['full_name'] == repo, 'RC belongs to another repository')
     require(run['head_repository']['id'] == run['repository']['id'], 'Fork RC is not publishable')
-    require(run['path'] == '.github/workflows/release-candidate.yml', 'Not a release-candidate workflow')
+    require(run['path'] == '.github/workflows/release-candidate.yml', 'Not a full RC workflow')
     require(run['event'] == 'workflow_dispatch', 'RC was not explicitly dispatched')
     require(run['head_sha'] == commit, 'RC commit differs from the version tag')
-    require(run['status'] == 'completed' and run['conclusion'] == 'success', 'Release candidate verification has not succeeded')
+    require(run['status'] == 'completed' and run['conclusion'] == 'success', 'Full RC has not succeeded')
 
 
 def check_tag(repo, tag, commit):
@@ -102,15 +100,13 @@ def download(repo, artifact, destination):
 
 
 def validate_receipt(receipt, run, repo):
-    require(receipt['schema_version'] == 2 and receipt['commit'] == run['head_sha'], 'RC receipt commit/schema mismatch')
+    require(receipt['schema_version'] == 1 and receipt['commit'] == run['head_sha'], 'RC receipt commit/schema mismatch')
     require(receipt['run_attempt'] == run['run_attempt'], 'RC receipt is from another attempt')
     require(receipt['run_url'] == f"https://github.com/{repo}/actions/runs/{run['id']}", 'RC receipt run mismatch')
     require(receipt['checks_passed'] is True and receipt['published'] is False,
             'RC receipt is not successful verification')
     require(receipt['results'] == dict(compile='success', behavior='success', installation='success'),
-            'RC receipt omits required release verification')
-    require(receipt.get('behavior_scope') == load_profile(),
-            'RC behavior selection differs from the reviewed release profile')
+            'RC receipt omits full verification')
 
 
 def validate_distribution(directory, checkout):

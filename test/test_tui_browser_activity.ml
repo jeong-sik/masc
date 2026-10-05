@@ -152,6 +152,36 @@ let backend_flags_and_flat_paths () =
     Alcotest.(check bool) "absent backend can retain explicit off intent" false actual)
     Browser_lane.Lane_name.all
 
+(* CR5408758179: root dotted keys spell the same flat Browser paths as a
+   [browser] table. They move under automation like the table form instead of
+   leaving a root path beside the nested flag, which the parser refuses. *)
+let dotted_root_paths () =
+  List.iter (fun (label, dotted) ->
+    let source = "# deployment paths\n" ^ dotted
+      ^ "\n[providers.extra]\nvalue = \"keep\"\n" in
+    let _,_,write=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+    let lines=String.split_on_char '\n' write.source_text in
+    let toml=Otoml.Parser.from_string_result write.source_text |> ok in
+    let config=Browser_configuration.parse toml |> ok in
+    Alcotest.(check bool) (label ^ ": only Automation activity changes") true
+      (not config.automation_enabled && config.live_enabled && config.stagehand_enabled);
+    Alcotest.(check bool) (label ^ ": paths remain configured") true
+      (config.automation = Some {Browser_configuration.driver="/fixture/driver";binary=Some "/fixture/browser"});
+    Alcotest.(check bool) (label ^ ": root driver moved") true
+      (Otoml.find_opt toml Fun.id ["browser";"geckodriver"] = None);
+    List.iter (fun comment -> Alcotest.(check bool) (label ^ ": " ^ comment) true (has comment lines))
+      ["# deployment paths";"# pinned driver";"value = \"keep\""];
+    Alcotest.(check bool) (label ^ ": no table header added") false (has "[browser" lines);
+    let _,_,again=A.start_save ~generation:3 (A.toggle (loaded (doc write.source_text))) |> ok in
+    let config=Otoml.Parser.from_string_result again.source_text |> ok |> Browser_configuration.parse |> ok in
+    Alcotest.(check bool) (label ^ ": toggled back on") true config.automation_enabled;
+    Alcotest.(check bool) (label ^ ": still no table header") false
+      (has "[browser" (String.split_on_char '\n' again.source_text)))
+    [ "bare dotted keys",
+      "browser.geckodriver = '/fixture/driver' # pinned driver\nbrowser.binary = '/fixture/browser'\n";
+      "quoted dotted keys",
+      "\"browser\" . 'geckodriver' = '/fixture/driver' # pinned driver\n  browser.\"binary\" = '/fixture/browser'\n" ]
+
 let unavailable () =
   let initial=A.create (owner "A") in
   rejected (A.start_save ~generation:1 initial);
@@ -233,6 +263,7 @@ let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.ma
    "clean draft keeps changed-path boundary",clean_draft_does_not_adopt_different_path;
    "backend flags and flat automation migration",backend_flags_and_flat_paths;
    "flat paths retain operator comments",flat_paths_preserve_operator_comments;
+   "root dotted paths migrate like the browser table",dotted_root_paths;
    "unavailable and malformed input",unavailable;
    "workspace roundtrip ignores old callbacks",workspace_roundtrip;
    "unconfirmed write and preview refusal",ambiguous_write_and_refusal;

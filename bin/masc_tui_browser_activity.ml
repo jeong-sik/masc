@@ -44,24 +44,75 @@ let with_activity lane desired (config : Browser_configuration.t) = match lane w
   | Automation -> {config with automation_enabled=desired}
   | Stagehand -> {config with stagehand_enabled=desired}
 
+(* The key path a key spells, read by the TOML grammar the way it reads a
+   header: quoting, escapes and whitespace around dots are the parser's. *)
+let key_path text = match Toml_line_editor.header_of_line ("[" ^ text ^ "]") with
+  | Some (Toml_line_editor.Table path) -> Some path
+  | Some (Toml_line_editor.Table_array _) | None -> None
+
+(* A [key = value] line split around its key: where the key starts, its text,
+   the path it spells and where it ends. The separator is the first '=' that
+   closes a well-formed key, so an '=' inside a quoted key is not it. *)
+let assignment line =
+  let length = String.length line in
+  let rec indent i =
+    if i < length && (line.[i] = ' ' || line.[i] = '\t') then indent (i + 1) else i in
+  let start = indent 0 in
+  let rec separator from = match String.index_from_opt line from '=' with
+    | None -> None
+    | Some at ->
+      let key = String.trim (String.sub line start (at - start)) in
+      (match key_path key with
+       | Some path when key <> "" -> Some (start, key, path, start + String.length key)
+       | Some _ | None -> separator (at + 1)) in
+  if start < length then separator start else None
+
+(* [key] spells [prefix @ [name]]. Put [automation] before [name], keeping
+   every segment as the operator spelled it. *)
+let before_last_segment key path =
+  match List.rev path with
+  | [] -> None
+  | [_] -> Some ("automation." ^ key)
+  | name :: reversed_prefix ->
+    let prefix = List.rev reversed_prefix in
+    let rec split from =
+      if from < 0 then None else
+      match String.rindex_from_opt key from '.' with
+      | None -> None
+      | Some dot ->
+        let head = String.sub key 0 dot in
+        let tail = String.trim (String.sub key (dot + 1) (String.length key - dot - 1)) in
+        if key_path (String.trim head) = Some prefix && key_path tail = Some [name]
+        then Some (head ^ ".automation." ^ tail)
+        else split (dot - 1) in
+    split (String.length key - 1)
+
+(* Flat Browser paths move under [automation] before its flag is written.
+   They are found by the key path each assignment declares -- the table it
+   sits in followed by its own dotted key -- so [geckodriver] under a
+   [\[browser\]] header and a root [browser.geckodriver] are the same path,
+   as they are to [Browser_configuration.parse]. *)
 let qualify_automation_paths source =
   let lines, trailing_newline = Toml_line_editor.split_lines source in
-  let qualify line =
-    let rec first_key i =
-      if i < String.length line && (line.[i] = ' ' || line.[i] = '\t')
-      then first_key (i + 1) else i in
-    let at = first_key 0 in
-    String.sub line 0 at ^ "automation." ^ String.sub line at (String.length line - at) in
-  let _, reversed = List.fold_left2 (fun (inside, acc) line structural ->
-    if structural && Toml_line_editor.is_table_header line then
-      Toml_line_editor.is_table ~path:browser_table line, line :: acc
-    else
-      let line = if structural && inside then
-        match Toml_line_editor.key_of_line line with
-        | Some ("geckodriver" | "binary") -> qualify line
-        | Some _ | None -> line
-      else line in
-      inside, line :: acc) (false, []) lines (Toml_line_editor.structural_lines lines) in
+  let qualify table line = match table, assignment line with
+    | Some table, Some (start, key, path, key_end) ->
+      (match table @ path with
+       | [ browser; ("geckodriver" | "binary") ] when String.equal browser browser_table ->
+         (match before_last_segment key path with
+          | Some key ->
+            String.sub line 0 start ^ key
+            ^ String.sub line key_end (String.length line - key_end)
+          | None -> line)
+       | _ -> line)
+    | None, _ | _, None -> line in
+  (* [None] inside an array of tables: no Browser path lives there. *)
+  let _, reversed = List.fold_left2 (fun (table, acc) line structural ->
+    if not structural then table, line :: acc
+    else match Toml_line_editor.header_of_line line with
+      | Some (Toml_line_editor.Table path) -> Some path, line :: acc
+      | Some (Toml_line_editor.Table_array _) -> None, line :: acc
+      | None -> table, qualify table line :: acc)
+    (Some [], []) lines (Toml_line_editor.structural_lines lines) in
   Toml_line_editor.join_lines (List.rev reversed) ~trailing_newline
 
 let apply desired lane (document : document) =

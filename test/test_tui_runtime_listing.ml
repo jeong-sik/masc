@@ -738,6 +738,41 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
   select_slot_editor_row state cursor;
   state
 
+(* The lanes overview and the exact picker draw the action error and the lane
+   notice with [box_lines_styled] too, so their row budgets must count the
+   lines rather than assume one. A three-line server refusal spends three
+   rows; counting one pushes the footer off the frame. *)
+let test_lanes_overview_and_exact_picker_count_every_notice_line () =
+  let refusal = "line one\nline two\nline three" in
+  Alcotest.(check int) "a three-line action error spends three rows" 3
+    (lanes_action_error_row_count (Some refusal));
+  Alcotest.(check int) "a three-line notice spends three rows" 3
+    (runtime_lane_notice_lines (Some (Lane_write_refused refusal)));
+  (* The lanes overview's chrome counts them. *)
+  let state = lane_state () in
+  state.lanes_mode <- Lanes_overview;
+  state.runtime_lane_notice <- None;
+  state.lanes_action_error <- None;
+  let base = (lanes_scrolled state).sc_chrome in
+  state.runtime_lane_notice <- Some (Lane_write_refused refusal);
+  expect "the lanes overview counts a three-line notice as three rows"
+    (base + 3) (lanes_scrolled state).sc_chrome;
+  state.runtime_lane_notice <- None;
+  state.lanes_action_error <- Some refusal;
+  expect "the lanes overview counts a three-line action error as three rows"
+    (base + 3) (lanes_scrolled state).sc_chrome;
+  (* The exact picker gives the notice's lines to the notice, not to the
+     picker: a three-line notice leaves one fewer two-row choice than a
+     one-line one. *)
+  let picker = slot_editor_state () in
+  picker.view <- Lanes;
+  picker.runtime_lane_notice <- Some (Lane_write_refused "one line");
+  let page_one = runtime_exact_picker_page picker ~terminal_rows:40 in
+  picker.runtime_lane_notice <- Some (Lane_write_refused refusal);
+  let page_three = runtime_exact_picker_page picker ~terminal_rows:40 in
+  expect "the exact picker gives a three-line notice two more rows than a one-line one"
+    (page_one - 1) page_three
+
 let slot_plan_text = function
   | Send_slot_write { target; slot; request } ->
     Printf.sprintf "%s %s %s" (slot_editor_target_name target)
@@ -1634,6 +1669,8 @@ let () = Alcotest.run "runtime list geometry"
         test_quota_scope_label_preserves_correlation;
       Alcotest.test_case "short viewport retains selected list row" `Quick
         test_short_viewport_preserves_selected_list_row;
+      Alcotest.test_case "lanes overview and exact picker count every notice line" `Quick
+        test_lanes_overview_and_exact_picker_count_every_notice_line;
       Alcotest.test_case "quota scope spans provider connections" `Quick
         test_runtime_quota_scope_is_shared_but_connection_keys_remain;
       Alcotest.test_case "account usage survives reset until new report" `Quick

@@ -1817,10 +1817,24 @@ let runtime_lane_notice_text = function
    breaks (the exact-lane save refusal names the [providers.<id>] table and the
    missing key on their own lines). The listing draws one row per line plus a
    divider, so the chrome counts the lines rather than assuming one. *)
+let detail_row_count detail = List.length (String.split_on_char '\n' detail)
+
+(* [lanes_action_error] is drawn with [box_lines_styled] too, so a refusal that
+   carries its own line breaks spends one row per line. *)
+let lanes_action_error_row_count = function
+  | None -> 0
+  | Some detail -> detail_row_count detail
+
+(* The lane notice's own rows, without the divider the runtime listing adds.
+   The lanes overview and the exact picker draw the notice with
+   [box_lines_styled] and no divider, so they count these. *)
+let runtime_lane_notice_lines = function
+  | None -> 0
+  | Some notice -> detail_row_count (runtime_lane_notice_text notice)
+
 let runtime_lane_notice_row_count = function
   | None -> 0
-  | Some notice ->
-      1 + List.length (String.split_on_char '\n' (runtime_lane_notice_text notice))
+  | Some notice -> 1 + runtime_lane_notice_lines (Some notice)
 
 (* Whether a list on screen carries the last lane write. It is not about a
    key, so it is kept apart from the notice: only a load of that list sets it.
@@ -9665,8 +9679,8 @@ let lanes_scrolled (state : state) =
           (match state.standalone_lanes with
            | None -> false
            | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
-      + (if Option.is_some state.lanes_action_error then 1 else 0)
-      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + lanes_action_error_row_count state.lanes_action_error
+      + runtime_lane_notice_lines state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
@@ -10378,8 +10392,8 @@ let runtime_exact_picker_page (state : state) ~terminal_rows =
   match state.view, state.slot_editor with
   | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
     let extra =
-      (if Option.is_some state.lanes_action_error then 1 else 0)
-      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      lanes_action_error_row_count state.lanes_action_error
+      + runtime_lane_notice_lines state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
       + (match state.runtime_lane_write with Lane_write_idle -> 0 | _ -> 1) in
     (* Two lines per model, after the frame, search, selected ID and keys. *)

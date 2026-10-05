@@ -20,6 +20,10 @@ type waiting_source =
   | Operator_pending_confirm
   | Read_error
 
+val source_of_string : string -> (waiting_source, string) result
+(** Decode the source vocabulary emitted by this inventory. Unknown sources
+    are errors, never ordinary queued work. *)
+
 type wake_producer =
   | Board_dispatch
   | Board_attention_judge

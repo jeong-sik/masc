@@ -8,7 +8,7 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
-    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None;
+    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_quota_scope_id = None;
     ro_rate_limited = false; ro_rate_limit_resets_at = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -20,8 +20,8 @@ let check_cols = 140
 
 let check_layout state expected =
   expect "rendering chrome" expected
-    (runtime_surface_listing_chrome ~cols:check_cols state);
-  match runtime_scrolled ~cols:check_cols state with
+    (runtime_surface_listing_chrome ~rows:100 ~cols:check_cols state);
+  match runtime_scrolled ~rows:100 ~cols:check_cols state with
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout -> expect "keyboard shares rendering chrome" expected layout.sc_chrome
 
@@ -411,14 +411,14 @@ let test_the_authority_row_spells_its_config_path_whole () =
   (* The budget follows the rows. Counting one authority row at every width put
      the footer past the frame's last row exactly when the sentence wrapped. *)
   Alcotest.(check int) "the chrome count follows the rows drawn"
-    (runtime_surface_listing_chrome ~cols:260 state
+    (runtime_surface_listing_chrome ~rows:100 ~cols:260 state
      + List.length (rows_at 100) - 1)
-    (runtime_surface_listing_chrome ~cols:100 state);
-  match runtime_scrolled ~cols:100 state with
+    (runtime_surface_listing_chrome ~rows:100 ~cols:100 state);
+  match runtime_scrolled ~rows:100 ~cols:100 state with
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout ->
       Alcotest.(check int) "the keys move through the drawing's count"
-        (runtime_surface_listing_chrome ~cols:100 state) layout.sc_chrome
+        (runtime_surface_listing_chrome ~rows:100 ~cols:100 state) layout.sc_chrome
 
 let test_search_follows_the_runtime_mode () =
   let state = state () in
@@ -436,7 +436,7 @@ let test_search_follows_the_runtime_mode () =
   let expect_rows expected =
     Alcotest.(check (option (list string))) "search uses the visible cursor order"
       (Some expected) (Masc_tui_surface_search.surface_row_texts state Runtime);
-    match runtime_scrolled ~cols:check_cols state with
+    match runtime_scrolled ~rows:100 ~cols:check_cols state with
     | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
     | None -> Alcotest.fail "runtime list lost its scroll geometry" in
   state.runtime_mode <- Runtime_lanes;
@@ -1383,9 +1383,165 @@ let test_account_usage_stays_spent_until_new_report () =
     (Result.is_error (runtime_spent_usage
        {snapshot.rss_resolved with rrs_usage = Error "bad report"} rt))
 
+let test_credit_cap_removal_clears_spent_warning () =
+  let module Usage = Runtime_provider_usage_window in
+  let open Masc.Tui_decode_usage in
+  let scope = Runtime_quota_window.scope_of_credential
+      ~provider_id:"usage_cap_removal_runtime_fixture" None in
+  let snapshot = match (lane_state ()).runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let record at body =
+    match Usage.decode_openrouter_key (Yojson.Safe.from_string body) with
+    | Error detail -> Alcotest.fail (Usage.decode_error_to_string detail)
+    | Ok report -> Usage.record ~scope ~observed_at:at report in
+  let reading () =
+    let json = Server_dashboard_runtime_resolved_json.build
+        ~generated_at_iso:"2026-10-04T00:00:00Z"
+        ~config:(Masc.Workspace.default_config (Filename.get_temp_dir_name ())) in
+    let usage = match decode_provider_usage_windows json with
+      | Ok usage -> usage | Error detail -> Alcotest.fail detail in
+    let account = List.find (fun account -> account.pua_scope_id =
+      Server_provider_usage_history.scope_id scope) usage.puws_accounts in
+    let rt = { (runtime "credit") with ro_quota_scope = Some account.pua_scope } in
+    let windows = match runtime_spent_usage
+        { snapshot.rss_resolved with rrs_usage = Ok usage } rt with
+      | Ok windows -> windows | Error detail -> Alcotest.fail detail in
+    account, List.length windows in
+  record 100. {|{"data":{"limit":20,"limit_remaining":0}}|};
+  expect "spent credit cap warns" 1 (snd (reading ()));
+  record 101. {|{"data":{"limit":null,"usage":21.5}}|};
+  let account, warnings = reading () in
+  expect "removing the cap removes the old spent warning" 0 warnings;
+  (match account.pua_state with
+   | Account_reported ({ puw_utilization = Utilization_usd { used; limit = None }; _ }, []) ->
+       Alcotest.(check (float 0.0001)) "only current uncapped USD remains" 21.5 used
+   | _ -> Alcotest.fail "stale credit-cap window survived the complete report");
+  record 102. {|{"data":{"limit":null}}|};
+  let account, warnings = reading () in
+  expect "empty complete report has no spent warning" 0 warnings;
+  (match account.pua_state with
+   | Account_reported_no_windows { observed_at; _ } ->
+       Alcotest.(check (float 0.0)) "empty report keeps its observation time" 102. observed_at
+   | _ -> Alcotest.fail "empty report became a missing report");
+  record 100.5 {|{"data":{"limit":20,"limit_remaining":0}}|};
+  expect "late older snapshot cannot resurrect the removed cap" 0 (snd (reading ()))
+
+let test_runtime_quota_scope_is_shared_but_connection_keys_remain () =
+  let first = { (runtime "first.luna") with ro_provider_id = "first";
+    ro_quota_scope = Some "account:1"; ro_quota_scope_id = Some "shared-codex-scope";
+    ro_effective_max_context = 272000 } in
+  let wide = { first with ro_id = "first_wide.luna"; ro_provider_id = "first_wide";
+    ro_effective_max_context = 500000 } in
+  let other = { first with ro_id = "second.luna"; ro_provider_id = "second";
+    ro_quota_scope = Some "account:2"; ro_quota_scope_id = Some "other-codex-scope" } in
+  Alcotest.(check string) "one quota scope spans both provider connections"
+    (runtime_quota_scope_label first) (runtime_quota_scope_label wide);
+  Alcotest.(check bool) "a distinct quota scope retains its own label" true
+    (runtime_quota_scope_label first <> runtime_quota_scope_label other);
+  List.iter (fun (runtime, context) ->
+    let label = runtime_model_picker_label runtime in
+    List.iter (fun fact -> Alcotest.(check bool) ("picker retains " ^ fact) true
+      (Astring.String.is_infix ~affix:fact label))
+      ["Quota scope shared-codex-scope"; "Connection " ^ runtime.ro_provider_id; runtime.ro_id; context])
+    [first, "272k context"; wide, "500k context"];
+  Alcotest.(check string) "missing quota ID preserves explicitly response-local correlation"
+    "unavailable; response-local scope account:1"
+    (runtime_quota_scope_label {first with ro_quota_scope_id=None})
+
+let test_selected_status_wraps_and_reserves_rows () =
+  let open Masc.Tui_decode_usage in
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let account = { pua_scope = "account:status"; pua_scope_id = "status"; pua_providers = [];
+    pua_state = Account_reported ({ puw_limit_id = None; puw_kind = Window_five_hour;
+      puw_role = Role_gates_model_calls; puw_utilization = Utilization_percent 100;
+      puw_resets_at = None; puw_observed_at = 0. }, []) } in
+  let observed = { (runtime "a") with
+    ro_provider_id = "codex-account-two"; ro_provider = "Account Two";
+    ro_quota_exhausted = true; ro_rate_limited = true; ro_quota_scope = Some "account:status";
+    ro_quota_scope_id = Some "status" } in
+  let resolved = { snapshot.rss_resolved with
+    rrs_usage = Ok { puws_since = 0.; puws_accounts = [account] };
+    rrs_runtimes = [observed; runtime "b"; runtime "c"] } in
+  state.runtime_surface <- Some (match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  List.iter (fun cols ->
+    let lines = runtime_selection_summary_lines ~cols state in
+    let text = String.concat " " (List.map String.trim lines) in
+    List.iter (fun fact -> Alcotest.(check bool) ("complete selected fact: " ^ fact) true
+        (Astring.String.is_infix ~affix:fact text))
+      [ "Lane primary"; "Quota scope status"; "Connection codex-account-two"; "Account Two / model";
+        "quota exhausted (no reset stated)"; "rate limited"; "account limit spent / unobserved" ];
+    List.iter (fun line -> Alcotest.(check bool) "wrapped status fits frame" true
+        (Masc_tui_message_layout.display_width line <= Masc_tui_frame.inner_width ~cols)) lines;
+    let chrome = runtime_surface_listing_chrome ~rows:100 ~cols state in
+    state.runtime_cursor <- 99;
+    let without_selection = runtime_surface_listing_chrome ~rows:100 ~cols state in
+    state.runtime_cursor <- 0;
+    expect "render and navigation reserve the full selected block"
+      (without_selection + List.length lines + 1) chrome)
+    [80;132]
+
+let test_quota_scope_label_preserves_correlation () =
+  let first = { (runtime "a") with ro_provider_id = "connection-a";
+    ro_quota_scope = Some "account:1"; ro_quota_scope_id = Some "stable-first" } in
+  let sibling = { first with ro_provider_id = "connection-b" } in
+  Alcotest.(check string) "quota scope label uses retained Usage scope" "stable-first"
+    (runtime_quota_scope_label first);
+  Alcotest.(check string) "connections sharing quota share scope label"
+    (runtime_quota_scope_label first) (runtime_quota_scope_label sibling);
+  Alcotest.(check string) "unjoined ordinal remains explicitly response-local"
+    "unavailable; response-local scope account:1"
+    (runtime_quota_scope_label {first with ro_quota_scope_id = None});
+  Alcotest.(check string) "no reported quota scope remains unavailable"
+    "unavailable (no quota scope reported)"
+    (runtime_quota_scope_label {first with ro_quota_scope_id = None; ro_quota_scope = None})
+
+let test_short_viewport_preserves_selected_list_row () =
+  let state = lane_state () in
+  List.iter (fun mode ->
+    state.runtime_mode <- mode;
+    List.iter (fun cols ->
+      List.iter (fun rows ->
+        List.iter (fun cursor ->
+          state.runtime_cursor <- cursor;
+          let chrome = runtime_surface_listing_chrome ~rows ~cols state in
+          let visible = rows - chrome in
+          Alcotest.(check bool) "supported viewport retains a list row" true
+            (visible >= 1);
+          let summary = runtime_selection_summary_for_viewport ~rows ~cols state in
+          expect "render budget counts exactly the drawn summary and divider"
+            (runtime_surface_base_chrome ~cols state
+             + (if summary = [] then 0 else List.length summary + 1)) chrome;
+          (match runtime_scrolled ~rows ~cols state with
+           | None -> Alcotest.fail "runtime list has no scroll geometry"
+           | Some layout ->
+               expect "navigation and renderer share short-height chrome" chrome layout.sc_chrome;
+               expect "navigation sees every runtime" 3 layout.sc_count))
+          [0; 1; 2]) [14; 15; 16; 40]) [80; 132])
+    [Runtime_lanes; Runtime_all];
+  state.runtime_mode <- Runtime_lanes;
+  state.runtime_cursor <- 0;
+  List.iter (fun cols ->
+    Alcotest.(check (list string)) "ample height retains complete selected evidence"
+      (runtime_selection_summary_lines ~cols state)
+      (runtime_selection_summary_for_viewport ~rows:100 ~cols state)) [80; 132]
+
 let () = Alcotest.run "runtime list geometry"
-  ["operator states", [ Alcotest.test_case "account usage survives reset until new report" `Quick
+  ["operator states", [ Alcotest.test_case "quota scope label preserves correlation" `Quick
+        test_quota_scope_label_preserves_correlation;
+      Alcotest.test_case "short viewport retains selected list row" `Quick
+        test_short_viewport_preserves_selected_list_row;
+      Alcotest.test_case "quota scope spans provider connections" `Quick
+        test_runtime_quota_scope_is_shared_but_connection_keys_remain;
+      Alcotest.test_case "account usage survives reset until new report" `Quick
         test_account_usage_stays_spent_until_new_report;
+        Alcotest.test_case "selected status wraps with shared scroll geometry" `Quick
+          test_selected_status_wraps_and_reserves_rows;
+        Alcotest.test_case "credit cap removal reaches runtime warning" `Quick
+          test_credit_cap_removal_clears_spent_warning;
         Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
         Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
         Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;

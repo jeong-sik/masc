@@ -51,14 +51,19 @@ failure observations can contain provider response bodies.
 
 ## Verification and measurement
 
-In the TUI's Librarian run detail, the output pane shows the received decision,
-model, confidence/probabilities, elapsed time and recorded generation path before
-the raw output. A judged no-change is distinct from validation acceptance and
-from the final memory commit. Unknown or inconsistent route evidence is rejected.
-Memory screens at the existing wide-layout threshold show a Category rail with
-counts and wrapped names. `c`/`C` and clicks select the same Category; smaller
-terminals retain the full-width fact list. Page movement uses the rendered pane
-width so wrapped details and cursor visibility share the same geometry.
+The TUI's Librarian run detail first shows the recorded generation path and
+snapshot result in a full-width reading, then the JEV decision. `d` expands the
+model, confidence/probabilities, elapsed time and original Input/Output evidence.
+A judged no-change is distinct from validation acceptance and the snapshot
+result; the run's settlement status remains visible. Recorded Context and
+Continuity write statuses and failure reasons remain in the compact summary,
+including when Memory committed successfully. Unknown or inconsistent
+route evidence is rejected. Memory facts use the full width by default. `d`
+opens or closes the wide Category rail with counts and wrapped names; `c`/`C`
+and clicks select the same Category. Smaller terminals retain the full-width
+fact list. Page movement uses the rendered pane width so wrapped details and
+cursor visibility share the same geometry. `Enter` opens the existing full-fact
+reading overlay.
 
 `test/test_keeper_librarian_preflight.exe` exercises the actual effect boundary
 with synthetic HTTP and an official-client runner: no-change skips generation,

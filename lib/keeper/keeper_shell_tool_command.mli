@@ -9,6 +9,12 @@ type dispatch =
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t option
 
+val reject_duplicate_paths : (string list * string) list -> unit
+(** Refuse a [shell_command] declaration list that maps the same path to
+    more than one tool.  The split answers the longest declared path, so a
+    duplicate strands the later tool — raised when the declaration table
+    builds, naming the path and both tools. *)
+
 val split_words : string list -> (string * string list) option
 (** Match literal words against the closed [shell_command] declaration table.
     The longest declared path wins. *)

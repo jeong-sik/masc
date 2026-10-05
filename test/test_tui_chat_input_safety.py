@@ -211,6 +211,12 @@ def queued_attachments(binary: str) -> None:
         http_fixtures=fixture.fixtures,
         http_requests=requests,
         prepare_workspace=_keyboard_chat.seed_image_workspace,
+        # The boot identity churn (several readings before the workspace
+        # settles) withdraws the turns/roster rows the chat status needs, and
+        # they only reload on the next cadence tick -- 60s at the default,
+        # far past this scenario's waits. A short cadence brings the reload
+        # inside the wait, the way the remote-workspace queue family runs.
+        refresh=0.5,
     )
 
 

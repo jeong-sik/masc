@@ -1421,14 +1421,12 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-context"]') as HTMLInputElement, {
       target: { value: '50000' },
     })
-    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-prompt-bytes"]') as HTMLInputElement, { target: { value: '45678' } })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
 
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[models.brandnewmodel]')
       expect(source).toContain('max-context = 50000')
-      expect(source).toContain('max-prompt-bytes = 45678')
     })
   })
 
@@ -1577,7 +1575,7 @@ is-non-interactive = true
     expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).not.toContain('account-home = "/synthetic/native"')
   })
 
-  it.each([false, true])('adds a Muse binding whether or not the model declares a byte budget (declared=%s)', async declared => {
+  it('adds a Muse binding', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
       source_text: `${richConfig.source_text}
 [providers.muse_fixture]
@@ -1588,7 +1586,6 @@ is-non-interactive = true
 [models.muse_fixture]
 api-name = "synthetic-model"
 max-context = 200000
-${declared ? 'max-prompt-bytes = 45678' : ''}
 ` })
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull())

@@ -305,7 +305,7 @@ val measure_message_bytes : Agent_core.Types.message -> int
     This is not a ceiling for a lane's own window. Antigravity charges a role
     label and a separator on top of this per message and charges its preamble
     whether or not one is inserted, so a range that measures inside a
-    declared max-prompt-bytes here can still be refused there. A lane that has
+    prompt ceiling here can still be refused there. A lane that has
     a byte ceiling enforces it with its own measure, at the point the refusal
     is raised. *)
 
@@ -450,7 +450,7 @@ val carried_start_range
     own has to be ready for a composition that does not fit it.
 
     [own_first_atom] is the front the lane already chose for its own reason
-    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes). A
+    (Antigravity cuts its seed to the ceiling derived from its window). A
     seed at or past that cut decides, even when it is older than
     [turn_start]: the range the last answered request carried is this lane's
     continuity. Without a seed the range starts at the later of the lane's

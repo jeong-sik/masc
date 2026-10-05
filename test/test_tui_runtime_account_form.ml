@@ -431,7 +431,6 @@ is-non-interactive = true
 [models.muse_fixture]
 api-name = "muse-fixture-1"
 max-context = 200000
-max-prompt-bytes = 1048576
 tools-support = true
 
 [muse_personal.muse_fixture]

@@ -1459,7 +1459,6 @@ let model_keys =
   ; "reasoning-effort"
   ; "reasoning-uncontrolled"
   ; "turn-timeout-s"
-  ; "max-prompt-bytes"
   ]
 ;;
 
@@ -1542,9 +1541,6 @@ let parse_model (id : string) (tbl : Otoml.t)
         ~default:false
     in
     let turn_timeout_result = turn_timeout_opt_field ~path tbl in
-    let max_prompt_bytes_result =
-      positive_int_opt_field ~path ~key:"max-prompt-bytes" tbl
-    in
     let ( let* ) = Result.bind in
     let* api_name = api_name_result in
     let* tools_support = tools_support_result in
@@ -1575,7 +1571,6 @@ let parse_model (id : string) (tbl : Otoml.t)
       | Some _, false | None, (true | false) -> Ok ()
     in
     let* turn_timeout_s = turn_timeout_result in
-    let* max_prompt_bytes = max_prompt_bytes_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
     | [] ->
@@ -1594,7 +1589,6 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; reasoning_effort
         ; reasoning_uncontrolled
         ; turn_timeout_s
-        ; max_prompt_bytes
         ; capabilities        })
 ;;
 

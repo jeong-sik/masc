@@ -51,7 +51,7 @@ module For_testing : sig
       [test_keeper_claude_code_runtime]. *)
 
   val unbounded_capacity_bytes : int
-  (** [capacity_bytes] for a runtime that declares no max-prompt-bytes. *)
+  (** [capacity_bytes] for a runtime with no prompt ceiling. *)
 
   val recovery_failure_of_client_error
     :  Runtime_claude_code.error
@@ -123,7 +123,7 @@ val run :
     [carried_front_seed] names where the start seed begins: the range the
     newest completed turn record on this history carried, whichever runtime
     measured it ({!Keeper_official_client_host.carried_start_range}). The
-    declared max-prompt-bytes ceiling still cuts, and the range starts at
+    prompt ceiling, when the runtime has one, still cuts, and the range starts at
     whichever of the two positions is later, so a turn seeded from a narrow
     range does not widen it and the ceiling does not undo the seed.
     [turn_start] is where the range starts when no seed names a front: the

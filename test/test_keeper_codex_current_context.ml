@@ -81,7 +81,7 @@ for line in sys.stdin:
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?max_prompt_bytes ?catalog_context_window test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?catalog_context_window test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -115,13 +115,10 @@ is-non-interactive = true
 [models.context]
 api-name = "context-fixture"
 max-context = %d
-%s[codex.context]
+[codex.context]
 [runtime]
 default = "codex.context"
-|} command max_context
-    (match max_prompt_bytes with
-     | None -> ""
-     | Some bytes -> Printf.sprintf "max-prompt-bytes = %d\n" bytes)) in
+|} command max_context) in
   write_catalog 400000;
   Runtime.init_default ~config_path |> require;
   let runtime = Runtime.get_runtime_by_id "codex.context" |> Option.get in
@@ -651,12 +648,10 @@ let test_continuation_resume_overflow_ends_on_a_full_thread () =
   | Ok _ -> fail "the overflow left no recovery record"
   | Error detail -> fail detail
 
-(* 64 messages of about 4 KiB: roughly 262 KiB of history, so the fixture can
-   cross a declared limit without building a large request. *)
+(* 64 messages of about 4 KiB: roughly 262 KiB of history, well inside the
+   Codex request limit. *)
 let large_history = List.init 64 (fun index -> Agent_core.Types.user_msg
   (Printf.sprintf "%d:%s" index (String.make 4096 'x')))
-
-let declared_limit = 65_536
 
 (* One settled native thread, then a Resume carrying [large_history]. Returns
    the Resume attempt and the requests it wrote. [start] and [resume] are the
@@ -701,26 +696,11 @@ let without_root ~capture value =
   copy 0;
   Buffer.contents buffer
 
-let test_declared_limit_windows_start () =
-  (* A Start injects its history as thread items instead of a snapshot; the
-     same declared limit bounds it. *)
-  with_fixture ~max_prompt_bytes:declared_limit @@ fun ~run ~capture ~reports:_ ->
-  successful (run ~initial_messages:large_history ~instructions:"Keeper instructions" ~world:"world" ());
-  match params_of "thread/inject_items" (read_requests capture) with
-  | [injected] ->
-    let injected = injected |> member "items" |> items in
-    check bool "older history was cut before the thread was seeded" true
-      (injected <> [] && List.length injected < 64);
-    check bool "the newest message is seeded" true
-      (String_util.contains_substring
-         (Yojson.Safe.to_string (List.nth injected (List.length injected - 1))) "63:xxxx")
-  | rows -> fail (Printf.sprintf "expected one inject_items request, saw %d" (List.length rows))
-
 let test_start_carries_the_range_not_the_whole_history () =
   (* A fresh thread is seeded with the carried range the other official
-     clients send, not with every message the keeper holds. Nothing is
-     declared here, so no byte window cuts anything and only the range can
-     bound the seed. The last completed turn ended at atom 60, so the range
+     clients send, not with every message the keeper holds. The history is
+     inside the request limit, so no byte window cuts anything and only the
+     range can bound the seed. The last completed turn ended at atom 60, so the range
      is atoms 60..63. *)
   with_fixture @@ fun ~run ~capture ~reports:_ ->
   successful
@@ -743,8 +723,8 @@ let test_start_carries_the_range_not_the_whole_history () =
     check int "only the range goes" 4 (List.length seeded)
   | rows -> fail (Printf.sprintf "expected one inject_items request, saw %d" (List.length rows))
 
-let resume_wire ~max_prompt_bytes =
-  with_fixture ?max_prompt_bytes @@ fun ~run ~capture ~reports:_ ->
+let resume_wire () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
   let attempt, rows = resume_large_history ~capture
     ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
     ~resume:(fun checkpoint -> run ~initial_messages:large_history
@@ -884,12 +864,11 @@ let test_a_later_librarian_position_decides_the_range () =
 (* A response accepted no prior history, but the next request can retain the
    Librarian's fitting summary and its separately delivered current goal. The
    summary must not resurrect the omitted final atom or bypass a real ceiling. *)
-let test_empty_history_keeps_a_fitting_summary ?max_prompt_bytes ~oversized () =
-  with_fixture ?max_prompt_bytes @@ fun ~run ~capture ~reports ->
+let test_empty_history_keeps_a_fitting_summary () =
+  with_fixture @@ fun ~run ~capture ~reports ->
   let trace_id = "accepted-empty-summary" in
   let summary_marker = "KEEP_CONTINUITY_WITHOUT_OLD_ATOMS" in
-  let working_state = summary_marker ^
-    if oversized then String.make (2 * declared_limit) 's' else ": prior work is complete." in
+  let working_state = summary_marker ^ ": prior work is complete." in
   let position = match Keeper_turn_boundaries.position_of_messages large_history with
     | Ok position -> position | Error detail -> fail detail in
   let lines = [ 1, Ok
@@ -923,8 +902,8 @@ let test_empty_history_keeps_a_fitting_summary ?max_prompt_bytes ~oversized () =
   let start = match params_of "thread/start" requests with
     | [params] -> params | _ -> fail "expected one fresh thread" in
   let instructions = start |> member "developerInstructions" |> text in
-  check bool "a fitting summary survives; an oversized summary stays out"
-    (not oversized) (String_util.contains_substring instructions summary_marker);
+  check bool "a fitting summary survives"
+    true (String_util.contains_substring instructions summary_marker);
   (match params_of "turn/start" requests with
    | [params] -> check string "current goal is still sent separately" goal (turn_input params)
    | _ -> fail "summary handling should not need another provider attempt");
@@ -932,12 +911,12 @@ let test_empty_history_keeps_a_fitting_summary ?max_prompt_bytes ~oversized () =
    | [Keeper_official_client_host.Whole_input_transmitted messages] ->
      check (list int) "no omitted atom was resurrected" [] (carried_indices messages);
      check bool "reported composition agrees with the native instructions"
-       (not oversized) (List.exists Runtime_model_input_tail_window.is_working_state messages)
+       true (List.exists Runtime_model_input_tail_window.is_working_state messages)
    | _ -> fail "expected one transmitted input observation")
 
-let test_a_declared_limit_cuts_inside_the_range () =
+let test_a_ceiling_cuts_inside_the_range () =
   (* Room for the omission preamble and two of the ~4 KiB messages: the
-     declared ceiling cuts deeper than the range's own front at atom 60, and
+     ceiling cuts deeper than the range's own front at atom 60, and
      the later front wins. *)
   let measure message = String.length (Keeper_official_client_host.encode_history_message message) in
   let framing =
@@ -1002,22 +981,11 @@ let test_a_turn_without_a_session_trace_opens_on_the_newest_atom () =
     (carried (start ~session_id:None ~recovery_view:None))
 let test_resume_sends_no_history () =
   (* The thread already holds the conversation. Neither the instructions nor
-     the turn input carry any of it, with a declared limit or without one. *)
-  List.iter (fun (label, max_prompt_bytes) ->
-    let _, wire = resume_wire ~max_prompt_bytes in
-    List.iter (fun sent ->
-      check bool (label ^ ": no history message is sent") false
-        (String_util.contains_substring sent "xxxx")) wire)
-    [ "nothing declared", None; "a declared limit", Some declared_limit ]
-
-let test_declared_limit_above_history_changes_nothing () =
-  (* (b) A limit the history fits under sends exactly what an undeclared lane
-     sends. *)
-  let _, undeclared = resume_wire ~max_prompt_bytes:None in
-  let _, declared = resume_wire ~max_prompt_bytes:(Some 10_000_000) in
-  check (list string) "a limit above the history leaves the request unchanged"
-    undeclared declared
-
+     the turn input carry any of it. *)
+  let _, wire = resume_wire () in
+  List.iter (fun sent ->
+    check bool "no history message is sent" false
+      (String_util.contains_substring sent "xxxx")) wire
 
 let () = run "Keeper current Codex context" ["native requests",[
   test_case "selected context window survives catalog reload on start and resume" `Quick test_captured_context_window_survives_catalog_reload;
@@ -1027,24 +995,18 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
   test_case "memory changes, clears, fails and recovers across native ticks" `Quick test_recall_lifecycle_across_native_ticks;
   test_case "operator interruption preserves previous Codex settlement" `Quick test_operator_interrupt_preserves_previous_native_settlement;
-  test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;
   test_case "a Resume after a Start sends no history" `Quick test_resume_after_start_sends_no_history;
   test_case "a Resume overflow retries with the whole range" `Quick test_a_resume_overflow_retries_with_the_whole_range;
   test_case "the seed decides the range" `Quick test_the_seed_decides_the_range;
   test_case "a later Librarian position decides the range" `Quick test_a_later_librarian_position_decides_the_range;
-  test_case "accepted empty history retains its summary without a ceiling" `Quick
-    (test_empty_history_keeps_a_fitting_summary ~oversized:false);
-  test_case "accepted empty history retains a summary under a fitting ceiling" `Quick
-    (test_empty_history_keeps_a_fitting_summary ~max_prompt_bytes:declared_limit ~oversized:false);
-  test_case "accepted empty history still omits an oversized summary" `Quick
-    (test_empty_history_keeps_a_fitting_summary ~max_prompt_bytes:declared_limit ~oversized:true);
-  test_case "a declared limit cuts inside the range" `Quick test_a_declared_limit_cuts_inside_the_range;
+  test_case "accepted empty history retains a fitting summary" `Quick
+    test_empty_history_keeps_a_fitting_summary;
+  test_case "a ceiling cuts inside the range" `Quick test_a_ceiling_cuts_inside_the_range;
   test_case "an overflow floor never restores the last atom" `Quick test_the_overflow_floor_does_not_restore_the_newest_atom;
   test_case "an unknown turn start carries the newest atom" `Quick test_an_unknown_turn_start_carries_the_newest_atom;
   test_case "a turn without a session trace opens on the newest atom" `Quick test_a_turn_without_a_session_trace_opens_on_the_newest_atom;
   test_case "a Resume sends none of the history" `Quick test_resume_sends_no_history;
-  test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
   test_case "a continuation's resume overflow ends on a full thread" `Quick test_continuation_resume_overflow_ends_on_a_full_thread;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
   test_case "a resume carries per-turn context in front of the goal" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:false);

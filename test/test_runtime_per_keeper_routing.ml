@@ -400,7 +400,6 @@ is-non-interactive = true
 [models.muse-spark]
 api-name = "muse-spark-1.3"
 max-context = 1007997
-max-prompt-bytes = 1048576
 
 [muse_code.muse-spark]
 |}

@@ -128,7 +128,7 @@ module For_testing : sig
       they are fed before the emit returns. *)
 
   val capacity_bounded_model_input_projection
-    :  declared_max_prompt_bytes:int option
+    :  prompt_ceiling_bytes:int option
     -> system_prompt:string
     -> goal:string
     -> ?on_model_input_window_observation:

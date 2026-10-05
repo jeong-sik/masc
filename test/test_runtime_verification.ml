@@ -1309,7 +1309,6 @@ is-non-interactive = true
 [models.fixture]
 api-name = "fixture-selected-model"
 max-context = 1007997
-max-prompt-bytes = 1048576
 reasoning-effort = "high"
 tools-support = true
 [muse.fixture]
@@ -1393,11 +1392,11 @@ tools-support = true
       Unix.unlink script)
       ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected"];
     Unix.unlink source;
-    List.iter (fun max_prompt_bytes ->
+    List.iter (fun max_context ->
       let script = Filename.concat directory "muse-invalid-capacity" in
       write script muse_readiness_fixture; Unix.chmod script 0o700;
       let selected = runtime script in
-      let selected = {selected with Runtime_instance.model = {selected.model with max_prompt_bytes}} in
+      let selected = {selected with Runtime_instance.model = {selected.model with max_context}} in
       let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
         ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
         ~cwd_path:directory ~timeout_s:15. selected in

@@ -182,16 +182,17 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* The head declares a large prompt ceiling, the fallback a small one, and a
-   third binding declares none. [roomy] and [tight] are the declared
-   ceilings the briefing-budget tests read back. Both declare through a
-   Claude Code provider, which reads [max-prompt-bytes]. [unread] is the
-   smallest number in the file, declared on a model bound through an HTTP
-   provider that never reads it, so no lane minimum may pick it. *)
-let roomy_max_prompt_bytes = 1_048_576
-let tight_max_prompt_bytes = 131_072
-let codex_max_prompt_bytes = 262_144
-let unread_max_prompt_bytes = 65_536
+(* The head has a large prompt ceiling, the fallback a small one, and a third
+   binding has none. Both ceilings come from the model's window through an
+   Antigravity provider ([Runtime_client_prompt_ceiling]); [roomy] and
+   [tight] are what the briefing-budget tests read back. An HTTP binding has
+   no ceiling. *)
+let roomy_window = 524_288
+let tight_window = 65_536
+let roomy_prompt_bytes =
+  Runtime_client_prompt_ceiling.antigravity_start_prompt_bytes ~max_context:roomy_window
+let tight_prompt_bytes =
+  Runtime_client_prompt_ceiling.antigravity_start_prompt_bytes ~max_context:tight_window
 
 let runtime_toml_with_uneven_prompt_ceilings =
   Printf.sprintf
@@ -202,32 +203,42 @@ default = "primary.roomy_model"
 [runtime.lanes.uneven]
 candidates = [ "primary.roomy_model", "fallback.tight_model" ]
 
-[runtime.lanes.undeclared_head]
+[runtime.lanes.ceilingless_head]
 candidates = [ "open.open_model", "fallback.tight_model" ]
 
-[runtime.lanes.undeclared_only]
+[runtime.lanes.ceilingless_only]
 candidates = [ "open.open_model" ]
 
 [runtime.lanes.three_deep]
 candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" ]
 
-[runtime.lanes.unread_declaration]
-candidates = [ "primary.roomy_model", "open.unread_model" ]
+[runtime.lanes.http_sibling]
+candidates = [ "primary.roomy_model", "open.open_model" ]
 
-[runtime.lanes.codex_declared]
-candidates = [ "primary.roomy_model", "codex.codex_model" ]
+[runtime.lanes.codex_sibling]
+candidates = [ "fallback.tight_model", "codex.codex_model" ]
 
 [providers.primary]
 display-name = "Primary Provider"
-protocol = "claude-code"
+protocol = "antigravity-cli"
 command = "/fixture-must-not-run-a-model"
 is-non-interactive = true
+timeout-s = 180.0
+
+[providers.primary.credentials]
+type = "file"
+path = "/fixture-antigravity-token"
 
 [providers.fallback]
 display-name = "Fallback Provider"
-protocol = "claude-code"
+protocol = "antigravity-cli"
 command = "/fixture-must-not-run-a-model"
 is-non-interactive = true
+timeout-s = 180.0
+
+[providers.fallback.credentials]
+type = "file"
+path = "/fixture-antigravity-token"
 
 [providers.open]
 display-name = "Open Provider"
@@ -242,15 +253,13 @@ is-non-interactive = true
 
 [models.roomy_model]
 api-name = "roomy-model"
-max-context = 200000
-max-prompt-bytes = %d
+max-context = %d
 tools-support = true
 streaming = true
 
 [models.tight_model]
 api-name = "tight-model"
-max-context = 200000
-max-prompt-bytes = %d
+max-context = %d
 tools-support = true
 streaming = true
 
@@ -260,17 +269,9 @@ max-context = 200000
 tools-support = true
 streaming = true
 
-[models.unread_model]
-api-name = "unread-model"
-max-context = 200000
-max-prompt-bytes = %d
-tools-support = true
-streaming = true
-
 [models.codex_model]
 api-name = "codex-model"
 max-context = 400000
-max-prompt-bytes = %d
 
 [primary.roomy_model]
 is-default = true
@@ -282,16 +283,11 @@ max-concurrent = 1
 [open.open_model]
 max-concurrent = 1
 
-[open.unread_model]
-max-concurrent = 1
-
 [codex.codex_model]
 max-concurrent = 1
 |}
-    roomy_max_prompt_bytes
-    tight_max_prompt_bytes
-    unread_max_prompt_bytes
-    codex_max_prompt_bytes
+    roomy_window
+    tight_window
 
 let runtime_toml_quota_lane_with_shared_credential
     ?(candidate_ids = ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"])
@@ -749,32 +745,32 @@ let briefing_budget_of_route route =
 let test_briefing_budget_fits_the_smallest_lane_ceiling () =
   with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
     Alcotest.(check (option int))
-      "the lane's smallest declared ceiling"
-      (Some tight_max_prompt_bytes)
-      (Runtime.smallest_max_prompt_bytes_of_route "uneven");
+      "the lane smallest ceiling"
+      (Some tight_prompt_bytes)
+      (Runtime.smallest_prompt_capacity_bytes_of_route "uneven");
     match briefing_budget_of_route "uneven" with
-    | None -> Alcotest.fail "a lane whose candidates declare ceilings is bounded"
+    | None -> Alcotest.fail "a lane whose candidates have ceilings is bounded"
     | Some budget ->
       Alcotest.(check int)
         "the briefing is a share of the fallback's ceiling"
-        (briefing_share_of tight_max_prompt_bytes)
+        (briefing_share_of tight_prompt_bytes)
         budget)
 
-(* A candidate that declares no ceiling has none in any admission path. It
-   adds no bound, and it must not erase the bound a sibling declares. *)
-let test_briefing_budget_an_undeclared_candidate_adds_no_bound () =
+(* A candidate with no ceiling has none in any admission path. It
+   adds no bound, and it must not erase the bound a sibling has. *)
+let test_briefing_budget_a_candidate_without_a_ceiling_adds_no_bound () =
   with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
     Alcotest.(check (option int))
-      "an undeclared head does not erase the fallback's ceiling"
-      (Some (briefing_share_of tight_max_prompt_bytes))
-      (briefing_budget_of_route "undeclared_head");
+      "a head without a ceiling does not erase the fallback's ceiling"
+      (Some (briefing_share_of tight_prompt_bytes))
+      (briefing_budget_of_route "ceilingless_head");
     Alcotest.(check (option int))
-      "a lane whose candidates declare none gets no bound"
+      "a lane whose candidates have none gets no bound"
       None
-      (briefing_budget_of_route "undeclared_only");
+      (briefing_budget_of_route "ceilingless_only");
     Alcotest.(check (option int))
       "a bare runtime route is bounded by its own ceiling"
-      (Some (briefing_share_of roomy_max_prompt_bytes))
+      (Some (briefing_share_of roomy_prompt_bytes))
       (briefing_budget_of_route "primary.roomy_model");
     Alcotest.(check (option int))
       "a route that names nothing gets no bound"
@@ -801,50 +797,48 @@ let test_briefing_budget_spans_the_whole_deferred_suffix () =
     in
     Alcotest.(check (option int))
       "the briefing fits the last candidate of the deferred walk"
-      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Some (briefing_share_of tight_prompt_bytes))
       (Budget.world_state_briefing_budget_bytes candidates);
     Alcotest.(check (option int))
       "without a hint the whole lane of the assignment bounds it"
-      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Some (briefing_share_of tight_prompt_bytes))
       (Budget.world_state_briefing_budget_bytes
          (Masc.Keeper_unified_turn.briefing_candidates_for_turn
             ~deferred_runtime_lane:None
             ~assigned_route:"three_deep")))
 
-(* Only Claude Code, Antigravity and Codex read [max-prompt-bytes]. A number
-   declared on an HTTP candidate bounds nothing that provider checks, so it
-   must not become the lane's minimum: counted, it would shrink every turn's
-   briefing even while the Claude Code head serves. Two reading candidates
-   still give their minimum ([uneven]). *)
-let test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read () =
+(* An HTTP candidate has no prompt ceiling: the provider checks request size
+   itself. It must not become the lane's minimum, so a lane holding one still
+   gives the ceiling of its other candidate, and two ceilings give their
+   minimum ([uneven]). *)
+let test_briefing_budget_ignores_a_candidate_without_a_ceiling () =
   with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
     Alcotest.(check (option int))
-      "the HTTP declaration does not become the lane minimum"
-      (Some roomy_max_prompt_bytes)
-      (Runtime.smallest_max_prompt_bytes_of_route "unread_declaration");
+      "an HTTP sibling does not lower or erase the ceiling"
+      (Some roomy_prompt_bytes)
+      (Runtime.smallest_prompt_capacity_bytes_of_route "http_sibling");
     Alcotest.(check (option int))
-      "a lone HTTP declaration bounds nothing"
+      "a lone HTTP candidate has no ceiling"
       None
-      (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ "open.unread_model" ]);
+      (Runtime.smallest_prompt_capacity_bytes_of_runtime_ids [ "open.open_model" ]);
     Alcotest.(check (option int))
-      "two reading candidates give their minimum"
-      (Some tight_max_prompt_bytes)
-      (Runtime.smallest_max_prompt_bytes_of_route "uneven"))
+      "two ceilings give their minimum"
+      (Some tight_prompt_bytes)
+      (Runtime.smallest_prompt_capacity_bytes_of_route "uneven"))
 
-(* Codex reads [max-prompt-bytes] since #37353: a declared limit windows its
-   first attempt. The declaration is therefore a real ceiling and must be the
-   lane's minimum when it is the smallest; left out, the Codex fallback would
-   receive a briefing larger than its own window (the defect #38500 fixed). *)
-let test_briefing_budget_counts_a_declared_codex_ceiling () =
+(* Codex sends the whole range and relies on the provider's typed overflow,
+   so it has no ceiling of its own and a lane holding one still gives the
+   ceiling of its other candidate. *)
+let test_briefing_budget_ignores_a_codex_candidate () =
   with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
     Alcotest.(check (option int))
-      "a declared Codex ceiling below the Claude Code head is the lane minimum"
-      (Some codex_max_prompt_bytes)
-      (Runtime.smallest_max_prompt_bytes_of_route "codex_declared");
+      "a lone Codex candidate has no ceiling"
+      None
+      (Runtime.smallest_prompt_capacity_bytes_of_runtime_ids [ "codex.codex_model" ]);
     Alcotest.(check (option int))
-      "a lone Codex declaration bounds its own route"
-      (Some codex_max_prompt_bytes)
-      (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ "codex.codex_model" ]))
+      "a Codex sibling does not lower or erase the ceiling"
+      (Some tight_prompt_bytes)
+      (Runtime.smallest_prompt_capacity_bytes_of_route "codex_sibling"))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -6397,19 +6391,19 @@ let () =
           Alcotest.test_case
             "an undeclared candidate adds no bound and erases none"
             `Quick
-            test_briefing_budget_an_undeclared_candidate_adds_no_bound;
+            test_briefing_budget_a_candidate_without_a_ceiling_adds_no_bound;
           Alcotest.test_case
             "the briefing budget spans the whole deferred suffix"
             `Quick
             test_briefing_budget_spans_the_whole_deferred_suffix;
           Alcotest.test_case
-            "the briefing budget ignores a ceiling its runtime does not read"
+            "the briefing budget ignores a candidate without a ceiling"
             `Quick
-            test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read;
+            test_briefing_budget_ignores_a_candidate_without_a_ceiling;
           Alcotest.test_case
-            "briefing budget counts a declared Codex ceiling"
+            "briefing budget ignores a Codex candidate"
             `Quick
-            test_briefing_budget_counts_a_declared_codex_ceiling;
+            test_briefing_budget_ignores_a_codex_candidate;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick

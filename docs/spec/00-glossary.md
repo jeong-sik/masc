@@ -1091,20 +1091,6 @@ status: reference
   → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
   [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
 
-**Max Prompt Bytes (최대 프롬프트 바이트)**
-: MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한
-  (`[models.<이름>].max-prompt-bytes`, `Runtime_schema.model.max_prompt_bytes`).
-  클라이언트는 자기 컨텍스트 창을 스스로 소유하고, 상한을 넘는 seed는 typed
-  terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
-  29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
-  10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
-  (#38740). Muse 는 넘친 입력을 거절하지 않고 조용히 요약으로 줄이므로, MASC 가
-  `max-context` 에서 `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(Muse Code
-  1.4.0 실측, `Runtime_muse_prompt_capacity`). 선언값은 이보다 작을 때만 쓴다.
-  운영자에게는 묻지 않는다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
-  MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
-  → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
-
 **Attempt Dispatch (시도 파견 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
   해당 시도가 실제 제공자 또는 클라이언트로 파견되어 실행되었는지를 구분하는 닫힌 두 값

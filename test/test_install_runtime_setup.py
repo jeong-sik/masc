@@ -1270,7 +1270,6 @@ class SelectedNativeAccounts(unittest.TestCase):
         source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
         with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no operator byte budget')), patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
             _, spec = SETUP.resolve_model_spec(source, dict(id='selected', context=8192), 10)
-        self.assertNotIn('max_prompt_bytes', spec)
         self.assertEqual(spec['account_home'], '/selected')
         with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no invented context')):
             with self.assertRaises(SETUP.SetupError):

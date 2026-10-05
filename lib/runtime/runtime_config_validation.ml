@@ -194,7 +194,7 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
 ;;
 
 (* A Muse window too small for the host's own overhead leaves no start-prompt
-   ceiling ([muse_prompt_capacity]), declared max-prompt-bytes or not, and is
+   ceiling ([muse_prompt_capacity]) and is
    refused here rather than at its first turn. *)
 let validate_muse_prompt_ceilings (runtimes : t list) : (unit, load_failure) result =
   match

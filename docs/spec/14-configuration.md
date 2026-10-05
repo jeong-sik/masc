@@ -224,16 +224,13 @@ preparation can outlast it if the selected account filesystem stalls.
 
 This template belongs in the selected base path's `.masc/config/runtime.toml`.
 Replace both uppercase placeholders with the selected vendor model's actual ID
-and documented context window before loading it. Leave `max-prompt-bytes` out:
-the Muse host rewrites an input larger than its window instead of refusing it,
+and documented context window before loading it.
+The Muse host rewrites an input larger than its window instead of refusing it,
 so MASC bounds the prompt it seeds a new session with at
 `4 × (⌊75% of max-context⌋ − 11,946)` bytes, from Muse Code 1.4.0's measured
 behaviour (its token estimate is UTF-8 bytes / 4, its own overhead is 11,946
-estimated tokens, and it compacts at 75% of the window). A declared
-`max-prompt-bytes` can only lower that ceiling; a larger value is not used,
-because the host compacts a larger prompt whatever the file says. A Muse model
-whose window leaves no room above the host's overhead is refused at load,
-declared value or not. No runtime is assigned merely by adding a provider and binding.
+estimated tokens, and it compacts at 75% of the window). A Muse model
+whose window leaves no room above the host's overhead is refused at load. No runtime is assigned merely by adding a provider and binding.
 
 ```toml
 [providers.muse_personal]

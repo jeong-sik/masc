@@ -101,48 +101,12 @@ let unbounded_model_input_capacity_bytes = max_int
    sends none of it, since the thread holds the conversation. A Start carries
    the same range the Claude Code and Antigravity lanes send
    ([carried_model_input_projection]), so the history a new thread receives is
-   bounded before anything is written, with or without a declared limit
-   (window RFC §4.1).
-
-   A declared max-prompt-bytes also cuts that range, from the first attempt
-   rather than only after a typed overflow (#37353: the app-server refuses a
-   [developerInstructions] string over 10 MiB, and a refusal after a tool
-   effect forbids the narrowed retry). Nothing declared leaves the byte
-   capacity unbounded; the range is then the only cut.
-
-   The vendor states its limit as a string length in characters
-   ([string_above_max_length], 10485760); this window counts bytes
-   ([String.length]). A UTF-8 string has at least as many bytes as
-   characters, so a byte window at the declared number always fits the
-   character limit: it can cut short, never over. *)
-let starting_capacity_of_declared_prompt_limit = function
-  | Some bytes -> bytes
-  | None -> unbounded_model_input_capacity_bytes
-;;
+   bounded before anything is written (window RFC §4.1). The byte capacity
+   starts unbounded; the range is the only cut until the provider names a
+   typed overflow and the shrink ladder narrows it. *)
 
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
   String.length (Host.encode_history_message message)
-;;
-
-(* What one kept message adds to what this lane writes, charged only when a
-   limit is declared. On a Start [project_messages] renders a [System] message
-   into [developerInstructions] joined by a two-byte separator, and any other
-   message goes to [thread/inject_items] as that encoding. A Resume writes no
-   conversation: the thread holds it. It writes only what
-   {!Host.is_carried_on_resume} selects, each behind its role label and a
-   two-byte separator in front of the goal ({!Host.resume_prompt}); every other
-   [System] message goes to [developerInstructions] as on a Start. The larger
-   of the two is charged, so the window fits whichever mode the attempt turns
-   out to be. *)
-let measure_declared_prompt_message_bytes (message : Agent_core.Types.message) =
-  let encoded = String.length (Host.encode_history_message message) in
-  if Host.is_carried_on_resume message
-  then String.length (Host.history_role_label message.role) + encoded + 2
-  else
-    match message.role with
-    | Agent_core.Types.System -> encoded + 2
-    | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool ->
-      encoded + 1
 ;;
 
 (* The next structural retry boundary, computed from the bounded history
@@ -194,13 +158,13 @@ let record_next_shrink_capacity
    not send from narrowing the fresh thread that retries it. The
    provider-bound copy is cut; the durable conversation is not rewritten.
    [reserved_bytes] is what the attempt sends besides history -- system
-   prompt, posture note and goal -- so a declared window and the fixed
+   prompt, posture note and goal -- so a byte window and the fixed
    sections share one ceiling.
 
    The range starts where the last answered request's range did (the
    seed), at the Librarian's absorbed point when that is later, and
    otherwise at the end of the last completed turn, exactly as on the
-   Claude Code and Antigravity lanes. A declared max-prompt-bytes still cuts
+   Claude Code and Antigravity lanes. The vendor request limit still cuts
    first and names a front of its own; the later front wins, so the shrink
    ladder that answers a typed overflow keeps narrowing instead of being
    widened back by the seed. *)
@@ -233,8 +197,8 @@ let carried_model_input_projection
           about the range's size: the thread it resumed is what was full.
           Sizing the retry from the range would open the fresh thread that
           retries it smaller than it needs to be. The retry gets the
-          ladder's own step from the attempt's capacity instead; with
-          nothing declared that step still carries the whole range, and the
+          ladder's own step from the attempt's capacity instead; the first
+          step still carries the whole range, and the
           fresh thread's own overflow, if any, narrows from what it sent. *)
        observed_next_shrink_capacity_bytes :=
          Some
@@ -787,7 +751,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
 
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~loading_plan ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
+    ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
@@ -899,12 +863,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         |> Result.map Option.some
         |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
     let initial_messages = Option.to_list historical_task_message @ initial_messages in
-    (* With a declared limit the window is cut after [Host.prepare_turn]
-       rather than inside it: its reservation needs the system prompt the hooks
-       settled on and the goal and posture note this attempt writes.
-       [prepare_turn] reads nothing from the messages after its
-       projection step, so the cut is the one it would have made. With nothing
-       declared the cut is made inside [Host.prepare_turn]. *)
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:
@@ -916,9 +874,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~tools
         ~initial_messages
         ~model_input_projection:
-          (match declared_max_prompt_bytes with
-           | None -> Some (project_history ~thread_mode ~reserved_bytes:0)
-           | Some _ -> None)
+          (Some (project_history ~thread_mode ~reserved_bytes:0))
         ~hooks:(Some hooks)
     in
     let* prompt, images =
@@ -942,41 +898,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       (prepared.system_prompt :: posture_notes) @ developer_messages
       |> List.filter (fun text -> String.trim text <> "")
       |> String.concat "\n\n"
-    in
-    let* prepared =
-      match declared_max_prompt_bytes with
-      | None -> Ok prepared
-      | Some _ ->
-        (* Everything this attempt writes that is not history, measured by
-           composing it with no history at all. Each message the cut keeps then
-           adds at most what [measure_declared_prompt_message_bytes] charges
-           for it, and the composition is measured before its final trim, so
-           the two sums bound the request. *)
-        let reserved_bytes =
-          String.length (compose_developer_instructions []) + String.length prompt
-        in
-        if reserved_bytes >= capacity_bytes
-        then
-          Error
-            (config_error
-               ~field:"max_prompt_bytes"
-               (Printf.sprintf
-                  "Codex fixed request sections measure %d bytes, at or above the \
-                   %d-byte window"
-                  reserved_bytes
-                  capacity_bytes))
-        else
-          let* messages =
-            try project_history ~thread_mode ~reserved_bytes prepared.messages with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn ->
-              Error
-                (internal_error
-                   (runtime_label
-                    ^ " runtime model input projection raised: "
-                    ^ Printexc.to_string exn))
-          in
-          Ok { prepared with messages }
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
@@ -1066,27 +987,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
     let developer_instructions = Some composed_developer_instructions in
-    (* The window already fits; this is the account checked once more before
-       anything is written, so a measure that ever undercounts is refused here
-       instead of by the app-server after a tool has run. *)
-    let* () =
-      match declared_max_prompt_bytes with
-      | None -> Ok ()
-      | Some _ ->
-        let request_bytes =
-          String.length composed_developer_instructions + String.length prompt
-        in
-        if request_bytes <= capacity_bytes
-        then Ok ()
-        else
-          Error
-            (config_error
-               ~field:"max_prompt_bytes"
-               (Printf.sprintf
-                  "Codex request measures %d bytes, above the %d-byte window"
-                  request_bytes
-                  capacity_bytes))
-    in
     (* No developer items: a Start carries the per-turn context in
        [developerInstructions], a Resume in front of its goal. *)
     let developer_context = [] in
@@ -1768,19 +1668,11 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     Atomic.set successful_tool_completion Successful_tool_completion
   in
   let observed_next_shrink_capacity_bytes = ref None in
-  let declared_max_prompt_bytes =
-    Runtime_inference.resolve_max_prompt_bytes ~runtime_id
-  in
-  let measure_message_bytes =
-    match declared_max_prompt_bytes with
-    | None -> measure_model_input_message_bytes
-    | Some _ -> measure_declared_prompt_message_bytes
-  in
+  let measure_message_bytes = measure_model_input_message_bytes in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-      ~starting_capacity:
-        (starting_capacity_of_declared_prompt_limit declared_max_prompt_bytes)
+      ~starting_capacity:unbounded_model_input_capacity_bytes
       (* A continuation always resumes its original thread, and a Resume's
          input is the same at every capacity; the retry would be a fresh
          start, which a continuation forbids. Its overflow ends the turn on the
@@ -1796,9 +1688,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
           ~default:(max 1 default_capacity))
       (* This runtime shrinks to the size the provider itself named
          ([observed_next_shrink_capacity_bytes]), not to a fraction of a
-         declared request-body cap. With a declared max-prompt-bytes the
-         attempt charges its fixed sections against that size and the oracle
-         adds them back, so the history window is what narrows. There is no
+         request-body cap. There is no
          local account that could rule the next size out, so the provider's
          own target stands. *)
       ~shrink_admits_history:(fun ~capacity:_ -> true)
@@ -1832,7 +1722,6 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
           ~tools
           ~loading_plan
           ~initial_messages
-          ~declared_max_prompt_bytes
           ~capacity_bytes
           (* A Resume still projects: the per-turn context it sends in front
              of the goal is placed by this projection. It reports no window

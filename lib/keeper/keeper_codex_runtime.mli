@@ -154,9 +154,9 @@ module For_testing : sig
     -> runtime_id:string
     -> Agent_core.Types.message list
     -> (Agent_core.Types.message list, Agent_core.Error.t) result
-  (** The history a [Start] carries: the carried range, cut again by a
-      declared ceiling when there is one. *)
+  (** The history a [Start] carries: the carried range, cut again to the
+      byte capacity of the attempt. *)
 
   val unbounded_capacity_bytes : int
-  (** [capacity_bytes] for a runtime that declares no max-prompt-bytes. *)
+  (** [capacity_bytes] of a first attempt: nothing is cut but the range. *)
 end

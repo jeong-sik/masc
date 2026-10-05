@@ -128,12 +128,9 @@ let test_muse_requires_explicit_account () =
   | Error _ -> Alcotest.fail "Muse setup rendering must parse"
   | Ok config ->
     let provider = List.hd config.Runtime_schema.providers in
-    let model = List.hd config.Runtime_schema.models in
     Alcotest.(check bool) "Muse protocol" true
       (provider.api_format = Runtime_schema.Muse_serve_runtime);
-    Alcotest.(check (option string)) "selected account" (Some "/synthetic/muse-account") provider.account_home;
-    Alcotest.(check (option int)) "no byte budget is invented for the model"
-      None model.max_prompt_bytes
+    Alcotest.(check (option string)) "selected account" (Some "/synthetic/muse-account") provider.account_home
 
 (* Discovery lists Codex models from the declared provider's account home;
    the saved provider must keep that home or it renders the ambient

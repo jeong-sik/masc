@@ -68,7 +68,6 @@ export interface NewRuntimeModelInput {
   id: string
   apiName: string
   maxContext: number
-  maxPromptBytes?: number
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -174,7 +173,6 @@ interface NewModelDraft {
   id: string
   apiName: string
   maxContext: string
-  maxPromptBytes: string
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -185,7 +183,6 @@ const DEFAULT_NEW_MODEL: NewModelDraft = {
   id: '',
   apiName: '',
   maxContext: '',
-  maxPromptBytes: '',
   toolsSupport: false,
   thinkingSupport: false,
   streaming: true,
@@ -546,15 +543,10 @@ export function RuntimeEnvironmentEditor({
       setModelFormError('max-context는 1 이상의 정수여야 합니다')
       return
     }
-    const maxPromptBytes = newModel.maxPromptBytes.trim() ? parseRequiredPositiveInteger(newModel.maxPromptBytes) : undefined
-    if (newModel.maxPromptBytes.trim() && maxPromptBytes === undefined) {
-      setModelFormError('max-prompt-bytes는 1 이상의 정수여야 합니다'); return
-    }
     onAddModel({
       id,
       apiName: newModel.apiName.trim(),
       maxContext,
-      ...(maxPromptBytes !== undefined ? { maxPromptBytes } : {}),
       toolsSupport: newModel.toolsSupport,
       thinkingSupport: newModel.thinkingSupport,
       streaming: newModel.streaming,
@@ -1234,13 +1226,6 @@ export function RuntimeEnvironmentEditor({
                     data-testid="runtime-add-model-max-context"
                     onInput=${(event: Event) => setNewModel({ ...newModel, maxContext: (event.currentTarget as HTMLInputElement).value })}
                   />
-                </div>
-                <div class="rt-field">
-                  <span class="sub-k">max-prompt-bytes · 선택</span>
-                  <input class="rt-input mono" type="number" min="1" step="1"
-                    value=${newModel.maxPromptBytes} disabled=${isDisabled}
-                    aria-label="새 model max-prompt-bytes" data-testid="runtime-add-model-max-prompt-bytes"
-                    onInput=${(event: Event) => setNewModel({ ...newModel, maxPromptBytes: (event.currentTarget as HTMLInputElement).value })} />
                 </div>
                 <div class="rt-field">
                   <span class="sub-k">json 지원</span>

@@ -286,7 +286,6 @@ let fanout_model =
   ; reasoning_uncontrolled = false
   ; reasoning_effort = None
   ; turn_timeout_s = None
-  ; max_prompt_bytes = None
   ; capabilities = None
   }
 

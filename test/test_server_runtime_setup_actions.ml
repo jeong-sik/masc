@@ -411,7 +411,6 @@ is-non-interactive = true
 [models.ready_muse]
 api-name = "fixture-muse"
 max-context = 200000
-max-prompt-bytes = 8192
 tools-support = true
 [ready_muse.ready_muse]
 |});
@@ -499,7 +498,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
       | _ -> Alcotest.fail "fixture request must be an object" in
     Alcotest.check Alcotest.bool "failed transaction leaves account available for retry" true
       (Result.is_error (Actions.save ~binary ~base_path:base rejected) && Result.is_ok (resolve ()));
-    let receipt = get (Actions.save ~binary ~base_path:base request) in
+    ignore (get (Actions.save ~binary ~base_path:base request));
     Alcotest.check Alcotest.bool "successful transaction preserves concurrent account selections" true
       (Result.is_ok (resolve ()));
     (match Actions.save ~binary ~base_path:base request with
@@ -507,15 +506,6 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
      | _ -> Alcotest.fail "lost-response retry must report revision conflict, not missing credentials");
     Alcotest.check Alcotest.bool "successful save retains the actual account" true (Sys.is_directory account_home);
     let parsed=Runtime_toml.parse_file runtime |> Result.get_ok in
-    if protocol="muse-serve" then (
-      let saved_runtime_id = receipt |> member "runtime_id" |> to_string in
-      let model_id = match String.index_opt saved_runtime_id '.' with
-        | Some i -> String.sub saved_runtime_id (i + 1) (String.length saved_runtime_id - i - 1)
-        | None -> Alcotest.fail "saved runtime id names no model" in
-      let model = List.find (fun (m : Runtime_schema.model_spec) -> String.equal m.id model_id)
-          parsed.Runtime_schema.models in
-      Alcotest.check Alcotest.(option int) "a saved Muse model declares no byte capacity"
-        None model.max_prompt_bytes);
     let homes=List.filter_map (fun (p:Runtime_schema.provider) -> p.account_home) parsed.providers in
     Alcotest.check Alcotest.bool "selected native home survives save byte-for-byte" true (List.mem account_home homes))
     ["selected-claude","claude-code","claude";"selected-codex","codex-app-server","codex";

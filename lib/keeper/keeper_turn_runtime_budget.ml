@@ -131,13 +131,13 @@ type briefing_candidates =
    head is demoted behind its siblings, so any candidate the walk holds can
    serve the turn. The budget is therefore a share of the smallest ceiling
    among exactly those candidates; see
-   {!Runtime.smallest_max_prompt_bytes_of_route} for what a candidate
+   {!Runtime.smallest_prompt_capacity_bytes_of_route} for what a candidate
    without one means. Candidates that all have none get no bound, the same
    answer their projection gives them. *)
 let world_state_briefing_budget_bytes candidates =
   (match candidates with
-   | Lane_of_route route -> Runtime.smallest_max_prompt_bytes_of_route route
-   | Deferred_candidates ids -> Runtime.smallest_max_prompt_bytes_of_runtime_ids ids)
+   | Lane_of_route route -> Runtime.smallest_prompt_capacity_bytes_of_route route
+   | Deferred_candidates ids -> Runtime.smallest_prompt_capacity_bytes_of_runtime_ids ids)
   |> Option.map (fun cap ->
     (* Divided before multiplying: a derived Muse ceiling can be as large as
        [max_int] ([Runtime_muse_prompt_capacity]), and [cap * share]

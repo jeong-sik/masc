@@ -175,16 +175,16 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   Ok windowed.Host.sent
 ;;
 
-let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
+let capacity_bounded_model_input_projection ~prompt_ceiling_bytes
     ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
     ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id source_projection
   =
-  match declared_max_prompt_bytes with
+  match prompt_ceiling_bytes with
   | None ->
     Error
       (config_error
-         ~field:"max_prompt_bytes"
-         "Antigravity requires max-prompt-bytes because the CLI has no typed oversized-input refusal")
+         ~field:"prompt_ceiling_bytes"
+         "Antigravity requires a resolvable max-context because the CLI has no typed oversized-input refusal")
   | Some capacity_bytes ->
     let reserved_bytes =
       String.length system_prompt
@@ -195,9 +195,9 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
     then
       Error
         (config_error
-           ~field:"max_prompt_bytes"
+           ~field:"prompt_ceiling_bytes"
            (Printf.sprintf
-              "Antigravity fixed prompt sections measure %d bytes, at or above max-prompt-bytes %d"
+              "Antigravity fixed prompt sections measure %d bytes, at or above the %d-byte prompt ceiling"
               reserved_bytes
               capacity_bytes))
     else
@@ -591,17 +591,17 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let declared_max_prompt_bytes =
-      Runtime_inference.resolve_max_prompt_bytes ~runtime_id
+    let prompt_ceiling_bytes =
+      Runtime_inference.resolve_prompt_capacity_bytes ~runtime_id
     in
     let* capacity_bytes =
-      match declared_max_prompt_bytes with
+      match prompt_ceiling_bytes with
       | Some capacity_bytes -> Ok capacity_bytes
       | None ->
         Error
           (config_error
-             ~field:"max_prompt_bytes"
-             "Antigravity requires max-prompt-bytes because the CLI has no typed oversized-input refusal")
+             ~field:"prompt_ceiling_bytes"
+             "Antigravity requires a resolvable max-context because the CLI has no typed oversized-input refusal")
     in
     let* () = match official_task_reference with
       | None -> Ok ()
@@ -695,7 +695,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       else
         let* capacity_projection =
           capacity_bounded_model_input_projection
-            ~declared_max_prompt_bytes
+            ~prompt_ceiling_bytes
             ~system_prompt:prepared.system_prompt
             ~goal
             ?on_model_input_window_observation
@@ -744,9 +744,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       else
         Error
           (config_error
-             ~field:"max_prompt_bytes"
+             ~field:"prompt_ceiling_bytes"
              (Printf.sprintf
-                "Antigravity final prompt measures %d bytes, above max-prompt-bytes %d"
+                "Antigravity final prompt measures %d bytes, above the %d-byte prompt ceiling"
                 (String.length prompt)
                 capacity_bytes))
     in
@@ -756,7 +756,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
-       goal_bytes=%d declared_max_prompt_bytes=%s"
+       goal_bytes=%d prompt_ceiling_bytes=%s"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)

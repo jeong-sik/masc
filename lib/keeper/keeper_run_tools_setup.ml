@@ -314,6 +314,81 @@ let initial_tool_calls
     seed_tool_calls_from_history ~history_memo ~history_messages)
 ;;
 
+(* The ToolUse ids the checkpoint history already holds. *)
+let history_tool_use_ids (history_messages : Agent_core.Types.message list) =
+  List.concat_map
+    (fun (message : Agent_core.Types.message) ->
+       List.filter_map
+         (fun (block : Agent_core.Types.content_block) ->
+            match block with
+            | Agent_core.Types.ToolUse { id; _ } -> Some id
+            | _ -> None)
+         message.content)
+    history_messages
+;;
+
+let ledger_seed_row_limit = 200
+
+(* task-627 / #26088: the official-client autonomous lane persists no AGENT_CORE
+   checkpoint, so [history_messages] arrives empty there and the history seed
+   above sees nothing — the loop guard started every cycle from zero, and a
+   poll repeated across cycles never reached the threshold. The keeper's own
+   call ledger is the durable record those cycles left: every executed call is
+   a row carrying the I/O fingerprints the judge compares, computed from the
+   raw input and output at write time (the row's own input/output fields are
+   redacted and truncated, so recomputing from them would answer a different
+   identity). Rows the history already represents (same tool_use_id) are
+   dropped, so a checkpoint-resumed lane counts each call once. Rows without
+   fingerprints — written before the fields existed, or by a caller that could
+   not fingerprint — cannot match a live call and are skipped rather than
+   counted. *)
+let seed_tool_calls_from_ledger
+    ~(history_tool_use_ids : string list)
+    ~(keeper_name : string)
+    () : Keeper_agent_result.tool_call_detail list =
+  (* Rows enqueued by the async appender are the previous cycle's own calls —
+     exactly the newest evidence, and the ones a cycle started right after
+     another would otherwise miss. Draining here is what the 0.5s flush daemon
+     would do moments later anyway. *)
+  Keeper_tool_call_log.flush_now ();
+  match Keeper_tool_call_log.read_recent ~keeper_name ~n:ledger_seed_row_limit () with
+  | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+    (* The run-local counter still applies; an unreadable seed must not fail
+       the turn. Say why on the record instead of failing open silently. *)
+    Log.Keeper.warn
+      "keeper %s repetition ledger seed unavailable: %s" keeper_name detail;
+    []
+  | Ok rows ->
+    List.filter_map
+      (fun row ->
+         match
+           ( Safe_ops.json_string_opt "tool" row
+           , Safe_ops.json_string_opt "input_fingerprint" row
+           , Safe_ops.json_string_opt "output_fingerprint" row )
+         with
+         | Some tool_name, Some input_fingerprint, Some output_fingerprint ->
+           let represented =
+             match Safe_ops.json_string_opt "tool_use_id" row with
+             | Some tool_use_id -> List.mem tool_use_id history_tool_use_ids
+             | None -> false
+           in
+           if represented then None
+           else
+             Some
+               { Keeper_agent_result.tool_name
+               ; provider = "call_ledger"
+               ; execution_outcome = Tool_result.Unknown
+               ; typed_outcome = None
+               ; latency_ms = 0.
+               ; task_id = None
+               ; route_evidence = None
+               ; input_fingerprint = Some input_fingerprint
+               ; output_fingerprint = Some output_fingerprint
+               }
+         | _ -> None)
+      rows
+;;
+
 let prepare_agent_setup
       ?preview
       ?observation_token
@@ -544,8 +619,12 @@ let prepare_agent_setup
       (* The autonomous lane, seeded from the checkpoint history past what
          a previous repetition yield already judged
          ([Keeper_repetition_judged]); the count the run was set up over is
-         what a yield in it records. *)
-      let pairs =
+         what a yield in it records. The official-client lane persists no
+         checkpoint, so its history is empty and the seed rides the keeper's
+         own call ledger instead (task-627); rows the history already
+         represents are dropped, so a checkpoint-resumed lane counts each
+         call once. *)
+      let history_pairs =
         initial_tool_calls
           ~history_memo:
             (Keeper_tool_progress_identity.history_memo
@@ -553,6 +632,13 @@ let prepare_agent_setup
                ~keeper_name:meta.name)
           ~history_messages
       in
+      let ledger_pairs =
+        seed_tool_calls_from_ledger
+          ~history_tool_use_ids:(history_tool_use_ids history_messages)
+          ~keeper_name:meta.name
+          ()
+      in
+      let pairs = history_pairs @ ledger_pairs in
       Ok (Keeper_repetition_judged.seed_beyond ~judged pairs, Some (List.length pairs))
     | Some execution ->
       Keeper_repetition_scope.Execution.prepare execution

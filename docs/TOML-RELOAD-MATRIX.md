@@ -95,12 +95,13 @@ Operational meaning:
 - The materialized config is held in memory (`Runtime.loaded_state_ref`).
   It is replaced at boot and when a write commits through
   the shared runtime config commit path. Full-source editor saves enter through
-  `Runtime.save_config_text_if_current`, comparing `expected_source_revision`
-  under the config write lock before validating and committing.
+  `Runtime.save_config_text_if_current`, comparing `expected_source_path` and
+  `expected_source_revision` under the config write lock before validating and committing.
   A hand edit to the file takes effect at the next restart.
-- `POST /api/v1/runtime/config/raw` requires `source_text` and the
-  `expected_source_revision` returned by the same GET as the edited source.
-  A missing or malformed revision returns 400. A changed source returns 409
+- `POST /api/v1/runtime/config/raw` requires `source_text`,
+  `expected_source_revision` from the original GET's `source_revision`, and
+  `expected_source_path` from that same GET's `path`.
+  A missing or malformed revision or path returns 400. A changed path or source returns 409
   with `code: "revision_conflict"` and `current.source_path`, `source_text`, and
   `source_revision`; it does not write the file or publish runtime state.
   `/raw/preview` remains text-only and does not authorize a later overwrite.

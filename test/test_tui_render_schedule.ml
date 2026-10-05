@@ -939,7 +939,7 @@ let test_workspace_path_takes_the_remainder () =
    two format strings. *)
 
 let test_workspace_header_and_row_share_their_offsets () =
-  for inner_width = 68 to 240 do
+  for inner_width = 60 to 240 do
     let layout = Schedule.workspace_layout ~inner_width in
     let header = Schedule.workspace_header_row ~layout in
     let row = Schedule.workspace_row ~layout workspace_probe in
@@ -955,7 +955,7 @@ let test_workspace_header_and_row_share_their_offsets () =
 (* A repository named past its cell, on a branch named past its cell, at a path
    longer than the frame: none of it may move a column. *)
 let test_workspace_row_width_does_not_depend_on_its_readings () =
-  for inner_width = 68 to 240 do
+  for inner_width = 60 to 240 do
     let layout = Schedule.workspace_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
     let header = width (Schedule.workspace_header_row ~layout) in
@@ -1018,7 +1018,7 @@ let verification_probe : Schedule.verification_row_values =
   }
 
 let test_verification_rows_stay_on_the_header_columns () =
-  for inner_width = 68 to 240 do
+  for inner_width = 60 to 240 do
     let submitter_width = 16 in
     let title_width =
       Schedule.verification_title_width ~inner_width ~submitter_width
@@ -1656,7 +1656,7 @@ let test_schedule_columns_hold_their_offsets () =
    undressed one does -- and what the header does. A colour cannot move a
    column. *)
 let test_system_log_colour_costs_no_cells () =
-  for inner_width = 68 to 240 do
+  for inner_width = 60 to 240 do
     let layout = Schedule.system_log_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
     let header = width (Schedule.system_log_header_row ~layout) in
@@ -1705,7 +1705,7 @@ let test_system_log_message_takes_the_remainder () =
 
 (* The offsets the two format strings could disagree about. *)
 let test_system_log_header_and_row_share_their_offsets () =
-  for inner_width = 68 to 240 do
+  for inner_width = 60 to 240 do
     let layout = Schedule.system_log_layout ~inner_width in
     let header = Schedule.system_log_header_row ~layout in
     let row =

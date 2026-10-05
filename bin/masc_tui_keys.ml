@@ -72,7 +72,7 @@ let config_bindings =
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
   ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
-  ; b Act "o" "model source", Some [Config_models]
+  ; b Act "m" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]

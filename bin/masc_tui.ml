@@ -25662,6 +25662,8 @@ and is loaded on demand through keeper_skill.
             goto_surface state ~mailbox:async_messages Clients
        | Some "c" when state.view = Config && state.config_pane = Config_models ->
            handle_model_form_open Masc_tui_model_form.Copy ()
+       | Some "m" when state.view = Config && state.config_pane = Config_models ->
+           handle_config_models_open_source ()
 | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
@@ -25989,8 +25991,6 @@ and is loaded on demand through keeper_skill.
            (* The picker owns focus while it is open. *)
            if Option.is_none state.runtime_lane_pick then
              open_selected_slot_config ()
-       | Some "o" when state.view = Config && state.config_pane = Config_models ->
-           handle_config_models_open_source ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the

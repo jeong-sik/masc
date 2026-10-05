@@ -839,16 +839,12 @@ val save_config_text :
 
 val save_config_text_if_current :
   ?runtime_config_path:string ->
-  expected_source_path:string ->
   expected_source_revision:string ->
   string ->
   (config_commit_receipt, config_edit_error) result
-(** Save an editor's complete source only if the file it read is still the
-    resolved config path and its lowercase SHA-256 revision still identifies
-    that file's bytes. The revision hashes the text alone, so the path is
-    compared too: a config path that moved to another file with the same
-    text is a conflict, not a match. Read, comparison and commit share the
-    config write lock. A conflict returns the current immutable observation without
+(** Save an editor's complete source only if its lowercase SHA-256 revision
+    still identifies the file. Read, comparison and commit share the config
+    write lock. A conflict returns the current immutable observation without
     writing the file or changing runtime/registry state. A matching revision
     uses {!save_config_text}'s validation, durability and application contract.
     Invalid revisions and read/validation/write failures are [Config_edit_failed]. *)

@@ -2313,30 +2313,18 @@ export class RuntimeTomlRevisionConflict extends Error {
   }
 }
 
-// The document an edit replaces: the file the editor read and the revision of
-// the bytes it read there. The revision hashes the text alone, so the server
-// compares both — the same text under another config path is not this base.
-export interface RuntimeTomlSaveBase {
-  sourcePath: string
-  sourceRevision: string
-}
-
 export async function saveRuntimeTomlConfig(
   sourceText: string,
-  base: RuntimeTomlSaveBase,
+  expectedSourceRevision: string,
 ): Promise<CommittedRuntimeTomlConfig> {
-  if (base.sourcePath === '') {
-    throw new Error('runtime.toml 저장 기준 경로가 없습니다. 현재 파일을 다시 읽으세요.')
-  }
-  if (!/^[0-9a-f]{64}$/.test(base.sourceRevision)) {
+  if (!/^[0-9a-f]{64}$/.test(expectedSourceRevision)) {
     throw new Error('runtime.toml 저장 기준 revision이 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
   }
   await ensureDevToken()
   try {
     const raw = await post<unknown>('/api/v1/runtime/config/raw', {
       source_text: sourceText,
-      expected_source_path: base.sourcePath,
-      expected_source_revision: base.sourceRevision,
+      expected_source_revision: expectedSourceRevision,
     })
     return decodeCommittedRuntimeTomlConfig(raw)
   } catch (error: unknown) {

@@ -1867,6 +1867,23 @@ status: reference
   Interest 판정의 `keeper_role`도 아니다 — Fusion 심판의 위상 종류다.
   → [Fusion_types.judge_role](../../lib/fusion_core/fusion_types.mli)
 
+**Fusion Judge Conclusion (심판 종합)**
+: Fusion 심판이 내는 하나의 종합(`Fusion_types.judge_synthesis`). 심판 모델은
+  `ppx_deriving_yojson`의 variant 인코딩(예: `["Answer", ...]`) 대신 LLM이 내기 쉬운
+  named-field JSON을 내고, 같은 typed field 정의에서 출력 schema와 parser가 함께
+  만들어진다(`Fusion_judge_parse`). 필드는 `consensus`·`contradictions`·
+  `partial_coverage`·`unique_insights`·`blind_spots`·`resolved_answer`·`decision`
+  일곱이고, `decision.kind`는 `answer`·`recommend`·`insufficient` 셋 중 하나다.
+  `answer`는 `answer`, `recommend`는 `action`과 `rationale`, `insufficient`는
+  `missing`(문자열 배열)을 요구한다. `answer`와 `recommend`는 공백뿐인 결정 내용과
+  `resolved_answer`를 거절하고, `insufficient`는 답을 지어내지 않고 빈
+  `resolved_answer`를 반환할 수 있다 — 여기서 "비어 있지 않음"은 유니코드 공백을
+  넘는 내용을 뜻한다. 제시된 배열 항목 하나가 잘못되면 종합 전체를 `Error`로
+  거절한다. 이 종합은 Board meta_json과 요청 Keeper의 메인 chat lane으로 전달된다
+  (Fusion Delivery Obligation).
+  → [Fusion_judge_parse](../../lib/fusion_core/fusion_judge_parse.mli),
+  [RFC-0252 §7.2](../rfc/RFC-0252-fusion-panel-judge-deliberation.md)
+
 **Fusion Route (경로 이름)**
 : Fusion 자리에 적히는 값. Keeper 배정과 같은 규칙(`Runtime.resolve_assignment`)으로
   푼다 — `[runtime.lanes.<이름>]`이 있으면 그 lane 의 후보 목록, 없고 런타임 id 이면 그

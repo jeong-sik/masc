@@ -131,7 +131,12 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     Store.write_blob store bytes)
     |> Result.map_error (fun _ -> "sampling request could not be retained") in
   let observation = ref Outside_observation in
-  let handler (params : S.create_message_params) =
+  let handler ?error_bytes (params : S.create_message_params) =
+    (* An error message must fit the whole JSON-RPC envelope, which the
+       transport measures with the request id; [error_bytes] carries that. *)
+    let refusal_bytes = match error_bytes with
+      | None -> package.resources.max_reply_bytes
+      | Some bytes -> min bytes package.resources.max_reply_bytes in
     let run () =
     let* observation_inputs = match !observation with
       | Outside_observation -> Error "host sampling requires an active observation"
@@ -253,11 +258,11 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Invocation_exception _ -> "outcome_unknown" | Answer _ -> "answered" in
         let reply = `Assoc ["status",`String status;"evidence",references] in
         (match Eio_unix.run_in_systhread (fun () ->
-           encode_bounded ~max_bytes:package.resources.max_reply_bytes reply) with
+           encode_bounded ~max_bytes:refusal_bytes reply) with
          | Ok bytes -> Error bytes
-         | Error _ -> Error (bound_refusal ~max_bytes:package.resources.max_reply_bytes
+         | Error _ -> Error (bound_refusal ~max_bytes:refusal_bytes
                                "sampling failed; outcome retained")) in
-    run () |> Result.map_error (bound_refusal ~max_bytes:package.resources.max_reply_bytes) in
+    run () |> Result.map_error (bound_refusal ~max_bytes:refusal_bytes) in
   Ok {package; instance_id; store; observation; handler}
 
 let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =

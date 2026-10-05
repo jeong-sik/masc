@@ -1514,6 +1514,56 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
         (Result.is_ok (Store.read_blob_bounded
           ~budget:(Store.read_budget ~max_bytes:p.resources.max_reply_bytes) store request))))) [false;true]
 
+(* The transport measures the whole JSON-RPC error, so the host tells the
+   handler how many bytes its message may encode for this request. A receipt
+   that fits [max_reply_bytes] but not that budget must not be returned as is. *)
+let test_sampling_refusal_reserves_error_envelope () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module S = Mcp_protocol.Sampling in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let reference = Types.evidence_to_json (Store.blob_reference "") in
+  let raw_receipt = Yojson.Safe.to_string (`Assoc ["status", `String "retention_error";
+    "evidence", `Assoc ["request", reference; "outcome", reference]]) in
+  let quoted_receipt_bytes = String.length (Yojson.Safe.to_string (`String raw_receipt)) in
+  let max_reply_bytes = quoted_receipt_bytes + 64 in
+  let base = package dir "sampling" in
+  let p = {base with model_access=Types.Host_sampling;
+    resources={base.resources with max_reply_bytes}} in
+  let params = require (S.create_message_params_of_yojson
+    (`Assoc ["messages", `List []; "maxTokens", `Int 1])) in
+  let refusal ~name ~error_bytes =
+    let store = Store.create ~root:(Filename.concat dir name) in
+    let broker = require (Sampling.create ~store ~package:p ~instance_id:"x" ~route:"r"
+      ~invoke:(fun ~route:_ ~request _ ->
+        let bytes = Yojson.Safe.to_string ~std:true (`Assoc [
+          "kind", `String "model_outcome"; "instance_id", `String "x";
+          "route", `String "r"; "request", Types.evidence_to_json request;
+          "status", `String "host_error"; "error", `String "failed"]) in
+        List.iter (fun directory ->
+          let directory = Filename.concat (Store.root store) directory in
+          if not (Sys.file_exists directory) then Unix.mkdir directory 0o700;
+          Unix.mkdir (Filename.concat directory (Store.digest bytes ^ ".json")) 0o700)
+          ["evidence"; "sampling-evidence"];
+        Error "failed") ()) in
+    let handler = require (Sampling.for_worker broker ~package:p ~instance_id:"x") in
+    let handler params = handler ?error_bytes params in
+    match run_sampling_observation broker handler params with
+    | Ok _ -> fail "failed host call cannot report success"
+    | Error message -> message in
+  let is_receipt message = match Yojson.Safe.from_string message with
+    | `Assoc fields -> List.assoc_opt "status" fields = Some (`String "retention_error")
+    | _ -> false
+    | exception Yojson.Json_error _ -> false in
+  check bool "a receipt within the error budget is delivered" true
+    (is_receipt (refusal ~name:"error-budget-fits" ~error_bytes:(Some quoted_receipt_bytes)));
+  let tight = refusal ~name:"error-budget-tight" ~error_bytes:(Some (quoted_receipt_bytes - 1)) in
+  check bool "a receipt beyond the error budget is not returned" false (is_receipt tight);
+  check bool "the replacement fits the error budget" true
+    (String.length (Yojson.Safe.to_string (`String tight)) <= quoted_receipt_bytes - 1);
+  check bool "without a budget only the reply bound applies" true
+    (is_receipt (refusal ~name:"error-budget-absent" ~error_bytes:None)))
+
 let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
@@ -1815,6 +1865,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
     (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
   test_case "sampling retention error uses encoded wire bound" `Quick test_sampling_retention_error_uses_encoded_reply_bound;
+  test_case "sampling refusal reserves error envelope" `Quick test_sampling_refusal_reserves_error_envelope;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
   test_case "sampling recovery reports unreadable terminal journal" `Quick test_sampling_recovery_reports_unreadable_terminal_journal;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;

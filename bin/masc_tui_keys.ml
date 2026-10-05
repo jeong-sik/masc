@@ -87,7 +87,7 @@ let config_bindings =
       ~help:"runtime.toml: discard only the local draft and read the current file",
       Some [ Config_runtime ]
   ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
-  ; b Act "o" "model source", Some [Config_models]
+  ; b Act "m" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]
@@ -1511,6 +1511,13 @@ let footer_hints_lanes_run_detail =
      ]
      @ listing_meta)
 
+let preflight_detail_binding =
+  b Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
+
+let footer_hints_lanes_run_detail_for ~preflight =
+  if preflight then hints_of_bindings [preflight_detail_binding] ^ "  " ^ footer_hints_lanes_run_detail
+  else footer_hints_lanes_run_detail
+
 let footer_hints_git_changes =
   hints_of_bindings
     ([ b Navigate "j/k" "move"
@@ -1547,6 +1554,7 @@ let bindings_memory_facts =
   ; b Act "Enter" "detail"
       ~help:"read the whole fact in a wide overlay that owns the terminal"
   ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
+  ; b Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
   ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
   ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
   ; b Search "/" "filter" ~help:"live text filter / search"
@@ -1785,6 +1793,7 @@ let help_sections ?current () =
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
+           | Lanes -> entries [preflight_detail_binding]
            | _ -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))

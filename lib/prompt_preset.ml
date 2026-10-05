@@ -326,10 +326,16 @@ let runtime_of_json (json : Yojson.Safe.t) =
             let* acc = acc in
             match value with
             | `Assoc lane_fields ->
+              (* Presets saved before lanes carried activity (v0.49.0 and
+                 earlier, same schema_version) have no [enabled]: every lane
+                 in them was live, and the runtime TOML reads an omitted
+                 [enabled] as true too. Absent means true; a present value
+                 that is not a boolean is still refused. *)
               let* enabled =
                 match List.assoc_opt "enabled" lane_fields with
                 | Some (`Bool enabled) -> Ok enabled
-                | Some _ | None -> Error ("lane " ^ id ^ " enabled must be a boolean")
+                | None -> Ok true
+                | Some _ -> Error ("lane " ^ id ^ " enabled must be a boolean")
               in
               let* slots = string_list_field lane_fields "slots" in
               let* cli_slots = string_list_field lane_fields "cli_slots" in

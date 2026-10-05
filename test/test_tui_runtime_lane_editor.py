@@ -695,6 +695,69 @@ def run_exact_refusal(executable: str) -> None:
     )
 
 
+def run_exact_picker_refusal(executable: str) -> None:
+    """The candidate picker refuses a candidate the save would refuse: its
+    provider declares no exact-body-timeout-s (Runtime_config_text rule 3,
+    #38779). The row carries the reason before Enter, so the operator does not
+    learn it from a 400 after the write. This is the picker half of the same
+    operator report as run_exact_refusal."""
+    store = LaneStore()
+    for runtime in store.body["runtimes"]:
+        runtime["exact_body_deadline_missing"] = True
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"no exact-body-timeout-s", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if b"no exact-body-timeout-s" not in screen:
+            raise AssertionError(
+                f"the picker did not refuse the candidate; screen tail={screen[-1600:]!r}"
+            )
+        # Enter on the refused row draws the sentence that names the table and
+        # the key, so the operator knows what to declare.
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"needs exact-body-timeout-s for exact lanes", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if b"needs exact-body-timeout-s for exact lanes" not in screen:
+            raise AssertionError(
+                f"the picker did not say why; screen tail={screen[-1600:]!r}"
+            )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="The exact-slot picker refuses a candidate the save would refuse",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 def run_cli_editor(executable: str) -> None:
     """The Librarian editor reaches both arrays and explains their boundary."""
     store = LaneStore()
@@ -1533,6 +1596,7 @@ if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
     run_exact_refusal(os.path.abspath(sys.argv[1]))
+    run_exact_picker_refusal(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))
     run_empty_cli_group(os.path.abspath(sys.argv[1]))
     run_curator_takes_cli(os.path.abspath(sys.argv[1]))

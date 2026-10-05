@@ -58,26 +58,36 @@ let reject_duplicate_paths (declared : (string list * string) list) :
 
 (* One parse of the embedded tool tree, on first ask — the files are
    crunched into the binary, so a second parse reads the same bytes to
-   the same answer (the pattern [Tool_loading_declarations] set). *)
+   the same answer (the pattern [Tool_loading_declarations] set).
+
+   [read] and [files] are passed in rather than read from
+   [Embedded_config] directly, so a test can drive the same load path with
+   its own TOML bytes (the shape {!Tool_definition_toml.validate_embedded}
+   already takes). *)
+let declarations_of ~(read : string -> string option) ~(files : string list) :
+    (string list * string) list =
+  List.filter_map
+    (fun path ->
+       match Filename.dirname path, Filename.extension path with
+       | "tools", ".toml" -> (
+         let name = Filename.remove_extension (Filename.basename path) in
+         match read path with
+         | None -> None
+         | Some contents -> (
+           (* A file that fails to load here already made the loading
+              declarations table raise; that owner owns load failures. *)
+           match Tool_definition_toml.load ~name ~contents with
+           | Error _ -> None
+           | Ok loaded ->
+             loaded.Tool_definition_toml.shell_command
+             |> Option.map (fun words -> words, name)))
+       | _, _ -> None)
+    files
+
 let entries : (string list * string) list Lazy.t =
   lazy
-    (List.filter_map
-       (fun path ->
-          match Filename.dirname path, Filename.extension path with
-          | "tools", ".toml" -> (
-            let name = Filename.remove_extension (Filename.basename path) in
-            match Embedded_config.read path with
-            | None -> None
-            | Some contents -> (
-              (* A file that fails to load here already made the loading
-                 declarations table raise; that owner owns load failures. *)
-              match Tool_definition_toml.load ~name ~contents with
-              | Error _ -> None
-              | Ok loaded ->
-                loaded.Tool_definition_toml.shell_command
-                |> Option.map (fun words -> words, name)))
-          | _, _ -> None)
-       Embedded_config.file_list)
+    (declarations_of ~read:Embedded_config.read
+       ~files:Embedded_config.file_list)
 
 (* The duplicate refusal is a value, not an exception.  A [lazy] that
    raised would cache the exception and re-raise it on every later force,

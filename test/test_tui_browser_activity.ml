@@ -228,6 +228,20 @@ let changed_path () =
   let _,_,write=A.start_save ~generation:4 (A.toggle (A.discard session)) |> ok in
   same off write.source_text
 
+(* CR5410456308: a 409 naming another path with the same bytes and revision
+   is another document. The panel says so, points to x rather than u, and a
+   discard starts over on the new file. *)
+let same_bytes_conflict_on_another_path () =
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let session=A.finish_save request (A.Conflict (doc ~path:"/new/runtime.toml" source)) pending in
+  shows "file path changed" session;
+  shows "x discards this draft" session;
+  Alcotest.(check bool) "no reapply promise across files" false
+    (has "u reapplies" (A.lines session));
+  rejected (A.start_save ~generation:3 session);
+  let _,_,write=A.start_save ~generation:4 (A.toggle (A.discard session)) |> ok in
+  same "/new/runtime.toml" write.expected_source_path
+
 let table_shapes () =
   let quoted="[browser.\"automation\"] # header\ngeckodriver = '/fixture/driver'\n" in
   let _,_,write=A.start_save ~generation:2 (A.toggle (loaded (doc quoted))) |> ok in
@@ -268,5 +282,6 @@ let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.ma
    "workspace roundtrip ignores old callbacks",workspace_roundtrip;
    "unconfirmed write and preview refusal",ambiguous_write_and_refusal;
    "changed file path needs discard",changed_path;
+   "same bytes on another path need discard",same_bytes_conflict_on_another_path;
    "quoted and multiline table shapes",table_shapes;
    "stored setting does not hide application failure",receipt_keeps_application_failure]]

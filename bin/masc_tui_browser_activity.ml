@@ -177,11 +177,31 @@ let finish_read request result t =
           explicit edit, reapply or discard can resolve the retained intent. *)
        let draft = if retain then t.draft else Some {base=current;desired=enabled} in
        {t with draft;current=Some current;message=None})
+(* How the draft's base relates to the current file. A different path is
+   another document even when its bytes and revision match, so u cannot carry
+   the draft across; only x starts over on the new file. Every gate and
+   message below reads this one classification. *)
+type base_relation = Same_document | File_changed | Other_file
+let base_relation (draft : draft) (current : document) =
+  if draft.base.path <> current.path then Other_file
+  else if draft.base.source_revision <> current.source_revision then File_changed
+  else Same_document
+let path_changed_guidance =
+  "The configuration file path changed. x discards this draft to edit the new file; u cannot reapply across files."
+let file_changed_guidance =
+  "File changed. u reapplies only activity to current settings; x discards the draft."
+let relation_guidance = function
+  | Same_document -> None
+  | File_changed -> Some file_changed_guidance
+  | Other_file -> Some path_changed_guidance
+
 let ready t =
   if busy t then Error "A request is pending." else
   match t.draft,t.current with
-  | Some draft, Some current when draft.base.path=current.path -> Ok (draft,current)
-  | Some _, Some _ -> Error "The configuration file path changed. Discard this draft before editing the new file."
+  | Some draft, Some current ->
+    (match base_relation draft current with
+     | Other_file -> Error path_changed_guidance
+     | Same_document | File_changed -> Ok (draft,current))
   | None, _ | _, None -> Error "Read the current configuration before editing or saving."
 let toggle t = match ready t with
   | Error detail -> {t with message=Some detail}
@@ -205,9 +225,9 @@ let discard t =
      | Ok enabled -> {t with draft=Some {base=current;desired=enabled};message=Some "Draft discarded; no file was written.";receipt=None})
 let start_save ~generation t =
   let* draft,current = ready t in
-  let* () = if draft.base.source_revision<>current.source_revision
-    then Error "File changed. u reapplies only this activity to current settings; s then saves."
-    else Ok () in
+  let* () = match base_relation draft current with
+    | File_changed -> Error "File changed. u reapplies only this activity to current settings; s then saves."
+    | Same_document | Other_file -> Ok () in
   let* was_enabled = activity t.owner.lane draft.base in
   let* () = if was_enabled=draft.desired then Error "No activity change to save." else Ok () in
   let* source_text = apply draft.desired t.owner.lane draft.base in
@@ -224,7 +244,11 @@ let finish_save request result t =
       | (Some _ | None), Durability_unconfirmed | None, Durable -> t.draft in
     {t with draft;current=None;receipt=Some receipt;
       message=Some "Write receipt received. Read current settings before editing again."}
-  | Save _,Conflict current -> {t with current=Some current;message=Some "File changed; draft retained. u reapplies activity to the current file."}
+  | Save _,Conflict current ->
+    let message = match t.draft with
+      | Some draft when base_relation draft current = Other_file -> path_changed_guidance
+      | Some _ | None -> "File changed; draft retained. u reapplies activity to the current file." in
+    {t with current=Some current;message=Some message}
   | Save _,Refused detail -> {t with message=Some detail}
   | Save _,Unconfirmed detail -> {t with current=None;message=Some (detail ^ " · read current before retrying")}
   | Read,_ -> t
@@ -241,9 +265,8 @@ let lines (t : t) =
     ["Activity draft: " ^ flag draft.desired;
      "Based on revision: " ^ draft.base.source_revision] in
   let conflict = match t.draft,t.current with
-    | Some draft,Some current when draft.base.source_revision<>current.source_revision ->
-      ["File changed. u reapplies only activity to current settings; x discards the draft."]
-    | Some _,Some _ | None,_ | _,None -> [] in
+    | Some draft,Some current -> Option.to_list (relation_guidance (base_relation draft current))
+    | None,_ | _,None -> [] in
   ["Browser activity · " ^ label;
    "Off stops new reads and actions; accepted work finishes. Configuration and sessions remain.";
    (match t.owner.lane with

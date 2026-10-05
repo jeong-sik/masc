@@ -241,6 +241,9 @@ let usage_window_kind_json : Usage.window_kind -> Yojson.Safe.t = function
 let usage_utilization_json : Usage.utilization -> Yojson.Safe.t = function
   | Fraction value -> `Assoc [ "unit", `String "fraction"; "value", `Float value ]
   | Percent value -> `Assoc [ "unit", `String "percent"; "value", `Int value ]
+  | Usd { used; limit } ->
+    `Assoc [ "unit", `String "usd"; "value", `Float used
+           ; "limit", Json_util.float_opt_to_json limit ]
 ;;
 
 let usage_window_json ({ window; source; observed_at } : Usage.recorded) : Yojson.Safe.t =
@@ -291,13 +294,16 @@ let usage_scopes (runtimes : Runtime_instance.t list) =
 ;;
 
 let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
-  let state, windows =
+  let state, windows, report_fields =
     match Usage.state ~scope with
-    | Not_reported_since_start -> "not_reported_since_start", []
-    | Reported (first, rest) -> "reported", List.map usage_window_json (first :: rest)
+    | Not_reported_since_start -> "not_reported_since_start", [], []
+    | Reported_no_windows { source; observed_at } ->
+        "reported_no_windows", [],
+        [ "source", `String (Usage.source_to_string source); "observed_at", `Float observed_at ]
+    | Reported (first, rest) -> "reported", List.map usage_window_json (first :: rest), []
   in
   `Assoc
-    [ "scope", `String (scope_label scope)
+    ([ "scope", `String (scope_label scope)
     ; "scope_id", `String (Server_provider_usage_history.scope_id scope)
     ; ( "providers"
       , `List
@@ -307,7 +313,7 @@ let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
              providers) )
     ; "state", `String state
     ; "windows", `List windows
-    ]
+    ] @ report_fields)
 ;;
 
 let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =

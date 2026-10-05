@@ -235,7 +235,8 @@ type chat_message = {
   mentions : Keeper_identity.Keeper_id.t list;
       (** RFC-0232 §3.3: mention ids parsed once at append from the
           persisted user content (plus connector-supplied explicit
-          mentions).  [[]] on tool/assistant lines, mention-free lines,
+          mentions), unless the writer explicitly selected passive context.
+          [[]] on passive context, tool/assistant lines, mention-free lines,
           and rows written before P4 (the offline backfill tool stamps
           those).  Malformed persisted entries are reported as
           persistence read drops and skipped; the row stays valid. *)
@@ -486,6 +487,11 @@ val append_user_message :
   unit ->
   unit
 
+type mention_policy = Parse_mentions | Passive_context
+(** [Parse_mentions] parses persisted content and includes explicit mentions.
+    [Passive_context] persists an empty mention list, even for literal @names or
+    supplied extra mentions. An already-present row keeps its original metadata. *)
+
 (** Idempotent accepted-user append for a direct/queued delivery identity. *)
 val append_user_message_once :
   base_dir:string ->
@@ -498,6 +504,7 @@ val append_user_message_once :
   ?external_message_id:string ->
   ?workspace_id:string ->
   ?speaker:speaker ->
+  ?mention_policy:mention_policy ->
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   unit ->
   (append_once_result, string) result

@@ -11,4 +11,13 @@ let path_of_file_uri uri =
   | _ -> uri
 ;;
 
-let file_uri_of_path path = Uri.make ~scheme:"file" ~path () |> Uri.to_string
+let file_uri_of_path path =
+  (* [Uri.make] takes an encoded path; protect literal percent sequences before
+     its parser decodes each segment. Keep directory separators unchanged. *)
+  let path =
+    String.split_on_char '/' path
+    |> List.map Uri.pct_encode
+    |> String.concat "/"
+  in
+  Uri.make ~scheme:"file" ~path () |> Uri.to_string
+;;

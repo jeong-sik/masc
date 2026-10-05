@@ -1,10 +1,11 @@
-type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection
+type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection | Disabled_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
 let error_message = function
   | Invalid_request -> "Choose a connection and models with reported context metadata."
   | Configuration_unavailable -> "The workspace configuration could not be read."
   | Network_unavailable -> "The server has no network capability for discovery."
+  | Disabled_connection -> "This provider is disabled. Enable it in runtime.toml before adding models."
   | Unsupported_connection -> "This connection needs its native account setup before web discovery."
   | Credential_unavailable -> "The selected connection's credential could not be prepared."
   | Discovery_failed error -> Runtime_model_discovery.error_message error
@@ -13,7 +14,7 @@ let error_message = function
    moved under the request. 502: the runtime or server behind the connection
    answered badly. 503: this server cannot serve the request right now. *)
 let status_of_error : error -> Httpun.Status.t = function
-  | Invalid_request | Unsupported_connection | Credential_unavailable -> `Bad_request
+  | Invalid_request | Unsupported_connection | Disabled_connection | Credential_unavailable -> `Bad_request
   | Configuration_unavailable | Network_unavailable -> `Service_unavailable
   | Discovery_failed (Runtime_model_discovery.Invalid_connection
       | Runtime_model_discovery.Credential_unavailable) -> `Bad_request
@@ -76,7 +77,8 @@ let private_key ~sw pending secret =
     pending := key :: !pending;
     Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted key);
     Ok ["credential_file",`String (Runtime_setup_credentials.reference_path key)]
-let source_template ~sw ~pending ~workspace config request =
+type source_use = Observe_source | Save_source
+let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request =
   let* request = fields ["integration_id";"endpoint";"api_key";"account_ref"] ["integration_id"] request in
   let* id = text (value "integration_id" request) in
   let inventory = Runtime_wizard_inventory.to_json config in
@@ -97,7 +99,7 @@ let source_template ~sw ~pending ~workspace config request =
   let endpoint_val = match endpoint with Some v -> v | None -> `Null in
   let transport = if http then ["endpoint", endpoint_val]
     else ["command",value "command" selected] in
-  let metadata = if http then List.filter (fun (key,_) -> List.mem key ["provider_kind";"request_path"]) selected else [] in
+  let metadata = if http then List.filter (fun (key,_) -> key="provider_kind" || key="request_path") selected else [] in
   let* account = match List.assoc_opt "account_ref" request with
     | None -> Ok None
     | Some (`String reference) when not http && not (List.mem_assoc "api_key" request) ->
@@ -107,6 +109,25 @@ let source_template ~sw ~pending ~workspace config request =
         |> Result.map_error (fun _ -> Credential_unavailable) in
       Ok (Some binding)
     | Some _ -> Error Invalid_request in
+  let* () = match declared_provider config id with
+    | Some provider when not provider.enabled ->
+      (* A disabled connection can still be the client template for an explicit
+         new login. Its old account must remain disabled; only a changed account
+         reference (or an explicitly supplied HTTP key) creates a new provider. *)
+      (match account, List.assoc_opt "api_key" request with
+       | Some (Runtime_setup_accounts.Native_home selected), None
+         when not (Runtime_setup_spec.account_home_matches choice provider.account_home
+           (Some selected.account_home)) -> Ok ()
+       | Some (Runtime_setup_accounts.Antigravity_account selected), None
+         when provider.credentials <> Some (Runtime_schema.File selected.credential_file) -> Ok ()
+       | None, Some (`String _) when http -> Ok ()
+       | _ -> Error Disabled_connection)
+    | Some _ | None -> Ok () in
+  let existing_inline = match use, account, List.assoc_opt "api_key" request,
+      declared_provider config id with
+    | Save_source, None, None, Some ({credentials=Some (Runtime_schema.Inline _); _} as provider)
+      when http -> Some provider
+    | _ -> None in
   let* credentials = match account,List.assoc_opt "api_key" request with
     | Some (Runtime_setup_accounts.Antigravity_account account),None
       when choice=Runtime_setup_spec.Antigravity -> Ok ["credential_file",`String account.credential_file]
@@ -121,7 +142,8 @@ let source_template ~sw ~pending ~workspace config request =
       (match declared_provider config id with
        | Some provider ->
          (match (provider.credentials : Runtime_schema.credential option),http with
-          | Some (Runtime_schema.Inline secret),true -> private_key ~sw pending secret
+          | Some (Runtime_schema.Inline secret),true ->
+              if Option.is_some existing_inline then Ok [] else private_key ~sw pending secret
           | Some (Runtime_schema.Inline _),false -> Error Credential_unavailable
           | Some (Runtime_schema.File path),_ -> Ok ["credential_file",`String path]
           | Some (Runtime_schema.Env name),_ -> Ok ["api_key_env",`String name]
@@ -151,7 +173,7 @@ let source_template ~sw ~pending ~workspace config request =
     | (Runtime_setup_spec.Claude_code | Codex | Muse),Some (Runtime_setup_accounts.Antigravity_account _) ->
       Error Invalid_request
     | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity),_ -> Ok [] in
-  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice)
+  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice,existing_inline)
 let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
@@ -320,15 +342,15 @@ let muse_catalog ~binary template =
   Ok ("muse_" ^ source,models)
 
 let bound_model_names (config : Runtime_schema.config) template id choice =
-  let selected_home = match choice with
-    | Runtime_setup_spec.Codex ->
-      Runtime_codex_app_server.effective_account_home
-        (match value "account_home" template with `String home -> Some home | _ -> None)
-    | Claude_code ->
-      Runtime_claude_code.effective_account_home
-        (match value "account_home" template with `String home -> Some home | _ -> None)
-    | Muse -> (match value "account_home" template with `String home -> Some home | _ -> None)
+  (* Resolve both sides with the same native-home rules used by inventory
+     grouping; an omitted home can name the same account as an explicit one. *)
+  let effective_home home = match choice with
+    | Runtime_setup_spec.Codex -> Runtime_codex_app_server.effective_account_home home
+    | Claude_code -> Runtime_claude_code.effective_account_home home
+    | Muse -> home
     | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> None in
+  let selected_home = effective_home
+      (match value "account_home" template with `String home -> Some home | _ -> None) in
   let selected_credential = match choice, value "credential_file" template with
     | Runtime_setup_spec.Antigravity, `String path -> Some path
     | _ -> None in
@@ -336,14 +358,12 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
     provider.enabled
     && (match choice_of_api_format provider.api_format with
         | Ok candidate -> candidate = choice | Error _ -> false)
-    && (String.equal provider.id id
-        || (match choice, selected_home, provider.account_home with
-            | (Runtime_setup_spec.Codex | Claude_code | Muse), Some selected, Some home ->
-              String.equal selected home
-            | _ -> false)
-        || (match selected_credential, provider.credentials with
-            | Some selected, Some (Runtime_schema.File path) -> String.equal selected path
-            | _ -> false)) in
+    && (match selected_home, selected_credential with
+        | Some selected, _ -> Option.equal String.equal (Some selected)
+            (effective_home provider.account_home)
+        | None, Some selected -> (match provider.credentials with
+            | Some (Runtime_schema.File path) -> String.equal selected path | _ -> false)
+        | None, None -> String.equal provider.id id) in
   List.filter_map (fun (binding : Runtime_schema.binding) ->
     if binding.enabled
        && List.exists (fun (provider : Runtime_schema.provider) ->
@@ -374,7 +394,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id,choice=source_template ~sw ~pending ~workspace:base_path config request in
+    let* template,id,choice,_=source_template ~sw ~pending ~workspace:base_path config request in
     let* json = match choice with
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
@@ -403,7 +423,7 @@ let context ~binary ~net ~base_path request =
     let* load=match value "load" request with `Bool value -> Ok value | _ -> Error Invalid_request in
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
+    let* template,id,choice,_=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
     let observed = match choice with
       | Runtime_setup_spec.Antigravity ->
         let* command=text (value "command" template) in
@@ -463,7 +483,7 @@ let save ~binary ~base_path request =
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,provider_id,choice,existing_inline=source_template ~use:Save_source ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let* reported_models=match choice with
@@ -472,7 +492,18 @@ let save ~binary ~base_path request =
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
           | Claude_code | Codex | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
-          let* spec=model_spec ~reported_models template model in let* tail=specs tail in Ok (spec::tail) in
+          let* spec=model_spec ~reported_models template model in
+          let* spec = match existing_inline with
+            | Some provider ->
+                (match Runtime_setup_spec.for_existing_inline_provider spec provider with
+                 | Some spec -> Ok spec | None -> Error Unsupported_connection)
+            | None -> Ok (match declared_provider config provider_id with
+                | None -> spec
+                | Some provider ->
+                  (match Runtime_setup_spec.for_provider spec provider with Some spec -> spec | None -> spec)) in
+          let* spec = Runtime_setup_spec.resolve_provider spec config.providers
+            |> Result.map_error (fun _ -> Unsupported_connection) in
+          let* tail=specs tail in Ok (spec::tail) in
         let* models=specs models in
         let* tail=prepare tail in Ok (models::tail) in
     let* prepared=prepare connections in

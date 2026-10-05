@@ -71,6 +71,9 @@ val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?
     the current declared default lane, replacing only its ordered candidates;
     unrelated lanes and Keeper assignments remain unchanged. The receipt names
     that lane as [runtime_id], with concrete candidates in [runtime_ids].
+    Specs resolve against enabled configured providers before rendering. Callers
+    prepare selection IDs against the same inventory (the native renderer accepts
+    [--base-path]); IDs for an unresolved provider are not accepted as aliases.
     Existing provider and unrelated settings bytes are retained. The source is
     compared again after stage validation under the runtime writer lock.
     Publication validates and atomically replaces runtime.toml through the

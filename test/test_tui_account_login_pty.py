@@ -92,6 +92,9 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         return 200, {"configured": True, "commit": {"durability": "durable", "warnings": []}, "readiness": "verified", "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"]}
 
     fixtures["/api/v1/setup/connections"] = _keyboard_harness.RequestHttpResponse(verify)
+    fixtures["/api/v1/runtime/setup/resume"] = (200, {
+        "runtime_ready": True, "exact_output_authority_available": True,
+        "model_setup": {"status": "available"}})
 
     def interact(process, fd, _slave, output, _base_path):
         _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
@@ -151,6 +154,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             _keyboard_harness.wait_for_output(process, fd, output, "검증하고 저장했습니다".encode(), start=start, timeout=20.0)
         else:
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", "검증하고 저장했습니다".encode())
+        _keyboard_harness.wait_for_output(process, fd, output, "런타임에 활성화했습니다".encode(), start=0)
         calls = [(path, json.loads(body)) for path, body in requests if body and path.startswith("/api/v1/setup/")]
         save = next(body for path, body in calls if path.endswith("/connections"))
         assert save["revision"] == "fixture-revision"

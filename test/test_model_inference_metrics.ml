@@ -1906,7 +1906,10 @@ let test_metrics_cache_retains_last_good () =
           ~cache ~key:"test" ~placeholder:(`Assoc ["state", `String "loading"])
           ~compute:(fun () -> M.compute ~base_path:base ~window_minutes:60
             |> Result.map M.to_json |> Result.map_error M.read_error_to_string)) in
-      let open Yojson.Safe.Util in
+      let member = Yojson.Safe.Util.member
+      and to_int = Yojson.Safe.Util.to_int
+      and to_string = Yojson.Safe.Util.to_string in
+      (* `open` would shadow the local `path` binding with Yojson.Safe.Util.path. *)
       let first = read () in
       check int "complete initial cache" 1 (first |> member "total_entries" |> to_int);
       let broken = make_keeper_dir base "unreadable" in

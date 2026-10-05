@@ -8420,6 +8420,7 @@ let runtime_resolved_json =
     [ ("generated_at_iso", `String "2026-08-24T10:20:02Z")
     ; ("source", `String "/api/v1/runtime/resolved")
     ; ("config_path", `String "/workspace/config/runtime.toml")
+    ; ("default_route", `String "ollama_cloud.deepseek")
     ; ("default_runtime", picker_default_runtime)
     ; "media_failover", `List []
     ; "media_failover_declared", `List []
@@ -8772,6 +8773,7 @@ let runtime_resolved_surface_json () =
     [ "generated_at_iso", `String "2026-08-24T10:20:02Z"
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", `String "/workspace/config/runtime.toml"
+    ; "default_route", `String "primary"
     ; "default_runtime", runtime_a
     ; "media_failover", `List []
     ; "media_failover_declared", `List []
@@ -9086,12 +9088,29 @@ let test_runtime_default_limits_must_match_listed_row () =
      "declared_reasoning_effort", `String "low";
      "is_local", `Bool true]
 
+let test_default_route_must_enter_the_reported_runtime () =
+  let replace_route route = function
+    | `Assoc fields ->
+        `Assoc (("default_route", `String route) :: List.remove_assoc "default_route" fields)
+    | json -> json
+  in
+  let json = runtime_resolved_surface_json () |> replace_route "degraded" in
+  match Tui_decode.decode_runtime_resolved_snapshot json with
+  | Error detail ->
+      Alcotest.(check string) "a lane cannot claim another entry runtime"
+        "default_route disagrees with its lane's entry runtime" detail
+  | Ok _ -> Alcotest.fail "contradictory default route was accepted"
+
 let test_runtime_surface_keeps_resolved_rows_without_a_probe () =
   match
     Tui_decode.decode_runtime_resolved_snapshot (runtime_resolved_surface_json ())
   with
   | Error detail -> Alcotest.fail detail
   | Ok resolved ->
+      Alcotest.(check (option string)) "configured route is a lane"
+        (Some "primary") resolved.rrs_default_route;
+      Alcotest.(check (option string)) "entry runtime is distinct"
+        (Some "runtime-a") resolved.rrs_default_runtime_id;
       (match
          Tui_decode.join_runtime_surface ~probe:None
            ~probe_error:(Some "probe permission denied") ~resolved
@@ -12620,6 +12639,8 @@ let () =
           test_runtime_route_keeps_declared_order
       ; Alcotest.test_case "default limits match listed runtime" `Quick
           test_runtime_default_limits_must_match_listed_row
+      ; Alcotest.test_case "default route agrees with entry runtime" `Quick
+          test_default_route_must_enter_the_reported_runtime
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
           test_runtime_surface_keeps_resolved_rows_without_a_probe
       ] );

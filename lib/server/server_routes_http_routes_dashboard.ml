@@ -1938,7 +1938,7 @@ let add_routes ~sw ~clock router =
           the route needs Admin like the setup inventory. *)
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
-           let default, runtimes = Runtime.get_default_and_runtimes () in
+           let _default_route, default, runtimes = Runtime.get_default_route_and_runtimes () in
            let providers =
              List.fold_left
                (fun providers (runtime : Runtime_instance.t) ->

@@ -303,6 +303,11 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
     if (config === null || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts) return
     if (nextSourceText === config.source_text) return
+    const expectedSourcePath = config.path
+    if (expectedSourcePath === null || expectedSourcePath === '') {
+      setError('runtime.toml 저장 기준 path를 확인하지 못했습니다. 현재 파일을 다시 읽으세요.')
+      return
+    }
     const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText, config.reserved_provider_ids)
     for (const provider of nextEnvironment.providers) {
       const protocol = config?.provider_protocols.find(item => item.protocol === provider.protocol)
@@ -321,7 +326,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setError(null)
     setNotice(null)
     try {
-      const saved = await saveRuntimeTomlConfig(nextSourceText, config.source_revision)
+      const saved = await saveRuntimeTomlConfig(nextSourceText, config.source_revision, { expectedSourcePath })
       await adoptSavedRuntimeConfig(saved)
     } catch (err: unknown) {
       if (err instanceof RuntimeTomlRevisionConflict && err.current.source_path === config.path) {

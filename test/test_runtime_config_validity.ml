@@ -5097,7 +5097,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     in
     let current_observation = Runtime.config_observation ~path degraded in
     let stale_state = Runtime.exact_output_registry_stale () in
-    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
              ~expected_source_revision:original_revision replacement with
      | Error (Runtime.Config_source_conflict current) ->
        check string "conflict carries current path" path current.path;
@@ -5114,7 +5114,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       (registry_exn () == after_degraded);
     check bool "source conflict preserves registry staleness" true
       (Runtime.exact_output_registry_stale () = stale_state);
-    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
              ~expected_source_revision:"invalid" replacement with
      | Error (Runtime.Config_edit_failed _) -> ()
      | Error (Runtime.Config_source_conflict _) | Ok _ ->
@@ -5145,7 +5145,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (lane_is_unconfigured
               ~lane_id:"hitl_auto_judge"
               after_write_failure));
-    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
              ~expected_source_revision:
                (Runtime.config_source_revision_to_string current_observation.source_revision)
              replacement with

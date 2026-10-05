@@ -505,12 +505,17 @@ let parse_runtime_config_raw_save_body body_str =
      one revision: duplicate revision fields cannot identify an editor base. *)
   match Yojson.Safe.from_string body_str with
   | `Assoc fields ->
-    (match List.filter (fun (key, _) -> String.equal key "expected_source_revision") fields with
-     | [_, `String revision] when String_util.is_lowercase_sha256_hex revision ->
-       Ok (source_text, revision)
+    let* revision = match List.filter (fun (key, _) -> String.equal key "expected_source_revision") fields with
+     | [_, `String revision] when String_util.is_lowercase_sha256_hex revision -> Ok revision
      | [] -> Error "expected_source_revision required"
      | [_] -> Error "expected_source_revision must be lowercase SHA-256 hex"
-     | _ -> Error "expected_source_revision must occur exactly once")
+     | _ -> Error "expected_source_revision must occur exactly once" in
+    let* path = match List.filter (fun (key, _) -> String.equal key "expected_source_path") fields with
+     | [_, `String path] when path <> "" && not (String.contains path '\000') -> Ok path
+     | [] -> Error "expected_source_path required"
+     | [_] -> Error "expected_source_path must be a nonempty path without NUL"
+     | _ -> Error "expected_source_path must occur exactly once" in
+    Ok (source_text, revision, path)
   | _ -> Error "JSON object body required"
 ;;
 
@@ -925,7 +930,7 @@ let handle_runtime_config_raw_post state agent_name req reqd body_str =
   match parse_runtime_config_raw_save_body body_str with
   | Error msg ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-  | Ok (source_text, expected_source_revision) ->
+  | Ok (source_text, expected_source_revision, expected_source_path) ->
     (* Audit metadata excludes the source, which can contain provider secrets. *)
     (match Keeper_runtime_config.validate_source_text source_text with
      | Error msg ->
@@ -941,7 +946,7 @@ let handle_runtime_config_raw_post state agent_name req reqd body_str =
          ~outcome:(Audit_log.Failure detail) ();
        respond_keeper_validation_error ~request:req reqd report
      | Ok _ ->
-       (match Runtime.save_config_text_if_current ~expected_source_revision source_text with
+       (match Runtime.save_config_text_if_current ~expected_source_path ~expected_source_revision source_text with
         | Error (Runtime.Config_edit_failed msg) ->
           audit_runtime_config_write state agent_name
             ~operation:Runtime_config_raw_save ~text:source_text

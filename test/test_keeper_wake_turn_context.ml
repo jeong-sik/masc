@@ -770,27 +770,34 @@ let test_direct_turn_discovers_published_workspace_memory () =
 
 let test_workspace_memory_observation_carries_the_claims_digest () =
   let module Ledger = Masc.Workspace_memory_ledger in
-  let observation () =
+  let observation ?(truncated = false) () =
     Ledger.Available
       { ledger_sha256 = "digest-sha"
       ; claim_count = 2
       ; conflict_count = 0
       ; classified_count = 2
       ; claims_digest = [ "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장" ]
+      ; claims_digest_truncated = truncated
       } in
   let shared = Prompt.format_workspace_memory_observation (observation ()) |> Option.get in
   List.iter (fun needle -> check bool "shared ledger digest reaches the briefing" true
     (contains ~needle shared))
     [ "digest-sha"; "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장";
-      "bounded digest"; "keeper_workspace_memory_read" ];
+      "each of the 2 shared claims"; "keeper_workspace_memory_read" ];
+  let truncated =
+    Prompt.format_workspace_memory_observation (observation ~truncated:true ()) |> Option.get in
+  check bool "a truncated digest says which slice it holds" true
+    (contains ~needle:"the digest shows the first 2 of 2 claims in id order" truncated);
   let none_yet =
     Prompt.format_workspace_memory_observation
       (Ledger.Available
          { ledger_sha256 = "digest-sha"; claim_count = 0; conflict_count = 0;
-           classified_count = 0; claims_digest = [] })
+           classified_count = 0; claims_digest = []; claims_digest_truncated = false })
     |> Option.get in
   check bool "an empty ledger says so instead of an empty section" true
-    (contains ~needle:"None yet." none_yet)
+    (contains ~needle:"None yet." none_yet);
+  check bool "an empty ledger announces no claims, not a slice" true
+    (contains ~needle:"The ledger holds no shared claims yet." none_yet)
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =

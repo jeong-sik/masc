@@ -323,8 +323,19 @@ let save ~base_path t =
    round-trip through the prompt, so the cut follows [String_util.utf8_prefix]. *)
 let digest_line_max_bytes = 160
 let digest_budget_bytes = 8192
+(* Canonical ids ("claim-" + 64 hex) are 71 bytes. The codec admits any
+   nonblank id, so the row bounds its id portion itself: an id a foreign
+   writer stretched to kilobytes, or one holding a newline, must not break
+   the row shape or the budget the .mli documents. *)
+let digest_id_max_bytes = 96
 
 let digest_line (claim_id, claim) =
+  let id_text = match String.index_opt claim_id '\n' with
+    | None -> claim_id
+    | Some cut -> String.sub claim_id 0 cut in
+  let id = String_util.utf8_prefix ~max_bytes:digest_id_max_bytes id_text in
+  let id_marked =
+    if String.length id < String.length id_text then id ^ "…" else id in
   let first_line = match String.index_opt claim '\n' with
     | None -> claim
     | Some cut -> String.sub claim 0 cut in
@@ -332,7 +343,7 @@ let digest_line (claim_id, claim) =
   let ellipsized =
     if String.length prefix < String.length first_line then prefix ^ "…"
     else prefix in
-  "- " ^ claim_id ^ ": " ^ ellipsized
+  "- " ^ id_marked ^ ": " ^ ellipsized
 
 let claims_digest ledger =
   (* The budget bounds what the prompt renders, so the join newline between
@@ -356,6 +367,7 @@ type observation =
       ; conflict_count : int
       ; classified_count : int
       ; claims_digest : string list
+      ; claims_digest_truncated : bool
       }
 
 let observe ~base_path =
@@ -373,11 +385,12 @@ let observe ~base_path =
        | Ok ledger ->
          let ledger_sha256 = Digestif.SHA256.(digest_string
            (Yojson.Safe.to_string (to_json ledger)) |> to_hex) in
-         let digest, _truncated = claims_digest ledger in
+         let digest, truncated = claims_digest ledger in
          Available { ledger_sha256; claim_count = List.length (claims ledger);
                      conflict_count = List.length (conflicts ledger);
                      classified_count = List.length (dispositions ledger);
-                     claims_digest = digest })
+                     claims_digest = digest;
+                     claims_digest_truncated = truncated })
     | _ -> Unavailable (ledger_path ^ ": not a regular file")
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing

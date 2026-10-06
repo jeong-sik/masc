@@ -68,9 +68,9 @@ val digest_line_max_bytes : int
 val digest_budget_bytes : int
 (** Total byte cap for the [claims_digest] list an observation carries. The
     digest holds a prefix of the claims in [claim_id] order, never a
-    relevance selection. A non-empty ledger always yields at least one line,
-    so a single digest line may exceed the cap on its own; the cap bounds
-    the accumulation from the second line on. *)
+    relevance selection; [claims_digest_truncated] reports whether claims
+    were left out. Every row bounds both its id and its opening line, so
+    the cap holds for any ledger the codec accepts. *)
 
 type observation =
   | Missing
@@ -84,6 +84,8 @@ type observation =
             (** One rendered opening line per claim, in [claim_id] order,
                 byte-bounded. Each line is ["- <claim_id>: <opening line>"];
                 the full body stays behind [keeper_workspace_memory_read]. *)
+      ; claims_digest_truncated : bool
+            (** True when claims exist beyond the digest's byte budget. *)
       }
 
 val observe : base_path:string -> observation

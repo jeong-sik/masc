@@ -78,7 +78,7 @@ def main(executable: str, captures: Path | None) -> None:
         overview = key(b"A", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
         first = screen(overview, b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
         for needle in (b"> World observer", b"MSX", b"o:retry observation",
-                       b"d:cleanup", b"D:full"):
+                       b"d:remove worker", b"D:full"):
             if needle not in first:
                 raise AssertionError(f"Add-on overview omitted {needle!r}")
         print("TUI_CAPTURE lane-addons overview " + repr(first), flush=True)
@@ -108,7 +108,7 @@ def main(executable: str, captures: Path | None) -> None:
         help_output = key(b"?", b"Lane Add-ons keys")
         help_screen = screen(help_output, b"Lane Add-ons keys")
         for needle in (b"Esc:close", b"j/k select", b"Enter open", b"1 Results",
-                       b"4 Records", b"E edit", b"e export marked rows", b"A command"):
+                       b"4 Records", b"E edit", b"e export marked rows", b"A opens Add-on commands"):
             if needle not in help_screen:
                 raise AssertionError(f"Lane help omitted {needle!r}")
         key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
@@ -178,7 +178,7 @@ def run_installation_detail(executable: str) -> None:
         "instances": [], "rows": [], "coverage": [],
         "configuration": {"directory": "/fixture/lane-addons", "complete": False,
                           "declarations": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
-                                            "desired_revision": "r1", "applied_revision": None,
+                                            "enabled": True, "desired_revision": "r1", "applied_revision": None,
                                             "instance_id": None}],
                           "issues": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
                                       "message": "Docker image missing"}]},
@@ -226,7 +226,7 @@ def run_declared_layers(executable: str, captures: Path | None) -> None:
                 "installation_id": producer, "output_id": "events", "selection": "latest_completed"}
                 for producer in upstream]}})
         declarations.append({"id": name, "source_path": path, "instance_id": owner,
-            "desired_revision": "1", "applied_revision": "1"})
+            "enabled": True, "desired_revision": "1", "applied_revision": "1"})
     captured["instances"], captured["rows"] = workers, []
     captured["configuration"]["declarations"] = declarations
     fixtures["/api/v1/lane-addons"] = (200, captured)
@@ -278,7 +278,7 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
             "title": "Preserved old result", "subject_id": f"retained world/{index}", "fields": {"old_run": owner}})
     captured["instances"] = [old_runs[0], active, *old_runs[1:]]
     captured["configuration"]["declarations"] = [{"id": "report", "source_path": active["configuration"]["source_path"],
-        "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
+        "enabled": True, "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
     inventory_reads: list[str] = []
     def inventory(path: str):
         inventory_reads.append(path)
@@ -423,7 +423,7 @@ def run_navigation_consistency(executable: str) -> None:
         key(b":go lane add-ons\r", b"World observer")
         capture("palette-from-addons", key(b":", b"From Lane Add-ons"))
         key(b"\x1b", b"World observer")
-        draft = key(b"A::act", b":::act")
+        draft = key(b"A::act", b"Add-on command: ::act")
         if b"MASC Command palette" in terminal.screen_text(draft):
             raise AssertionError("advanced text input intercepted a literal colon")
         key(b"\x1b", b"World observer")

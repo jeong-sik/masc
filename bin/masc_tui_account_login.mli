@@ -60,6 +60,7 @@ type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
+  mutable result_scroll : int;
   mutable saved_scroll_max : int;
   mutable saved_runtime_ids : string list;
   (** Runtime IDs introduced by the saved selection, excluding previously
@@ -96,6 +97,12 @@ val begin_attempt : t -> provider -> existing:bool -> string option
     reset login input state before the next process is launched. *)
 val key : t -> string -> action
 val paste : t -> string -> unit
+(** [groups_of_inventory providers json] reads the setup inventory's
+    [account_groups] rows against [providers], keeping only complete rows whose
+    provider members are configured, same-client, and used by exactly one group.
+    Incomplete or overlapping rows collapse to the inventory refresh error. *)
+val groups_of_inventory : provider list -> Yojson.Safe.t -> (account_group list, string) result
+
 (** Preserve printable UTF-8 and spaces; remove at most one trailing CR, LF or
     CRLF. Reject other multiline/control input without changing the draft. *)
 val inventory : ?view:list_view -> t -> Yojson.Safe.t -> (unit, string) result
@@ -167,6 +174,9 @@ type row =
 val lines : t -> row list
 val row_text : row -> string
 (** The row's characters without colour. *)
+(** Finished and failed results wrap every row, start at the summary, and
+    retain a separate scroll position. Rendering clamps it to the current
+    viewport and includes an overflow indicator when space allows. *)
 val visible_lines : height:int -> width:int -> t -> row list
 (** The rows that fit [height], the notice wrapped at [width] cells so a
     server's reason is read whole. *)

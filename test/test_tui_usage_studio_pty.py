@@ -12,6 +12,7 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 
+
 def fixtures():
     now = time.time()
     result = _keyboard_harness.keeper_runtime_http_fixtures()
@@ -62,9 +63,12 @@ def fixtures():
             "days": days, "generated_at": now,
             "sampling": "latest_provider_report_per_utc_day", "unreadable_reports": 0, "reported_no_windows": [],
             "points": [{"scope_id": scope["scope_id"], "kind": "five_hour",
-                        "limit_id": None, "unit": "fraction", "value": 0.4,
-                        "observed_at": now, "source": "fixture", "resets_at": None}
-                       for scope in scopes]})
+                        "limit_id": None, "unit": "fraction", "value": value,
+                        "observed_at": now - (6 - offset) * 86400,
+                        "source": "fixture", "resets_at": None}
+                       for scope in scopes
+                       for offset, value in enumerate((0.0, 0.15, None, 0.35, 0.6, 0.9, 0.4))
+                       if value is not None and 6 - offset < days]})
     result["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
         "keepers": [], "window_minutes": 1440, "generated_at": now,
         "cache": {"state": "fresh", "generated_at": now}})
@@ -91,10 +95,11 @@ def journey(executable, no_color=False):
         _keyboard_harness.tab_until(process, fd, output, b"MASC Usage")
         _keyboard_harness.wait_for_output(process, fd, output, b"catalogue reopens", start=0, timeout=10)
         wide = capture(process, fd, output, "plan-wide-no-color" if no_color else "plan-wide",
-                       48, 220, b"claude@example.com")
+                       80, 220, b"claude@example.com")
         for value in (b"Plan usage", b"Used   0%", b"Used  25%", b"Used  33%", b"Reset",
                       b"Last report", b"Model call limit", b"Other use", b"does not block model calls",
-                      b"Unclassified limit", b"Catalogue", b"reported", b"claude@example.com"):
+                      b"Unclassified limit", b"Catalogue", b"reported", b"claude@example.com",
+                      b"Remaining", b"At limit (reported)", b"Blocked (observed)", b"Trend 14 UTC days"):
             if value not in wide:
                 raise AssertionError(f"Plan omitted {value!r}: {wide!r}")
         if b"Quota scope trend" in wide or b"Keeper usage" in wide:
@@ -129,7 +134,19 @@ def journey(executable, no_color=False):
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"Claude")
         capture(process, fd, output, "plan-restored", 30, 120, b"Claude")
         _keyboard_harness.send_and_wait(process, fd, output, b"v", b"UTC days reported")
-        capture(process, fd, output, "trend", 30, 120, b"UTC days reported")
+        trend = capture(process, fd, output, "trend", 60, 220, b"UTC days reported")
+        for value in (b"100%", b"75%", b"50%", b"25%", b"UTC", b"Latest report", b"6/14 UTC days reported"):
+            if value not in trend:
+                raise AssertionError(f"Trend omitted chart evidence {value!r}: {trend!r}")
+        if not any(b"Antigravity" in line and "팀 계정".encode() in line for line in trend.splitlines()):
+            raise AssertionError("wide Trend did not place account charts side by side")
+        compact_trend = capture(process, fd, output, "trend-compact", 30, 80, b"UTC days reported")
+        if b"100%" not in compact_trend or b"Latest report" not in compact_trend:
+            raise AssertionError("compact Trend hid the measurement or its scale")
+        for reading in (trend, compact_trend):
+            for meaning in ("↓ below zero", "↑ above limit"):
+                if meaning.encode() not in reading:
+                    raise AssertionError(f"Trend omitted range meaning {meaning!r}")
         _keyboard_harness.send_and_wait(process, fd, output, b"w", b"1 UTC days")
         _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Keeper usage")
         capture(process, fd, output, "keepers", 30, 120, b"Keeper usage")
@@ -159,10 +176,113 @@ def failure(executable):
                             http_fixtures=responses, terminal_cols=80, terminal_rows=30)
 
 
+def keeper_comparison(executable, no_color=False, unreported_cost=False):
+    responses, _ = fixtures()
+    def row(name, tokens, cost, missing=0, failed=False, malformed=0, unread=0):
+        return {"keeper_name": name, "sample_count": 10,
+                "total_tokens": tokens, "total_cost_usd": cost,
+                "tokens_reported_samples": 0 if tokens is None else 10 - missing,
+                "tokens_unreported_samples": missing, "tokens_unread_samples": 0,
+                "cost_reported_samples": 0 if cost is None else 10 - missing,
+                "cost_unreported_samples": missing, "cost_unread_samples": 0,
+                "metrics_read": {"state": "failed", "reason": "fixture read failure"} if failed
+                                else {"state": "read", "malformed_rows": malformed, "unread_turn_rows": unread}}
+    keeper_rows = [row("alpha", 1000, 1.0), row("beta-partial", 500, 0.25, missing=3, unread=2),
+                   row("gamma-missing", None, None, missing=10),
+                   row("delta-failed", 900000, 900.0, failed=True), row("epsilon-zero", 0, 0.0)]
+    responses["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
+        "keepers": keeper_rows,
+        "window_minutes": 1440, "generated_at": 1790985600.0,
+        "cache": {"state": "stale_refreshing", "generated_at": 1790985600.0, "age_s": 120.0,
+                  "last_error": "fixture refresh failure"}})
+    if unreported_cost:
+        for keeper in keeper_rows:
+            keeper["total_cost_usd"] = None
+            keeper["cost_reported_samples"] = 0
+            keeper["cost_unreported_samples"] = 10
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=10)
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Usage")
+        _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Quota scope trend")
+        _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Keeper usage")
+        suffix = "-unreported-cost" if unreported_cost else "-no-color" if no_color else ""
+        wide = capture(process, fd, output, "keeper-comparison-wide" + suffix,
+                       70, 120, b"epsilon-zero")
+        for text in ("Scale: tokens 1000", "cost unreported" if unreported_cost else "cost $1.0000", "As of 2026-10-03 00:00 UTC",
+                     "120s old", "refresh failed: fixture refresh failure",
+                     "partial (0 malformed rows, 2 unread turn rows)", "7 reported, 3 missing",
+                     "unreported", "fixture read failure", "bars are not quota",
+                     "[unavailable", "[" + "░" * 32 + "] 0"):
+            assert text.encode() in wide, f"Keeper comparison evidence missing: {text}"
+        assert wide.count(b"[unavailable") == (8 if unreported_cost else 6), "missing/failed metrics drew a bar"
+        compact = capture(process, fd, output, "keeper-comparison-compact" + suffix,
+                          20, 80, b"Keeper usage")
+        assert b"Scale: tokens 1000" in compact
+        for _ in range(70):
+            current = _keyboard_harness.press_and_settle(process, fd, output, b"j")
+            if b"epsilon-zero" in current:
+                break
+        else:
+            raise AssertionError("last Keeper was unreachable on compact screen")
+        capture(process, fd, output, "keeper-comparison-bottom" + suffix,
+                20, 80, b"epsilon-zero")
+        os.write(fd, b"q")
+    _keyboard_harness.run_terminal_scenario(executable, description="Keeper reported usage comparison" + (" no color" if no_color else ""),
+                            interact=interact, http_fixtures=responses,
+                            terminal_cols=120, terminal_rows=70,
+                            extra_env={"NO_COLOR": "1"} if no_color else {})
+
+
+def keeper_partial_scale(executable, *, unreported_cost=False, unreported_tokens=False):
+    responses, _ = fixtures()
+    now = time.time()
+    responses["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
+        "keepers": [{
+            "keeper_name": "partial-only", "sample_count": 1,
+            "total_tokens": None if unreported_tokens else 1000,
+            "total_cost_usd": None if unreported_cost else 1.0,
+            "tokens_reported_samples": 0 if unreported_tokens else 1,
+            "tokens_unreported_samples": 1 if unreported_tokens else 0,
+            "tokens_unread_samples": 0,
+            "cost_reported_samples": 0 if unreported_cost else 1,
+            "cost_unreported_samples": 1 if unreported_cost else 0,
+            "cost_unread_samples": 0,
+            "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 2}}],
+        "window_minutes": 1440, "generated_at": now,
+        "cache": {"state": "fresh", "generated_at": now}})
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=10)
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Usage")
+        _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Quota scope trend")
+        _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Keeper usage")
+        screen = capture(process, fd, output, "keeper-partial-scale", 40, 160, b"partial-only")
+        tokens = "unreported" if unreported_tokens else "unavailable (no complete window)"
+        cost = "unreported" if unreported_cost else "unavailable (no complete window)"
+        assert f"Scale: tokens {tokens} · cost {cost}".encode() in screen
+        if not unreported_tokens:
+            assert b"Tokens  1000" in screen
+        if not unreported_cost:
+            assert b"Cost    $1.0000" in screen
+        assert screen.count(b"[unavailable") == 2
+        assert "█".encode() not in screen and "░".encode() not in screen
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(executable, description="Keeper partial-only metric scales",
+                            interact=interact, http_fixtures=responses,
+                            terminal_cols=160, terminal_rows=40)
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     print("STUDIO_BINARY_SHA256=" + hashlib.sha256(open(executable, "rb").read()).hexdigest())
     journey(executable)
     journey(executable, no_color=True)
     failure(executable)
+    keeper_comparison(executable)
+    keeper_comparison(executable, no_color=True)
+    keeper_comparison(executable, unreported_cost=True)
+    keeper_partial_scale(executable)
+    keeper_partial_scale(executable, unreported_cost=True)
+    keeper_partial_scale(executable, unreported_cost=True, unreported_tokens=True)
     print("tui usage studio PTY: PASS")

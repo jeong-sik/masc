@@ -40,6 +40,9 @@ let read directory session =
     ~body:(Yojson.Safe.to_string (Owner.document_to_json document)) |> ok
 
 let create_and_conflict_repair () = with_directory (fun directory ->
+  ignore (Draft.create ".toml" |> ok);
+  check bool "enumerated suffix-only declaration is selectable" true
+    (Draft.editable_source_path ~directory (Filename.concat directory ".toml"));
   let session = { (Draft.create "observer.toml" |> ok) with text=source } in
   let created = save directory session in
   let session = Draft.after_response session created in
@@ -94,19 +97,20 @@ let file_identity_and_draft_sessions () = with_directory (fun directory ->
     (Result.is_error (Draft.decode_response (Draft.Read (Filename.concat directory "other.toml")) ~status:200
       ~body:(Yojson.Safe.to_string (Owner.document_to_json document))));
   List.iter (fun name -> check bool "only one TOML filename" true (Result.is_error (Draft.create name)))
-    ["../outside.toml";"nested/file.toml";"file.json";".toml"])
+    ["../outside.toml";"nested/file.toml";"file.json"];
+  check bool "suffix-only filename follows the declaration loader" true (Result.is_ok (Draft.create ".toml")))
 
 let configuration_and_ports () =
   let json = Yojson.Safe.from_string {|{
     "instances":[{"instance_id":"actual-1","run_id":"world","addon_id":"custom","title":"Custom layer",
       "revision":"package-1","phase":{"kind":"attached"},"observation_seq":2,"rows_count":0,
       "incarnation":"actual-1","action_schema":null,
-      "configuration":{"id":"custom","source_path":"/config/lane-addons/custom.toml"},
+      "configuration":{"id":"custom","source_path":"/config/lane-addons/custom.toml","revision":"applied"},
       "binding":{"sources":[{"kind":"lane_output","id":"input","installation_id":"upstream","output_id":"frames"}]},
       "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills"}}],
     "configuration":{"directory":"/config/lane-addons","complete":false,
       "declarations":[{"id":"custom","source_path":"/config/lane-addons/custom.toml",
-        "desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
+        "enabled":true,"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
       "issues":[{"id":null,"source_path":"/config/lane-addons/broken.toml","message":"invalid TOML"},
         {"id":null,"source_path":"/config/lane-addons","message":"inventory unavailable"},
         {"id":null,"source_path":"/config/lane-addons/nested/a.toml","message":"nested file"},
@@ -117,6 +121,36 @@ let configuration_and_ports () =
   check (option string) "decode retains the worker's applied configuration owner" (Some "custom")
     (List.hd snapshot.instances).installation_id;
   let overview = {UI.initial with snapshot=Some snapshot} in
+  let worker = List.hd snapshot.instances in
+  check bool "known revision mismatch blocks removal before dispatch" true
+    (Option.is_some (UI.removal_block_reason overview worker));
+  let current = {snapshot with configuration=Option.map (fun (c:UI.configuration) ->
+    {c with complete=true; declarations=List.map (fun (d:UI.declaration) -> {d with desired=d.applied}) c.declarations}) snapshot.configuration} in
+  check (option string) "matching current owner may be removed" None
+    (UI.removal_block_reason {overview with snapshot=Some current} worker);
+  check bool "unknown configured inventory blocks removal" true
+    (Option.is_some (UI.removal_block_reason {overview with snapshot=Some {snapshot with configuration=None}} worker));
+  let config = Option.get current.configuration in
+  let owned = List.hd config.declarations in
+  let removal declarations complete = UI.removal_block_reason
+    {overview with snapshot=Some {current with configuration=Some {config with declarations;complete}}} worker in
+  check bool "partial inventory blocks matching revision" true
+    (Option.is_some (removal [owned] false));
+  check bool "duplicate owner ID blocks removal even at another path" true
+    (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";instance_id=None}] true));
+  check bool "same ID issue elsewhere blocks removal" true
+    (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";
+      desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only}] true));
+  check bool "invalid owned file with no recoverable ID blocks removal" true
+    (Option.is_some (removal [{owned with installation_id=None;desired=None;applied=None;
+      instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true));
+  check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
+  check (option string) "unrelated invalid declaration does not block cleanup" None
+    (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
+      enabled=None;desired=None;applied=None;instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true);
+  check (option string) "manual cleanup remains available" None
+    (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
+
   let empty = {snapshot with instances=[];
     configuration=Some {directory="/config/lane-addons";complete=true;declarations=[]}} in
   let first = {snapshot with instances=[];
@@ -167,6 +201,13 @@ let configuration_and_ports () =
   check int "partial inventory cannot fabricate subscription choices" 0
     (List.length (UI.subscription_targets view));
   let complete_config = {(Option.get snapshot.configuration) with complete=true} in
+  let off_config = {complete_config with declarations=List.map (fun (d:UI.declaration) ->
+    if d.instance_id=Some "actual-1" then {d with enabled=Some false} else d)
+      complete_config.declarations} in
+  let off_snapshot = {snapshot with configuration=Some off_config} in
+  check bool "desired off is visible while the same worker is still attached" true
+    (UI.lines ~width:160 {overview with snapshot=Some off_snapshot}
+     |> List.exists (String.starts_with ~prefix:"> custom · Custom layer · off requested · attached"));
   let complete = {snapshot with configuration=Some complete_config} in
   let choices = UI.subscription_targets {view with snapshot=Some complete} in
   check int "declared instance supplies its two actual named outputs" 2 (List.length choices);
@@ -278,7 +319,7 @@ let guided_actions () =
     }}|} in
   let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
     skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
@@ -336,7 +377,7 @@ let guided_actions () =
   check bool "failed row keeps retry and cleanup visible with its long reason" true
     (List.exists (String.starts_with ~prefix:"> MSX · failed") failed_lines
      && List.exists (String.starts_with
-       ~prefix:"    Enter:open  o:retry observation  d:cleanup") failed_lines
+       ~prefix:"    Enter:open  o:retry observation  d:remove worker") failed_lines
      && List.mem "    D:full ·" failed_lines
      && List.exists (String.starts_with ~prefix:("    " ^ String.make 8 'x')) failed_lines);
   check int "long failure reason survives wrapping" 120
@@ -412,7 +453,7 @@ let guided_actions () =
 let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
     outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
@@ -422,7 +463,7 @@ let context_flow_uses_declared_connections () =
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
       instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
-      origin=UI.Parsed_declaration} in
+      enabled=Some true;origin=UI.Parsed_declaration} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -590,7 +631,7 @@ let evidence_export_chooses_a_keeper_by_name () =
     fields=[];evidence=[];related_ids=[]} in
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
@@ -703,12 +744,12 @@ let refresh_preserves_operator_target () =
     fields=[];evidence=[];related_ids=[]} in
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -769,12 +810,12 @@ let refresh_preserves_operator_target () =
 let detail_keeps_installation_ownership () =
   let worker id : UI.instance = {id;incarnation=id ^ "-run";run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=2;installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=2;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
@@ -851,7 +892,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
         "label",`String "Delivery";"format",`String "text"]]]) |> ok in
   let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
     addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
   let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
     title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
@@ -1048,13 +1089,13 @@ let empty_completed_results_keep_capability_identity_and_input_details () =
   let worker installation_id id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fusion-compute";title="Shared Fusion package";revision="1";
     phase=UI.Row.Attached;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;
-    installation_id=Some installation_id;source_path=Some ("/config/" ^ id ^ ".toml");binding=`Assoc ["sources",`List []];
+    configuration_revision=Some "1";installation_id=Some installation_id;source_path=Some ("/config/" ^ id ^ ".toml");binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
   let judge = worker "judge" "judge-worker" and panel = worker "panel-a" "panel-worker" in
   let declaration name (item : UI.instance) : UI.declaration = {
     source_path=Option.get item.source_path;installation_id=Some name;
     desired=Some "1";applied=Some "1";instance_id=Some item.id;
-    issues=[];origin=UI.Parsed_declaration} in
+    issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
   let coverage : UI.Row.coverage = {source_id="panel-input";incarnation="unobserved";
     cursor=None;complete=false;detail=Some "Waiting for supplied input observations"} in
   let snapshot : UI.snapshot = {instances=[judge;panel];complete=None;
@@ -1085,7 +1126,7 @@ let empty_completed_results_keep_capability_identity_and_input_details () =
   let failed_lines = UI.lines ~width:180 (changed {judge with phase=UI.Row.Failed "model route unavailable"}) in
   check bool "failed Add-on exposes its actual cause and retry/cleanup controls" true
     (List.mem "Add-on failed: model route unavailable" failed_lines
-     && List.mem "o:retry observation  d:cleanup" failed_lines);
+     && List.mem "o:retry observation  d:remove TOML + worker" failed_lines);
   check bool "filtered view does not claim latest result was empty" true
     (List.mem "No result rows in this received view."
       (UI.lines ~width:180 (changed {judge with rows_count=2})))
@@ -1093,7 +1134,7 @@ let empty_completed_results_keep_capability_identity_and_input_details () =
 let current_installations_and_grouped_history_keep_exact_targets () =
   let worker id run addon phase source_path : UI.instance = {
     id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
-    revision="1";phase;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;installation_id=Option.map (fun _ -> addon) source_path;source_path;
+    revision="1";phase;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=Some "1";installation_id=Option.map (fun _ -> addon) source_path;source_path;
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
@@ -1102,7 +1143,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
   let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
     desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
-    issues=["missing image"];origin=UI.Parsed_declaration} in
+    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration} in
   let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
   let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
     kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";
@@ -1181,13 +1222,13 @@ let declared_layers_use_exact_configured_owners () =
       "selection",`String "latest_completed"]) upstream)] in
   let worker id upstream : UI.instance = {id="worker-" ^ id;incarnation="worker-" ^ id;
     run_id="project";addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
     binding=binding upstream;outputs=[];skills_directory=None;action_schema=None;
     binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id (item : UI.instance) : UI.declaration = {
     source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
     instance_id=Some item.id;desired=Some "1";applied=Some "1";issues=[];
-    origin=UI.Parsed_declaration} in
+    enabled=Some true;origin=UI.Parsed_declaration} in
   let roots = [worker "a" [];worker "b" []] in
   let branches = [worker "c" ["a"];worker "d" ["a";"b"]] in
   let joined = worker "e" ["c";"d"] in
@@ -1221,7 +1262,7 @@ let declared_layers_use_exact_configured_owners () =
       "  project-input · snapshot /data/research.json -> a";
       "  project-input · snapshot /data/second.json -> b";
       "  [a]  |  [b]";"Layer 1";"  [judge]";
-      "    a: attached · last completed: 1 result row";
+      "    a: attached · last completed: 1 record";
       "    b: observing · no completed observation received";
       "    judge: failed: provider unavailable · last completed: 2 records";
       "No evidence sharing receipt in this session."];

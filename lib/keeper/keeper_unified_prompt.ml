@@ -221,7 +221,8 @@ let format_goal_summaries (summaries : goal_summary list) : string =
             ^ render_fragment
                 Prompt_names.keeper_world_active_goals_verifying_annotation
                 []
-          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped) | None
+          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
+                 | Goal_phase.Paused _ | Goal_phase.Blocked _) | None
             -> base
           in
           String.concat "\n" (base :: details))

@@ -57,7 +57,8 @@ beforeEach(() => {
   api.previewRuntimeTomlConfig.mockResolvedValue({ ok: true, can_save: true })
   api.fetchRuntimeResolved.mockResolvedValue({ runtimes: [] })
   projectionApi.fetchStandaloneLanes.mockResolvedValue(parseLaneInventory(inventory).exact_snapshot)
-  api.saveRuntimeTomlConfig.mockImplementation(async (text, expected) => {
+  api.saveRuntimeTomlConfig.mockImplementation(async (text, expected, options) => {
+    options?.beforeDispatch?.()
     if (expected !== revision(stored)) throw new RuntimeTomlRevisionConflict('changed', document(stored))
     stored = text; return receipt(text)
   })
@@ -168,6 +169,27 @@ describe('Browser activity operator flow', () => {
     pending.resolve(receipt(off)); await saving
     expect(session.state.value.uncertain).toBe(true)
     expect(session.state.value.receipt).toBeNull()
+  })
+  it.each(['preview', 'before dispatch', 'dispatched'] as const)('marks a save uncertain only after its POST is dispatched: authority changes at %s', async stage => {
+    const { session, authority } = await draft(), gate = deferred<void>(), response = deferred<ReturnType<typeof receipt>>()
+    const dispatched = stage === 'dispatched'
+    if (stage === 'preview') api.previewRuntimeTomlConfig.mockImplementationOnce(async () => { await gate.promise; return { ok: true, can_save: true } })
+    else api.saveRuntimeTomlConfig.mockImplementationOnce(async (_text, _revision, options) => {
+      if (!dispatched) await gate.promise
+      options?.beforeDispatch?.(); return response.promise
+    })
+    const saving = session.save(authority)
+    await waitFor(() => expect(stage === 'preview' ? api.previewRuntimeTomlConfig : api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    workspace('/fixture/B')
+    expect(session.state.value.uncertain).toBe(dispatched)
+    gate.resolve(); response.resolve(receipt(off)); expect(await saving).toBe(false)
+    expect(session.state.value.uncertain).toBe(dispatched)
+    const fresh = workspace('/fixture/A')
+    api.fetchRuntimeTomlConfig.mockRejectedValueOnce(new Error('runtime.toml unavailable'))
+    await session.read(fresh); session.discard(fresh)
+    expect(session.modified()).toBe(false)
+    const unload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(dispatched)
   })
   it('follows a fresh file when there is no unsaved activity change', async () => {
     const authority = executionWorkspaceAuthority.peek()!, session = browserLaneActivitySessionFor(authority, lane)
@@ -316,7 +338,9 @@ describe('Browser activity operator flow', () => {
   })
   it('requires a read after an unanswered write and does not blindly repeat it', async () => {
     const { session, authority } = await draft()
-    api.saveRuntimeTomlConfig.mockImplementationOnce(async text => { stored = text; throw new Error('connection lost') })
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async (text, _revision, options) => {
+      options?.beforeDispatch?.(); stored = text; throw new Error('connection lost')
+    })
     expect(await session.save(authority)).toBe(false); expect(session.state.value.current).toBeNull()
     expect(await session.save(authority)).toBe(false); expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     await session.read(authority); session.reapply(authority)
@@ -342,7 +366,8 @@ describe('Browser activity operator flow', () => {
     session.discard(authority); expect(session.state.value.draft?.base.source_path).toBe('/another/runtime.toml')
   })
   it('rejects a mismatched receipt without claiming a saved setting', async () => {
-    const { session, authority } = await draft(); api.saveRuntimeTomlConfig.mockResolvedValueOnce(receipt(source))
+    const { session, authority } = await draft()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async (_text, _revision, options) => { options?.beforeDispatch?.(); return receipt(source) })
     expect(await session.save(authority)).toBe(false); expect(session.state.value.current).toBeNull()
     expect(session.state.value.receipt).toBeNull(); expect(session.state.value.uncertain).toBe(true)
   })

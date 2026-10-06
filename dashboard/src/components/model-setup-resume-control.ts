@@ -1,14 +1,14 @@
 import { html } from 'htm/preact'
-import { modelSetupResumeState, resumeSavedModelSetup, type ModelSetupResumeState } from '../lib/model-setup-resume'
+import { modelSetupResumeState, resumeSavedModelSetup } from '../lib/model-setup-resume'
 
 export function ModelSetupResumeControl({ disabled = false, onComplete }: {
-  disabled?: boolean; onComplete?: (result: ModelSetupResumeState) => Promise<void> | void
+  disabled?: boolean; onComplete?: () => Promise<void> | void
 }) {
   const state = modelSetupResumeState.value
   async function resume() {
     if (disabled || modelSetupResumeState.peek().kind === 'resuming') return
-    const result = await resumeSavedModelSetup()
-    await onComplete?.(result)
+    await resumeSavedModelSetup()
+    await onComplete?.()
   }
   return html`<div class="set-card" aria-label="저장한 모델 설정 적용">
     <button type="button" class="btn" disabled=${disabled || state.kind === 'resuming'} onClick=${resume}>

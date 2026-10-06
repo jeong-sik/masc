@@ -1750,6 +1750,10 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
               | Ok (Some owner) -> Some (owner, fields)
               | Error message -> histories_readable := false; add_issue directory message; None) values in
     let can_apply = Result.is_ok past && !histories_readable && snapshot.complete in
+    if not can_apply then
+      List.iter (fun (d : Lane_addon_config.declaration) ->
+        if not d.enabled then add_issue ~id:d.id d.source_path
+          "Off requested; worker cleanup waits for a complete declaration and retained-binding reading") snapshot.declarations;
     let retire sw e =
       match detach_entry ~sw m e with
       | Ok _ -> ()
@@ -1790,9 +1794,21 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
              | [visibility] -> Ok visibility
              | [] -> desired_visibility [] d
              | _ -> Error "declaration has ambiguous retained ownership" in
-           let admitted =
+           let document_owner =
              let* visibility = retained_visibility in
              let* () = retain_configured_document_owner m d visibility in
+             Ok visibility in
+           if not d.enabled then (
+             (* Disabling keeps the document and its privacy owner. Cleanup
+                must not depend on an upstream connection or an available image. *)
+             (match document_owner with
+              | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message);
+             List.iter (retire sw) (live_for d.id);
+             List.iter (retire_past sw)
+               (List.filter (fun (owner, fields) -> owner.id = d.id && not (detached fields)) histories))
+           else
+           let admitted =
+             let* visibility = document_owner in
              let* _ = validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding in
              Ok visibility in
            match admitted with
@@ -1833,6 +1849,14 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Ok _ -> ());
     let nullable_string = function None -> `Null | Some s -> `String s in
     let exports = entries m |> List.filter_map (fun e ->
+      let configured_off = snapshot.complete && match e.configuration with
+        | None -> false
+        | Some owner -> List.exists (fun (d : Lane_addon_config.declaration) ->
+            d.id = owner.id && not d.enabled) snapshot.declarations in
+      (* Cleanup failures retain their worker and evidence for retry, but a
+         retiring owner cannot supply a usable Skill. An incomplete reading
+         does not authorize inferring desired activity for a running owner. *)
+      if e.stopping || configured_off then None else
       match e.package.skills_directory, e.phase with
       | None, _ | Some _, Detached -> None
       | Some _, (Attached | Observing | Failed _ | Detaching) ->
@@ -1849,7 +1873,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     let declarations = List.map (fun (d : Lane_addon_config.declaration) ->
       let active = match live_for d.id with [e] -> Some e | _ -> None in
       let applied_revision = Option.bind active (fun e -> Option.map (fun o -> o.revision) e.configuration) in
-      `Assoc ["id", `String d.id; "source_path", `String d.source_path;
+      `Assoc ["id", `String d.id; "source_path", `String d.source_path; "enabled", `Bool d.enabled;
         "desired_revision", `String d.revision; "applied_revision", nullable_string applied_revision;
         "instance_id", nullable_string (Option.map (fun e -> e.instance_id) active)]) snapshot.declarations in
     let json = `Assoc ["directory", `String directory; "complete", `Bool snapshot.complete;

@@ -110,7 +110,7 @@ let configuration_and_ports () =
       "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills"}}],
     "configuration":{"directory":"/config/lane-addons","complete":false,
       "declarations":[{"id":"custom","source_path":"/config/lane-addons/custom.toml",
-        "desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
+        "enabled":true,"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
       "issues":[{"id":null,"source_path":"/config/lane-addons/broken.toml","message":"invalid TOML"},
         {"id":null,"source_path":"/config/lane-addons","message":"inventory unavailable"},
         {"id":null,"source_path":"/config/lane-addons/nested/a.toml","message":"nested file"},
@@ -147,7 +147,7 @@ let configuration_and_ports () =
   check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
   check (option string) "unrelated invalid declaration does not block cleanup" None
     (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
-      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true);
+      enabled=None;desired=None;applied=None;instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true);
   check (option string) "manual cleanup remains available" None
     (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
 
@@ -201,6 +201,13 @@ let configuration_and_ports () =
   check int "partial inventory cannot fabricate subscription choices" 0
     (List.length (UI.subscription_targets view));
   let complete_config = {(Option.get snapshot.configuration) with complete=true} in
+  let off_config = {complete_config with declarations=List.map (fun (d:UI.declaration) ->
+    if d.instance_id=Some "actual-1" then {d with enabled=Some false} else d)
+      complete_config.declarations} in
+  let off_snapshot = {snapshot with configuration=Some off_config} in
+  check bool "desired off is visible while the same worker is still attached" true
+    (UI.lines ~width:160 {overview with snapshot=Some off_snapshot}
+     |> List.exists (String.starts_with ~prefix:"> custom · Custom layer · off requested · attached"));
   let complete = {snapshot with configuration=Some complete_config} in
   let choices = UI.subscription_targets {view with snapshot=Some complete} in
   check int "declared instance supplies its two actual named outputs" 2 (List.length choices);
@@ -456,7 +463,7 @@ let context_flow_uses_declared_connections () =
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
       instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
-      origin=UI.Parsed_declaration} in
+      enabled=Some true;origin=UI.Parsed_declaration} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -742,7 +749,7 @@ let refresh_preserves_operator_target () =
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -808,7 +815,7 @@ let detail_keeps_installation_ownership () =
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
@@ -1088,7 +1095,7 @@ let empty_completed_results_keep_capability_identity_and_input_details () =
   let declaration name (item : UI.instance) : UI.declaration = {
     source_path=Option.get item.source_path;installation_id=Some name;
     desired=Some "1";applied=Some "1";instance_id=Some item.id;
-    issues=[];origin=UI.Parsed_declaration} in
+    issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
   let coverage : UI.Row.coverage = {source_id="panel-input";incarnation="unobserved";
     cursor=None;complete=false;detail=Some "Waiting for supplied input observations"} in
   let snapshot : UI.snapshot = {instances=[judge;panel];complete=None;
@@ -1136,7 +1143,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
   let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
     desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
-    issues=["missing image"];origin=UI.Parsed_declaration} in
+    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration} in
   let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
   let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
     kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";
@@ -1221,7 +1228,7 @@ let declared_layers_use_exact_configured_owners () =
   let declaration id (item : UI.instance) : UI.declaration = {
     source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
     instance_id=Some item.id;desired=Some "1";applied=Some "1";issues=[];
-    origin=UI.Parsed_declaration} in
+    enabled=Some true;origin=UI.Parsed_declaration} in
   let roots = [worker "a" [];worker "b" []] in
   let branches = [worker "c" ["a"];worker "d" ["a";"b"]] in
   let joined = worker "e" ["c";"d"] in

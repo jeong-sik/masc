@@ -148,8 +148,25 @@ let bounded_run_reading_is_visible () =
   Alcotest.(check bool) "full diagnostics retain the same observation scope" true
     (List.mem note (Display.snapshot_notices decoded))
 
+let disabled_is_desired_not_cleanup_proof () =
+  let declaration enabled = object_ ["kind",str "valid";"enabled",`Bool enabled;
+    "installation_id",str "observer";"run_id",str "run";"package_id",str "custom-package";
+    "title",str "Observer";"desired_revision",str "same-payload"] in
+  let payload = snapshot [declared ~instances:[instance ~phase:"failed" "worker"] (declaration false)] in
+  let observed = ok (Decode.decode payload) in
+  let row = find "declaration//config/broken.toml" observed in
+  Alcotest.(check string) "off does not claim cleanup finished"
+    "off requested · live failed: cleanup unconfirmed" (Display.row_summary row);
+  let off = declared (declaration false) in
+  let observed = ok (Decode.decode (snapshot [off])) in
+  Alcotest.(check string) "off with no observed worker is explicit"
+    "configured off · no worker observed" (Display.row_summary (find "declaration//config/broken.toml" observed));
+  let invalid = set "enabled" (str "false") (declaration false) in
+  rejects "nonboolean desired activity is not coerced" (snapshot [declared invalid])
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
-  Alcotest.test_case "running observation survives inventory" `Quick running_observation_survives_inventory;
+  Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;
+    Alcotest.test_case "running observation survives inventory" `Quick running_observation_survives_inventory;
   Alcotest.test_case "bounded run reading remains visible" `Quick bounded_run_reading_is_visible;
   Alcotest.test_case "all builtins and manual identity" `Quick complete_inventory;
   Alcotest.test_case "invalid declaration and live worker" `Quick invalid_and_running;

@@ -43,7 +43,7 @@ never invoke an executor or open a session.
 
 Package declaration states are:
 
-- `valid`: `installation_id`, `run_id`, `package_id`, `title`, `desired_revision`.
+- `valid`: `enabled` (desired activity), `installation_id`, `run_id`, `package_id`, `title`, `desired_revision`.
 - `invalid`: `messages` from the configuration owner, including duplicate IDs.
 - `absent`: a complete inventory does not contain a still-owned file.
 - `unobserved`: an incomplete read cannot establish whether the file is present.
@@ -69,3 +69,8 @@ Declaration and retained metadata filesystem reads are offloaded. This endpoint
 does not create a manager/store, write or sync files, start/stop workers, settle
 Browser waiters, or reconcile declarations. It is a navigation and observation
 surface; actions still use their existing owners and authorization contracts.
+
+A package declaration's `enabled` is separate from its payload revision and
+worker presence. Off with a live or unresolved retained worker is an off request,
+not proof of cleanup. See [package activity](lane-package-activity.md) for the
+configuration-preserving control and incomplete-read behavior.

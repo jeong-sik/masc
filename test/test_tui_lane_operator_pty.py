@@ -36,6 +36,7 @@ def main(executable: str, captures: Path | None) -> None:
         instance['rows_count'] = 1
     data['configuration']['declarations'] = [{
         'id': 'unapplied-installation', 'source_path': '/fixture/lane-addons/pending.toml',
+        'enabled': True,
         'desired_revision': 'pending', 'applied_revision': None, 'instance_id': None,
     }]
     fixtures = terminal.overview_event_http_fixtures()
@@ -271,7 +272,7 @@ def stale_removal(executable: str) -> None:
              'revision': 'installed'}
     worker['configuration'] = owner
     data['instances'] = [worker]
-    declaration = {'id': owner['id'], 'source_path': owner['source_path'],
+    declaration = {'id': owner['id'], 'source_path': owner['source_path'], 'enabled': True,
                    'desired_revision': 'changed', 'applied_revision': 'installed',
                    'instance_id': worker['instance_id']}
     data['configuration']['declarations'] = [declaration]

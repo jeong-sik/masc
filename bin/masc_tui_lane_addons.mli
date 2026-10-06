@@ -11,7 +11,7 @@ type instance = {
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; desired : string option;
+  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
 }

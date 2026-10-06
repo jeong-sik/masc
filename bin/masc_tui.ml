@@ -19862,6 +19862,15 @@ and is loaded on demand through keeper_skill.
                          (match Addons.selected_document view with
                           | Some _ -> update {view with editor_ready=true}
                           | None -> select_lane_document view)
+                     | " " when Option.is_some (Addons.selected_document view) ->
+                         if view.loading then update {view with error=lane_addons_input_failure
+                           "Wait for the current document request; the draft is retained"}
+                         else (match Addons.selected_document view with
+                           | None -> ()
+                           | Some session ->
+                               match Masc_tui_lane_declaration.toggle_enabled session with
+                               | Error detail -> update {view with error=lane_addons_input_failure detail}
+                               | Ok session -> update (Addons.put_document {view with error=None;scroll=0} session))
                      | "s" ->
                          (match Addons.selected_document view with
                           | None -> update {view with error=lane_addons_input_failure "Open a TOML draft with n or E first"}

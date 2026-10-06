@@ -13,6 +13,7 @@ import shlex
 import sys
 import tempfile
 import threading
+import tomllib
 import time as _keyboard_time
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def main(executable: str) -> None:
         return 200, {"instances": [], "rows": [], "coverage": [], "configuration": {
             "directory": state["directory"], "complete": True, "issues": [],
             "declarations": [] if doc is None else [{"id": "terminal-layer", "source_path": doc["source_path"],
-                "desired_revision": "desired-1", "applied_revision": None, "instance_id": None}]}}
+                "enabled": tomllib.loads(doc["source_text"]).get("enabled", True), "desired_revision": "desired-1", "applied_revision": None, "instance_id": None}]}}
 
     def declaration(body: bytes) -> tuple[int, dict]:
         if not body:
@@ -108,6 +109,22 @@ def main(executable: str) -> None:
             if state["document"]["source_text"] != source:
                 raise AssertionError("TUI did not send exact editor bytes")
 
+            before = len([p for p, body in requests if p == "/api/v1/lane-addons/declaration" and body])
+            key(b" ", b"Draft: disabled")
+            if state["document"]["source_text"] != source:
+                raise AssertionError("Space saved before explicit s")
+            if len([p for p, body in requests if p == "/api/v1/lane-addons/declaration" and body]) != before:
+                raise AssertionError("Space sent a declaration mutation")
+            key(b"s", b"Saved")
+            if tomllib.loads(state["document"]["source_text"])["enabled"] is not False:
+                raise AssertionError("explicit off save lost root activity")
+            if not state["document"]["source_text"].endswith(source):
+                raise AssertionError("off discarded existing configuration")
+            key(b" ", b"Draft: enabled")
+            key(b"s", b"Saved")
+            if tomllib.loads(state["document"]["source_text"])["enabled"] is not True:
+                raise AssertionError("explicit on save did not restore desired activity")
+
             # A server-side writer changed the file after our base was read.
             state["document"] = document("terminal.toml", "# externally changed\n" + source)
             edit_text.write_text("# operator text\n" + source)
@@ -123,9 +140,20 @@ def main(executable: str) -> None:
             key(b"s", b"Malformed candidate")
             # Leaving/reopening keeps the invalid draft, not just the old file.
             key(b"q", b"MASC Dashboard")
-            reopened = key(b":go lane add-ons\r", b"TOML draft terminal.toml")
-            if b"id = [" not in terminal.CSI_RE.sub(b"", reopened):
-                raise AssertionError("closing the pane discarded rejected TOML")
+            key(b":go lane add-ons\r", b"TOML draft terminal.toml")
+            # Activity validation adds rows above the retained draft. Scroll the
+            # real viewport to its body before asserting the rejected bytes.
+            reopened = b""
+            for _ in range(30):
+                terminal.read_available(master_fd, output)
+                start = len(output)
+                os.write(master_fd, b"J")
+                terminal.wait_for_output(process, master_fd, output, terminal.FRAME_END, start=start, timeout=3.0)
+                reopened = terminal.screen_text(bytes(output))
+                if b"id = [" in reopened:
+                    break
+            if b"id = [" not in reopened:
+                raise AssertionError(f"closing the pane discarded rejected TOML: {reopened!r}")
 
             # Save A can complete while the operator starts draft B. Its response
             # must update A without selecting A or losing B.
@@ -189,10 +217,10 @@ def main(executable: str) -> None:
             key(b"q", b"MASC Dashboard")
             os.write(master_fd, b"q")
             deadline = _keyboard_time.monotonic() + 3
-            while len([path for path, _ in requests if path == "/api/v1/lane-addons/declaration"]) < 5:
+            while len([path for path, _ in requests if path == "/api/v1/lane-addons/declaration"]) < 7:
                 terminal.read_available(master_fd, output)
                 if _keyboard_time.monotonic() >= deadline:
-                    raise AssertionError("fifth explicit save was not captured")
+                    raise AssertionError("seventh explicit save was not captured")
                 _keyboard_select.select([master_fd], [], [], 0.01)
             lane_requests = [(path, json.loads(body)) for path, body in requests
                              if path.startswith("/api/v1/lane-addons")]
@@ -202,8 +230,8 @@ def main(executable: str) -> None:
                 raise AssertionError("starting a draft implicitly saved it")
             saves = [body for path, body in lane_requests if path.endswith("/declaration")]
             actions = [body for path, body in lane_requests if path.endswith("/actions")]
-            if len(saves) != 5 or actions != [action_request]:
-                raise AssertionError(f"expected five explicit saves and one action; got {lane_requests}")
+            if len(saves) != 7 or actions != [action_request]:
+                raise AssertionError(f"expected seven explicit saves and one action; got {lane_requests}")
 
         terminal.run_terminal_scenario(executable, description="Lane TOML package terminal",
             interact=interact, http_fixtures=fixtures, http_requests=requests,

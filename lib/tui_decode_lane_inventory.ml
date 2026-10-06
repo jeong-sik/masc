@@ -16,7 +16,7 @@ type configuration =
 
 type declaration =
   | Valid of {
-      installation_id : string; run_id : string; package_id : string;
+      installation_id : string; enabled : bool; run_id : string; package_id : string;
       title : string; desired_revision : string;
     }
   | Invalid of string list
@@ -121,11 +121,12 @@ let declaration json =
   let* tag = kind json in
   match tag with
   | "valid" ->
-      let* f = fields ["kind";"installation_id";"run_id";"package_id";"title";"desired_revision"] json in
+      let* f = fields ["kind";"enabled";"installation_id";"run_id";"package_id";"title";"desired_revision"] json in
+      let* enabled = get bool "enabled" f in
       let* installation_id = get nonblank "installation_id" f in let* run_id = get nonblank "run_id" f in
       let* package_id = get nonblank "package_id" f in let* title = get nonblank "title" f in
       let* desired_revision = get nonblank "desired_revision" f in
-      Ok (Valid {installation_id;run_id;package_id;title;desired_revision})
+      Ok (Valid {installation_id;enabled;run_id;package_id;title;desired_revision})
   | "invalid" -> let* f = fields ["kind";"messages"] json in
       let* messages = get (list string) "messages" f in
       if messages = [] then error "invalid declaration has no diagnostics" else Ok (Invalid messages)

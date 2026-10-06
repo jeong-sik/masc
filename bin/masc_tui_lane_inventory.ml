@@ -15,7 +15,7 @@ let phase = function
 let instance_summary (item : instance) =
   (match item.presence with Live -> "live " | Retained -> "retained ") ^ phase item.phase
 let declaration_summary = function
-  | Valid _ -> "declaration valid"
+  | Valid value -> if value.enabled then "enabled" else "configured off"
   | Invalid _ -> "declaration invalid"
   | Absent -> "declaration absent"
   | Unobserved -> "declaration not observed"
@@ -34,7 +34,10 @@ let row_summary (row : row) = match row.state with
   | Machine_state Stable -> "screen stable"
   | Machine_state Running -> "machine running"
   | Package_state {declaration;instances} ->
-      let declared = match declaration with None -> "manual attachment" | Some value -> declaration_summary value in
+      let declared = match declaration, instances with
+        | None, _ -> "manual attachment"
+        | Some (Valid {enabled=false;_}), _::_ -> "off requested"
+        | Some value, _ -> declaration_summary value in
       declared ^ " · " ^ (match instances with
         | [] -> "no worker observed"
         | values -> String.concat "; " (List.map instance_summary values))

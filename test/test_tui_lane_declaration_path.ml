@@ -39,7 +39,37 @@ let create_draft_can_explicitly_compare_owned_file () =
     (Result.is_error (D.find_for_path ~create_directory:"/current" ~path:"/old/foo.toml" [draft]));
   let adopted = get (D.use_current_revision compared) in
   check string "adopt uses compared source" path (Option.get adopted.base).source_path
+let toggle_preserves_nested_data_comments_and_cas () =
+  let source = {|# operator note
+id = "observer"
+[ binding ]
+enabled = true
+note = '''
+enabled = false
+[not_a_header]
+'''
+|} in
+  let base = {(document "/current/foo.toml") with source_text=source} in
+  let draft = D.from_document base in
+  let disabled = get (D.toggle_enabled draft) in
+  check bool "root activity off" false (get (D.draft_enabled disabled));
+  check string "other draft bytes retained" ("enabled = false\n" ^ source) disabled.text;
+  check string "CAS keeps the read revision" "read-revision"
+    (Yojson.Safe.Util.member "expected_source_revision" (D.write_json disabled) |> Yojson.Safe.Util.to_string);
+  check string "current file is not silently changed" source (Option.get disabled.current).source_text;
+  let with_comment = {disabled with text="\"enabled\" = false  # keep switch note\n" ^ source} in
+  let enabled = get (D.toggle_enabled with_comment) in
+  check string "target comment and nested text retained" ("enabled = true  # keep switch note\n" ^ source) enabled.text;
+  check bool "new value is a boolean" true (get (D.draft_enabled enabled))
+let invalid_toggle_keeps_draft () =
+  List.iter (fun text ->
+    let draft = {(get (D.create "bad.toml")) with text} in
+    check bool "bad key is not coerced" true (Result.is_error (D.toggle_enabled draft));
+    check string "failed toggle preserves edited bytes" text draft.text)
+    ["enabled = \"false\"\n"; "enabled = true\nenabled = false\n"; "[binding\n"]
 let () = run "Lane declaration path identity" ["draft navigation",[
+  test_case "on/off keeps comments, nested values and CAS" `Quick toggle_preserves_nested_data_comments_and_cas;
+  test_case "invalid toggle preserves edited bytes" `Quick invalid_toggle_keeps_draft;
   test_case "explicit create comparison uses its owner directory" `Quick create_draft_can_explicitly_compare_owned_file;
   test_case "same basename does not alias paths" `Quick retained_draft_uses_full_path;
   test_case "conflict comparison retains exact target" `Quick conflict_read_keeps_source;

@@ -110,7 +110,7 @@ let configuration_json = function
   | Exact_projection.Unconfigured detail -> `Assoc ["kind",str "unconfigured";"detail",str detail]
   | Exact_projection.Registry_unavailable detail -> `Assoc ["kind",str "unavailable";"detail",str detail]
 let declaration_json = function
-  | Valid d -> `Assoc ["kind",str "valid";"installation_id",str d.id;"run_id",str d.run_id;
+  | Valid d -> `Assoc ["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;"run_id",str d.run_id;
       "package_id",str d.package.id;"title",str d.package.title;"desired_revision",str d.revision]
   | Invalid messages -> `Assoc ["kind",str "invalid";"messages",strings messages]
   | Absent -> `Assoc ["kind",str "absent"]

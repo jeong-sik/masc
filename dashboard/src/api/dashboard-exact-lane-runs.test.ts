@@ -62,6 +62,21 @@ describe('fetchExactLaneRuns', () => {
     expect(first.total).toBe(2)
     expect(second).toMatchObject({ total: 2, hasMore: false, runs: [{ runId: 'native-a' }] })
   })
+
+  it('asks the server to filter one lane before it pages', async () => {
+    const requests: URL[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      requests.push(new URL(input, 'http://fixture.invalid'))
+      return new Response(JSON.stringify({ generated_at: '2026-09-08T00:00:00Z', count: 0, total: 0, has_more: false, runs: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    setStoredToken('lane-filter-fixture', { source: 'manual' })
+    await fetchExactLaneRuns({ lane: 'candle_appraiser' })
+    await fetchExactLaneRuns()
+    expect(requests[0]!.searchParams.get('lane')).toBe('candle_appraiser')
+    expect(requests[0]!.searchParams.get('run_kind')).toBe('exact_output')
+    expect(requests[1]!.searchParams.has('lane')).toBe(false)
+  })
 })
 
 describe('parseExactLaneRunsResponse', () => {

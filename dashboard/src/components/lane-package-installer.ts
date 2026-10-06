@@ -8,13 +8,13 @@ import type { LaneDeclarationSession } from '../lib/lane-declaration-sessions'
 import { lanePackageInstallationFor } from '../lib/lane-package-installation-session'
 import type { BindingInput } from '../lib/lane-binding-form'
 
-export function LanePackageInstaller({ authority, documents, snapshot }: {
-  authority: ExecutionWorkspaceAuthority; documents: LaneDeclarationSession; snapshot: LaneAddonSnapshot;
+export function LanePackageInstaller({ authority, documents, snapshot, onSelectionChange }: {
+  authority: ExecutionWorkspaceAuthority; documents: LaneDeclarationSession; snapshot: LaneAddonSnapshot; onSelectionChange?: () => void;
 }) {
   const owner = lanePackageInstallationFor(authority, documents.directory)
   const state = owner.state.value
   const { folderInput: directory, manifestInput: manifest } = state
-  if (!state.visible) return html`<${ActionButton} onClick=${() => owner.open(authority)}>Install package</${ActionButton}>`
+  if (!state.visible) return html`<${ActionButton} onClick=${() => { onSelectionChange?.(); owner.open(authority) }}>Install package</${ActionButton}>`
   const busy = state.phase !== 'idle'
   const selectedKey = state.selected
   const selected = selectedKey === null ? undefined : state.drafts.get(selectedKey)
@@ -38,15 +38,15 @@ export function LanePackageInstaller({ authority, documents, snapshot }: {
           : entry.kind === 'issue' ? html`<p role="status" class="break-all">${entry.path}: ${entry.message}</p>`
           : html`<div class="space-y-2"><h4 class="font-semibold">${entry.title} · ${entry.revision}</h4>
             ${entry.description && html`<p class="whitespace-pre-wrap">${entry.description}</p>`}<p class="break-all text-sm">${entry.manifest_path}</p>
-            <${ActionButton} disabled=${busy} onClick=${() => owner.preview(entry.manifest_path, authority)}>Choose ${entry.title}</${ActionButton}>
+            <${ActionButton} disabled=${busy} onClick=${() => { onSelectionChange?.(); void owner.preview(entry.manifest_path, authority) }}>Choose ${entry.title}</${ActionButton}>
             <${ActionButton} disabled=${busy} onClick=${() => owner.browse(entry.manifest_path.slice(0, entry.manifest_path.lastIndexOf('/')) || '/', authority)}>Open package folder</${ActionButton}>
           </div>`}
       </li>`)}</ul></div>`}
     <details><summary>Enter a manifest path directly</summary><label class="block">Package manifest path
       <${TextInput} class="w-full" value=${manifest} onInput=${(event: Event) => owner.editPath('manifestInput', (event.target as HTMLInputElement).value, authority)} /></label>
-      <${ActionButton} disabled=${busy || !manifest.trim()} onClick=${() => owner.preview(manifest, authority)}>Read package preview</${ActionButton}></details>
+      <${ActionButton} disabled=${busy || !manifest.trim()} onClick=${() => { onSelectionChange?.(); void owner.preview(manifest, authority) }}>Read package preview</${ActionButton}></details>
     ${(state.drafts.size > 1 || state.drafts.size > 0 && selectedKey === null) && html`<label class="block">Retained package inputs<select aria-label="Retained package inputs" class="block w-full rounded border p-2 bg-[var(--bg)]"
-      value=${selectedKey ?? ''} onChange=${(event: Event) => owner.select((event.target as HTMLSelectElement).value, authority)}>
+      value=${selectedKey ?? ''} onChange=${(event: Event) => { onSelectionChange?.(); owner.select((event.target as HTMLSelectElement).value, authority) }}>
       ${selectedKey === null && html`<option value="">Choose retained package inputs</option>`}
       ${[...state.drafts].map(([key, draft], index) => html`<option value=${key}>${draft.preview.package.title} · ${draft.id || 'unnamed'} · input set ${index + 1}</option>`)}
     </select></label>`}
@@ -59,7 +59,7 @@ export function LanePackageInstaller({ authority, documents, snapshot }: {
       <label class="block">Run ID<${TextInput} class="block w-full" value=${selected.runId} onInput=${(event: Event) => owner.update(selectedKey, { runId: (event.target as HTMLInputElement).value }, authority)} /></label>
       <${LaneBindingField} schema=${selected.schema} input=${selected.input} name="binding" path=${[]} required=${true}
         runId=${selected.runId} snapshot=${snapshot} onChange=${(input: BindingInput) => owner.update(selectedKey, { input }, authority)} />
-      <${ActionButton} variant="primary" onClick=${() => owner.prepare(selectedKey, documents, authority)}>Prepare TOML draft</${ActionButton}>
+      <${ActionButton} variant="primary" onClick=${() => { onSelectionChange?.(); owner.prepare(selectedKey, documents, authority) }}>Prepare TOML draft</${ActionButton}>
     </fieldset>`}
   </section>`
 }

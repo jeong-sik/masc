@@ -9,6 +9,7 @@ import { BrowserLaneActivityPanel } from './browser-lane-activity-panel'
 import { browserLaneObservationRevision } from '../lib/browser-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
+import { laneTargetFor, laneTargetParams } from '../lib/lane-navigation'
 
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
 const browserActivityText = { on: 'New requests enabled', off: 'Off · configuration and sessions retained',
@@ -48,8 +49,9 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   }
 }
 
-function LaneDetails({ row, snapshot }: { row: LaneInventoryRow; snapshot: LaneInventory }) {
+function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snapshot: LaneInventory; authority: ExecutionWorkspaceAuthority }) {
   const selection = row.selection
+  const target = laneTargetFor(row, authority.workspaceRoot)
   const exactLane = selection.kind === 'exact'
     ? snapshot.exact_snapshot.lanes.find(lane => lane.laneId === selection.lane_id) : undefined
   return html`<section aria-label=${`Details for ${row.label}`} class="rounded border border-[var(--color-border-default)] p-4 space-y-3">
@@ -59,13 +61,13 @@ function LaneDetails({ row, snapshot }: { row: LaneInventoryRow; snapshot: LaneI
     ${selection.kind === 'browser' ? html`<${BrowserLaneActivityPanel} key=${selection.lane} lane=${selection.lane} title=${row.label} />` : null}
     ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
-      <${RouteLink} tab="monitoring" params=${{ section: 'internal-agents' }}>Exact runs and diagnostics<//>
-      <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Runtime settings · Lane candidates<//>
+      <${RouteLink} tab="monitoring" params=${laneTargetParams(target, true)}>Exact runs and diagnostics<//>
+      <${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Runtime settings · Lane candidates<//>
     </div>` : selection.kind === 'declaration' || selection.kind === 'manual_instance' ? html`<div class="space-y-2">
       ${selection.kind === 'declaration' ? html`<p class="break-all">${selection.source_path}</p>` : html`<p>Incarnation: ${selection.incarnation}</p>`}
-      <${RouteLink} tab="monitoring" params=${{ section: 'lane-addons' }}>Manage package declarations and retained observations<//>
-    </div>` : selection.kind === 'browser' ? html`<${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Runtime settings · Browser paths<//>`
-      : html`<p>Use the TUI detail or operator tools to load, inspect or restore this machine.</p>`}
+      <${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Manage package declarations and retained observations<//>
+    </div>` : selection.kind === 'browser' ? html`<${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Runtime settings · Browser paths<//>`
+      : html`<${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Runtime settings · Machine configuration<//><p>Use the TUI detail or operator tools to load, inspect or restore this machine.</p>`}
     <details><summary>Observed configuration and worker details</summary>
       <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.state, null, 2)}</pre>
     </details>
@@ -148,7 +150,7 @@ export function LaneInventoryPanel() {
     </div>` : null}
     <label class="block">Find a Lane<input class="block w-full rounded border bg-transparent p-2" type="search" value=${query}
       onInput=${(event: Event) => setQuery((event.currentTarget as HTMLInputElement).value)} /></label>
-    ${snapshot && detail ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} /></div>`
+    ${snapshot && detail && authority ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} authority=${authority} /></div>`
       : selected && snapshot ? html`<p role="status">The selected Lane is absent from this reading.</p>` : null}
     ${snapshot && !rows.length ? html`<p>No Lanes match this search.</p>` : null}
     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

@@ -15,6 +15,8 @@ import { LanePackageInstaller } from './lane-package-installer'
 import { LanePackageActivityPanel } from './lane-package-activity-panel'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
 import { lanePackageActivityObservationRevision } from '../lib/lane-package-activity-session'
+import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
+import { declarationIdentity, laneTargetLabel, type LaneNavigationTarget } from '../lib/lane-navigation'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
@@ -202,15 +204,30 @@ function LaneAddonActions({ instances, authority }: {
 
 /** This component owns its reads. A slow package never joins the fleet refresh. */
 export function LaneAddonsPanel() {
+  const navigation = useLaneNavigation(['declaration', 'instance'])
+  if (navigation.error || navigation.pending) return html`<${LaneNavigationNotice}
+    message=${navigation.error ?? 'Verify the workspace before opening this Lane target.'} pending=${navigation.pending} />`
+  const target = navigation.target
+  return html`<${LaneAddonsPanelContent} navigationTarget=${target && (target.kind === 'declaration' || target.kind === 'instance') ? target : undefined} />`
+}
+
+function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extract<LaneNavigationTarget, { kind: 'declaration' | 'instance' }> }) {
   const authority = executionWorkspaceAuthority.value
   const [recoveringAuthority, setRecoveringAuthority] = useState(false)
   const [authorityError, setAuthorityError] = useState<string | null>(null)
+  function releaseTarget() { if (navigationTarget) clearLaneNavigation() }
   function editToml(sourcePath: string | null) {
+    releaseTarget()
     if (session && authority) session.open(sourcePath, authority)
   }
   const [received, setReceived] = useState<Owned<LaneAddonSnapshot> | null>(null)
   const [receivedSlice, setReceivedSlice] = useState<Owned<LaneAddonSlice> | null>(null)
   const snapshot = received?.authority === authority ? received.value : null
+  // The navigation target that was selected when the retained inventory was
+  // read. A target chosen after that reading is validated only against a read
+  // that began once it was selected; until then it is pending, not absent.
+  const [inventoryTarget, setInventoryTarget] = useState<typeof navigationTarget>(undefined)
+  const inventoryCurrent = navigationTarget === undefined || inventoryTarget === navigationTarget
   const slice = receivedSlice?.authority === authority ? receivedSlice.value : null
   const [receivedError, setReceivedError] = useState<Owned<string> | null>(null)
   const error = receivedError?.authority === authority ? receivedError.value : null
@@ -232,7 +249,9 @@ export function LaneAddonsPanel() {
   const [selectedValue, setSelected] = useState<string[]>([])
   const [evidenceAuthority, setEvidenceAuthority] = useState(authority)
   const evidenceCurrent = evidenceAuthority === authority
-  const instance = evidenceCurrent ? instanceValue : ''
+  const navigationInstanceMissing = navigationTarget?.kind === 'instance' && snapshot !== null && inventoryCurrent
+    && !snapshot.instances.some(item => item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation && item.phase.kind !== 'detached')
+  const instance = evidenceCurrent && !navigationInstanceMissing ? instanceValue : ''
   const focusedRow = evidenceCurrent ? focusedRowValue : null
   const selected = evidenceCurrent ? selectedValue : []
   useLayoutEffect(() => {
@@ -247,6 +266,7 @@ export function LaneAddonsPanel() {
   async function refresh() {
     if (!mounted.current || !currentAuthority(authority)) return
     const requestedAuthority = authority
+    const requestedTarget = currentNavigation.current.target
     reads.current?.abort()
     const controller = new AbortController()
     reads.current = controller
@@ -256,6 +276,7 @@ export function LaneAddonsPanel() {
       const result = await fetchLaneAddons(controller.signal)
       if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) {
         setReceived({ authority: requestedAuthority, value: result })
+        setInventoryTarget(requestedTarget)
       }
     } catch (err) {
       if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setError(message(err))
@@ -331,12 +352,89 @@ export function LaneAddonsPanel() {
   const configuration = snapshot?.configuration ?? null
   const session = authority !== null && snapshot !== null && configuration !== null
     ? laneDeclarationSessionFor(authority, configuration.directory) : null
+  const [navigationAttempt, setNavigationAttempt] = useState(0)
+  type NavigationReading = { authority: ExecutionWorkspaceAuthority; target: typeof navigationTarget; attempt: number }
+  const handledNavigation = useRef<NavigationReading | null>(null)
+  const focusedNavigation = useRef<NavigationReading | null>(null)
+  const currentNavigation = useRef({ authority, target: navigationTarget, attempt: navigationAttempt })
+  currentNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt }
+  const [fileCheck, setFileCheck] = useState<(NavigationReading & { error: string | null }) | null>(null)
+  const fileChecked = fileCheck?.authority === authority && fileCheck?.target === navigationTarget && fileCheck?.attempt === navigationAttempt
+  const targetDraft = navigationTarget?.kind === 'declaration' ? session?.state.value.drafts[navigationTarget.path] : undefined
+  const declarationFocus = useRef<HTMLDivElement>(null), instanceFocus = useRef<HTMLTableRowElement>(null)
+  let snapshotTargetError: string | null = null
+  if (navigationTarget && snapshot && inventoryCurrent) {
+    if (navigationTarget.kind === 'instance') {
+      if (navigationInstanceMissing) snapshotTargetError = 'The selected worker is absent or its incarnation changed. No replacement worker was selected.'
+    } else {
+      const declaration = configuration?.declarations.find(item => item.source_path === navigationTarget.path)
+      const issue = configuration?.issues.find(item => item.source_path === navigationTarget.path)
+      if (!configuration || !isDeclarationFile(configuration.directory, navigationTarget.path)) snapshotTargetError = 'The selected file is outside the current declaration directory.'
+      else if (declaration && navigationTarget.installation !== null && declaration.id !== navigationTarget.installation)
+        snapshotTargetError = 'The selected file now belongs to a different installation. Its replacement was not opened.'
+      else if (!declaration && (!issue || navigationTarget.installation !== null && issue.id !== navigationTarget.installation))
+        snapshotTargetError = configuration.complete ? 'The selected declaration is absent from this reading.' : 'The declaration reading is incomplete; the selected target is not confirmed.'
+    }
+  }
+  useEffect(() => {
+    if (!navigationTarget || !authority || !snapshot || !inventoryCurrent || snapshotTargetError) return
+    const previous = handledNavigation.current
+    if (previous?.target === navigationTarget && previous.authority === authority && previous.attempt === navigationAttempt) return
+    if (navigationTarget.kind === 'declaration') {
+      // Wait for an existing read/save to settle, then read the selected file.
+      // The session retains the draft and its original CAS basis separately,
+      // and opens the file only after its installation ID matches the target.
+      if (!session || targetDraft && targetDraft.phase !== 'idle') return
+      const reading = { authority, target: navigationTarget, attempt: navigationAttempt }
+      handledNavigation.current = reading
+      session.closeActivity(authority)
+      const installation = navigationTarget.installation
+      void session.openAccepted(navigationTarget.path, authority, document => {
+        if (installation === null) return null
+        try {
+          return declarationIdentity(document.source_text) === installation ? null
+            : 'The file read belongs to a different installation. The replacement was not opened.'
+        } catch { return 'The file read cannot confirm the selected installation ID. Open the file explicitly from the current workspace to repair it.' }
+      }).then(result => {
+        const current = currentNavigation.current
+        if (!mounted.current || current.authority !== authority || current.target !== navigationTarget || current.attempt !== navigationAttempt) return
+        setFileCheck({ ...reading, error: result.opened ? null : result.error })
+      })
+    } else {
+      setInstance(navigationTarget.instance); setSelected([])
+      session?.close(); session?.closeActivity(authority)
+      handledNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt }
+    }
+  }, [navigationTarget, authority, snapshot, inventoryCurrent, session, snapshotTargetError, navigationAttempt, targetDraft?.phase])
+  const targetError = snapshotTargetError ?? (fileChecked ? fileCheck?.error ?? null : null)
+  const targetPending = !inventoryCurrent || navigationTarget?.kind === 'declaration' && !fileChecked
+  // A target selected while this panel stays mounted reads the inventory
+  // again; the mount read above already serves the first target.
+  const lastTargetRead = useRef(navigationTarget)
+  useEffect(() => {
+    if (lastTargetRead.current === navigationTarget) return
+    lastTargetRead.current = navigationTarget
+    if (navigationTarget) void refresh()
+  }, [navigationTarget])
+  useEffect(() => {
+    if (!navigationTarget || !authority || !snapshot || targetError || targetPending) return
+    const previous = focusedNavigation.current
+    if (previous?.target === navigationTarget && previous.authority === authority && previous.attempt === navigationAttempt) return
+    const element = navigationTarget.kind === 'declaration' ? declarationFocus.current : instanceFocus.current
+    if (element) { element.focus(); focusedNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt } }
+  }, [navigationTarget, authority, snapshot, targetError, targetPending, navigationAttempt])
+  function retryTarget() { setNavigationAttempt(value => value + 1); void refresh() }
   const rows = slice?.rows ?? snapshot?.rows ?? []
   const selectionOwned = instance !== '' && selected.length > 0 && selected.every(id =>
     rows.some(row => row.id === id && row.lane_id.startsWith(`${instance}/`)))
   const focused = rows.find(row => row.id === focusedRow)
   const coverage = slice?.coverage ?? snapshot?.coverage ?? []
+  if (navigationTarget && targetError) return html`<${LaneNavigationNotice} message=${targetError} onRetry=${retryTarget} />`
+  if (navigationTarget && (!snapshot || targetPending)) return html`<${LaneNavigationNotice}
+    message=${error ?? 'Reading the selected Lane target in the current workspace…'}
+    onRetry=${reading || targetDraft && targetDraft.phase !== 'idle' ? undefined : retryTarget} />`
   return html`<section class="space-y-4 p-4" aria-label="Lane Add-ons">
+    ${navigationTarget && html`<p role="status" class="break-all">Selected: ${laneTargetLabel(navigationTarget)}</p>`}
     <header class="flex items-center justify-between gap-4">
       <div><h2 class="text-lg font-semibold">Lane Add-ons</h2>
         <p>Optional observations and relationships. Keeper work continues independently.</p></div>
@@ -366,7 +464,7 @@ export function LaneAddonsPanel() {
       })}</div>`}
       <button type="button" class=${buttonClass} onClick=${() => {
         const owner = snapshot?.instances.find(item => focused.lane_id.startsWith(`${item.instance_id}/`))
-        if (owner) { setInstance(owner.instance_id); setSelected([focused.id]) }
+        if (owner) { releaseTarget(); setInstance(owner.instance_id); setSelected([focused.id]) }
       }} disabled=${!snapshot?.instances.some(item => focused.lane_id.startsWith(`${item.instance_id}/`))}>Select this evidence and its instance</button>
       <button type="button" class=${buttonClass} onClick=${() => setFocusedRow(null)}>Close event</button>
     </section>`}
@@ -387,7 +485,7 @@ export function LaneAddonsPanel() {
             <td>${declaration.id}<div class="break-all">${declaration.source_path}</div>
               <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button>
               <button type="button" class=${buttonClass} disabled=${session === null || authority === null}
-                onClick=${() => { if (session && authority) session.openActivity(declaration.source_path, declaration.id, authority) }}
+                onClick=${() => { if (session && authority) { releaseTarget(); session.openActivity(declaration.source_path, declaration.id, authority) } }}
                 aria-label=${`Configure activity for ${declaration.id}`}>On / off</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
             <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
@@ -412,10 +510,10 @@ export function LaneAddonsPanel() {
       }} />`}
     ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
       key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
-      authority=${authority} documents=${session} snapshot=${snapshot} />`}
-    ${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSaved=${() => {
+      authority=${authority} documents=${session} snapshot=${snapshot} onSelectionChange=${releaseTarget} />`}
+    <div ref=${declarationFocus} tabIndex=${-1} aria-label="Selected declaration settings">${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSelectionChange=${releaseTarget} onSaved=${() => {
       if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
-    }} />`}
+    }} />`}</div>
     <details><summary>Attach a package</summary>
       <form class="flex flex-wrap gap-2 py-2" onSubmit=${(event: Event) => {
         event.preventDefault()
@@ -433,9 +531,12 @@ export function LaneAddonsPanel() {
     </details>
     <div class="overflow-x-auto"><table class="w-full text-left"><thead><tr>
       <th>Instance / package</th><th>Run / revision</th><th>Status</th><th>Cursor / rows</th><th>Actions</th>
-    </tr></thead><tbody>${snapshot?.instances.map(item => html`<tr key=${item.instance_id}>
+    </tr></thead><tbody>${snapshot?.instances.map(item => html`<tr key=${item.instance_id}
+      ref=${navigationTarget?.kind === 'instance' && item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation ? instanceFocus : undefined}
+      tabIndex=${navigationTarget?.kind === 'instance' && item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation ? -1 : undefined}
+      aria-label=${`Worker ${item.instance_id} · incarnation ${item.incarnation}`}>
       <td><label><input type="radio" name="addon-instance" checked=${instance === item.instance_id}
-        onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
+        onChange=${() => { releaseTarget(); setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
         ${item.configuration === null ? html`<p>Not managed by TOML</p>` : html`<div class="break-all" aria-label=${`Configuration for ${item.instance_id}`}>
           <p>TOML: ${item.configuration.id}</p><p>${item.configuration.source_path}</p><p>Installed configuration: ${item.configuration.revision}</p>
           ${hasCurrentDeclaration(configuration, item) && html`<button type="button" class=${buttonClass} disabled=${session === null}

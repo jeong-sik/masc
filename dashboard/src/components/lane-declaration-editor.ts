@@ -5,8 +5,8 @@ import { ActionButton } from './common/button'
 import { TextArea, TextInput } from './common/input'
 
 /** The session owner survives component unmounts; this component projects it. */
-export function LaneDeclarationEditor({ session, authority, onSaved }: {
-  session: LaneDeclarationSession; authority: ExecutionWorkspaceAuthority; onSaved: () => void;
+export function LaneDeclarationEditor({ session, authority, onSaved, onSelectionChange }: {
+  session: LaneDeclarationSession; authority: ExecutionWorkspaceAuthority; onSaved: () => void; onSelectionChange?: () => void;
 }) {
   const state = session.state.value
   const target = state.target
@@ -21,7 +21,7 @@ export function LaneDeclarationEditor({ session, authority, onSaved }: {
   const modified = draft.document === null || draft.text !== draft.document.source_text
   const key = target.key
   const update = (key: string, change: (value: LaneDeclarationDraft) => LaneDeclarationDraft) => session.update(key, change)
-  const onClose = () => session.close()
+  const onClose = () => { onSelectionChange?.(); session.close() }
   async function save() {
     if (await session.save(key, authority)) onSaved()
   }
@@ -33,7 +33,7 @@ export function LaneDeclarationEditor({ session, authority, onSaved }: {
     </header>
     ${Object.keys(state.drafts).length > 1 && html`<label class="block">Open drafts
       <select aria-label="Open drafts" class="block border rounded p-2 bg-[var(--bg)]" value=${key}
-        onChange=${(event: Event) => session.selectDraft((event.target as HTMLSelectElement).value, authority)}>
+        onChange=${(event: Event) => { onSelectionChange?.(); session.selectDraft((event.target as HTMLSelectElement).value, authority) }}>
         ${Object.entries(state.drafts).map(([draftKey, entry]) => html`<option key=${draftKey} value=${draftKey}>${entry.fileName || 'Unnamed TOML draft'}</option>`)}
       </select>
     </label>`}

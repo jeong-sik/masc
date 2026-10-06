@@ -49,6 +49,7 @@ import {
   type RuntimeStructuredSection,
 } from './runtime-environment-editor'
 import { RuntimeExactLaneEditor } from './runtime-exact-lane-editor'
+import { laneTargetLabel, runtimeTargetRange, type RuntimeLaneTarget } from '../lib/lane-navigation'
 
 type LoadState = 'idle' | 'loading' | 'loaded'
 
@@ -173,6 +174,7 @@ function stopOverlayContentClick(event: MouseEvent) {
 }
 
 export interface RuntimeTomlEditorProps {
+  navigationTarget?: RuntimeLaneTarget
   onClose?: () => void
   /** Called after a successful backend write (raw save, routing patch, or
    *  assignment patch). Use this in parent surfaces that also display derived
@@ -200,7 +202,7 @@ export function RuntimeTomlEditor(props: RuntimeTomlEditorProps = {}) {
     authority=${authority} session=${runtimeTomlSessionFor(authority)} />`
 }
 
-function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: RuntimeTomlEditorProps & {
+function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authority, session }: RuntimeTomlEditorProps & {
   authority: ExecutionWorkspaceAuthority; session: RuntimeTomlSession;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -216,6 +218,56 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
   const setError = (value: string | null) => session.edit('error', value)
   const setNotice = (value: string | null) => session.edit('notice', value)
   const setSection = (value: RuntimeSectionId) => session.edit('section', value)
+  // A target is selected once, when it is found. Until then every draft
+  // change looks it up again so the notice follows the text; the first
+  // attempt also moves focus into the editor. A target that only becomes
+  // locatable after the reader edits is offered, not selected: selecting it
+  // under the caret would let the next keystroke overwrite the declaration.
+  const focusedNavigation = useRef<RuntimeLaneTarget | undefined>(undefined)
+  const attemptedNavigation = useRef<RuntimeLaneTarget | undefined>(undefined)
+  const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
+  const [locatedNavigation, setLocatedNavigation] = useState<[number, number] | null>(null)
+  useEffect(() => {
+    if (navigationTarget) session.edit('section', navigationTarget.kind === 'exact' ? 'lanes' : 'toml')
+    setNavigationNotice(null); setLocatedNavigation(null)
+  }, [navigationTarget, session])
+  const selectNavigation = (range: [number, number] | null) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    const start = range?.[0] ?? draft.length, end = range?.[1] ?? start
+    textarea.setSelectionRange(start, end)
+    const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight)
+    if (Number.isFinite(lineHeight)) {
+      textarea.scrollTop = draft.slice(0, start).split('\n').length * lineHeight - lineHeight
+      if (lineGutterRef.current) lineGutterRef.current.scrollTop = textarea.scrollTop
+    }
+  }
+  useEffect(() => {
+    if (!navigationTarget || navigationTarget.kind === 'exact' || config === null || section !== 'toml'
+      || focusedNavigation.current === navigationTarget || !textareaRef.current) return
+    let range: [number, number] | null = null, notice: string | null = null
+    try {
+      range = runtimeTargetRange(draft, navigationTarget)
+      if (range === null) notice = 'This target is not declared in the current draft. No configuration was inserted; edit the original TOML to add it.'
+    } catch (cause) { notice = `Cannot locate the target in this draft: ${errorToString(cause)}. Your text is unchanged.` }
+    setNavigationNotice(notice)
+    const firstAttempt = attemptedNavigation.current !== navigationTarget
+    attemptedNavigation.current = navigationTarget
+    if (firstAttempt) selectNavigation(range)
+    if (range !== null && firstAttempt) { focusedNavigation.current = navigationTarget; setLocatedNavigation(null) }
+    else setLocatedNavigation(range)
+  }, [navigationTarget, config, section, draft])
+  // Returning to the TOML section while a Browser/Machine target is linked
+  // gives keyboard focus back to the editor. Only focus moves: the reader's
+  // selection stays where they left it, never jumping to the declaration.
+  const inToml = useRef(section === 'toml')
+  useEffect(() => {
+    const entering = section === 'toml' && !inToml.current
+    inToml.current = section === 'toml'
+    if (entering && navigationTarget && navigationTarget.kind !== 'exact'
+      && attemptedNavigation.current === navigationTarget) textareaRef.current?.focus()
+  }, [section, navigationTarget])
   const ready = session.writable(authority)
   const canAdopt = session.ready(authority)
   const observationRevision = exactLaneObservationRevision(authority)
@@ -848,8 +900,12 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
             </div>
 
             <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
+              ${navigationTarget?.kind === 'exact' && html`<p role="status">Selected Lane: ${navigationTarget.lane}</p>`}
+              ${navigationTarget?.kind === 'exact' && exactLanes && !exactLanes.some(lane => lane.laneId === navigationTarget.lane)
+                && html`<p role="alert">The selected Lane is absent from the current runtime reading.</p>`}
               ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}
               ${parseError !== null ? html`<p role="alert">${parseError}</p>` : exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
+                selectedLane=${section === 'lanes' && navigationTarget?.kind === 'exact' ? navigationTarget.lane : undefined}
                 sourceText=${draft} lanes=${exactLanes} runtimes=${laneRuntimes}
                 slotsDisabled=${!ready || saving || readingCurrent || currentSource !== null || loadState !== 'loaded' || dirty}
                 deadlineDisabled=${saving || loadState !== 'loaded'}
@@ -859,6 +915,10 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
+              ${navigationTarget && navigationTarget.kind !== 'exact' && html`<p role="status">Selected configuration: ${laneTargetLabel(navigationTarget)}. Existing draft text is retained.</p>`}
+              ${navigationNotice && html`<p role="status">${navigationNotice}</p>`}
+              ${locatedNavigation && navigationTarget && navigationTarget.kind !== 'exact' && html`<p role="status">The selected configuration is now declared in this draft.
+                <button type="button" onClick=${() => { selectNavigation(locatedNavigation); focusedNavigation.current = navigationTarget; setLocatedNavigation(null) }}>Select target</button></p>`}
               <div class="rt-toml-wrap">
                 <div class="rt-toml-bar">
                   <span class="mono">${path}</span>

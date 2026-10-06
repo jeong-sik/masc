@@ -284,6 +284,46 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
   })
 
+  it('follows draft edits for an absent navigation target and offers it without moving the caret', async () => {
+    const target = { kind: 'browser' as const, lane: 'live' as const, workspace: '/tmp' }
+    render(html`<${RuntimeTomlEditor} navigationTarget=${target} />`, container)
+    await waitFor(() => expect(container.textContent).toContain('This target is not declared in the current draft'))
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const draft = baseConfig.source_text + '[browser.live]\nenabled = true\n'
+    fireEvent.input(textarea, { target: { value: draft } })
+    textarea.setSelectionRange(draft.length, draft.length)
+    const offer = await waitFor(() => {
+      const button = [...container.querySelectorAll('button')].find(item => item.textContent === 'Select target')
+      expect(button).toBeTruthy()
+      return button as HTMLButtonElement
+    })
+    // The notice follows the text, and the reader's caret is not taken over.
+    expect(container.textContent).not.toContain('This target is not declared in the current draft')
+    expect(textarea.selectionStart).toBe(draft.length)
+    fireEvent.click(offer)
+    expect(textarea.selectionStart).toBe(draft.indexOf('[browser.live]'))
+    expect(textarea.selectionEnd).toBeGreaterThan(textarea.selectionStart)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('returns keyboard focus to the editor when the TOML section is re-entered for a linked target', async () => {
+    const target = { kind: 'browser' as const, lane: 'live' as const, workspace: '/tmp' }
+    render(html`<${RuntimeTomlEditor} navigationTarget=${target} />`, container)
+    const textarea = await waitFor(() => {
+      const element = container.querySelector('textarea') as HTMLTextAreaElement | null
+      expect(element).not.toBeNull(); expect(document.activeElement).toBe(element)
+      return element!
+    })
+    textarea.setSelectionRange(3, 5)
+    const routing = container.querySelector('[data-testid="runtime-toml-nav-routing"]') as HTMLButtonElement
+    fireEvent.click(routing); routing.focus()
+    expect(document.activeElement).not.toBe(textarea)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
+    await waitFor(() => expect(document.activeElement).toBe(textarea))
+    // Only focus returns; the reader's selection is not moved.
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([3, 5])
+  })
+
   it('keeps the unload guard while the dirty editor is unmounted', async () => {
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))

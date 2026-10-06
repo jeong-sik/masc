@@ -1062,6 +1062,22 @@ status: reference
   Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Standalone_lane](../../lib/runtime/standalone_lane.mli) · [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
+**Chat Lane (채팅 레인)**
+: Keeper에게 대화 메시지가 들어오고 결과가 배달되는 표면. dashboard·커넥터
+  화자가 보낸 메시지는 `Keeper_msg_async`가 background fiber로 turn을 열고,
+  `Keeper_chat_store`가 Keeper마다 append-only JSONL
+  (`.masc/keeper_chat/<sanitized-name>.jsonl`)로 남긴다. Keeper는 다음 turn에서
+  `recent_direct_conversation` observation으로 이 대화를 읽는다. Fusion 심의
+  결론도 요청 Keeper의 *메인* chat lane에 authored 메시지로 남아 이 경로로
+  수령된다(`Fusion_sink`).
+  경계: 위의 **Lane**(고정 실행 경로)과 다른 층이다 — Lane은 모델이 도는
+  exact-output 작업의 경로이고, chat lane은 Keeper에게 대화가 들어오고 결과가
+  배달되는 표면이다. **Official Client Lane**(공식 클라이언트 실행 경로)과도
+  다르다. heartbeat가 여는 자율 turn과 함께 Keeper turn을 시작하는 두 진입
+  경로를 이룬다(RFC-0225).
+  → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
+  [Keeper_msg_async](../../lib/keeper/keeper_msg_async.mli)
+
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가

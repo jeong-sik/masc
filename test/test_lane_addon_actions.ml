@@ -34,6 +34,9 @@ let output : Types.output = {rows=[{id="state";lane_id="state";kind=Types.Event;
   title="Observed state";observed_at=1.;subject_id="owned-fixture";clock=None;
   actor=None;fields=[];evidence=[];related_ids=[]}];coverage=[]}
 type outcome = Confirm | Refuse | Unknown | Lost_reply
+(* A long request id would inflate the committed observation past a small
+   declared bound, so the fixture echoes only its digest. *)
+let echoed request_id = if String.length request_id > 256 then Store.digest request_id else request_id
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
@@ -52,7 +55,7 @@ let backend fixture : Runtime.For_testing.backend = {
               | Refuse -> Action.Package_failed_before_effect
               | Unknown -> Action.Package_outcome_unknown | Lost_reply -> assert false in
             let output = {output with rows=List.map (fun (row:Types.row) ->
-              {row with fields=["action_request",str (text "request_id" arguments)]}) output.rows} in
+              {row with fields=["action_request",str (echoed (text "request_id" arguments))]}) output.rows} in
             Ok {Action.status;result=obj ["calls",`Int !(fixture.calls)];output});
       stop=(fun () -> Ok ())} in
     on_created connection; Ok connection);
@@ -163,7 +166,7 @@ let test_action_input_is_not_bounded_by_the_reply_bound () = with_fixture (fun c
   let id = attach ~reply_bytes:4096 clock fixture ~acting:true in
   let long_request_id = String.make 8192 'r' in
   ignore (act fixture id long_request_id (`Int 1) |> unwrap);
-  await clock (fun () -> !(fixture.calls) = 1);
+  ignore (await_state clock fixture id long_request_id "confirmed");
   check int "the accepted input reached the worker" 1 !(fixture.calls);
   detach clock fixture id)
 

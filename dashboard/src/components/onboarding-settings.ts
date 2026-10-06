@@ -4,17 +4,11 @@ import { fetchSetupStatus, fetchSetupInventory, saveSetupCredential, type Status
 
 import { RuntimeSetupPicker } from './runtime-setup-picker'
 import { ModelSetupResumeControl } from './model-setup-resume-control'
-import { executionWorkspaceAuthority } from '../store'
-import { completeLaneActivitySetupResume } from '../lib/lane-activity-session'
-import { modelSetupResumeState, resumeSavedModelSetup, type ModelSetupResumeState } from '../lib/model-setup-resume'
+import { modelSetupResumeState, resumeSavedModelSetup } from '../lib/model-setup-resume'
 
 const labels = { satisfied: '확인됨', needs_setup: '설정 필요', needs_verification: '검증 필요', invalid: '설정 확인 필요' }
 
 export function OnboardingSettings() {
-  const authority = executionWorkspaceAuthority.value
-  function completeSetupResume(result: ModelSetupResumeState) {
-    if (authority) completeLaneActivitySetupResume(authority, result)
-  }
   const [status, setStatus] = useState<Status | null>(null)
   const [inventory, setInventory] = useState<Inventory | null>(null)
   const [provider, setProvider] = useState('')
@@ -68,7 +62,7 @@ export function OnboardingSettings() {
     </form>
     ${inventory ? html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${refresh}
       disabled=${busy || resumeState.kind === 'resuming'} onBusyChange=${setPickerBusy} />` : null}
-    <${ModelSetupResumeControl} disabled=${controlsBusy} onComplete=${completeSetupResume} />
+    <${ModelSetupResumeControl} disabled=${controlsBusy} />
     ${notice ? html`<p role="status">${notice}</p>` : null}
   </section>`
 }

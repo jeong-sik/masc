@@ -9547,7 +9547,7 @@
 (test
  (name test_goal_suspension)
  (modules test_goal_suspension)
- (libraries masc masc_goal masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
+ (libraries masc masc_goal masc_types masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
 
 (test
  (name test_goal_suspension_projection)

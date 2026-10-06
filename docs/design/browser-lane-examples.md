@@ -71,8 +71,16 @@ Runtime 원문 편집기나 admin raw endpoint로 검증·저장한 활동 값�
 저장한다. `r`로 현재 파일을 읽고, 충돌 시 `u`로 활동 변경만 최신 설정에
 재적용한 뒤 `s`로 저장한다. `x`는 초안을 버리고 `Esc`는 초안을 보존한 채
 돌아간다. 화면 이동·작업공간 왕복에서 초안을 유지하며 파일 경로가 바뀌면
-명시적으로 초안을 버린 뒤 새 파일을 편집한다. Web은 Runtime 원문 편집기를
-사용한다.
+명시적으로 초안을 버린 뒤 새 파일을 편집한다.
+
+Web에서는 All Lanes의 Browser 행을 Inspect하고 **활동 설정 열기**를 누른다.
+스위치는 초안만 바꾸며 **활동 설정 저장**이 전체 파일을 검증하고 읽었던
+revision으로 저장한다. 화면을 이동해도 작업공간·backend별 초안이 남는다.
+다른 설정 저장과 충돌하면 **현재 설정 읽기**, **활동 값만 다시 적용** 후
+저장하거나 **초안 버리기**를 선택한다. Runtime 원문 편집기의 별도 미저장
+초안은 덮어쓰지 않는다. 저장 뒤 파일과 All Lanes를 다시 읽으며 파일의
+켜짐/꺼짐과 관측한 연결 수·executor 등록 여부를 따로 표시한다. 이 조작은
+모델 setup 재개를 호출하거나 Browser executor를 설치하지 않는다.
 
 승인된 accepting 배포 단계에서는 `enabled` 생략을 켜짐으로 읽는다.
 Automation 경로는 `[browser.automation]`이 정본이다. 이 단계에서는 기존
@@ -81,8 +89,11 @@ Automation 경로는 `[browser.automation]`이 정본이다. 이 단계에서는
 옮겨야 한다. TUI에서 Live나 Stagehand 활동을 저장하면 이 경로는 그대로 남는다.
 Automation 활동을 저장할 때는 기존 `[browser]` 표의 경로를 같은 초안에서
 옮기고 다른 backend 설정을 보존한다. inline/dotted 표를 안전하게 바꿀 수
-없으면 저장 전에 원문 편집을 안내한다. 운영 파일 변경과 후속 strict 전환은
-별도 배포 단계다.
+없으면 저장 전에 원문 편집을 안내한다. Web 활동 편집기는 TOML 구문 트리로
+inline/dotted/quoted 표도 수정하고 automation의 기존 경로를 옮긴다.
+Web에서 기존 enabled 값을 바꿀 때 inline comment는 유지되지만, 경로 행을
+옮길 때 그 행의 inline comment는 유지되지 않는다. 운영 파일 변경과 후속
+strict 전환은 별도 배포 단계다.
 
 ## 열린 업무 화면에서 근거 찾기
 

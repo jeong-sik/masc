@@ -93,6 +93,14 @@ Lane inventory. Saving Automation activity moves existing flat `geckodriver` and
 Stagehand activity leaves those paths where they are. Inline/dotted forms that
 cannot be preserved by the line editor require the Runtime source editor.
 
+The Web All Lanes detail offers the same explicit activity draft/save flow via
+**활동 설정 열기** and **활동 설정 저장**. It keeps its draft across navigation,
+leaves the raw Runtime editor's draft intact, and rereads file and inventory after
+save. A file conflict requires explicit activity-only reapplication; a changed
+file path requires discarding the old draft. Enabling an unconfigured backend
+does not install its executor. See the linked backend settings guide for Web
+TOML editing and path migration limits.
+
 ## Verification
 
 `test/test_browser_surface.ml` covers page selection, empty browsers and failures.

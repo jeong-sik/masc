@@ -1,3 +1,5 @@
+import { BrowserLaneActivityPanel } from './browser-lane-activity-panel'
+import { browserLaneActivitySessionFor, resetBrowserLaneActivitySessionsForTesting } from '../lib/browser-lane-activity-session'
 import * as runtimeApi from '../api/dashboard-runtime'
 import { exactLaneActivitySessionFor, resetExactLaneActivitySessionsForTesting } from '../lib/exact-lane-activity-session'
 import * as coreApi from '../api/core'
@@ -7,7 +9,7 @@ import { modelSetupResumeState } from '../lib/model-setup-resume'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { act, fireEvent, waitFor } from '@testing-library/preact'
+import { act, fireEvent, waitFor, within } from '@testing-library/preact'
 import { Effect } from 'effect'
 import {
   SettingsSurface,
@@ -2146,6 +2148,81 @@ describe('SettingsSurface', () => {
       resume.mockRestore()
       lanes.mockRestore()
       invalidateExecutionSnapshotGeneration('settings-late-save-finished', 0)
+    }
+  })
+
+  it.each([{ unmount: false, refreshFailure: false }, { unmount: true, refreshFailure: false }, { unmount: true, refreshFailure: true }])('refreshes mounted Settings from a verified Browser receipt before follow-up: unmount=$unmount failure=$refreshFailure', async ({ unmount, refreshFailure }) => {
+    resetBrowserLaneActivitySessionsForTesting(); resetRuntimeTomlSessionsForTesting()
+    const epoch = `settings-browser-commit-${unmount}-${refreshFailure}`
+    invalidateExecutionSnapshotGeneration(epoch, 0)
+    hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+      status: { project: 'test', workspace_root: '/settings-browser-commit' },
+    } as Parameters<typeof hydrateExecutionSnapshot>[0])
+    const authority = executionWorkspaceAuthority.peek()!
+    const config = { ok: true, path: MOCK_RUNTIME_PATH, file_name: 'runtime.toml',
+      source_text: '[runtime]\ndefault = "rt-a"\n[browser.automation]\nenabled = true\n', source_revision: 'a'.repeat(64),
+      provider_protocols: runtimeProviderProtocols, reserved_provider_ids: [...runtimeReservedProviderIdsFixture] }
+    apiMock.fetchRuntimeTomlConfig.mockResolvedValue(config)
+    let finish!: (receipt: ReturnType<typeof committedRuntimeTomlConfigFixture>) => void
+    apiMock.saveRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    let finishRefresh!: () => void
+    const followup = new Promise<void>(resolve => { finishRefresh = resolve })
+    runtimeRefreshMock.refreshRuntimeConfigConsumers.mockImplementationOnce(async () => {
+      await followup
+      if (refreshFailure) throw new Error('Browser consumer refresh unavailable')
+    })
+    const spies = [
+      vi.spyOn(runtimeApi, 'fetchRuntimeTomlConfig').mockImplementation(apiMock.fetchRuntimeTomlConfig),
+      vi.spyOn(runtimeApi, 'saveRuntimeTomlConfig').mockImplementation(apiMock.saveRuntimeTomlConfig),
+      vi.spyOn(runtimeApi, 'previewRuntimeTomlConfig').mockResolvedValue({ ok: true, can_save: true,
+        validation: { valid: true, schema_version: 1, current_schema_version: 1, forward_schema: false, issues: [] } }),
+    ]
+    const resume = vi.spyOn(coreApi, 'postControlPlane').mockResolvedValue({ runtime_ready: true,
+      exact_output_authority_available: true, model_setup: { status: 'available' } })
+    const producer = document.createElement('div'); document.body.appendChild(producer)
+    try {
+      render(html`<${SettingsSurface} />`, container)
+      await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]')!)
+      await waitFor(() => expect(container.querySelector('[data-testid="runtime-default-runtime"]')).not.toBeNull())
+      render(html`<${BrowserLaneActivityPanel} lane="automation" title="Browser automation" />`, producer)
+      await fireEvent.click(within(producer).getByRole('button', { name: '활동 설정 열기' }))
+      await waitFor(() => expect(within(producer).getByRole('switch').hasAttribute('disabled')).toBe(false))
+      await fireEvent.click(within(producer).getByRole('switch'))
+      await fireEvent.click(within(producer).getByRole('button', { name: '활동 설정 저장' }))
+      await waitFor(() => expect(apiMock.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+      const draft = apiMock.saveRuntimeTomlConfig.mock.calls[0]![0] as string
+      expect(apiMock.saveRuntimeTomlConfig.mock.calls[0]![1]).toBe(config.source_revision)
+      if (unmount) render(null, producer)
+      const counts = [apiMock.fetchRuntimeDefaults.mock.calls.length, apiMock.fetchRuntimeProviders.mock.calls.length]
+      const resolved = makeRuntimeResolved()
+      apiMock.fetchRuntimeResolved.mockResolvedValue(makeRuntimeResolved({ default_runtime: {
+        ...resolved.default_runtime!, model: 'browser-commit-visible-model',
+      } }))
+      apiMock.fetchRuntimeTomlConfig.mockResolvedValue({ ...config, source_text: draft, source_revision: 'b'.repeat(64) })
+      const saved = committedRuntimeTomlConfigFixture({ ...config, source_text: draft })
+      saved.source_revision = 'b'.repeat(64); saved.commit.source_revision = saved.source_revision
+      finish(saved)
+      const session = browserLaneActivitySessionFor(authority, 'automation')
+      await waitFor(() => expect(session.state.peek().receipt).toBe(saved))
+      await waitFor(() => expect(container.textContent).toContain('browser-commit-visible-model'))
+      expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreaterThan(counts[0]!)
+      expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGreaterThan(counts[1]!)
+      expect(session.state.peek().phase).toBe('followup')
+      expect(resume).not.toHaveBeenCalled()
+      expect(coreApi.post).not.toHaveBeenCalled()
+      finishRefresh()
+      await waitFor(() => expect(session.state.peek().phase).toBe('idle'))
+      if (refreshFailure) expect(session.state.peek().followupError).toContain('Browser consumer refresh unavailable')
+      else expect(session.state.peek().followupError).toBeNull()
+      expect(session.state.peek().receipt).toBe(saved)
+      expect(apiMock.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+      expect(resume).not.toHaveBeenCalled()
+    } finally {
+      finishRefresh(); render(null, producer); producer.remove(); render(null, container)
+      resetBrowserLaneActivitySessionsForTesting(); resetRuntimeTomlSessionsForTesting()
+      for (const spy of spies) spy.mockRestore()
+      resume.mockRestore()
+      invalidateExecutionSnapshotGeneration('settings-browser-commit-finished', 0)
     }
   })
 

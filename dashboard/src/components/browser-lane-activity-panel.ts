@@ -40,7 +40,7 @@ export function BrowserLaneActivityPanel({ lane, title }: { lane: BrowserActivit
       </div>` : null}
       <div class="flex flex-wrap gap-2">
         <button type="button" class=${button} disabled=${!ready || !session.modified() || !!conflict}
-          onClick=${() => session.save(authority)}>${state.phase === 'previewing' || state.phase === 'saving' ? '활동 설정 저장 중…' : '활동 설정 저장'}</button>
+          onClick=${() => session.save(authority)}>${state.phase === 'saving' ? '활동 설정 저장 중…' : '활동 설정 저장'}</button>
         <button type="button" class=${button} disabled=${busy} onClick=${() => session.read(authority)}>현재 설정 읽기</button>
         ${conflict && !changedPath ? html`<button type="button" class=${button} disabled=${!ready}
           onClick=${() => session.reapply(authority)}>활동 값만 다시 적용</button>` : null}

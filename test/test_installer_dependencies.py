@@ -153,7 +153,19 @@ class LinuxPortableBootstrap(unittest.TestCase):
                      'awk', 'tar', 'gzip', 'sha256sum', 'shasum', 'rm', 'mv', 'cp', 'cat', 'grep',
                      'sed', 'tr', 'cut', 'sort', 'head', 'tail', 'date', 'sleep', 'ln', 'env'):
             tool = shutil.which(name)
-            if tool:
+            if not tool:
+                continue
+            if name == 'shasum':
+                # macOS /usr/bin/shasum is a perl wrapper that refuses to run
+                # when $0 is not its canonical path ("perl ... can't run
+                # host-bin/shasum"). A symlink makes $0 the host-bin path, and
+                # the sandbox PATH carries no perl, so the wrapper dies. A
+                # shell shim that execs the real path keeps $0 canonical and
+                # lets the absolute #!/usr/bin/perl shebang resolve.
+                shim = self.bin / name
+                shim.write_text('#!/bin/sh\nexec ' + shlex.quote(tool) + ' "$@"\n')
+                shim.chmod(0o755)
+            else:
                 (self.bin / name).symlink_to(tool)
         self.env['PATH'] = str(self.bin)
 

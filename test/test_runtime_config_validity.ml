@@ -5091,6 +5091,37 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check bool "degraded save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_degraded);
     let replacement = content ~default:"local.chat" "slot-b" in
+    let original_revision =
+      Runtime.config_source_revision_to_string
+        (Runtime.config_observation ~path baseline).source_revision
+    in
+    let current_observation = Runtime.config_observation ~path degraded in
+    let stale_state = Runtime.exact_output_registry_stale () in
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+             ~expected_source_revision:original_revision replacement with
+     | Error (Runtime.Config_source_conflict current) ->
+       check string "conflict carries current path" path current.path;
+       check string "conflict carries intervening source" degraded current.source_text;
+       check string "conflict revision identifies intervening source"
+         (Runtime.config_source_revision_to_string current_observation.source_revision)
+         (Runtime.config_source_revision_to_string current.source_revision)
+     | Error (Runtime.Config_edit_failed detail) -> failf "expected source conflict: %s" detail
+     | Ok _ -> fail "a stale editor must not overwrite the intervening commit");
+    check string "source conflict preserves file" degraded (Fs_compat.load_file path);
+    check string "source conflict preserves runtime cache" "local.libr"
+      (Runtime.get_default_runtime_id ());
+    check bool "source conflict preserves registry identity" true
+      (registry_exn () == after_degraded);
+    check bool "source conflict preserves registry staleness" true
+      (Runtime.exact_output_registry_stale () = stale_state);
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+             ~expected_source_revision:"invalid" replacement with
+     | Error (Runtime.Config_edit_failed _) -> ()
+     | Error (Runtime.Config_source_conflict _) | Ok _ ->
+       fail "a malformed revision must fail admission");
+    check string "malformed revision preserves file" degraded (Fs_compat.load_file path);
+    check bool "malformed revision preserves registry" true
+      (registry_exn () == after_degraded);
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
     Fun.protect
@@ -5114,8 +5145,12 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (lane_is_unconfigured
               ~lane_id:"hitl_auto_judge"
               after_write_failure));
-    (match Runtime.save_config_text ~runtime_config_path:path replacement with
-     | Error detail -> failf "valid exact replacement failed: %s" detail
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+             ~expected_source_revision:
+               (Runtime.config_source_revision_to_string current_observation.source_revision)
+             replacement with
+     | Error (Runtime.Config_edit_failed detail) -> failf "valid exact replacement failed: %s" detail
+     | Error (Runtime.Config_source_conflict _) -> fail "fresh revision must commit"
      | Ok _receipt -> ());
     check string "valid save commits file" replacement (Fs_compat.load_file path);
     check string "valid save commits runtime cache" "local.chat"
@@ -5482,6 +5517,47 @@ let test_runtime_max_context_missing_both_sources_rejected_at_load () =
          | Error msg ->
            check bool "load error names the max-context field" true
              (String_util.contains_substring msg "max-context")))
+
+let test_resolved_routing_snapshot_survives_lane_reload () =
+  let original = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore original) (fun () ->
+    let config candidates = Printf.sprintf {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.a]
+api-name = "chat-a"
+max-context = 1024
+[models.b]
+api-name = "chat-b"
+max-context = 1024
+[local.a]
+[local.b]
+[runtime]
+default = "primary"
+[runtime.lanes.primary]
+candidates = [%s]
+[runtime.assignments]
+reviewer = "primary"
+|} candidates in
+    with_temp_runtime_toml (config "\"local.a\", \"local.b\"") (fun before_path ->
+      (match Runtime.init_default ~config_path:before_path with
+       | Ok () -> () | Error message -> fail message);
+      let before = Runtime.dashboard_runtime_resolved_snapshot () in
+      with_temp_runtime_toml (config "\"local.b\", \"local.a\"") (fun after_path ->
+        (match Runtime.init_default ~config_path:after_path with
+         | Ok () -> () | Error message -> fail message);
+        let after = Runtime.dashboard_runtime_resolved_snapshot () in
+        let candidates snapshot = match snapshot.Runtime.rs_resolve_assignment "primary" with
+          | `Lane lane -> Runtime_lane.ordered_candidates lane
+          | `Missing | `Unavailable _ -> fail "declared primary lane did not resolve" in
+        check (list string) "captured resolver retains the old lane order"
+          ["local.a"; "local.b"] (candidates before);
+        check (list string) "new resolver follows the reloaded lane order"
+          ["local.b"; "local.a"] (candidates after);
+        check (option string) "old default agrees with old lane head"
+          (Some "local.a") (Option.map (fun (rt : Runtime_instance.t) -> rt.id) before.rs_default_runtime);
+        check (option string) "new default agrees with new lane head"
+          (Some "local.b") (Option.map (fun (rt : Runtime_instance.t) -> rt.id) after.rs_default_runtime))))
 
 let test_runtime_assignment_default_rider_resolves_to_default_runtime () =
   let runtime_toml =
@@ -6319,7 +6395,7 @@ let () =
             "removed [runtime].structured_judge key is unknown"
             `Quick test_structured_judge_runtime_key_is_rejected;
           test_case
-            "save_config_text commits exact registry with runtime state"
+            "raw saves commit exact state and refuse stale editor revisions"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
@@ -6481,6 +6557,8 @@ let () =
           test_case
             "assignments: unassigned keeper rides [runtime].default"
             `Quick test_runtime_assignment_default_rider_resolves_to_default_runtime;
+          test_case "resolved routing snapshot survives lane reload" `Quick
+            test_resolved_routing_snapshot_survives_lane_reload;
           test_case
             "repo runtime.toml declares every mandatory exact-output lane"
             `Quick test_repo_runtime_toml_declares_mandatory_exact_output_lanes;

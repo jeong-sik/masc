@@ -52,17 +52,11 @@ let surface_row_texts (state : state) : surface -> string list option =
       else None
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
+       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
        | Lanes_overview ->
-           let standalone =
-             match state.standalone_lanes with
-             | None -> []
-             | Some snapshot ->
-                 List.map
-                   (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label)
-                   snapshot.Tui_decode.sls_lanes
-           in
-           (match standalone with [] -> None | _ -> Some standalone))
+           let rows = List.map (fun (row : Masc.Tui_decode_lane_inventory.row) ->
+             row.label ^ " " ^ row.id ^ " " ^ row.purpose) (lane_inventory_rows state) in
+           (match rows with [] -> None | _ -> Some rows))
   | Clients ->
       let names =
         match state.clients_surface with

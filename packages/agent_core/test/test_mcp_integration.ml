@@ -87,7 +87,7 @@ let sampling_round_trip ?sampling_handler ?(after_reply = fun _ -> ()) () =
 
 let test_sampling_is_host_owned_over_stdio () =
   let calls = ref 0 in
-  let sampling_handler (params : Mcp_protocol.Sampling.create_message_params) =
+  let sampling_handler ?error_bytes:_ (params : Mcp_protocol.Sampling.create_message_params) =
     incr calls;
     Alcotest.(check int) "requested provider output limit reaches host" 64 params.max_tokens;
     Alcotest.(check bool) "no extra server context requested" true
@@ -114,7 +114,7 @@ let test_sampling_is_host_owned_over_stdio () =
 ;;
 
 let test_sampling_denial_is_returned_to_package () =
-  let result = sampling_round_trip ~sampling_handler:(fun _ -> Error "host policy rejected this request") () in
+  let result = sampling_round_trip ~sampling_handler:(fun ?error_bytes:_ _ -> Error "host policy rejected this request") () in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "host refusal is a protocol error, not a synthetic answer"
     "host policy rejected this request" (result |> member "reply" |> member "error" |> member "message" |> to_string)
@@ -125,7 +125,7 @@ exception Sampling_callback_cancelled
 
 let test_sampling_exception_preserves_stdio () =
   let calls = ref 0 in
-  let sampling_handler _ =
+  let sampling_handler ?error_bytes:_ _ =
     incr calls;
     if !calls = 1 then raise Sampling_callback_failure
     else Ok {Mcp_protocol.Sampling.role=Assistant;
@@ -151,7 +151,7 @@ let test_sampling_exception_preserves_stdio () =
 let test_sampling_cancellation_propagates () =
   let propagated =
     try
-      ignore (sampling_round_trip ~sampling_handler:(fun _ ->
+      ignore (sampling_round_trip ~sampling_handler:(fun ?error_bytes:_ _ ->
         raise (Eio.Cancel.Cancelled Sampling_callback_cancelled)) ());
       false
     with Eio.Cancel.Cancelled Sampling_callback_cancelled -> true in

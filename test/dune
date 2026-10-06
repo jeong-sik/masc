@@ -1,5 +1,9 @@
 (include stanzas/test_tui_usage_studio_pty.inc)
 (include stanzas/test_tui_runtime_status_pty.inc)
+(test
+ (name test_server_lane_inventory)
+ (modules test_server_lane_inventory)
+ (libraries masc_test_deps masc.server alcotest eio_main unix yojson bigstringaf h2 h2-eio))
 (include stanzas/test_librarian_working_state_evaluation.inc)
 
 (test
@@ -3334,12 +3338,15 @@
   alcotest
   fmt
   masc
+  masc_tui_model_runtime_table
   masc_tui_types
   masc_tui_voice_wizard_session
   masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc_tui_runtime_account_form
+  masc_tui_runtime_config_view
+  masc_tui_model_form
   masc.voice_setup
   masc.voice_wizard))
 
@@ -4184,7 +4191,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries alcotest masc.masc_goal masc_tui_types))
+ (libraries alcotest masc.masc_goal masc_tui_types masc_tui_render_prim))
 
 ; The named keyboard alias keeps the existing targeted-suite entry point.
 ; Each dependency has its own process, so Dune can run the six parts together.
@@ -6259,13 +6266,6 @@
  (libraries alcotest masc_tui_render_prim))
 
 (test
- (name test_tui_lane_table)
- (modules test_tui_lane_table)
- ; masc_tui_message_layout so a drawn line is measured in display cells, the
- ; way the table sizes its columns.
- (libraries alcotest masc_tui_lane_table masc_tui_message_layout))
-
-(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  ; masc_tui_message_layout so a column offset is asked in display cells rather
@@ -7026,7 +7026,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries astring yojson masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)
@@ -8087,7 +8087,7 @@
 (test
  (name test_runtime_setup_spec)
  (modules test_runtime_setup_spec)
- (libraries alcotest yojson masc.runtime)
+ (libraries alcotest otoml unix yojson masc.agent_core.llm_provider masc.runtime masc.string_util)
  (deps fixtures/runtime-setup-specs.json))
 (test
  (name test_runtime_setup_batch)
@@ -8096,7 +8096,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries masc.toml_line_editor alcotest yojson unix eio eio_main httpun masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries masc.toml_line_editor alcotest yojson unix eio eio_main httpun masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -9352,17 +9352,45 @@
  (name runtest)
  (deps (alias runtest-test_tui_memory_recall_state_pty)))
 
+; Raw config edit recovery: isolated state flow and real terminal/API interaction.
+(test
+ (name test_tui_runtime_config_edit)
+ (modules test_tui_runtime_config_edit)
+ (libraries masc_tui_runtime_config_edit masc_tui_types alcotest))
+
+(rule
+ (alias runtest-test_tui_runtime_config_draft_pty)
+ (deps test_tui_runtime_config_draft_pty.py test_tui_runtime_account_form_pty.py
+       tui_keyboard_harness.py tui_keyboard_runtime.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_runtime_config_draft_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_runtime_config_draft_pty)))
+
+(test
+ (name test_tui_lane_inventory)
+ (modules test_tui_lane_inventory)
+ (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory alcotest yojson))
+
+(test
+ (name test_tui_lane_declaration_path)
+ (modules test_tui_lane_declaration_path)
+ (libraries alcotest yojson masc_tui_lane_declaration))
+
+(include stanzas/test_tui_lane_inventory_pty.inc)
+
 (test
  (name test_tui_model_form)
  (modules test_tui_model_form)
- (libraries alcotest masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
+ (libraries alcotest astring masc.agent_core.llm_provider masc.toml_line_editor masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
 
 (include stanzas/test_tui_context_catalog_scope.inc)
 
 (test
  (name test_tui_runtime_evidence)
  (modules test_tui_runtime_evidence)
- (libraries alcotest masc_tui_runtime_evidence))
+ (libraries alcotest yojson masc_tui_runtime_evidence))
 
 (rule
  (alias runtest-test_tui_runtime_evidence_pty)
@@ -9375,3 +9403,13 @@
 (include stanzas/test_goal_drop_delivery.inc)
 
 (include stanzas/test_goal_notification_contract.inc)
+
+(test
+ (name test_goal_suspension)
+ (modules test_goal_suspension)
+ (libraries masc masc_goal masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
+
+(test
+ (name test_goal_suspension_projection)
+ (modules test_goal_suspension_projection)
+ (libraries masc_dashboard masc_goal alcotest yojson))

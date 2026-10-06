@@ -1,0 +1,48 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts -t 'refuses rounded or nonfinite numbers anywhere in JSON readings'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-addons-panel.test.ts (28 tests | 1 failed | 27 skipped) 21ms
+   ❯ optional Lane Add-on surface (28)
+     × refuses rounded or nonfinite numbers anywhere in JSON readings 20ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > refuses rounded or nonfinite numbers anywhere in JSON readings
+AssertionError: expected [ '{"count":9007199254740992}', …(4) ] to deeply equal [ …(5) ]
+
+- Expected
++ Received
+
+  [
+-   "Unavailable · integer exceeds JavaScript’s exact range",
+-   "Unavailable · integer exceeds JavaScript’s exact range",
+-   "Unavailable · integer exceeds JavaScript’s exact range",
+-   "Unavailable · field does not match declared display format",
++   "{\"count\":9007199254740992}",
++   "[{\"counts\":[0,-9007199254740992]}]",
++   "9007199254740992",
++   "{\"count\":null}",
+    "{\"counts\":[9007199254740991,-9007199254740991,1.25,0],\"label\":\"9007199254740993\",\"empty\":null,\"ready\":false}",
+  ]
+
+ ❯ src/components/lane-addons-panel.test.ts:142:77
+    140|     const screen = render(html`<${LaneAddonsPanel} />`)
+    141|     const group = await screen.findByLabelText(`Package readings for $…
+    142|     expect([...group.querySelectorAll('dd')].map(node => node.textCont…
+       |                                                                             ^
+    143|       'Unavailable · integer exceeds JavaScript’s exact range',
+    144|       'Unavailable · integer exceeds JavaScript’s exact range',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 27 skipped (28)
+   Start at  23:36:24
+   Duration  881ms (import 33%, environment 25%, setup 22%, transform 17%, tests 3%)
+
+ ELIFECYCLE  Test failed. See above for more details.

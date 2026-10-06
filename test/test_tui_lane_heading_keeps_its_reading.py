@@ -1,4 +1,4 @@
-"""The standalone lanes heading keeps its own fact when the row is narrow."""
+"""The common Lane inventory heading keeps its own fact when the row is narrow."""
 import os
 import sys
 import tui_keyboard_harness as _keyboard_harness
@@ -7,8 +7,8 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 
-HEADING = "Lanes · observed ".encode()
-# The row's own reading: when the standalone snapshot was read. Nothing else
+HEADING = "All lanes · observed ".encode()
+# The row's own reading: when the common inventory snapshot was read. Nothing else
 # on the screen says it.
 OWN = b"observed "
 # The key table's words. The footer draws them from the table and the sheet
@@ -20,7 +20,7 @@ TABLE_WORDS = (b"Lane Add-ons", b"append slot")
 def heading_row(rows: dict[int, bytes], columns: int) -> bytes:
     index = _keyboard_harness.screen_row_of(rows, HEADING)
     if index < 0:
-        raise AssertionError(f"at {columns} columns Lanes drew no standalone heading")
+        raise AssertionError(f"at {columns} columns Lanes drew no inventory heading")
     return rows[index].rstrip()
 
 
@@ -29,7 +29,7 @@ def run(executable: str) -> None:
     # scenario has to serve one; without it the heading has no reading of its
     # own to keep.
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = _keyboard_keepers.standalone_lane_runtime_config_response()
 
     def interact(process, fd, _slave, output, _base_path):
@@ -67,58 +67,57 @@ def run(executable: str) -> None:
                             interact=interact, http_fixtures=fixtures)
 
 
+def unapplied_inventory():
+    rows = []
+    for name in ("dos-counter", "dos-output-statistics"):
+        path = f"/fixture/lane-addons/{name}.toml"
+        rows.append({
+            "id": "declaration/" + path, "label": name + ".toml",
+            "purpose": "Package declaration and its owned observation workers.",
+            "selection": {"kind": "declaration", "source_path": path},
+            "state": {"kind": "package", "instances": [], "declaration": {
+                "kind": "valid", "enabled": True, "installation_id": name, "run_id": "fixture-world",
+                "package_id": name, "title": name, "desired_revision": "revision-1",
+            }},
+        })
+    return _keyboard_keepers.lane_inventory_response(package_rows=rows)
+
+
 def run_unapplied_installations(executable: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
-    inventory = {
-        "instances": [], "rows": [], "coverage": [],
-        "configuration": {
-            "directory": "/fixture/lane-addons", "complete": True,
-            "declarations": [
-                {"id": name, "source_path": f"/fixture/lane-addons/{name}.toml",
-                 "desired_revision": name, "applied_revision": None, "instance_id": None}
-                for name in ("dos-counter", "dos-output-statistics")
-            ],
-            "issues": [
-                {"id": name, "source_path": f"/fixture/lane-addons/{name}.toml",
-                 "message": "Docker image missing"}
-                for name in ("dos-counter", "dos-output-statistics")
-            ],
-        },
-    }
     fail_read = [False]
+    requests = []
 
-    def add_ons():
-        return (503, {"error": "inventory unavailable"}) if fail_read[0] else (200, inventory)
+    def inventory():
+        return (503, {"error": "inventory unavailable"}) if fail_read[0] else unapplied_inventory()
 
-    fixtures["/api/v1/lane-addons"] = add_ons
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = inventory
 
     def interact(process, fd, _slave, output, _base_path):
-        _keyboard_harness.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        # A opens the installation overview. Numeric section keys belong to
-        # an installed worker's detail, so observe this overview's fetch instead.
-        addon_start = len(output)
-        _keyboard_harness.send_and_wait(process, fd, output, b"A", b"Lane Add-ons")
-        _keyboard_harness.wait_for_output(process, fd, output, b"Lane Add-ons \xc2\xb7 2 declared",
-                          start=addon_start, timeout=3.0)
-        frame = _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"2 declared")
-        reading = b"Lane Add-ons: 2 declared \xc2\xb7 0 active \xc2\xb7 2 config issues"
-        if reading not in _keyboard_harness.screen_text(frame):
-            raise AssertionError("unapplied TOML was counted as an installed worker")
+        _keyboard_harness.wait_for_output(process, fd, output, HEADING, start=0, timeout=10)
+        _keyboard_harness.send_and_wait(process, fd, output, b"/dos-counter", b"dos-counter")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
+        _keyboard_harness.send_and_wait(process, fd, output, b"d", b"no worker observed")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        frame = _keyboard_harness.screen_text(bytes(output))
+        if b"enabled" not in frame or b"no worker observed" not in frame:
+            raise AssertionError(f"unapplied TOML lost its observed state: {frame!r}")
+        if any(path.split("?", 1)[0] == "/api/v1/lane-addons" for path, _ in requests):
+            raise AssertionError("first common inventory required opening the Add-ons surface")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
         fail_read[0] = True
-        addon_start = len(output)
-        _keyboard_harness.send_and_wait(process, fd, output, b"A", b"Lane Add-ons")
-        _keyboard_harness.wait_for_output(process, fd, output, b"HTTP 503",
-                          start=addon_start, timeout=3.0)
-        stale = _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"STALE")
-        if b"Lane Add-ons: STALE \xc2\xb7 2 declared" not in _keyboard_harness.screen_text(stale):
-            raise AssertionError("failed Add-on reread was shown as a current count")
+        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"inventory unavailable")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        stale = _keyboard_harness.screen_text(bytes(output))
+        if b"STALE" not in stale or b"dos-counter" not in stale:
+            raise AssertionError(f"failed inventory read hid the retained declaration: {stale!r}")
         os.write(fd, b"q")
 
-    _keyboard_harness.run_terminal_scenario(executable,
-                            description="unapplied Add-ons are not active workers",
-                            interact=interact, http_fixtures=fixtures)
+    _keyboard_harness.run_terminal_scenario(
+        executable, description="unapplied declarations are observed before Add-ons is opened",
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+    )
 
 
 if __name__ == "__main__":

@@ -1296,7 +1296,6 @@ let test_judge_blank_synthesis_uses_the_next_candidate () =
 [models.muse-fallback]
 api-name = "muse-fallback"
 max-context = 1007997
-max-prompt-bytes = 1048576
 reasoning-effort = "high"
 [muse_code.muse-fallback]
 [runtime.lanes.blank-judge]

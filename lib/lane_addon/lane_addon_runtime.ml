@@ -27,7 +27,7 @@ type backend = {
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
     binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
-  recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
+  recover_stop : instance_id:string -> container_id:string option ->
     (unit, string) result;
   image_ready : package:package -> (unit, string) result;
 }
@@ -400,8 +400,7 @@ let stop_entry ~sw ~backend m e =
     let cleanup = match e.connection with
       | Some c -> Some (Some c.container_id, c.stop)
       | None when not e.running -> Some (None, fun () ->
-          backend.recover_stop ~instance_id:e.instance_id ~container_id:None
-            ~max_reply_bytes:e.package.resources.max_reply_bytes)
+          backend.recover_stop ~instance_id:e.instance_id ~container_id:None)
       | None -> None (* startup still owns the unresolved create operation *) in
     match cleanup with
     | None -> ()
@@ -724,13 +723,13 @@ let backend ~store () = match !override with
               ~mgr:Posix_spawn_process_mgr.mgr ~package ()
             |> Result.map (fun (_ : string) -> ())
             |> Result.map_error Lane_addon_worker.error_to_string);
-      recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes ->
+      recover_stop = (fun ~instance_id ~container_id ->
         match clock with
         | None -> Error "Lane Add-on Docker control requires the server Eio clock"
         | Some clock ->
             Lane_addon_worker.recover_stop ~clock ~control_timeout_sec
               ~mgr:Posix_spawn_process_mgr.mgr
-              ~instance_id ~container_id ~max_reply_bytes ()
+              ~instance_id ~container_id ()
             |> Result.map_error Lane_addon_worker.error_to_string) }
 let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -863,9 +862,6 @@ let historical_detach ~sw m fields =
     let* package_revision = text package "revision" in
     let* resources = match List.assoc_opt "resources" package with
       | Some json -> object_ json | None -> Error "missing persisted resource settings" in
-    let* max_reply_bytes = match List.assoc_opt "max_reply_bytes" resources with
-      | Some (`Int value) when value > 0 -> Ok value
-      | _ -> Error "missing positive persisted reply bound" in
     let detaching = replace_phase fields Detaching in
     Hashtbl.add m.recovering id ();
     let* () = match offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:id detaching) with
@@ -873,7 +869,7 @@ let historical_detach ~sw m fields =
       | Error message -> Hashtbl.remove m.recovering id; Error message in
     let backend = backend ~store:m.store () in
     fork_isolated ~sw (fun () ->
-      let result = try backend.recover_stop ~instance_id:id ~container_id ~max_reply_bytes with
+      let result = try backend.recover_stop ~instance_id:id ~container_id with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn) in
       let phase = match result with
@@ -1958,7 +1954,7 @@ module For_testing = struct
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
-    recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
+    recover_stop : instance_id:string -> container_id:string option ->
       (unit, string) result;
     image_ready : package:package -> (unit, string) result;
   }

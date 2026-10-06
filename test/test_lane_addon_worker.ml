@@ -281,7 +281,7 @@ let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir 
   let worker = unwrap (start ~instance_id:"worker-test" env sw dir docker "good") in
   let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:(Some (Worker.container_id worker)) ~max_reply_bytes:4096
+      ~instance_id ~container_id:(Some (Worker.container_id worker))
       ~docker_command:docker () in
   check bool "another binding cannot remove this container" true
     (Result.is_error (recover "different-owner"));
@@ -296,7 +296,7 @@ let test_restart_without_create_receipt () = with_fixture (fun env sw dir docker
   let other = unwrap (start env sw dir docker "good") in
   let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id ~container_id:None ~docker_command:docker () in
   unwrap (recover ());
   check bool "container is found without a retained create response" false
     (Sys.file_exists (Filename.concat dir (Worker.container_id worker ^ ".json")));
@@ -318,7 +318,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
   write path (Yojson.Safe.to_string changed);
   let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id ~container_id:None ~docker_command:docker () in
   check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
   check bool "foreign owner survives recovery refusal" true (Sys.file_exists path);
   check bool "failed creation does not clean up a foreign name collision" true
@@ -331,7 +331,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
 let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir docker ->
   let recover container_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id:"not-created" ~container_id ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id:"not-created" ~container_id ~docker_command:docker () in
   unwrap (recover None);
   let marker = Filename.concat dir "daemon-unavailable" in
   write marker "unavailable";
@@ -349,7 +349,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
   let started_at = Eio.Time.now clock in
   let result = Worker.recover_stop ~clock ~control_timeout_sec:0.05
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
-      ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~container_id:None ~docker_command:docker () in
   check bool "hung control command is reported" true (Result.is_error result);
   check bool "timeout names the failed control operation" true
     (match result with
@@ -368,7 +368,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
      starved 0.05 one. The hung-command assertions above stay unchanged. *)
   unwrap (Worker.recover_stop ~clock ~control_timeout_sec:1.
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
-    ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker ()))
+    ~container_id:None ~docker_command:docker ()))
 
 let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fun env sw dir docker ->
   let other = unwrap (start env sw dir docker "good") in
@@ -466,6 +466,19 @@ let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir
     (Array.exists (fun path -> Filename.check_suffix path ".json") (Sys.readdir dir));
   write (Filename.concat dir "daemon-unavailable") "offline";
   check bool "daemon failure stays an error rather than absence" true (Result.is_error (inspect ())))
+
+(* The Docker CLI answers the host, not the package, so a small manifest reply
+   bound must not decide whether an image can be inspected. *)
+let test_docker_control_ignores_the_package_reply_bound () = with_fixture (fun env _sw dir docker ->
+  let small = package dir "good" in
+  let small = {small with resources={small.resources with max_reply_bytes=16}} in
+  let identity = "sha256:" ^ String.make 64 'a' in
+  check bool "the engine reply is longer than the declared reply bound" true
+    (String.length identity > small.resources.max_reply_bytes);
+  check string "image identity is returned" identity
+    (unwrap (Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
+      ~package:small ~docker_command:docker ())))
 
 (* Tests deliberately collect their small fixture history; production recovery streams. *)
 let sampling_requests store ~instance_id =
@@ -1818,6 +1831,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
+  test_case "docker control ignores the package reply bound" `Quick test_docker_control_ignores_the_package_reply_bound;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
   test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;

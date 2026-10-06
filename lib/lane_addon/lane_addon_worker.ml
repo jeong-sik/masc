@@ -44,11 +44,18 @@ let valid_container_id id =
 
 exception Control_reply_too_large
 
+(* Docker control output is host-run CLI output, not a package reply, so the
+   manifest's reply bound does not apply. It is bounded like any other
+   captured subprocess stream, because an image can add large labels to an
+   inspect result. Package stdout goes through the MCP transport's own bound. *)
+let control_output_max_bytes = Common.max_process_capture_head_bytes
+
 (* This reader bounds both Docker control streams before retaining their
-   contents. Package stdout goes through the MCP transport's own bound. *)
-let read_control ~max_bytes flow =
-  let buffer = Buffer.create (min max_bytes 4096) in
-  let chunk = Cstruct.create (min max_bytes 4096) in
+   contents. *)
+let read_control flow =
+  let max_bytes = control_output_max_bytes in
+  let buffer = Buffer.create 4096 in
+  let chunk = Cstruct.create 4096 in
   let rec loop () =
     match Eio.Flow.single_read flow chunk with
     | count ->
@@ -60,7 +67,7 @@ let read_control ~max_bytes flow =
   in
   loop ()
 
-let run_control ~clock ~timeout_sec ~mgr ~docker_command ~max_bytes ~operation args =
+let run_control ~clock ~timeout_sec ~mgr ~docker_command ~operation args =
   let run () =
     try Eio.Switch.run (fun sw ->
       let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -71,8 +78,8 @@ let run_control ~clock ~timeout_sec ~mgr ~docker_command ~max_bytes ~operation a
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
       let stdout, stderr = Eio.Fiber.pair
-          (fun () -> read_control ~max_bytes stdout_r)
-          (fun () -> read_control ~max_bytes stderr_r) in
+          (fun () -> read_control stdout_r)
+          (fun () -> read_control stderr_r) in
       match Eio.Process.await child with
       | `Exited 0 -> Ok stdout
       | `Exited code ->
@@ -99,7 +106,6 @@ let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else
   let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
-      ~max_bytes:package.resources.max_reply_bytes
       ~operation:"image inspect" ["image";"inspect";"--format";"{{.Id}}";package.image] in
   let digest = String.trim raw in
   if digest="" then Error (Docker_failed {operation="image inspect";detail="empty image identity"})
@@ -213,17 +219,15 @@ let inspect_owned_container ~run ~instance_id ~name id =
   with Yojson.Json_error detail ->
     Error (Docker_failed { operation = "recover ownership"; detail })
 
-let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~max_reply_bytes
+let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id
     ?(docker_command = "docker") () =
-  if max_reply_bytes <= 0 then Error (Invalid_package "max_reply_bytes must be positive")
-  else if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
+  if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
   else if Option.exists (fun id -> not (valid_container_id id)) container_id then
     Error (Docker_failed { operation = "recover ownership"; detail = "invalid container ID" })
   else
-    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
-      ~max_bytes:max_reply_bytes in
+    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
     let* found, name = match container_id with
       | None ->
           let name = owned_name instance_id in
@@ -282,19 +286,18 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
      stdout or persisting [on_created]. Domain labels are checked before any
      recovered container is removed. *)
   let name = owned_name instance_id in
-  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
-      ~max_bytes:package.resources.max_reply_bytes in
+  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
   let identity = ref None in
   let cleanup_finished = ref false in
   let cleanup () =
     if !cleanup_finished then Ok ()
     else match !identity with
       | None ->
-          (* create can take effect before its stdout is received (or exceed
-             a tiny reply limit). Verify the binding's deterministic name
-             and label instead of removing an unverified name collision. *)
+          (* create can take effect before its stdout is received. Verify the
+             binding's deterministic name and label instead of removing an
+             unverified name collision. *)
           let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None
-              ~max_reply_bytes:package.resources.max_reply_bytes ~docker_command () in
+              ~docker_command () in
           cleanup_finished := true;
           Ok ()
       | Some id ->

@@ -100,7 +100,7 @@ let make_backend () =
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
-    recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
+    recover_stop = (fun ~instance_id ~container_id ->
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
       then Error "persisted container does not belong to instance"
       else begin

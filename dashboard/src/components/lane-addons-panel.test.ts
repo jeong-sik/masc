@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
   requestLaneAddonAction: vi.fn(), fetchLaneAddonAction: vi.fn(),
 }))
 const transport = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
-vi.mock('../api/core', () => transport)
+vi.mock('../api/core', async original => ({ ...await original<typeof import('../api/core')>(), ...transport }))
 vi.mock('../api/lane-addons', async original => ({
   ...await original<typeof import('../api/lane-addons')>(), ...api,
 }))

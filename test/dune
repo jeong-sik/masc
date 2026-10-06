@@ -3,7 +3,7 @@
 (test
  (name test_server_lane_inventory)
  (modules test_server_lane_inventory)
- (libraries masc_test_deps masc.server alcotest eio_main unix yojson bigstringaf h2 h2-eio))
+ (libraries masc_test_deps masc.server masc.browser_lane alcotest eio_main unix yojson bigstringaf h2 h2-eio))
 (include stanzas/test_librarian_working_state_evaluation.inc)
 
 (test
@@ -173,13 +173,13 @@
 (test
  (name test_msx_vision)
  (modules test_msx_vision)
- (libraries alcotest unix base64 yojson fs_compat masc masc_test_deps
+ (libraries masc.machine_configuration alcotest unix base64 yojson fs_compat masc masc_test_deps
    masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
 
 (test
  (name test_dos_vision)
  (modules test_dos_vision)
- (libraries alcotest unix yojson fs_compat masc masc_test_deps
+ (libraries masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
    masc.dos_lane masc.multimodal masc.tool_types))
 
 (test
@@ -1238,7 +1238,7 @@
  (deps
   ../config/runtime.toml
   (source_tree ../scripts/fixtures))
- (libraries masc_test_deps exact_output_fixture))
+ (libraries masc_test_deps exact_output_fixture masc.toml_line_editor))
 
 (test
  (name test_tui_config_pane_title_head)
@@ -1888,8 +1888,9 @@
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
-  test_board_core_payload)
+ test_board_core_payload)
  (libraries
+  masc.toml_line_editor
   masc.browser_lane
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
@@ -6390,6 +6391,7 @@
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_keeper_schedule_error_once.inc)
 (include stanzas/test_tui_keeper_automation_rows.inc)
+(include stanzas/test_tui_approvals_window_pty.inc)
 (include stanzas/test_tui_schedule_wake_error_once.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
@@ -6869,6 +6871,8 @@
  (name test_browser_lane)
  (modules test_browser_lane)
  (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
+
+(include stanzas/test_browser_activity.inc)
 
 ; Mock clock as the lane's clock: a command taken, and an answer delivered,
 ; as their window passed stand.
@@ -8066,12 +8070,12 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -8147,6 +8151,12 @@
  (libraries alcotest masc masc_test_deps yojson unix fs_compat))
 
 (test
+ (name test_lane_addon_application)
+ (modules test_lane_addon_application)
+ (flags :standard -open Masc)
+ (libraries alcotest masc yojson))
+
+(test
  (name test_lane_addon_config)
  (modules test_lane_addon_config)
  ; The shipped DOS chain manifests and their checked-in declarations are read
@@ -8176,7 +8186,7 @@
        ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
        ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)
- (libraries masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
 (include stanzas/test_lane_fusion_compute_packages.inc)
@@ -8264,6 +8274,21 @@
  (name test_tui_lane_broadcast_pending)
  (modules test_tui_lane_broadcast_pending)
  (libraries alcotest yojson unix masc.fs_compat masc_tui_lane_broadcast_pending))
+
+(test
+ (name test_lane_addon_catalog)
+ (modules test_lane_addon_catalog)
+ (libraries alcotest unix masc))
+
+(test
+ (name test_tui_package_browser)
+ (modules test_tui_package_browser)
+ (libraries alcotest unix yojson masc masc_tui_package_browser))
+
+(test
+ (name test_tui_lane_application)
+ (modules test_tui_lane_application)
+ (libraries alcotest yojson masc_tui_lane_application masc_tui_lane_declaration))
 
 (test
  (name test_tui_lane_addons)
@@ -9409,6 +9434,68 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_memory_selection_refresh_pty)))
+
+(test
+ (name test_tui_exact_activity)
+ (modules test_tui_exact_activity)
+ (libraries masc.runtime masc_tui_exact_activity masc_tui_runtime_config_edit
+  masc_tui_runtime_config_receipt alcotest))
+
+(rule
+ (alias runtest-test_tui_exact_activity_pty)
+ (deps test_tui_exact_activity_pty.py test_tui_runtime_account_form_pty.py
+       tui_keyboard_harness.py tui_keyboard_keepers.py tui_keyboard_runtime.py
+       ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_exact_activity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_exact_activity_pty)))
+
+(test
+ (name test_tui_browser_activity)
+ (modules test_tui_browser_activity)
+ (libraries alcotest otoml masc.browser_lane masc.browser_configuration
+  masc_tui_browser_activity masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+
+(rule
+ (alias runtest-test_tui_browser_activity_pty)
+ (deps test_tui_browser_activity_pty.py test_tui_runtime_account_form_pty.py
+       tui_keyboard_harness.py tui_keyboard_keepers.py tui_keyboard_runtime.py
+       ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_browser_activity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_browser_activity_pty)))
+
+(test
+ (name test_msx_lane_activity)
+ (modules test_msx_lane_activity)
+ (libraries alcotest unix otoml ocaml-msx.msx masc.msx_lane
+  masc.machine_configuration masc.runtime_toml_namespace))
+
+(test
+ (name test_dos_lane_activity)
+ (modules test_dos_lane_activity)
+ (libraries alcotest unix masc.dos_lane masc.machine_checkpoint masc.machine_configuration))
+
+(test
+ (name test_tui_machine_activity)
+ (modules test_tui_machine_activity)
+ (libraries alcotest otoml masc masc.machine_configuration
+  masc_tui_machine_activity masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+
+(rule
+ (alias runtest-test_tui_machine_activity_pty)
+ (deps test_tui_machine_activity_pty.py test_tui_runtime_account_form_pty.py
+       tui_keyboard_harness.py tui_keyboard_keepers.py tui_keyboard_runtime.py
+       ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_machine_activity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_machine_activity_pty)))
 
 (test
  (name test_tui_model_form)

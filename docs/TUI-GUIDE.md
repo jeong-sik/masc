@@ -629,7 +629,8 @@ Existing drafts are retained. `&` still opens the machine media menu.
 `d` reads the selected row's full observation; `i` reads inventory diagnostics.
 Both readers scroll, and Esc/Left returns to the list. `o` or `A`, `/addons`, and
 `go Lane Add-ons` keep the full package management surface available. Its `i`
-key opens the existing schema-based installation form; its scope differs from
+key opens the local package browser, followed by package preview and the existing
+schema-based installation form; its scope differs from
 the inventory's diagnostics key. See the [Lane Add-on guide](guides/tui-lane-addons.md).
 
 This inventory does not provide enable/disable controls. Browser registration

@@ -1,0 +1,19 @@
+RUN  v5.0.2 /private/tmp/masc-b10-settings-c2e74cc-20261005/dashboard
+
+stdout | src/components/B10-settings-workspace-audit.test.ts > SettingsSurface > B10 loaded A routing remains visible and writable after authority becomes B
+B10 loaded reading: authority=B, same mounted Settings, A default=rt-a still enabled; no B defaults/resolved/providers GET
+
+stdout | src/components/B10-settings-workspace-audit.test.ts > SettingsSurface > B10 late A resolved response is accepted after workspace B is current
+B10 late reading: A config_path accepted and rendered while actual execution authority is B
+
+stdout | src/components/B10-settings-workspace-audit.test.ts > SettingsSurface > B10 actual routing API dispatches A selection after token await resumes under B
+B10 actual API dispatch: A selected rt-b; token suspended; authority changed to B; POST transport received default=rt-b under B. Mock rejects before any server effect.
+
+ ✓ src/components/B10-settings-workspace-audit.test.ts > SettingsSurface > B10 loaded A routing remains visible and writable after authority becomes B 63ms
+ ✓ src/components/B10-settings-workspace-audit.test.ts > SettingsSurface > B10 late A resolved response is accepted after workspace B is current 6ms
+ ✓ src/components/B10-settings-workspace-audit.test.ts > SettingsSurface > B10 actual routing API dispatches A selection after token await resumes under B 6ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  00:35:46
+   Duration  1.68s (transform 40%, import 34%, environment 11%, setup 9%, tests 5%)

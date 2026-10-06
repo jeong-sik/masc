@@ -5281,6 +5281,15 @@ type state = {
      surfaces read the same file the same way. Plain text is derived where it
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
+  mutable exact_activity_sessions: Masc_tui_exact_activity.t list;
+  mutable exact_activity_open: Masc_tui_exact_activity.owner option;
+  mutable exact_activity_generation: int;
+  mutable browser_activity_sessions: Masc_tui_browser_activity.t list;
+  mutable browser_activity_open: Masc_tui_browser_activity.owner option;
+  mutable browser_activity_generation: int;
+  mutable machine_activity_sessions: Masc_tui_machine_activity.t list;
+  mutable machine_activity_open: Masc_tui_machine_activity.owner option;
+  mutable machine_activity_generation: int;
   mutable runtime_config_view: runtime_config_reading option;
   mutable runtime_config_edits: runtime_config_edit_session list;
   mutable runtime_config_generation: int;
@@ -8152,6 +8161,9 @@ let play_invite_forget current name =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || (state.view = Lanes && Option.is_some state.exact_activity_open)
+  || (state.view = Lanes && Option.is_some state.browser_activity_open)
+  || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
   || Option.is_some (play_card_shown state)
 
@@ -8182,6 +8194,9 @@ let close_key_modals (state : state) =
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
+  state.exact_activity_open <- None;
+  state.browser_activity_open <- None;
+  state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state
 
@@ -8355,6 +8370,15 @@ let create_state
   prompts_librarian_input = None;
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
+  exact_activity_sessions = [];
+  exact_activity_open = None;
+  exact_activity_generation = 0;
+  browser_activity_sessions = [];
+  browser_activity_open = None;
+  browser_activity_generation = 0;
+  machine_activity_sessions = [];
+  machine_activity_open = None;
+  machine_activity_generation = 0;
   runtime_config_view = None;
   runtime_config_edits = [];
   runtime_config_generation = 0;
@@ -9662,6 +9686,51 @@ let runtime_config_workspace (state : state) =
   Option.map (fun identity ->
     canonical_path identity.Tui_decode.sid_base_path,
     canonical_path identity.Tui_decode.sid_masc_root) state.server_identity
+
+let browser_activity_session (state : state) owner =
+  List.find_opt (fun session -> Masc_tui_browser_activity.same_owner owner
+    (Masc_tui_browser_activity.owner session)) state.browser_activity_sessions
+
+let put_browser_activity (state : state) session =
+  state.browser_activity_sessions <- session :: List.filter (fun existing ->
+    not (Masc_tui_browser_activity.same_owner (Masc_tui_browser_activity.owner session)
+      (Masc_tui_browser_activity.owner existing))) state.browser_activity_sessions
+
+let shown_browser_activity (state : state) =
+  match state.browser_activity_open, runtime_config_workspace state with
+  | Some owner,Some workspace when owner.Masc_tui_browser_activity.workspace=workspace ->
+    browser_activity_session state owner
+  | None,_ | _,None | Some _,Some _ -> None
+
+let machine_activity_session (state : state) owner =
+  List.find_opt (fun session -> Masc_tui_machine_activity.same_owner owner
+    (Masc_tui_machine_activity.owner session)) state.machine_activity_sessions
+
+let put_machine_activity (state : state) session =
+  state.machine_activity_sessions <- session :: List.filter (fun existing ->
+    not (Masc_tui_machine_activity.same_owner (Masc_tui_machine_activity.owner session)
+      (Masc_tui_machine_activity.owner existing))) state.machine_activity_sessions
+
+let shown_machine_activity (state : state) =
+  match state.machine_activity_open, runtime_config_workspace state with
+  | Some owner,Some workspace when owner.Masc_tui_machine_activity.workspace=workspace ->
+    machine_activity_session state owner
+  | None,_ | _,None | Some _,Some _ -> None
+
+let exact_activity_session (state : state) owner =
+  List.find_opt (fun session -> Masc_tui_exact_activity.same_owner owner
+    (Masc_tui_exact_activity.owner session)) state.exact_activity_sessions
+
+let put_exact_activity (state : state) session =
+  state.exact_activity_sessions <- session :: List.filter (fun existing ->
+    not (Masc_tui_exact_activity.same_owner (Masc_tui_exact_activity.owner session)
+      (Masc_tui_exact_activity.owner existing))) state.exact_activity_sessions
+
+let shown_exact_activity (state : state) =
+  match state.exact_activity_open, runtime_config_workspace state with
+  | Some owner,Some workspace when owner.Masc_tui_exact_activity.workspace=workspace ->
+    exact_activity_session state owner
+  | None,_ | _,None | Some _,Some _ -> None
 
 let runtime_config_edit_session (state : state) =
   match runtime_config_workspace state, state.runtime_config_view with

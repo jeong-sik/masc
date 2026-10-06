@@ -1,0 +1,24 @@
+{
+  "error": "TimeoutError: locator.selectOption: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByLabel('Action instance', { exact: true })\u001b[22m\n",
+  "errors": [],
+  "unhandled": [],
+  "writes": [
+    {
+      "path": "/api/v1/lane-addons/observe",
+      "body": {
+        "instance_id": "A-worker"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons/slice"
+    }
+  ],
+  "body": "Synthetic HTTP fixture · actual Status, Add-ons component and decoder · no live package\n\nFixture workspace A\nFixture workspace B\nFixture withdraw authority\nKEEPER FLEET\nINTERNAL AGENTS\nTOOL MONITOR\nRUNTIME\nOBSERVATORY\nSKILLS\nALL LANES\nLANE ADD-ONS\nLANE · QUEUE\nMONITOR\n›\nLANE ADD-ONS\nLANE ADD-ONS\n\nOptional cross-lane observations and relationships.\n\nLANE ADD-ONS\n\nOptional observations and relationships. Keeper work continues independently.\n\nNew TOML\nRefresh\n\nFrozen slice: Refresh updates installation status only. Use Slice to query again, or Clear slice to show the latest snapshot.\n\nLane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window.\n\nEach row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation.\n\n1970-01-01T00:00:01.000Z → 1970-01-01T00:00:01.000Z\n\noutput · A-worker\nA package · attached\nEvent list · 1 observations, including overlapping points\nTOML CONFIGURATION\n\nConfiguration service has not started.\n\nCurrent workspace TOML configuration is unavailable. Refresh to retry; your retained drafts are unchanged.\n\nAttach a package\nINSTANCE / PACKAGE\tRUN / REVISION\tSTATUS\tCURSOR / ROWS\tACTIONS\n A package\nA-worker · fixture\n\nNot managed by TOML\n\nPackage input and display contracts\n\tA\nfixture\n\tattached\t0 / 0\tObserveRemove worker\n\nCleans up this worker and its owned resources. Retained observations and evidence remain.\n\nPACKAGE ACTIONS\n\nSubmit an action advertised by an installed package. Observations and Keeper work continue independently.\n\nAction instance \nSelect an installed package\nA package · A · A-worker\nRun filter \nLane filter \nSince (Unix seconds) \nUntil (Unix seconds) \nSlice\nClear slice\n\nSlice: complete within reported coverage\n\nFrozen A observation\n· value · A-worker/output\n\n1970-01-01T00:00:01.000Z · A-subject · actor unknown\n\nFields and original evidence · A-event\nKeeper (optional) \nPreserve selected evidence"
+}

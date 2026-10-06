@@ -262,6 +262,7 @@ let test_an_invite_recovers_only_a_stopped_keepers_controller () =
                 : Masc.Keeper_registry.registry_entry);
             Fun.protect
               ~finally:(fun () ->
+                Lane.install_activity_observer None;
                 Masc.Keeper_registry.For_testing.unregister ~base_path holder;
                 let who = match Lane.screen () with
                   | Ok { Lane.controller = Some name; _ } -> name
@@ -269,6 +270,8 @@ let test_an_invite_recovers_only_a_stopped_keepers_controller () =
                 ignore (Lane.eject ~who ~announce:(fun () -> ()) ()
                   : (unit, Lane.error) result))
               (fun () ->
+                Lane.install_activity_observer
+                  (Some (fun () -> Machine_configuration.Enabled));
                 (match Lane.load ~who:holder
                   ~ledger_dir:(Filename.concat base_path "ledger")
                   ~saves_dir:(Filename.concat base_path "saves")
@@ -314,11 +317,14 @@ let test_an_invite_passes_only_to_someone_at_the_machine () =
   with_state ~auth:true (fun ~base_path handle ->
     Fun.protect
       ~finally:(fun () ->
+        Lane.install_activity_observer None;
         let who = match Lane.screen () with
           | Ok { Lane.controller = Some name; _ } -> name
           | Ok _ | Error _ -> "cleanup" in
         ignore (Lane.eject ~who ~announce:(fun () -> ()) () : (unit, Lane.error) result))
       (fun () ->
+        Lane.install_activity_observer
+          (Some (fun () -> Machine_configuration.Enabled));
         (match Lane.load ~who:"pi"
           ~ledger_dir:(Filename.concat base_path "ledger")
           ~saves_dir:(Filename.concat base_path "saves")

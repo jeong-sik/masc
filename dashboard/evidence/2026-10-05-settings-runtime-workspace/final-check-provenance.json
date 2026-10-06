@@ -1,0 +1,32 @@
+{
+  "base": "8763173e4b9a7ddba8c0e120c8a93eff0be5b93f",
+  "source_sha256": {
+    "dashboard/src/lib/settings-runtime-session.ts": "85060fe8eb0fd1c30ecb385a141b4a01ca4f914b873b1eb7dff9c1654bbf1c4f",
+    "dashboard/src/components/settings-surface.ts": "dcbe54dfe68aa0ed2650698c020659a939b202a4da83acdb0f48ff6db57adbc0",
+    "dashboard/src/components/settings-surface.test.ts": "a71e9272c85e5a7b2189b16d771339bcc29d8581ada07d659524884adce2406b",
+    "dashboard/src/lib/runtime-toml-source-generation.ts": "f69a21e4183521e5c17db3b102dcd2c9ff62dcfa47db1584875e9e079d2c2b23",
+    "dashboard/src/lib/runtime-toml-session.ts": "f5f9cded0cea238c9b5a277a2b3ec0b766c45fe08d19444d6b31de8514332172",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "73d55b86fd8d7f160251ba0950b84bf0bb574c4f562f353bfc87ae9fe2af7364",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "84d4c7eea2d98f167470e1567669d4b17032c5f2c18c59bef3a2d18f3da2e167",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "728d2a8e6497ad865aa9d99c2dbffd44fd474521fda135b209b261e80b54b4c2"
+  },
+  "cwd": "dashboard",
+  "test_command": "node node_modules/vitest/vitest.mjs run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/settings-surface.test.ts src/api/dashboard-runtime-routing-lifetime.test.ts src/components/runtime-toml-editor.test.ts src/components/exact-lane-activity-panel.test.ts src/components/browser-lane-activity-panel.test.ts",
+  "test_result": "232 passed in 5 files",
+  "typecheck_command": "node node_modules/typescript/bin/tsc --noEmit",
+  "typecheck_exit": 0,
+  "lint_command": "node node_modules/eslint/bin/eslint.js src/lib/settings-runtime-session.ts src/components/settings-surface.ts src/components/settings-surface.test.ts src/lib/runtime-toml-source-generation.ts src/lib/runtime-toml-session.ts src/components/runtime-toml-editor.test.ts src/lib/exact-lane-activity-session.ts src/lib/browser-lane-activity-session.ts",
+  "lint_exit": 0,
+  "logs": [
+    "tests.txt",
+    "typecheck.txt",
+    "lint.txt"
+  ],
+  "not_run": [
+    "Dune",
+    "native",
+    "CI",
+    "real backend"
+  ],
+  "browser": "browser-result.json; actual Settings/store/API and synthetic HTTP only"
+}

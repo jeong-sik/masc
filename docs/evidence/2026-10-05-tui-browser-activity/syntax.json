@@ -1,0 +1,60 @@
+{
+  "scope": "OCaml 5.5.1 parsing only, not native TUI type/link",
+  "passed": true,
+  "files": [
+    {
+      "path": "bin/masc_tui.ml",
+      "sha256": "11af1433f7e2ca93aebbfc1d30eb6202cc1a1eeaad80a8c52bcadefcd151d42f",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.ml",
+      "sha256": "d5902105d90376245bdef961a87bacdc0d5b8916a2a1e4025e7873e400002546",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.mli",
+      "sha256": "d5902105d90376245bdef961a87bacdc0d5b8916a2a1e4025e7873e400002546",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "bin/masc_tui_browser_activity.ml",
+      "sha256": "a80d08f44c38a94024cd6387a4500441fdad7273328cb58513e6b23c7ac80520",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "bin/masc_tui_browser_activity.mli",
+      "sha256": "bc140783d36cfd715cba8ba0e1445df0864b4dba79ba6fb8ab2f418ff6aaf685",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "sha256": "4244a7042dfb707d449100c51548e97b96c653e510c6fd5a9edb8a4b36eb0a6b",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "bin/masc_tui_render.ml",
+      "sha256": "140b08afbd2cf3ea6764b7544f908827f38bbca1ad1c63c9bb6d37046bfb289c",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "sha256": "0cd4db8177ccee8c72e384e64ba4a2e768272135278c3eeac507f1ba06415e1b",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_tui_browser_activity.ml",
+      "sha256": "63ee1b2aa815fb7cd72cb3d90e6f43d1b9c2140030d6d39466953e4b549f621b",
+      "exit_code": 0,
+      "output": ""
+    }
+  ]
+}

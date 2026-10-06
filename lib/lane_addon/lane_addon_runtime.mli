@@ -58,6 +58,11 @@ val register_skill_export_handler :
     Keeper turn prerequisite. Bodies are not inserted into Keeper instructions. *)
 
 (** Reconcile a complete TOML declaration inventory with owned observers.
+    Returned declaration metadata includes the exact [source_revision] and a
+    typed [application] observation. Operator Inspect recomputes this observation
+    from live and retained owners without triggering reconciliation or cleanup.
+    Non-operator callers receive an Unknown application observation; new worker
+    identity/error details are operator-only.
     Malformed declarations and incomplete reads preserve the last applied
     configuration. Confirmed declaration removal detaches its owned observer.
     The directory is explicit for isolated feature tests. *)
@@ -99,6 +104,11 @@ val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock -> unit
 
 module For_testing : sig
+  val with_cleanup_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t option ->
+      (unit, string) result) -> (unit -> 'a) -> 'a
+  (** Terminal historical cleanup persistence. [None] removes a never-started
+      binding; [Some json] persists its final phase. Captured before offload. *)
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;

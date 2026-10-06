@@ -74,6 +74,16 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
         ])
 ;;
 
+(* The activity gate rejects a request because the machine's activity is off,
+   not because the request is malformed: the same request succeeds once the
+   operator turns activity on, so the client should retry rather than fix its
+   body. Every route that can hit the gate answers it the same way — 409 with
+   the code the client keys on — so a client built against one route reads the
+   other's rejection the same way. *)
+let activity_rejection_json code =
+  `Assoc [ ("ok", `Bool false); ("code", `String code) ]
+;;
+
 (* A human change to the machine wakes the Lane instances bound to it with the
    typed activity a Keeper's finished MSX tool produces through the event
    bridge (RFC machine-spectating-goes-through-lanes §2.2). These routes call
@@ -133,6 +143,10 @@ let press_response ~config ~who ~body =
       | Ok obs ->
         machine_changed ~config;
         `OK, press_result_json ~ok:true (Some obs)
+      | Error Msx_lane.Activity_disabled ->
+        `Conflict, activity_rejection_json "activity_disabled"
+      | Error Msx_lane.Activity_unobserved ->
+        `Conflict, activity_rejection_json "activity_unobserved"
       | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
@@ -347,6 +361,10 @@ let tick_response ~body =
       | Ok (frame, entries, mark) ->
         `OK, tick_frame_json pixel_response frame entries mark
       | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
+      | Error Msx_lane.Activity_disabled ->
+        `Conflict, activity_rejection_json "activity_disabled"
+      | Error Msx_lane.Activity_unobserved ->
+        `Conflict, activity_rejection_json "activity_unobserved"
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
@@ -371,6 +389,9 @@ let handle_tick request reqd =
       Http.Response.json_value_on_cpu ~status ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
+
+let activity_json () = `Assoc ["schema",`String "masc.msx-activity/v1";
+  "activity",`String (Machine_configuration.activity_to_wire (Msx_lane.activity ()))]
 
 let checkpoint_response ~(config : Workspace.config) ~restore ~body =
   let base_path = config.base_path in
@@ -444,6 +465,10 @@ let handle_checkpoint ~config ~restore request reqd =
 
 let add_routes router =
   router
+  |> Http.Router.get "/api/v1/msx/activity" (fun request reqd ->
+       with_public_read
+         (fun _state req reqd -> Http.Response.json_value ~compress:true ~request:req (activity_json ()) reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read
          (fun state req reqd ->

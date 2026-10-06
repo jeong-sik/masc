@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status route, menu, component and decoder; synthetic HTTP. No native, worker or deployment proof.",
+  "assertions": [
+    "menu route renders 12 builtin kinds and a package",
+    "off intent retains failed cleanup reading",
+    "selected detail receives focus",
+    "search filters actual row identities",
+    "unavailable refresh labels previous reading",
+    "mobile page has no horizontal overflow",
+    "zero writes and unexpected routes"
+  ],
+  "errors": [],
+  "writes": [],
+  "unhandled": []
+}

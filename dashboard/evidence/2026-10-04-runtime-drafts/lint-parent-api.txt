@@ -1,0 +1,7 @@
+
+/Users/dancer/me/workspace/yousleepwhen/masc-runtime-web-draft-session-20261004/dashboard/src/api/dashboard-runtime.ts
+  987:56  error  Do not nest ternary expressions  no-nested-ternary
+  989:7   error  Do not nest ternary expressions  no-nested-ternary
+
+✖ 2 problems (2 errors, 0 warnings)
+

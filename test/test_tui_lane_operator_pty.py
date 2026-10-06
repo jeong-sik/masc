@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 import tomllib
+from urllib.parse import parse_qs, urlsplit
 import tui_keyboard_harness as terminal
 from test_tui_lane_visual_pty import snapshot
 
@@ -37,6 +38,7 @@ def main(executable: str, captures: Path | None) -> None:
     data['configuration']['declarations'] = [{
         'id': 'unapplied-installation', 'source_path': '/fixture/lane-addons/pending.toml',
         'enabled': True,
+        'source_revision': 'source-pending', 'application': {'kind': 'starting'},
         'desired_revision': 'pending', 'applied_revision': None, 'instance_id': None,
     }]
     fixtures = terminal.overview_event_http_fixtures()
@@ -125,21 +127,36 @@ def guided_install(executable: str, captures: Path | None) -> None:
     data.update(instances=[], rows=[], coverage=[])
     fixtures = terminal.overview_event_http_fixtures()
     fixtures['/api/v1/lane-addons'] = (200, data)
-    fixtures['/api/v1/lane-addons/package-preview'] = (200, {
+    def catalog(path: str) -> tuple[int, dict]:
+        directory = parse_qs(urlsplit(path).query).get('directory', ['/fixture'])[0]
+        if directory == '/fixture':
+            return 200, {'directory': directory, 'parent': None, 'entries': [
+                {'kind': 'folder', 'path': '/fixture/package'}]}
+        if directory == '/fixture/package':
+            return 200, {'directory': directory, 'parent': '/fixture', 'entries': [
+                {'kind': 'package', 'manifest_path': '/fixture/package/lane.toml',
+                 'title': 'Listed operator package', 'revision': 'old', 'description': 'Select to reread'}]}
+        raise AssertionError(f'Unexpected package folder: {directory!r}')
+    fixtures['/api/v1/lane-addons/package-catalog'] = terminal.PathHttpResponse(catalog)
+    preview_requests: list[str] = []
+    def preview(path: str) -> tuple[int, dict]:
+        preview_requests.append(path)
+        return 200, {
         'manifest_path': '/fixture/package/lane.toml',
         'package': {'title': 'Operator package', 'revision': '1', 'image': 'fixture-image',
                     'binding_schema': {'type': 'object', 'properties': {
                         'source': {'type': 'string', 'minLength': 1}},
                         'required': ['source'], 'additionalProperties': False}},
         'image': {'state': 'unverified', 'detail': 'Controlled test does not inspect Docker'},
-    })
+        }
+    fixtures['/api/v1/lane-addons/package-preview'] = terminal.PathHttpResponse(preview)
     requests: terminal.HttpRequests = []
     saved: list[dict] = []
 
     def save(body: bytes) -> tuple[int, dict]:
         request = json.loads(body)
         parsed = tomllib.loads(request['source_text'])
-        expected = {'id': 'operator-layer', 'run_id': 'operator-run',
+        expected = {'enabled': True, 'id': 'operator-layer', 'run_id': 'operator-run',
                     'manifest_path': '/fixture/package/lane.toml',
                     'binding': {'source': 'explicit-source'}}
         if parsed != expected:
@@ -157,9 +174,15 @@ def guided_install(executable: str, captures: Path | None) -> None:
         def key(value: bytes, needle: bytes) -> bytes:
             return terminal.send_and_wait(process, master, output, value, needle)
         key(b':go lane add-ons\r', b'MASC Lane Add-ons')
-        key(b'i', b'Install Add-on:')
-        key(b'/fixture/package/lane.toml\x13', b'Review input')
+        key(b'i', b'Folder  package')
+        key(b'p', b'Install Add-on:')
+        key(b'\x1b', b'No Add-ons installed.')
+        key(b'i', b'Folder  package')
+        key(b'\r', b'Listed operator package')
+        assert not preview_requests
         key(b'\r', b'Image unverified:')
+        assert len(preview_requests) == 1
+        assert parse_qs(urlsplit(preview_requests[0]).query) == {'manifest_path': ['/fixture/package/lane.toml']}
         key(b'operator-layer\t', b'run_id')
         key(b'operator-run\t', b'binding.source')
         key(b'explicit-source\x13', b'Review input')
@@ -180,6 +203,47 @@ def guided_install(executable: str, captures: Path | None) -> None:
     terminal.run_terminal_scenario(executable, description='Lane guided package installation',
         interact=interact, http_fixtures=fixtures, http_requests=requests)
     print('Package preview / schema fields / review / explicit declaration save: PASS')
+
+
+def package_scroll_boundary(executable: str) -> None:
+    data = snapshot()
+    data.update(instances=[], rows=[], coverage=[])
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures['/api/v1/lane-addons'] = (200, data)
+    fixtures['/api/v1/lane-addons/package-catalog'] = (200, {
+        'directory': '/fixture', 'parent': None, 'entries': [{
+            'kind': 'package', 'manifest_path': '/fixture/package/lane.toml',
+            'title': 'Long metadata package', 'revision': '1',
+            'description': ' '.join(f'metadata-{index:03d}-' + 'x' * 70 for index in range(80)),
+        }],
+    })
+    requests: terminal.HttpRequests = []
+
+    def interact(process, master, slave, output, _base):
+        terminal.send_and_wait(process, master, output, b':go lane add-ons\r', b'MASC Lane Add-ons')
+        terminal.send_and_wait(process, master, output, b'i', b'Long metadata package')
+        terminal.write_all(master, output, b'\x1b[6~' * 200)
+        terminal.wait_for_terminal_input_consumed(slave)
+        assert terminal.drain_until_quiet(process, master, output)
+        before = terminal.screen_rows(bytes(output))
+        assert b'metadata-079-' in b' '.join(before.values()), 'did not reach the actual metadata bottom'
+        terminal.write_all(master, output, b'\x1b[5~')
+        terminal.wait_for_terminal_input_consumed(slave)
+        assert terminal.drain_until_quiet(process, master, output)
+        after = terminal.screen_rows(bytes(output))
+        assert {row: text for row, text in before.items() if 5 <= row < 29} != {
+            row: text for row, text in after.items() if 5 <= row < 29
+        }, 'PageUp did not move visible metadata after repeated PageDown at the bottom'
+        mutations = [path for path, body in requests
+                     if not (path == '/mcp' and json.loads(body).get('method') == 'initialize')]
+        assert not mutations, f'browsing metadata dispatched a mutation: {mutations!r}'
+        terminal.send_and_wait(process, master, output, b'\x1b', b'No Add-ons installed.')
+        terminal.send_and_wait(process, master, output, b'q', b'MASC Dashboard')
+        os.write(master, b'q')
+
+    terminal.run_terminal_scenario(executable, description='Package metadata scroll boundary',
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    print('Package metadata bottom / immediate PageUp / no mutation: PASS')
 
 
 def broadcast_export(executable: str, captures: Path | None) -> None:
@@ -273,6 +337,7 @@ def stale_removal(executable: str) -> None:
     worker['configuration'] = owner
     data['instances'] = [worker]
     declaration = {'id': owner['id'], 'source_path': owner['source_path'], 'enabled': True,
+                   'source_revision': 'source-changed', 'application': {'kind': 'cleaning'},
                    'desired_revision': 'changed', 'applied_revision': 'installed',
                    'instance_id': worker['instance_id']}
     data['configuration']['declarations'] = [declaration]
@@ -309,4 +374,5 @@ if __name__ == '__main__':
     stale_removal(os.path.abspath(args.executable))
     main(os.path.abspath(args.executable), args.capture_dir)
     guided_install(os.path.abspath(args.executable), args.capture_dir)
+    package_scroll_boundary(os.path.abspath(args.executable))
     broadcast_export(os.path.abspath(args.executable), args.capture_dir)

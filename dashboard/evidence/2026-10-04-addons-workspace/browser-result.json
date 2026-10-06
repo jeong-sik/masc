@@ -1,0 +1,92 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status/component/API decoder in Chromium against synthetic HTTP; no native backend, worker or deployment.",
+  "assertions": [
+    "B read failure removes A rows and actions",
+    "B never displays frozen A slice",
+    "late A observation does not replace B receipt",
+    "A pending action does not block B",
+    "late A action receipt stays in A journal",
+    "A return restores original request ID",
+    "aborted status check can be retried on return",
+    "unknown authority disables reads and hides rows",
+    "only four explicitly requested mutations; no automatic replay"
+  ],
+  "errors": [],
+  "unhandled": [],
+  "writes": [
+    {
+      "path": "/api/v1/lane-addons/observe",
+      "body": {
+        "instance_id": "A-worker"
+      }
+    },
+    {
+      "path": "/api/v1/lane-addons/actions",
+      "body": {
+        "instance_id": "A-worker",
+        "expected_incarnation": "A-worker",
+        "request_id": "8ecb921e-ab4a-442d-aa74-2c8ced149e19",
+        "action": {}
+      }
+    },
+    {
+      "path": "/api/v1/lane-addons/observe",
+      "body": {
+        "instance_id": "B-worker"
+      }
+    },
+    {
+      "path": "/api/v1/lane-addons/actions",
+      "body": {
+        "instance_id": "B-worker",
+        "expected_incarnation": "B-worker",
+        "request_id": "3a2b0141-4877-4a16-b961-7ef185d818af",
+        "action": {}
+      }
+    }
+  ],
+  "reads": [
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons/slice"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons/actions"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/lane-addons/actions"
+    }
+  ]
+}

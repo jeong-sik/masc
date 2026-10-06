@@ -1,0 +1,10 @@
+{
+  "scope": "Actual component regression against pre-fix product sources; uncommitted reproduction test",
+  "product_head": "4e29bb9f54a1cf9e45ee8c3a433b37744f8ea297",
+  "exit_code": 1,
+  "sha256": {
+    "dashboard/src/components/lane-package-installer.ts": "0cee51e645f54522c48acbbc303870e557e6dc6989ae99926f13bb591cbab4df",
+    "dashboard/src/lib/lane-package-installation-session.ts": "ef7655a6b1a3cb725b2a242c2a78019ae02c347deb6de33744e4f5f6505f0446",
+    "dashboard/src/components/lane-package-installer.test.ts": "3dfb0209f145149a405ab0f4a7f2679f58dfc83112e8a6ae9220be6cdd6839ed"
+  }
+}

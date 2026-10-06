@@ -1,0 +1,114 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-04T18:42:51.504Z",
+  "browser": "149.0.7827.55",
+  "scope": "Actual styled Status, machine panel/session, raw editor, router and API with synthetic HTTP. No real backend validation/publication, machine execution, native TUI, CI or deployment.",
+  "checks": [
+    "file and last observed server activity are separate",
+    "open and toggle make no writes",
+    "navigation retains the MSX draft",
+    "preview refusal preserves the draft and does not write",
+    "CAS conflict preserves file and draft",
+    "explicit reapply/save preserves inline TOML, comments, DOS and concurrent edits",
+    "raw draft is retained with its stale write basis withdrawn",
+    "lost commit reply triggers readback, retains uncertainty, and never repeats the write",
+    "independent MSX/DOS changes do not load or restore a machine",
+    "failed observation is visible and explicitly recoverable",
+    "mobile controls remain visible without horizontal overflow",
+    "only explicit previews/saves: no model resume, machine action, unexpected route or page error"
+  ],
+  "reads": 15,
+  "applied": 3,
+  "mutations": [
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=false},dos={enabled=false}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=false},dos={enabled=false}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=false},dos={enabled=false}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n",
+        "expected_source_revision": "0cacaf517a11fec1cd8bad0ca6986b791a969a2d88d3c67c20a22590eda04112"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=false},dos={enabled=false}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=false},dos={enabled=false}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n",
+        "expected_source_revision": "ea5355713b725eea3d384028cd6890671268d66b4a2ca52f1ce0642a21068fce"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=false},dos={enabled=true}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=false},dos={enabled=true}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n",
+        "expected_source_revision": "d7a3248b0dd5e222179006cdda129332d83b19ae6d5182be5bb9de7a09d61127"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=true},dos={enabled=true}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\nmachines={msx={enabled=true},dos={enabled=true}} # retain machines comment\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n",
+        "expected_source_revision": "1daccfd5e1dcf26e5972d1fb06f38aac830df2d72dc0f024d1686f9d4b0ff4b2"
+      }
+    }
+  ],
+  "mobileControls": [
+    {
+      "text": "활동 설정 닫기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "활동 설정 저장",
+      "opacity": "0.38",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "현재 설정 읽기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "초안 버리기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 94,
+      "height": 33.25
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

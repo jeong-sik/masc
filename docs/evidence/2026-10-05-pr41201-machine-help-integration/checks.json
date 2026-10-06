@@ -1,0 +1,100 @@
+{
+  "original_head": "91450e271625da18d3eed4b1574fd4683a6c20bf",
+  "parent": "6adb878a95156f743281cc75bc5627be6427fd8d",
+  "build_before": {
+    "handle": 61435,
+    "exit": 0
+  },
+  "native": {
+    "handle": 37755,
+    "exit": 0,
+    "machine": 16,
+    "toml": 58
+  },
+  "excluded_help_readiness": {
+    "handle": 34300,
+    "exit": 1
+  },
+  "compact_red": {
+    "handle": 78194,
+    "exit": 1
+  },
+  "build_fixed": {
+    "handle": 70526,
+    "exit": 0
+  },
+  "pty_green": {
+    "handle": 81151,
+    "exit": 0
+  },
+  "binaries": {
+    "before": {
+      "path": "/tmp/pr41201-before-masc_tui.exe",
+      "sha256": "55071aeb24137735d7d316982b52910805d18ab6eadd5147869f5833e9a4b694"
+    },
+    "fixed": {
+      "path": "_build/default/bin/masc_tui.exe",
+      "sha256": "85706486b70472fc2e5524d2ce65c8bb7e2deb117ad082e08cd48a14a6c86ec7"
+    }
+  },
+  "python": {
+    "ruff_errors": 0,
+    "pyright_baseline_errors": 1,
+    "pyright_final_errors": 1,
+    "new_errors": 0
+  },
+  "source_sha256": {
+    "bin/masc_tui.ml": "c8e6d6b48303e116681701f0e6c26e7fa049c0bb4d3b7ef72afff320bd61f930",
+    "bin/dune": "98e93dc82ec346230508ba8b7885e11176278da536bc57302f4c0e67465653c7",
+    "test/dune": "66300863d10820ca436178dcd2c177b355800d5f36f14022ef14f09cc9114a4d",
+    "bin/masc_tui_machine_activity.ml": "ecf4080ed9c3e393171a79fccd7dcb758c0be91ee0151fb016dbd36a7bc600ec",
+    "bin/masc_tui_machine_activity.mli": "c0aeaf3b5e6ad54a5066d774e21ca7443cbb786d24926c67b03cf9fc3ea3cfd5",
+    "lib/toml_line_editor/toml_line_editor.ml": "abf5b063b9f576ec161ac0cbcfd3089a27a20d36d6629cff92377d9f10135d7f",
+    "lib/toml_line_editor/toml_line_editor.mli": "ae2632f055771937026a1e844f14e04c3b0fa84490260e471f7be0bf547e28e7",
+    "test/test_tui_machine_activity.ml": "c1b59a1248525d915b21c18390a09f85286f10bc62fd431b07361d205d5a21c4",
+    "test/test_tui_machine_activity_pty.py": "afee15b5a137c228dd6fa8e296b314f32cc4da61c213e712e8673a81ecfef7de",
+    "test/toml_line_editor/test_toml_line_editor.ml": "8b4f5f95b9338ff0f6e8d55beba38da04ce3c65856e078b5ae19c83298aa6385"
+  },
+  "logs": {
+    "before-build.log": {
+      "source": "/tmp/pr41201-before-build.log",
+      "sha256": "4e308449c573cf3868ce82e2667f550808b763864b62cd1c6beee46b0a3fa370"
+    },
+    "fixed-build.log": {
+      "source": "/tmp/pr41201-fixed-build.log",
+      "sha256": "06cdb8e30ec9a37300448308d6c05475195713887e36e3b160611cb7d0785628"
+    },
+    "help-readiness-failure.log": {
+      "source": "/tmp/pr41201-compact-red.log",
+      "sha256": "cc96ef776784f285bff8d65b7e250e0c83abfba1af7d53244d7c62baf9c6b7a5"
+    },
+    "compact-red.log": {
+      "source": "/tmp/pr41201-compact-red2.log",
+      "sha256": "7968ef0bdd44ab6781b3f1315a48033e5ac8975dc2c596f1f19a1f60e98ef333"
+    },
+    "compact-green.log": {
+      "source": "/tmp/pr41201-compact-green.log",
+      "sha256": "f8b9625ef596246647899f37d71fa933c026c0ea99d8b32feb5ed9d3d62238ea"
+    },
+    "machine-native.log": {
+      "source": "/tmp/pr41201-machine-native.log",
+      "sha256": "26cfc6ce0ecceee2acdaf8864facdb359135439052735ff001443d3d1023bd61"
+    },
+    "toml-native.log": {
+      "source": "/tmp/pr41201-toml-native.log",
+      "sha256": "f640c8c932fb1c4b5fa0a78ba6eadadbda213fea1936cc06e049a64e3e5588e2"
+    },
+    "ruff.log": {
+      "source": "/tmp/pr41201-final-ruff.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "pyright-baseline.json": {
+      "source": "/tmp/pr41201-pyright-baseline.json",
+      "sha256": "6f23e3664045168357f7427cc73aeb8a3ec6cd308f45f678e748f5b96b8ce7ca"
+    },
+    "pyright-final.json": {
+      "source": "/tmp/pr41201-final-pyright.json",
+      "sha256": "2b1ba0ed77d38c72566530c70d4a8802da5c9830a496b6fd1c1c97ac76b19f8f"
+    }
+  }
+}

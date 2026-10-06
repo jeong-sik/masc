@@ -28,6 +28,7 @@ let with_workspace f =
     Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw (fun () ->
+      Dos_lane.install_activity_observer None;
       (match Dos_lane.screen () with
        | Ok { controller; _ } ->
          (match Dos_lane.eject ~who:(Option.value controller ~default:"cleanup") ~announce:ignore () with
@@ -36,6 +37,7 @@ let with_workspace f =
       Time_compat.clear_clock ();
       Fs_compat.remove_tree base_path;
       Fs_compat.clear_fs ());
+    Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
     Auth.save_auth_config base_path { D.default_auth_config with enabled = true; require_token = true };
     let operator, _ = auth_ok (Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:D.Admin) in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in

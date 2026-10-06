@@ -445,7 +445,14 @@ let run_runtime_evidence ?fixture_dir () =
     Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
     Alcotest.(check int) "JEV request count"
       (if Option.is_some (runtime_skip_reason scenario) then 0 else 1) (List.length !jev_requests);
-    let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
+    (* Exact-run rows only: since #40709 the absorb gate also registers its
+       pre-dispatch evaluation requests in this registry, under run ids the
+       runtime builds with the "librarian-absorb-" prefix
+       (keeper_librarian_runtime.ml). Those rows are evidence about one
+       evaluation, not this Librarian run. *)
+    let run = match List.filter (fun (run : Runs.run) ->
+        run.actor = keeper_id
+        && not (String.starts_with ~prefix:"librarian-absorb-" run.run_id))
         (Runs.list_runs registry) with
       | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
       | _ -> Alcotest.fail "expected one actual Librarian run" in
@@ -483,7 +490,31 @@ let run_runtime_evidence ?fixture_dir () =
       original (Runs.run_to_yojson replayed);
     let output = member "output" original in
     (match output with
-     | `Assoc (("absorb_gate", _) :: _) -> ()
+     | `Assoc fields when List.exists (fun (name, _) -> String.equal name "absorb_gate") fields ->
+       (* Derived-context and preflight evidence is legitimately prepended to
+          the run output ahead of the absorption report; what must hold is the
+          gate evidence surviving ahead of the pass's own product, not being
+          the literal first key. A failed pass has no exact_output at all
+          (the gate observation is the whole product), which also satisfies
+          the ordering. *)
+       let index_of key =
+         let rec go i = function
+           | [] -> None
+           | (name, _) :: rest ->
+             if String.equal name key then Some i else go (i + 1) rest in
+         go 0 fields in
+       let verdict = match index_of "absorb_gate", index_of "exact_output" with
+         | Some gate_index, Some product_index ->
+           if gate_index < product_index then "absorb_gate_before_exact_output"
+           else "exact_output_first:" ^ String.concat ","
+                  (List.map fst fields)
+         (* A failed pass's output is the gate observation alone: nothing
+            exact_output could come ahead of. *)
+         | Some _, None -> "absorb_gate_before_exact_output"
+         | None, _ -> "absorb_gate_missing" in
+       Alcotest.(check string) "absorb_gate evidence precedes exact_output"
+         "absorb_gate_before_exact_output" verdict
+     | `Assoc _ -> Alcotest.fail "absorb_gate evidence missing from run output"
      | _ -> Alcotest.fail "absorb_gate evidence must precede exact_output");
     let gate = member "absorb_gate" output in
     let expected_status = match scenario with
@@ -1947,6 +1978,81 @@ let test_payment_failure_does_not_multiply_current_claims () =
       (String_util.contains_substring detail "absorb judgment failed")) failures
 ;;
 
+(* The evaluation registry rows the runtime persists before dispatch
+   (keeper_librarian_runtime.ml, the "librarian-absorb-" run ids from #40709)
+   are the recovery evidence for an evaluation whose process died mid-provider
+   call. The least the evidence must keep across a server restart is the
+   request identity: direction, destinations and the exact questions. A
+   replayed registry row is not the evaluation itself — replay closes every
+   Running row — but the request must stay reconstructible instead of
+   disappearing with the process. *)
+let test_persisted_evaluation_request_survives_restart () =
+  let module Runs = Masc.Exact_lane_run_registry in
+  let module Client = Masc.Typesafeai_client in
+  let module Types = Masc.Typesafeai_types in
+  let path = Filename.concat (Filename.temp_dir "librarian-eval-replay-" "")
+      Runs.storage_filename in
+  let registry = Runs.create ~path () in
+  let state = `Assoc [ "snapshot", `String "replay-fixture" ] in
+  let question =
+    Types.Noul { Types.instructions = "does the claim convey the statement"
+               ; Types.criteria = Some ("conveys", "does not") } in
+  (* The runtime mints these ids with Random_id.prefixed
+     "librarian-absorb-" ~bytes:16; the prefix is the only part this fixture
+     needs to reproduce, and a fixed body keeps the row name deterministic. *)
+  let evaluation_id = "librarian-absorb-" ^ String.make 32 '0' in
+  let () =
+    Runs.register_running registry
+      ~run_id:evaluation_id
+      ~lane:Runs.Librarian ~actor:"replay-fixture-keeper"
+      ~started_at:100.0
+      ~input:(Runs.Exact_input
+                (Masc.Keeper_librarian_absorb_gate.evaluation_request_to_yojson
+                   ~direction:Masc.Keeper_librarian_absorb_gate.Forward
+                   ~destinations:[ { Client.destination_uri =
+                                       "http://127.0.0.1:9/evaluate"
+                                   ; model = "replay-fixture-model" } ]
+                   ~state
+                   ~questions:[ ("s0_0", question) ]))
+  in
+  (* No completion is recorded: the process is assumed to have died between
+     registration and the provider reply. Replay must close the row and keep
+     the request readable. *)
+  let replayed = Runs.replay path in
+  let row = match Runs.get replayed ~run_id:evaluation_id with
+    | Some row -> row
+    | None -> Alcotest.fail "the pre-dispatch evaluation row was lost on restart" in
+  Alcotest.(check string) "a replayed in-flight evaluation is closed, not running"
+    "failed" (Runs.status_label row.status);
+  let failure = match row.status with
+    | Completed { outcome = Runs.Failed { code; _ }; _ } -> code
+    | _ -> Alcotest.fail "expected the replay closure outcome" in
+  Alcotest.(check string) "replay names the restart closure" Runs.server_restarted_code failure;
+  let request = match row.input with
+    | Runs.Exact_input payload -> payload in
+  Alcotest.(check string) "the persisted request names the forward direction" "forward"
+    (Yojson.Safe.Util.(member "direction" request |> to_string));
+  let inner = Yojson.Safe.Util.member "request" request in
+  let destinations =
+    Yojson.Safe.Util.(member "destinations" inner |> to_list) in
+  Alcotest.(check int) "the armed destination is preserved" 1 (List.length destinations);
+  Alcotest.(check string) "the destination is preserved without its key"
+    "http://127.0.0.1:9/evaluate"
+    (Yojson.Safe.Util.(member "destination_uri" (List.hd destinations) |> to_string));
+  Alcotest.(check string) "the request model is preserved" "replay-fixture-model"
+    (Yojson.Safe.Util.(member "model" (List.hd destinations) |> to_string));
+  Alcotest.(check string) "the snapshot state is preserved" "replay-fixture"
+    (Yojson.Safe.Util.(member "snapshot" (Yojson.Safe.Util.member "state" inner)
+      |> to_string));
+  let questions = Yojson.Safe.Util.(member "questions" inner |> to_assoc) in
+  Alcotest.(check (list string)) "the asked statement ids are preserved"
+    [ "s0_0" ] (List.map fst questions);
+  Alcotest.(check bool) "the asked question body is preserved" true
+    (Yojson.Safe.Util.(member "s0_0" (Yojson.Safe.Util.member "questions" inner)
+      |> member "instructions"
+      |> to_string = "does the claim convey the statement"))
+;;
+
 let () =
   if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--emit-tui-fixtures"
   then run_runtime_evidence ~fixture_dir:Sys.argv.(2) ()
@@ -2012,6 +2118,8 @@ let () =
             test_selection_gate_and_store_keep_the_unconveyed_original
         ; Alcotest.test_case "payment failure cannot multiply current claims" `Quick
             test_payment_failure_does_not_multiply_current_claims
+        ; Alcotest.test_case "a pre-dispatch evaluation row survives a restart with its request" `Quick
+            test_persisted_evaluation_request_survives_restart
         ] )
     ; ( "reverse"
       , [ Alcotest.test_case "a claim its sources convey is not applied" `Quick

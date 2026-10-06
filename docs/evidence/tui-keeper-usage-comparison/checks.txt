@@ -1,0 +1,10 @@
+Focused bin/masc_tui.exe build: PASS
+Ruff: PASS
+Pyright: 0 errors
+Final Usage studio PTY: PASS (6 journeys: Plan/Trend color and no-color, unavailable source, Keeper color/no-color/all-cost-unreported)
+Keeper comparison focused PTY: PASS (3 scenarios)
+Live read-only Keeper snapshot candidate replay: PASS
+BROWSER_PTY_FRAME_MATCH=PASS keeper-comparison-wide
+BROWSER_PTY_FRAME_MATCH=PASS keeper-comparison-compact
+BROWSER_PTY_FRAME_MATCH=PASS keeper-comparison-bottom
+BROWSER_PTY_FRAME_MATCH=PASS keeper-live-snapshot (private)

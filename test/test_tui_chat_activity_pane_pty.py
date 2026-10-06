@@ -69,7 +69,7 @@ def output_handoff_scenario(executable):
             continuation_at = _keyboard_harness.screen_row_of(rows, "한글 진행 내용".encode())
             if continuation_at <= excerpt_at:
                 raise AssertionError(f"multiline output lost its separate row: {rows!r}")
-            activity_at = _keyboard_harness.screen_row_of(rows, b"Esc stops it")
+            activity_at = _keyboard_harness.screen_row_of(rows, "Esc:중단".encode())
             if excerpt_at >= activity_at:
                 raise AssertionError(f"output is outside conversation: {rows!r}")
             text = b"\n".join(rows.values())
@@ -78,12 +78,12 @@ def output_handoff_scenario(executable):
             if "최근 출력 발췌".encode() not in text:
                 raise AssertionError(f"incomplete preview not labelled: {rows!r}")
             _keyboard_harness.send_and_wait(process, fd, output, b"queued-question-preserved", b"queued-question-preserved")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"WAITING TO START")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "내 메시지 1건 대기".encode())
             phase["tail"] = "SECOND_PROGRESS_LINE"
             _keyboard_harness.wait_for_output(process, fd, output, b"SECOND_PROGRESS_LINE", start=len(output), timeout=12)
             rows = screen(process, fd, output)
             text = b"\n".join(rows.values())
-            for marker in (b"SECOND_PROGRESS_LINE", b"queued-question-preserved", b"WAITING TO START"):
+            for marker in (b"SECOND_PROGRESS_LINE", b"queued-question-preserved", "내 메시지 1건 대기".encode()):
                 if marker not in text:
                     raise AssertionError(f"running output or queued input lost {marker!r}: {rows!r}")
             if b"FIRST_PROGRESS_LINE" in text or b"Latest output:" in text:
@@ -94,7 +94,9 @@ def output_handoff_scenario(executable):
             _keyboard_harness.wait_for_output(process, fd, output, "마지막 관측, 갱신 실패".encode(), start=len(output), timeout=12)
             phase["failed"] = False
             phase["tail"] = ""
-            _keyboard_harness.wait_for_output(process, fd, output, b"EMPTY_PREVIEW_OBSERVED", start=len(output), timeout=12)
+            if not _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: b"SECOND_PROGRESS_LINE" not in _keyboard_harness.screen_text(bytes(output)), timeout=12):
+                raise AssertionError("empty preview retained previous output")
             rows = screen(process, fd, output)
             if b"SECOND_PROGRESS_LINE" in b"\n".join(rows.values()):
                 raise AssertionError(f"empty preview retained previous output: {rows!r}")

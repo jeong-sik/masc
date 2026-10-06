@@ -1,0 +1,10 @@
+[
+  {
+    "command": "pnpm exec tsc --noEmit",
+    "exit_code": 0
+  },
+  {
+    "command": "pnpm exec eslint src/api/lane-addons.ts src/components/lane-addon-readings.ts src/components/lane-addons-panel.ts src/components/lane-addons-panel.test.ts",
+    "exit_code": 0
+  }
+]

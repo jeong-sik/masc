@@ -14,6 +14,7 @@ vi.mock('../api/lane-addons', async original => ({
   ...await original<typeof import('../api/lane-addons')>(), ...api,
 }))
 import { LaneAddonsPanel } from './lane-addons-panel'
+import { LaneAddonReadings } from './lane-addon-readings'
 
 const row = {
   id: 'external-evidence-1', lane_id: 'unregistered-domain', kind: 'relation',
@@ -23,12 +24,13 @@ const row = {
   evidence: [{ uri: 'artifact://source/1', sha256: null }], related_ids: ['receipt-3'],
 }
 const coverage = [{ source_id: 'opaque-input', incarnation: 'run-2', cursor: '7', complete: false, detail: 'Source gap' }]
+const packageContract = { binding_schema: null, presentation: { description: null, readings: [] }, outputs: { frames: { lanes: ['msx/frame'] }, statistics: { all_lanes: true } } }
 const snapshot = {
   configuration: null,
   instances: [{ instance_id: 'instance-1', run_id: 'run-2', addon_id: 'unregistered-package',
     title: 'User supplied layer', revision: 'digest-1', phase: { kind: 'observing' },
     configuration: null, incarnation: 'incarnation-1', action_schema: null,
-    package: { outputs: { frames: { lanes: ['msx/frame'] }, statistics: { all_lanes: true } } },
+    package: packageContract,
     observation_seq: 1, rows_count: 1 }], rows: [row], coverage,
 }
 const actionSnapshot = {
@@ -49,6 +51,182 @@ const actionReceipt = {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
+  it('renders the owning package display contract in order while retaining raw fields and binding schema', async () => {
+    const bindingSchema = { type: 'object', properties: { sources: { type: 'array' } }, required: ['sources'] }
+    const readings = [
+      { lane_id: 'quality', path: ['missing'], label: 'Missing records', unit: 'records', format: 'number' },
+      { lane_id: 'quality', path: ['ready'], label: 'Ready', unit: null, format: 'boolean' },
+      { lane_id: 'quality', path: ['note'], label: 'Operator note', unit: null, format: 'text' },
+      { lane_id: 'quality', path: ['details'], label: 'Details', unit: null, format: 'json' },
+    ]
+    const owned = { ...row, lane_id: 'instance-1/quality', fields: {
+      missing: 0, ready: false, note: '<img src=x onerror=alert(1)>\nsecond line', details: { count: 7 },
+    } }
+    const decoded = parseLaneAddonSnapshot({ ...snapshot, rows: [owned], instances: [
+      { ...snapshot.instances[0], package: { ...packageContract, binding_schema: bindingSchema,
+        presentation: { description: 'Declared quality observations', readings } } },
+      { ...snapshot.instances[0], instance_id: 'instance-2', package: { ...packageContract,
+        presentation: { description: null, readings: [{ ...readings[0], label: 'Other instance reading' }] } } },
+    ] })
+    expect(decoded.instances[0]?.package.binding_schema).toEqual(bindingSchema)
+    expect(decoded.instances[0]?.package.presentation.readings).toEqual(readings)
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    // Inspect the actual displayed contract, including false and zero values.
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dt')].map(node => node.textContent))
+      .toEqual(['Missing records', 'Ready', 'Operator note', 'Details'])
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent))
+      .toEqual(['0 records', 'false', '<img src=x onerror=alert(1)>\nsecond line', '{"count":7}'])
+    expect(group.querySelector('img')).toBeNull()
+    expect(group.textContent).not.toContain('Other instance reading')
+    expect(screen.getByText('Declared quality observations')).toBeTruthy()
+    expect(screen.getByText(`Fields and original evidence · ${row.id}`)).toBeTruthy()
+    expect(screen.getAllByText(/artifact:\/\/source\/1/).length).toBeGreaterThan(0)
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+  })
+  it('shows unavailable for absent or incorrectly typed readings without inventing successful values', async () => {
+    const fields = { wrongNumber: '0', wrongBoolean: 'false', scalar: 1, nullValue: null }
+    const readings = [
+      { path: ['absent'], label: 'Missing' },
+      { path: ['wrongNumber'], label: 'Wrong number' },
+      { path: ['scalar', 'nested'], label: 'Invalid path' },
+      { path: ['__proto__'], label: 'Inherited property' },
+    ].map(item => ({ ...item, lane_id: 'quality', format: 'number', unit: 'records' }))
+    const decoded = parseLaneAddonSnapshot({ ...snapshot, rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract, presentation: {
+        description: null, readings: [...readings,
+          { lane_id: 'quality', path: ['wrongBoolean'], label: 'Wrong boolean', format: 'boolean', unit: null },
+          { lane_id: 'quality', path: ['nullValue'], label: 'Null JSON', format: 'json', unit: null }],
+      } } }] })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · field unavailable', 'Unavailable · field does not match declared display format',
+      'Unavailable · field path does not address an object', 'Unavailable · field unavailable',
+      'Unavailable · field does not match declared display format', 'null',
+    ])
+    expect(group.textContent).not.toContain('0 records')
+  })
+  it('refuses rounded JSON integer readings while preserving safe numbers and fractions', async () => {
+    const fields = JSON.parse('{"tooLarge":9007199254740993,"tooSmall":-9007199254740993,"maxSafe":9007199254740991,"minSafe":-9007199254740991,"fraction":1.25,"zero":0}') as Record<string, unknown>
+    const readings = Object.keys(fields).map(key => ({
+      lane_id: 'quality', path: [key], label: key, format: 'number', unit: null,
+    }))
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings } } }],
+    })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      '9007199254740991', '-9007199254740991', '1.25', '0',
+    ])
+  })
+  it('refuses rounded or nonfinite numbers anywhere in JSON readings', async () => {
+    const fields = JSON.parse('{"object":{"count":9007199254740993},"array":[{"counts":[0,-9007199254740993]}],"scalar":9007199254740993,"overflow":{"count":1e400},"safe":{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}}') as Record<string, unknown>
+    const readings = Object.keys(fields).map(key => ({
+      lane_id: 'quality', path: [key], label: key, format: 'json', unit: null,
+    }))
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings } } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · field does not match declared display format',
+      '{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}',
+    ])
+  })
+  it('renders deeply nested valid JSON readings without recursive validation overflow', async () => {
+    const raw = '['.repeat(12000) + '{"count":7}' + ']'.repeat(12000)
+    const fields = JSON.parse('{"deep":' + raw + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    // Whether the compact formatter still handles 12000 levels is the
+    // engine's native stack limit, not this code: V8 on Node 22 stops near
+    // 3,650 levels for compact and pretty output alike. Both declared outcomes
+    // are valid; the fixture's depth is what overflowed the old recursive
+    // validator, and the pretty raw-fields output always exceeds it first.
+    const formatterLimit = 'Unavailable · JSON nesting exceeds this browser’s formatter capacity'
+    const declared = group.querySelector('dd')?.textContent ?? ''
+    expect(declared === raw || declared.startsWith(formatterLimit)).toBe(true)
+    expect(screen.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText('Deep')).toBeTruthy()
+    expect(detail.getByText(declared === raw ? raw : formatterLimit)).toBeTruthy()
+    expect(detail.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+  })
+  it('keeps the panel usable when the browser compact formatter rejects a deep valid reading', async () => {
+    const fields = JSON.parse('{"deep":' + '['.repeat(12000) + '7' + ']'.repeat(12000) + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    const deep = decoded.rows[0]!.fields.deep
+    const stringify = JSON.stringify
+    const formatter = vi.spyOn(JSON, 'stringify').mockImplementation((...args: Parameters<typeof JSON.stringify>) => {
+      if (args[0] === deep) throw new RangeError('fixture browser compact formatter limit')
+      return stringify(...args)
+    })
+    try {
+      api.fetchLaneAddons.mockResolvedValue(decoded)
+      const screen = render(html`<${LaneAddonsPanel} />`)
+      const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+      expect(group.textContent).toContain('Unavailable · JSON nesting exceeds this browser’s formatter capacity')
+      expect(group.textContent).not.toContain('field does not match declared display format')
+      fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+      const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+      expect(detail.getByText('Unavailable · JSON nesting exceeds this browser’s formatter capacity')).toBeTruthy()
+      expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+    } finally { formatter.mockRestore() }
+  })
+  it.each([
+    ['{"first":[9007199254740993],"second":1e400}', 'integer exceeds JavaScript’s exact range'],
+    ['{"first":[1e400],"second":9007199254740993}', 'field does not match declared display format'],
+  ])('preserves first invalid JSON number in display order: %s', (raw, reason) => {
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields: JSON.parse('{"value":' + raw + '}') }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['value'], label: 'Value', format: 'json', unit: null },
+        ] } } }],
+    })
+    const view = render(html`<${LaneAddonReadings} row=${decoded.rows[0]!} instances=${decoded.instances} />`)
+    expect(view.getByText(`Unavailable · ${reason}`)).toBeTruthy()
+  })
+  it('rejects malformed package display contracts instead of discarding them', () => {
+    const reading = { lane_id: 'quality', path: ['count'], label: 'Count', unit: null, format: 'number' }
+    for (const invalid of [{ ...reading, path: [] }, { ...reading, format: 'status' }, { ...reading, unit: 7 }]) {
+      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0],
+        package: { ...packageContract, presentation: { description: null, readings: [invalid] } },
+      }] })).toThrow()
+    }
+  })
+
   it('opens original evidence from horizontal lanes without filtering and includes empty workers', async () => {
     const owned = { ...row, lane_id: 'instance-1/msx/frame' }
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [owned],
@@ -303,7 +481,7 @@ describe('optional Lane Add-on surface', () => {
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], incarnation: undefined }] })).toThrow()
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], action_schema: undefined }] })).toThrow()
     for (const outputs of [{ bad: { lanes: [] } }, { bad: { all_lanes: false } }, { bad: { all_lanes: true, lanes: ['frame'] } }]) {
-      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], package: { outputs } }] })).toThrow()
+      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], package: { ...packageContract, outputs } }] })).toThrow()
     }
   })
   it('submits an advertised package action with an exact binding while slice and other controls remain usable', async () => {

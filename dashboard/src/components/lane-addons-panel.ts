@@ -9,12 +9,22 @@ import {
 } from '../api/lane-addons'
 import { isRecord } from './common/normalize'
 import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
+import { LaneAddonReadings } from './lane-addon-readings'
 import { LaneDeclarationEditor, type LaneDeclarationEditorTarget } from './lane-declaration-editor'
 import type { LaneDeclarationDocument } from '../api/lane-declarations'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+
+function rawFieldsText(fields: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(fields, null, 2)
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
+    return 'Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.'
+  }
+}
 
 function isDeclarationFile(directory: string, sourcePath: string): boolean {
   const fileName = sourcePath.slice(sourcePath.lastIndexOf('/') + 1)
@@ -243,7 +253,8 @@ export function LaneAddonsPanel() {
       <h3 class="font-semibold">Selected: ${focused.title}</h3>
       <p>${focused.lane_id} · ${formatLaneTime(focused.observed_at)}</p>
       <p>Actor: ${focused.actor ?? 'not recorded'} · Subject: ${focused.subject_id}</p>
-      <pre class="whitespace-pre-wrap break-all">${JSON.stringify(focused.fields, null, 2)}</pre>
+      <${LaneAddonReadings} row=${focused} instances=${snapshot?.instances ?? []} />
+      <pre class="whitespace-pre-wrap break-all">${rawFieldsText(focused.fields)}</pre>
       <h4>Original evidence</h4>
       ${focused.evidence.length === 0 ? html`<p>No original evidence recorded.</p>` : focused.evidence.map(evidence => html`<p class="break-all" key=${evidence.uri}>${evidence.uri} · sha256 ${evidence.sha256 ?? 'not recorded'}</p>`)}
       ${focused.related_ids.length > 0 && html`<div>Recorded relationships: ${focused.related_ids.map(id => {
@@ -311,6 +322,11 @@ export function LaneAddonsPanel() {
           ${hasCurrentDeclaration(configuration, item) && html`<button type="button" class=${buttonClass}
             onClick=${() => { if (item.configuration !== null) editToml(item.configuration.source_path) }} aria-label=${`Edit TOML for ${item.instance_id}`}>Edit TOML</button>`}
         </div>`}
+        ${item.package.presentation.description !== null && html`<p>${item.package.presentation.description}</p>`}
+        <details><summary>Package input and display contracts</summary>
+          <pre class="whitespace-pre-wrap break-all">${JSON.stringify({ binding_schema: item.package.binding_schema,
+            presentation: item.package.presentation }, null, 2)}</pre>
+        </details>
         <div aria-label=${`Output ports for ${item.instance_id}`}>
           ${Object.entries(item.package.outputs).map(([id, selection]) => html`<p key=${id}>
             Output ${id}: ${selection.all_lanes === true ? 'all package lanes' : selection.lanes.join(', ')}
@@ -340,8 +356,9 @@ export function LaneAddonsPanel() {
         <strong>${row.title}</strong> · ${row.kind} · ${row.lane_id}</label>
       <p>${formatLaneTime(row.observed_at)} · ${row.subject_id} · actor ${row.actor ?? 'unknown'}</p>
       ${row.clock && html`<p>World time: ${row.clock.domain} ${row.clock.value}</p>`}
+      <${LaneAddonReadings} row=${row} instances=${snapshot?.instances ?? []} />
       <details><summary>Fields and original evidence · ${row.id}</summary>
-        <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.fields, null, 2)}</pre>
+        <pre class="whitespace-pre-wrap break-all">${rawFieldsText(row.fields)}</pre>
         ${row.evidence.map(evidence => html`<p key=${evidence.uri} class="break-all">${evidence.uri} · sha256 ${evidence.sha256 ?? 'unknown'}</p>`)}
         ${row.related_ids.length > 0 && html`<p>Related: ${row.related_ids.join(', ')}</p>`}
       </details>

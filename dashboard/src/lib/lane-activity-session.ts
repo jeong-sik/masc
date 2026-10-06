@@ -45,9 +45,10 @@ export type LaneActivitySpec<L, O> = {
   key(lane: L): string
   read(source: string, lane: L): { enabled: boolean }
   write(source: string, lane: L, enabled: boolean): string
-  /** Work owed after a committed save, before consumers refresh. Returns a
-   * setup-resume failure to show, or null. Aborted when ownership moves. */
-  afterCommit?(signal: AbortSignal): Promise<string | null>
+  /** Setup resume owed after a committed save, before consumers refresh.
+   * Resolves whether the resume was confirmed. Aborted when ownership moves,
+   * which leaves it unconfirmed. */
+  afterCommit?(signal: AbortSignal): Promise<boolean>
   announceObservation(authority: ExecutionWorkspaceAuthority): void
   /** Server activity for this lane; a rejection becomes a failed observation. */
   observe?(lane: L): Promise<LaneActivityObservation<O>>
@@ -76,6 +77,7 @@ function document(config: RuntimeTomlConfig): LaneActivityDocument {
   return { source_path: config.path, source_text: config.source_text, source_revision: config.source_revision }
 }
 const unobserved = { kind: 'unknown' } as const
+const setupResumeUnconfirmed = '설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.'
 
 /** An activity draft owns only a boolean. It never adopts or overwrites the
  * full raw editor's independent draft, including when that editor is hidden. */
@@ -85,7 +87,8 @@ export class LaneActivitySession<L, O> {
     followupError: null, setupResumeError: null, receipt: null, uncertain: null, observation: unobserved })
   private authority: ExecutionWorkspaceAuthority | null = null
   private attempt: SaveAttempt | null = null
-  private followup: AbortController | null = null
+  /** The setup resume a committed save is waiting for, if any. */
+  private resuming: AbortController | null = null
   private version = 0
   private generation = runtimeTomlSourceGeneration.peek()
   constructor(private readonly spec: LaneActivitySpec<L, O>, readonly workspaceRoot: string, readonly lane: L) {}
@@ -113,12 +116,17 @@ export class LaneActivitySession<L, O> {
   invalidate(authority: ExecutionWorkspaceAuthority | null, generation: number) {
     const before = this.state.peek()
     if (this.authority !== null && this.authority !== authority) {
-      ++this.version; this.authority = null; this.followup?.abort()
+      ++this.version; this.authority = null
+      // A committed save whose setup resume is cut off stays unconfirmed; the
+      // warning outlives the authority so the operator can retry the resume.
+      const resumeCut = this.resuming !== null
+      this.resuming?.abort(); this.resuming = null
       // Only a sent POST can have changed the file; a save still in preview or
       // the token wait is stopped by beforeDispatch once ownership moves.
       const unanswered = this.attempt?.stage === 'sent' ? this.attempt : null
       this.update({ phase: 'idle', current: null, observation: unobserved, uncertain: before.uncertain ?? unanswered,
-        error: '작업공간 연결이 바뀌었습니다. 초안은 보관했습니다. 현재 설정을 다시 읽으세요.' })
+        error: '작업공간 연결이 바뀌었습니다. 초안은 보관했습니다. 현재 설정을 다시 읽으세요.',
+        ...(resumeCut ? { setupResumeError: setupResumeUnconfirmed } : {}) })
     }
     if (generation !== this.generation) {
       this.generation = generation
@@ -241,7 +249,9 @@ export class LaneActivitySession<L, O> {
     const attempt: SaveAttempt = { stage: 'checking', base: draft.base, source }
     let committed = false
     this.attempt = attempt
-    this.update({ phase: 'saving', error: null, notice: null, followupError: null, setupResumeError: null })
+    // A setup-resume warning from an earlier commit stays until a new commit
+    // resumes or a later resume succeeds; a refused save leaves it unapplied.
+    this.update({ phase: 'saving', error: null, notice: null, followupError: null })
     try {
       const preview = await previewRuntimeTomlConfig(source, options)
       if (!this.owns(authority, version)) return false
@@ -262,12 +272,16 @@ export class LaneActivitySession<L, O> {
         uncertain: receipt.commit.durability === 'durable' ? null : attempt,
         draft: receipt.commit.durability === 'durable' ? { ...draft, base: saved } : draft,
         notice: '파일 저장 응답을 받았습니다. 현재 설정과 적용 상태를 다시 확인합니다.' })
-      const controller = new AbortController(); this.followup = controller
-      const setupResumeError = this.spec.afterCommit ? await this.spec.afterCommit(controller.signal) : null
+      let resumed: boolean | null = null
+      if (this.spec.afterCommit) {
+        const controller = new AbortController(); this.resuming = controller
+        resumed = await this.spec.afterCommit(controller.signal)
+        if (this.resuming === controller) this.resuming = null
+      }
       if (!this.owns(authority, version)) return false
       announceRuntimeTomlCommitted(authority)
       this.spec.announceObservation(authority)
-      if (setupResumeError !== null) this.update({ setupResumeError })
+      if (resumed !== null) this.update({ setupResumeError: resumed ? null : setupResumeUnconfirmed })
       try { await refreshRuntimeConfigConsumers() }
       catch (error) { if (this.owns(authority, version)) this.update({ followupError:
         [this.state.peek().followupError, `설정 저장 후 목록 갱신 실패: ${errorToString(error)}`].filter(Boolean).join(' ') }) }
@@ -303,7 +317,7 @@ export class LaneActivitySession<L, O> {
       }
     } finally {
       if (this.attempt === attempt) this.attempt = null
-      if (this.owns(authority, version)) { this.followup = null; this.update({ phase: 'idle' }) }
+      if (this.owns(authority, version)) { this.resuming = null; this.update({ phase: 'idle' }) }
     }
     if (committed && this.owns(authority, version)) await this.read(authority)
     else if (this.state.peek().uncertain === attempt && this.owns(authority, version)) {

@@ -1937,11 +1937,10 @@ type 'error retraction_plan =
   * (plan_id:string -> snapshot_revision:int -> snapshot_sha256:string -> detail:string -> 'error)
 
 (* What a commit does when its facts equal the stored ones. A Librarian pass
-   keeps the stored snapshot. An explicit write still writes a revision: its
-   caller reads the returned [change] as what that write did, and the keeper
-   stamps [last_seen] with the write time, so an equal set does not arise
-   from it in practice. A retraction plan is an explicit write, so a kept
-   pass never carries one. *)
+   keeps the stored snapshot. An explicit write keeps it only for a
+   same-trace echo of identical content; every other write rewrites, and its
+   caller reads the returned [change] as what that write did. A retraction
+   plan is an explicit write, so a kept pass never carries one. *)
 type 'error equal_facts =
   | Keep_stored
   | Write_revision of 'error retraction_plan option
@@ -2339,15 +2338,22 @@ let update_locked_with_error
       ?clock
       ?dropped_statements
       ?retraction_plan
+      ?equal_facts
+      ?on_committed
       ~store_error
       ~keepers_dir
       ~keeper_id
       ~now
       build
   =
+  let equal_facts =
+    match equal_facts with
+    | Some policy -> policy
+    | None -> Write_revision retraction_plan
+  in
   update_locked_with_output
-    ?clock ?dropped_statements
-    ~equal_facts:(Write_revision retraction_plan) ~store_error ~keepers_dir ~keeper_id ~now
+    ?clock ?dropped_statements ?on_committed
+    ~equal_facts ~store_error ~keepers_dir ~keeper_id ~now
     (fun ~snapshot_content previous ->
        let+ next = build ~snapshot_content previous in
        next, ())
@@ -2762,17 +2768,44 @@ let insert_or_reobserve current_facts (incoming : Keeper_memory_os_types.fact) =
               origin (an injected copy re-observed must not repaint an
               authored row) and refresh the observation time. Nothing is
               counted: seeing the same bytes again says nothing about the
-              fact's worth (RFC-0418). *)
-           { incoming with
-             first_seen = existing.first_seen
-           ; last_seen = Float.max existing.last_seen incoming.last_seen
-           ; origin = existing.origin
-           ; basis = merge_basis existing.basis incoming.basis
-           })
+              fact's worth (RFC-0418).
+
+              A rewrite of identical content by the trace that already
+              confirmed it is an echo of one observation event, not a new
+              observation: the stored row is kept byte-identical so the
+              commit layer keeps the snapshot (#41377). Any content change
+              (category, joined basis), a first sighting by this trace, or
+              a legacy row with no recorded trace still commits. *)
+           let joined_basis = merge_basis existing.basis incoming.basis in
+           let content_identical =
+             String.equal
+               (Keeper_memory_os_types.category_to_string existing.category)
+               (Keeper_memory_os_types.category_to_string incoming.category)
+             && Yojson.Safe.equal
+                  (Keeper_memory_os_types.basis_to_json joined_basis)
+                  (Keeper_memory_os_types.basis_to_json existing.basis)
+           in
+           let same_trace =
+             match existing.last_seen_trace with
+             | Some trace -> String.equal trace incoming.origin.trace_id
+             | None -> false
+           in
+           if content_identical && same_trace
+           then existing
+           else
+             { incoming with
+               first_seen = existing.first_seen
+             ; last_seen = Float.max existing.last_seen incoming.last_seen
+             ; last_seen_trace = Some incoming.origin.trace_id
+             ; origin = existing.origin
+             ; basis = joined_basis
+             })
          else existing)
       current_facts
   in
-  if !found then facts else facts @ [ incoming ]
+  if !found
+  then facts
+  else facts @ [ { incoming with last_seen_trace = Some incoming.origin.trace_id } ]
 ;;
 
 let upsert_snapshot ~previous ~now ~source incoming =
@@ -2820,9 +2853,11 @@ let upsert_snapshot ~previous ~now ~source incoming =
       |> Result.map_error (fun detail -> Upsert_persistence_failed detail)
 ;;
 
-let upsert_fact ?clock ~keepers_dir ~keeper_id ~now ~source incoming =
+let upsert_fact ?clock ?on_committed ~keepers_dir ~keeper_id ~now ~source incoming =
   update_locked_with_error
     ?clock
+    ?on_committed
+    ~equal_facts:Keep_stored
     ~store_error:(fun detail -> Upsert_persistence_failed detail)
     ~keepers_dir ~keeper_id ~now
     (fun ~snapshot_content:_ previous -> upsert_snapshot ~previous ~now ~source incoming)

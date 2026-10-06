@@ -286,6 +286,12 @@ type fact =
   ; category : category
   ; first_seen : float
   ; last_seen : float
+  ; last_seen_trace : string option
+      (** The trace that last confirmed these bytes ([None] for rows written
+          before the field existed). A same-trace rewrite of identical
+          content is an echo of one observation event and commits nothing;
+          a cross-trace rewrite is an independent re-confirmation and moves
+          [last_seen]. *)
   ; origin : origin
   ; basis : basis
   }

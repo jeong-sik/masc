@@ -9,6 +9,7 @@ let wire_field_claim = "claim"
 let wire_field_category = "category"
 let wire_field_first_seen = "first_seen"
 let wire_field_last_seen = "last_seen"
+let wire_field_last_seen_trace = "last_seen_trace"
 let wire_field_origin = "origin"
 let wire_field_memory_id = "memory_id"
 let wire_field_reason = "reason"
@@ -251,13 +252,28 @@ let memory_id_shape =
 
 let non_empty_string value = not (String.equal (String.trim value) "")
 
-(* The canonical persisted fact shape is closed and field-exact. *)
+(* The canonical persisted fact shape is closed and field-exact. Rows written
+   before [last_seen_trace] existed carry the six legacy fields and decode
+   with [last_seen_trace = None]; rows that carry the key must carry all
+   seven. *)
+let fact_wire_fields_legacy =
+  wire_field_set
+    [ wire_field_claim
+    ; wire_field_category
+    ; wire_field_first_seen
+    ; wire_field_last_seen
+    ; wire_field_origin
+    ; wire_field_basis
+    ]
+;;
+
 let fact_wire_fields =
   wire_field_set
     [ wire_field_claim
     ; wire_field_category
     ; wire_field_first_seen
     ; wire_field_last_seen
+    ; wire_field_last_seen_trace
     ; wire_field_origin
     ; wire_field_basis
     ]
@@ -458,14 +474,17 @@ type basis =
 (* The fact carries the exact claim, its recalled category, and observable
    insertion/refresh timestamps. [first_seen]: insertion, authoritative,
    preserved across re-upsert. [last_seen]: most recent observation of the
-   same claim bytes; a re-observation refreshes it and adds no row, and is
-   not a strength signal (RFC-0418). A fact's value is the librarian's
-   judgment, not a score or a model-invented semantic identity. *)
+   same claim bytes; a cross-trace re-observation refreshes it and adds no
+   row, and is not a strength signal (RFC-0418). A same-trace rewrite of
+   identical content is an echo and commits nothing ([last_seen_trace]).
+   A fact's value is the librarian's judgment, not a score or a
+   model-invented semantic identity. *)
 type fact =
   { claim : string
   ; category : category
   ; first_seen : float
   ; last_seen : float
+  ; last_seen_trace : string option
   ; origin : origin
   ; basis : basis
   }
@@ -712,6 +731,7 @@ let observed ~claim ~category ~now ~origin =
   ; category
   ; first_seen = now
   ; last_seen = now
+  ; last_seen_trace = None
   ; origin
   ; basis = Observed Transcript
   }
@@ -726,6 +746,7 @@ let derived ~claim ~category ~now ~origin ~derivations =
       ; category
       ; first_seen = now
       ; last_seen = now
+      ; last_seen_trace = None
       ; origin
       ; basis = Derived (List.map normalize_derivation derivations)
       }
@@ -743,17 +764,21 @@ let fact_to_json (f : fact) =
   if not (Float.is_finite f.last_seen)
   then invalid_arg "memory fact last_seen must be finite";
   `Assoc
-    [ wire_field_claim, `String f.claim
-    ; wire_field_category, `String (category_to_string f.category)
-    ; wire_field_first_seen, `Float f.first_seen
-    ; wire_field_last_seen, `Float f.last_seen
-    ; wire_field_origin, origin_to_json f.origin
-    ; wire_field_basis, basis_to_json f.basis
-    ]
+    ([ wire_field_claim, `String f.claim
+     ; wire_field_category, `String (category_to_string f.category)
+     ; wire_field_first_seen, `Float f.first_seen
+     ; wire_field_last_seen, `Float f.last_seen
+     ]
+     @ (match f.last_seen_trace with
+        | None -> []
+        | Some trace -> [ wire_field_last_seen_trace, `String trace ])
+     @ [ wire_field_origin, origin_to_json f.origin
+       ; wire_field_basis, basis_to_json f.basis
+       ])
 ;;
 
 (* Strict decoder for the closed canonical fact shape. *)
-let current_fact fields =
+let current_fact ~last_seen_trace fields =
   let* claim = wire_string_field wire_field_claim fields in
   let* category_token = wire_string_field wire_field_category fields in
   let* first_seen = wire_number_field wire_field_first_seen fields in
@@ -782,14 +807,20 @@ let current_fact fields =
     then Ok ()
     else wire_fail [ Wire_field wire_field_last_seen ] Not_finite
   in
-  { claim; category; first_seen; last_seen; origin; basis }
+  { claim; category; first_seen; last_seen; last_seen_trace; origin; basis }
 ;;
 
 let fact_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    let* () = exact_fields_result fact_wire_fields fields in
-    current_fact fields
+    if List.exists (fun (name, _) -> String.equal name wire_field_last_seen_trace) fields
+    then
+      let* () = exact_fields_result fact_wire_fields fields in
+      let* trace = wire_string_field wire_field_last_seen_trace fields in
+      current_fact ~last_seen_trace:(Some trace) fields
+    else
+      let* () = exact_fields_result fact_wire_fields_legacy fields in
+      current_fact ~last_seen_trace:None fields
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
 ;;

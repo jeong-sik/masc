@@ -3261,11 +3261,11 @@ let test_retract_records_a_retraction () =
   Alcotest.(check string) "new identity is inserted" "inserted"
     (string_field "identity_disposition" written_json);
   let repeated = (write ()).Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string in
-  Alcotest.(check string) "identical write reobserves the existing identity" "reobserved"
+  Alcotest.(check string) "identical write reports already-current" "already_current"
     (string_field "identity_disposition" repeated);
-  Alcotest.(check string) "reobservation keeps the content identity" written_id
+  Alcotest.(check string) "already-current keeps the content identity" written_id
     (string_field "memory_id" repeated);
-  Alcotest.(check int) "reobservation leaves exactly one current fact" 1
+  Alcotest.(check int) "already-current leaves exactly one current fact" 1
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
   let retract id =
     Runtime.keeper_memory_retract_with_outcome

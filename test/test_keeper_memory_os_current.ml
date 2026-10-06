@@ -24,6 +24,7 @@ let fact ?(claim = "claim") () :
   ; category = Types.Constraint
   ; first_seen = 100.0
   ; last_seen = 100.0
+  ; last_seen_trace = None
   ; origin = { kind = Types.Authored; trace_id = "trace" }
   ; basis = Types.Observed Types.Transcript
   }
@@ -1927,6 +1928,125 @@ let test_reobservation_refreshes_instead_of_duplicating () =
   check bool "category still updates" true (stored.category = Types.Lesson)
 ;;
 
+let explicit_source trace_id =
+  { Current.kind = Current.Explicit_write; trace_id }
+;;
+
+let efact ~claim ~trace_id ~now =
+  { (fact ~claim ()) with
+    first_seen = now
+  ; last_seen = now
+  ; origin = { kind = Types.Authored; trace_id }
+  }
+;;
+
+let upsert ~keepers_dir ~now ~trace_id fact =
+  Current.upsert_fact
+    ~keepers_dir
+    ~keeper_id:"keeper"
+    ~now
+    ~source:(explicit_source trace_id)
+    fact
+  |> require_upsert_ok
+;;
+
+(* ---------- A same-trace echo commits nothing ----------
+
+   sangsu rewrote identical facts 2,355 times across two turns (#41377):
+   every rewrite minted a revision, so no two receipts matched and the
+   repeat guards stayed blind. A rewrite of identical content by the trace
+   that already confirmed it is one observation event, not a new one: the
+   stored snapshot is kept with its revision. *)
+
+let test_same_trace_echo_keeps_snapshot () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let first =
+    upsert ~keepers_dir ~now:100.0 ~trace_id:"trace-a" (efact ~claim:"echoed claim" ~trace_id:"trace-a" ~now:100.0)
+  in
+  let committed = ref None in
+  let second =
+    Current.upsert_fact
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:200.0
+      ~source:(explicit_source "trace-a")
+      (efact ~claim:"echoed claim" ~trace_id:"trace-a" ~now:200.0)
+      ~on_committed:(fun _snapshot commit -> committed := Some commit)
+    |> require_upsert_ok
+  in
+  check int "echo keeps the revision" first.revision second.revision;
+  check bool "echo reports Unchanged" true (!committed = Some Current.Unchanged);
+  check int "still one row" 1 (List.length second.facts);
+  let stored = List.hd second.facts in
+  check (float 0.0) "echo does not move last_seen" 100.0 stored.last_seen;
+  check (option string) "echo keeps the confirming trace" (Some "trace-a") stored.last_seen_trace
+;;
+
+let test_cross_trace_reobserve_commits () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let first =
+    upsert ~keepers_dir ~now:100.0 ~trace_id:"trace-a" (efact ~claim:"recurring claim" ~trace_id:"trace-a" ~now:100.0)
+  in
+  let second =
+    upsert ~keepers_dir ~now:200.0 ~trace_id:"trace-b" (efact ~claim:"recurring claim" ~trace_id:"trace-b" ~now:200.0)
+  in
+  check bool "re-confirmation mints a revision" true (second.revision > first.revision);
+  check int "still one row" 1 (List.length second.facts);
+  let stored = List.hd second.facts in
+  check (float 0.0) "re-confirmation moves last_seen" 200.0 stored.last_seen;
+  check (option string) "re-confirmation restamps the trace" (Some "trace-b") stored.last_seen_trace
+;;
+
+let test_legacy_row_without_trace_commits () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let legacy = fact ~claim:"legacy claim" () in
+  ignore (replace ~keepers_dir ~facts:[ legacy ] () |> require_ok);
+  let snapshot =
+    upsert ~keepers_dir ~now:300.0 ~trace_id:"trace-a" (efact ~claim:"legacy claim" ~trace_id:"trace-a" ~now:300.0)
+  in
+  let stored = List.hd snapshot.facts in
+  check (float 0.0) "legacy reobserve moves last_seen" 300.0 stored.last_seen;
+  check (option string) "legacy reobserve stamps the trace" (Some "trace-a") stored.last_seen_trace
+;;
+
+let test_same_trace_category_change_commits () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let first =
+    upsert ~keepers_dir ~now:100.0 ~trace_id:"trace-a" (efact ~claim:"recategorized claim" ~trace_id:"trace-a" ~now:100.0)
+  in
+  let relabeled = { (efact ~claim:"recategorized claim" ~trace_id:"trace-a" ~now:200.0) with category = Types.Lesson } in
+  let second = upsert ~keepers_dir ~now:200.0 ~trace_id:"trace-a" relabeled in
+  check bool "changed content mints a revision" true (second.revision > first.revision);
+  let stored = List.hd second.facts in
+  check bool "category updated" true (stored.category = Types.Lesson)
+;;
+
+let test_fact_codec_accepts_legacy_and_traced_rows () =
+  let legacy_json =
+    `Assoc
+      [ "claim", `String "legacy claim"
+      ; "category", `String "fact"
+      ; "first_seen", `Float 100.0
+      ; "last_seen", `Float 100.0
+      ; "origin", `Assoc [ "kind", `String "authored"; "trace_id", `String "trace" ]
+      ; "basis", `Assoc [ "kind", `String "observed" ]
+      ]
+  in
+  (match Types.fact_of_json legacy_json with
+   | Ok fact ->
+     check (option string) "legacy row decodes without a trace" None fact.last_seen_trace
+   | Error detail -> fail ("legacy row rejected: " ^ Types.wire_error_to_string detail));
+  let traced =
+    { (fact ~claim:"traced claim" ()) with last_seen_trace = Some "trace-a" }
+  in
+  let round_tripped =
+    match Types.fact_of_json (Types.fact_to_json traced) with
+    | Ok fact -> fact
+    | Error detail -> fail ("traced row rejected: " ^ Types.wire_error_to_string detail)
+  in
+  check (option string) "trace survives the round trip" (Some "trace-a") round_tripped.last_seen_trace
+;;
+
 (* ---------- A rejection has to name the row and the field ----------
 
    These assert the rendered text, because the text is the whole deliverable.
@@ -3031,6 +3151,26 @@ let () =
             "re-observation refreshes instead of duplicating"
             `Quick
             test_reobservation_refreshes_instead_of_duplicating
+        ; test_case
+            "same-trace echo keeps the snapshot"
+            `Quick
+            test_same_trace_echo_keeps_snapshot
+        ; test_case
+            "cross-trace re-observation commits"
+            `Quick
+            test_cross_trace_reobserve_commits
+        ; test_case
+            "legacy row without a trace commits"
+            `Quick
+            test_legacy_row_without_trace_commits
+        ; test_case
+            "same-trace category change commits"
+            `Quick
+            test_same_trace_category_change_commits
+        ; test_case
+            "fact codec accepts legacy and traced rows"
+            `Quick
+            test_fact_codec_accepts_legacy_and_traced_rows
         ] )
     ; ( "undecodable state is not a wedge"
       , [ test_case

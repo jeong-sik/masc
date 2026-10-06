@@ -443,6 +443,7 @@ let test_recall_lifecycle_across_native_ticks () =
   let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let fact claim : Memory.fact =
     { claim; category = Constraint; first_seen = 1.; last_seen = 1.
+    ; last_seen_trace = None
     ; origin = { kind = Authored; trace_id = "recall-cycle" }
     ; basis = Observed Transcript } in
   let replace ?(now = 1.) expected_revision facts =

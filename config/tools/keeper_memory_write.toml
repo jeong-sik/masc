@@ -2,7 +2,7 @@ name = "keeper_memory_write"
 description = """
 Record a durable claim for later turns.
 
-memory_id identifies exact claim bytes: identical writes reuse its ID, even after retraction. A repeated ID is not a duplicate and needs no cleanup. Receipts distinguish inserted/reobserved.
+memory_id identifies exact claim bytes: identical writes reuse its ID, even after retraction. A repeated ID is not a duplicate and needs no cleanup. Receipts distinguish inserted/reobserved/already_current: already_current means this turn already confirmed the exact bytes, nothing was committed (rows_written 0), so do not write them again.
 
 Memory is for thoughts, decisions and state worth remembering. When a new claim replaces your own earlier claim of the same kind (e.g. a progress or position snapshot), pass that claim's memory_id as supersedes instead of writing another copy. Do not write the same kind of snapshot again without superseding the previous one.
 

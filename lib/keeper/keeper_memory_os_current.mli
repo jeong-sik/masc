@@ -123,7 +123,8 @@ type t =
     the same order, so the stored snapshot stays as it is: same revision,
     bytes and [updated_at], no commit notification. The journal still gets the
     pass's line, naming the kept revision. [Rewritten]: a new revision
-    replaced the snapshot. Explicit writes always write a revision. *)
+    replaced the snapshot. An explicit write rewrites except for a same-trace
+    echo of identical content, which keeps the stored snapshot. *)
 type commit_effect =
   | Rewritten
   | Unchanged
@@ -497,6 +498,7 @@ val replace
 
 val upsert_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?on_committed:(t -> commit_effect -> unit)
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
@@ -514,6 +516,14 @@ val upsert_fact
     existing rule identity, and appends a distinct rule identity.
     It never evicts an existing fact to admit the incoming fact; no local
     importance, recency, budget, or echo heuristic changes truth.
+
+    A rewrite of identical content (category, joined basis) by the trace
+    that already confirmed it is an echo of one observation event: the
+    stored snapshot is kept with its revision ([Unchanged]) instead of
+    minted anew. Any content change, a first sighting by this trace, or a
+    legacy row with no recorded trace rewrites. [on_committed] observes
+    the settled snapshot with its effect; it runs once under the store
+    locks and must only update caller-owned in-memory state.
 
     A derived incoming fact commits only when it survives support maintenance
     in the same locked update. Missing support is a typed

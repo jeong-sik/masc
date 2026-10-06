@@ -1612,16 +1612,18 @@ let upsert_explicit_fact
       ~(body : string)
       ~(basis : Keeper_memory_os_types.basis)
       ~(supersedes : string option)
-  : (Keeper_memory_os_current.t * supersession, explicit_write_error) result
+  : (Keeper_memory_os_current.t * supersession * Keeper_memory_os_current.commit_effect, explicit_write_error) result
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let committed = ref Keeper_memory_os_current.Rewritten in
   let fact : Keeper_memory_os_types.fact =
     { claim = body
     ; category = Keeper_memory_os_types.Fact
     ; first_seen = now
     ; last_seen = now
+    ; last_seen_trace = None
     ; origin = { kind = Keeper_memory_os_types.Authored; trace_id }
     ; basis
     }
@@ -1630,7 +1632,13 @@ let upsert_explicit_fact
     { kind = Keeper_memory_os_current.Explicit_write; trace_id }
   in
   let upsert () =
-    Keeper_memory_os_current.upsert_fact ~keepers_dir ~keeper_id ~now ~source fact
+    Keeper_memory_os_current.upsert_fact
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      ~source
+      ~on_committed:(fun _snapshot commit -> committed := commit)
+      fact
     |> Result.map_error (function
       | Keeper_memory_os_current.Unsupported_derivation invalidation ->
         Write_unsupported_derivation invalidation
@@ -1639,7 +1647,7 @@ let upsert_explicit_fact
   in
   let result =
     match supersedes with
-    | None -> upsert () |> Result.map (fun snapshot -> snapshot, No_supersedes)
+    | None -> upsert () |> Result.map (fun snapshot -> snapshot, No_supersedes, !committed)
     | Some superseded_memory_id ->
       (match
          Keeper_memory_os_current.supersede_fact
@@ -1651,9 +1659,12 @@ let upsert_explicit_fact
            fact
        with
        | Ok (snapshot, Keeper_memory_os_current.Superseded_current) ->
-         Ok (snapshot, Superseded superseded_memory_id)
+         Ok (snapshot, Superseded superseded_memory_id, Keeper_memory_os_current.Rewritten)
        | Ok (snapshot, Keeper_memory_os_current.Target_already_dropped removal) ->
-         Ok (snapshot, Target_already_dropped { memory_id = superseded_memory_id; removal })
+         Ok
+           ( snapshot
+           , Target_already_dropped { memory_id = superseded_memory_id; removal }
+           , Keeper_memory_os_current.Rewritten )
        | Error (Keeper_memory_os_current.Supersede_target_not_current _) ->
          Error (Write_supersede_refused Supersedes_not_current)
        | Error (Keeper_memory_os_current.Supersede_target_removed removal) ->
@@ -1730,21 +1741,25 @@ let supersedes_removal_json ~memory_id (removal : Keeper_memory_os_current.remov
          removal.drop_reason)
 ;;
 
-type memory_write_identity_disposition = Inserted | Reobserved
+type memory_write_identity_disposition = Inserted | Reobserved | Already_current
 
 let memory_write_identity_disposition
+      ~(commit : Keeper_memory_os_current.commit_effect)
       ~(snapshot : Keeper_memory_os_current.t)
       ~(fact : Keeper_memory_os_types.fact)
   =
-  let identity = Keeper_memory_os_types.memory_id fact in
-  let has_identity = List.exists (fun candidate ->
-    String.equal (Keeper_memory_os_types.memory_id candidate) identity) in
-  (* The returned delta was computed under the same lock as the commit.
-     Updating an existing identity can put its old and new payloads in both
-     lists; only an addition without a corresponding removal is insertion. *)
-  if has_identity snapshot.change.added && not (has_identity snapshot.change.removed)
-  then Inserted
-  else Reobserved
+  match commit with
+  | Keeper_memory_os_current.Unchanged -> Already_current
+  | Keeper_memory_os_current.Rewritten ->
+    let identity = Keeper_memory_os_types.memory_id fact in
+    let has_identity = List.exists (fun candidate ->
+      String.equal (Keeper_memory_os_types.memory_id candidate) identity) in
+    (* The returned delta was computed under the same lock as the commit.
+       Updating an existing identity can put its old and new payloads in both
+       lists; only an addition without a corresponding removal is insertion. *)
+    if has_identity snapshot.change.added && not (has_identity snapshot.change.removed)
+    then Inserted
+    else Reobserved
 ;;
 
 let memory_write_identity_receipt = function
@@ -1754,6 +1769,9 @@ let memory_write_identity_receipt = function
   | Reobserved ->
     [ "identity_disposition", `String "reobserved"
     ; "what_committed", `String "The existing current fact was re-observed; its observation or support was refreshed. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
+  | Already_current ->
+    [ "identity_disposition", `String "already_current"
+    ; "what_committed", `String "Nothing was committed: this turn already confirmed these exact bytes and the stored row is unchanged. Do not write them again. Supersede only if this replaces an earlier claim." ]
 ;;
 
 let keeper_memory_write_with_outcome
@@ -1879,7 +1897,7 @@ let keeper_memory_write_with_outcome
           respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ])
      | None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
-     | Ok (snapshot, supersession) ->
+     | Ok (snapshot, supersession, commit_effect) ->
        let written_fact =
          List.find_opt
            (fun fact -> String.equal fact.Keeper_memory_os_types.claim body)
@@ -1906,8 +1924,10 @@ let keeper_memory_write_with_outcome
             ~ok:true
             ~error_kind:No_memory_write_error
             (memory_write_identity_receipt
-               (memory_write_identity_disposition ~snapshot ~fact:written_fact)
-             @ [ "rows_written", `Int 1
+               (memory_write_identity_disposition ~commit:commit_effect ~snapshot ~fact:written_fact)
+             @ [ "rows_written", `Int (match commit_effect with
+               | Keeper_memory_os_current.Unchanged -> 0
+               | Keeper_memory_os_current.Rewritten -> 1)
             ; "revision", `Int snapshot.revision
               (* [recorded_at] echoes the persisted snapshot stamp rather than
                  reading a second clock: the receipt and the stored fact cannot
@@ -1918,7 +1938,9 @@ let keeper_memory_write_with_outcome
             ; ( "recorded_at"
               , `String
                   (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-            ; "outcome", `String "persisted_current_snapshot"
+            ; "outcome", `String (match commit_effect with
+              | Keeper_memory_os_current.Unchanged -> "kept_current_snapshot"
+              | Keeper_memory_os_current.Rewritten -> "persisted_current_snapshot")
             ; "store", `String "current_memory_snapshot"
             ; "memory_id", `String written_memory_id
             ; "basis", memory_write_basis_receipt written_fact.basis

@@ -95,6 +95,15 @@ returns promptly; the optional worker handles it in its own execution flow.
 The Dashboard preserves the selected instance, incarnation and request identity
 when querying a receipt. It does not silently retarget or resend a lost request.
 
+While Lane Add-ons stays open, switching workspaces hides the previous workspace's
+requests and resets the action form. A pending acceptance in one workspace does
+not block another workspace. Returning to the same workspace in the same runtime
+epoch restores its original request IDs and any acceptance received meanwhile.
+Status reads are cancelled on a switch and can be requested again on return.
+Switching does not cancel or replay an action already submitted. This in-memory
+request list does not survive leaving the Add-ons screen or reloading the page;
+the server's durable receipt can still be queried using its recorded request ID.
+
 Read the receipt with `GET /api/v1/lane-addons/actions?instance_id=...&request_id=...`
 or `masc_lane_action_status`. A repeated request with the same normalized input
 returns the existing receipt. A different input under the same request identity

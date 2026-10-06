@@ -906,6 +906,43 @@ let test_a_key_with_a_quote_is_escaped () =
   Alcotest.(check bool) "the inner quotes are escaped" true
     (has_line out {|"say \"hi\"" = "Yuna"|})
 
+let test_bool_edits_preserve_inline_comments () =
+  List.iter (fun (key, spelling) ->
+    List.iter (fun suffix ->
+      let line = spelling ^ " = true" ^ suffix in
+      let expected = Toml_line_editor.render_key key ^ " = false" ^ suffix in
+      let source = "[machines.msx]\n" ^ line ^ "\n[machines.dos]\nenabled = true\n" in
+      let out = Toml_line_editor.edit_table_bool source ~path:"machines.msx" ~key ~value:false in
+      Alcotest.(check string) "table bool keeps its exact comment suffix"
+        ("[machines.msx]\n" ^ expected ^ "\n[machines.dos]\nenabled = true\n") out;
+      check_loads "comment-preserving table bool" out;
+      let root = line ^ "\n[nested]\nenabled = true\n" in
+      let out = Toml_line_editor.edit_root_bool root ~key ~value:false in
+      Alcotest.(check string) "root bool keeps the same suffix contract"
+        (expected ^ "\n[nested]\nenabled = true\n") out;
+      check_loads "comment-preserving root bool" out)
+      [" # operator note"; "\t # # chained marker"; "#adjacent"; " # CRLF note\r"; "\r"])
+    ["enabled", "enabled"; "enabled#note", "\"enabled#note\"";
+     "enabled#note", "'enabled#note'"]
+
+let test_bool_comment_edit_ignores_multiline_content () =
+  List.iter (fun quote ->
+    let prefix = "[machines.msx]\nnotes = " ^ quote ^ "\n[machines.msx]\nenabled = true # string data\n" ^ quote ^ "\n" in
+    let source = prefix ^ "enabled = true\t# real operator note\n" in
+    let out = Toml_line_editor.edit_table_bool source ~path:"machines.msx" ~key:"enabled" ~value:false in
+    Alcotest.(check string) "only the structural boolean changes"
+      (prefix ^ "enabled = false\t# real operator note\n") out;
+    check_loads "comment edit beside a multiline string" out)
+    ["\"\"\""; "'''"]
+
+let test_bool_entry_edit_preserves_inline_comment () =
+  let source = "[[voice.stt.endpoints]]\nid = \"local\"\nenabled = true # operator note\n" in
+  let out = upsert source ~path:endpoints ~id_key:"id" ~id:"local"
+      ~fields:["enabled", Some (Toml_line_editor.Bool false)] in
+  Alcotest.(check string) "typed entry bool retains its comment"
+    "[[voice.stt.endpoints]]\nid = \"local\"\nenabled = false # operator note\n" out;
+  check_loads "comment-preserving typed entry bool" out
+
 let test_nested_bool_preserves_binding_layouts () =
   List.iter (fun (name, declaration, path, expected_price) ->
     let source = declaration ^ "\n[unrelated]\nnotes = \"keep this\"\n" in
@@ -976,6 +1013,12 @@ let () =
             test_a_float_field_keeps_its_point
         ; Alcotest.test_case "a bool field is not quoted" `Quick
             test_a_bool_field_is_not_quoted
+        ; Alcotest.test_case "bool edits preserve inline comments" `Quick
+            test_bool_edits_preserve_inline_comments
+        ; Alcotest.test_case "bool comment editing ignores multiline content" `Quick
+            test_bool_comment_edit_ignores_multiline_content
+        ; Alcotest.test_case "typed entry bool preserves inline comment" `Quick
+            test_bool_entry_edit_preserves_inline_comment
         ; Alcotest.test_case "a missing field is appended to that entry alone" `Quick
             test_a_field_the_entry_lacks_is_appended_to_it_alone
         ; Alcotest.test_case "a new entry lands after the last one" `Quick

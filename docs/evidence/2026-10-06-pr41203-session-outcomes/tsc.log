@@ -1,0 +1,6 @@
+compdef:153: _comps: assignment to invalid subscript range
+
+> masc-dashboard@1.0.0 typecheck /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/p2-41203/dashboard
+> tsc --noEmit
+
+tsc_exit=0

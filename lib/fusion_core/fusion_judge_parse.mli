@@ -4,6 +4,8 @@
     내기 어렵다. LLM이 내기 쉬운 JSON(named fields, [decision]은 [{"kind": ...}]
     태그 객체)을 typed field 정의로 받는다. 같은 정의에서 출력 schema와 parser를
     만들며, 제시된 배열 항목이 잘못되면 종합 전체를 Error로 거절한다.
+    [answer]와 [recommend]는 공백뿐인 결정 내용과 [resolved_answer]를 거절한다.
+    [insufficient]는 답을 지어내지 않고 빈 [resolved_answer]를 반환할 수 있다.
 
     순수 함수 — agent_core 의존 없이 fusion_core에서 단위 테스트 가능.
 

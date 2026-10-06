@@ -16,7 +16,7 @@ Additional surfaces hang off parents instead of holding Tab stops:
 Work's `t` switches Goals and Tasks, and `v` cycles through Task Review and
 Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
-Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
+Automation, and Runs as tabs. Runtime reaches the common Lanes inventory with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
 System reaches Runtime with `9` (Esc returns to System), Resources with `s` and Tools with `t`, and Activity
@@ -309,7 +309,8 @@ Antigravity). The form copies that provider's command and model bindings,
 refuses a location another provider of the same client already uses, and
 saves through the same preview. Enter on the last field re-reads
 `runtime.toml` from the server and declares against that, so a change made
-while the form was open is kept. It does not sign in; the rows under the
+while the form was open is kept. The save also guards that fresh revision; a
+concurrent write is refused and the form remains available for retry. It does not sign in; the rows under the
 fields name the command that does, and after the save the same command is
 in the session log. Turns reach the new account only after a lane lists it
 as a candidate. The
@@ -608,24 +609,36 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
-The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output execution path — the same thing this section's UI label `Lanes` shows — and Runtime Candidate Order for the order in which a Keeper turn tries runtime candidates. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes.
+Lanes is the common operator inventory for exact-output services, Browser
+backends, shared MSX/DOS machines and package installations. Runtime candidate
+orders remain a separate Runtime tab. Keeper lifecycle and turn-cycle facts
+remain on Keepers.
 
-For TOML package installations, open `/addons` from the composer or choose
-`go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
-covers configuration editing, connections, Skills, actions and cross-Lane evidence.
-These are three different customization surfaces: Config → Runtime edits named
-Keeper candidate orders; the six exact-output work purposes on this screen are
-fixed, although their runtime slots can be edited; Lane Add-ons load custom
-TOML packages and require a working image before a worker is active.
+The inventory is loaded on entry from `GET /api/v1/lanes`; opening Add-ons first
+is unnecessary. Invalid TOML and workers with unconfirmed cleanup stay visible.
+A saved declaration and an observed worker have separate readings. Missing data
+from a partial read does not mean a Lane was removed or disabled.
 
-Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
-Keepers, so this surface no longer repeats a second Keeper table. It hangs
-off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
-lanes, all runtimes, and then this surface. From the lane overview, `p` or
-`Esc` returns to Runtime; inside the run list and run detail, `Esc` first
-backs out one drill-down level as before. The palette keeps `go Lanes`.
+`j/k`, Page Up/Down, Home/End and `/` move through the same scrollable list. A
+mouse press selects the row actually drawn, and pressing the selected row opens
+it. Right or Enter opens exact runs, the selected Browser backend, the shared
+machine spectator, a declaration document or the exact manual instance.
+Declaration documents open for inspection: `E` edits and `s` saves explicitly.
+Existing drafts are retained. `&` still opens the machine media menu.
 
-On Lanes, select a lane and press `s` to edit its model order. Arrow keys or
+`d` reads the selected row's full observation; `i` reads inventory diagnostics.
+Both readers scroll, and Esc/Left returns to the list. `o` or `A`, `/addons`, and
+`go Lane Add-ons` keep the full package management surface available. Its `i`
+key opens the local package browser, followed by package preview and the existing
+schema-based installation form; its scope differs from
+the inventory's diagnostics key. See the [Lane Add-on guide](guides/tui-lane-addons.md).
+
+This inventory does not provide enable/disable controls. Browser registration
+is not process health, a machine publication does not identify its controller,
+and an unapplied declaration is not a running worker. The
+[inventory contract](guides/lane-inventory.md) names each observation precisely.
+
+On Lanes, select an exact-output lane and press `s` to edit its model order. Arrow keys or
 `j/k` select a candidate. Press `r` to replace it at the same position;
 type a configured model and reasoning effort such as `luna medium`, select
 with arrows and press Enter. The choices show the declared reasoning effort,
@@ -639,9 +652,16 @@ the shared model's settings in other lanes.
 `a` adds a fallback. `1` moves the selected candidate to the first position
 within its HTTP or CLI group, preserving the other candidates' relative order.
 HTTP candidates always run before CLI candidates. `J/K` move within a group,
-`x` removes, and Esc returns. These changes save immediately. The success
-message appears after the saved order is read back; a failed read is shown as
-unverified rather than successful.
+`x` removes, and Esc returns. These changes save immediately. The result
+shows file durability separately from application: exact lanes may be applied,
+unchanged with a reason, or unavailable until restart. When the prior exact
+configuration is kept, correct the reported configuration problem before
+restarting. The notice also names pending Keeper settings and lock warnings.
+A subsequent list refresh does not turn a held application into success. If
+that read fails, the commit result remains visible beside the stale-list warning.
+Long result messages wrap to the terminal width. Navigation dismisses the notice;
+a delayed reread does not restore it. Keeper values overridden by environment
+settings remain visible as warnings even when no restart is required.
 
 Standalone Lane model settings use the same form as Config → Models. In the
 Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's
@@ -673,43 +693,20 @@ inactive rows stay in the roster, receded, because "who left" is part of
 the reading. This is a registry view, not a socket list - a leftover
 process holding a connection is still an `lsof` question.
 
-```
- MASC Lanes (6 lanes)  17:02:53  [connected]
-  Lanes · observed 17:02:52
-  Lane Add-ons: 2 declared · 0 active · 2 config issues
-    LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
- >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
-```
+### Exact-output Lane detail
 
-Rows come from `GET /api/v1/dashboard/standalone-lanes`. One dim header
-carries the column names; a row carries the lane's mark and name, its status
-(with the elapsed time of a running lane), the running count, retained run
-count, execution outcomes, latency, the admitted slots, and the slots actually
-selected. The name and slot columns are as wide as the widest row needs, so
-a long name moves every row's columns together rather than one row's. The
-counts come before the slots because they are what a reader compares down
-the column; beside the Activity pane the slot column is the one cut, and the
-block under the list prints the selected lane's slots in full. This build
-projects six fixed consumers:
-`Board Attention` judges one durable Board attention candidate, `HITL Auto
-Judge` judges one held approval, `Librarian` selects the next Memory OS
-snapshot from immutable Keeper history, and `Verifier` reviews Task completion
-and Goal proof evidence. `Workspace Curator` classifies changed Keeper facts,
-and `Browser Stagehand` handles model-driven browser operations. The Add-on
-summary counts declared TOML files separately from active workers; a saved
-file can remain unapplied when its package image is unavailable.
+The common inventory's `exact_snapshot` preserves the exact execution reading:
+retained runs and their window/source counts, admitted and declared model order,
+failures and elapsed-time measurements. An exact row expands underneath the
+scrolling inventory. `d` shows complete configuration readings, and Enter opens
+its retained runs.
 
-The selected row expands underneath the matrix instead of forcing its long
-identifiers through the clipped comparison row. It names the exact
-`[runtime.exact_output_lanes.<lane-id>]` table, every admitted catalog slot in
-attempt order, the official-client runtime suffix used only after catalog
-exhaustion, publication-dropped slots that will not execute, and any admission
-error. In `runtime.toml`, `slots` is a required non-empty array of opaque
-catalog references; `cli_slots` is an optional array of official-client runtime
-ids. Blank values and duplicates are rejected. The lane tries admitted catalog
-slots in declaration order, then CLI runtimes in declaration order. The
-configuration is TOML; an individual run's Input and Output are retained JSON
-evidence, not another lane configuration format.
+The `[runtime.exact_output_lanes.<lane-id>]` table supplies `slots` for catalog
+references and `cli_slots` for official-client runtime IDs. At least one slot
+across the two groups is required. The lane tries admitted catalog slots in
+declaration order, then CLI runtimes in declaration order. Configuration is
+TOML; a run's retained Input and Output are JSON evidence. File durability,
+registry application and subsequent observation remain separate results.
 
 `s` opens the selected lane's provider editor. `a`, there or on the matrix,
 picks a runtime, and the runtime's kind decides the list it joins: an HTTP
@@ -1652,6 +1649,15 @@ error instead of redrawing it as an empty result.
 
 ### Memory
 
+저장된 메모리 크기는 기본적으로 추정 토큰(≈)으로 표시한다. `u`로
+토큰과 바이트 단위(B/KiB/MiB)를 전환한다. Keeper를 선택하면 저장량 아래에
+전체 요청 입력의 `avg / max / min / last`도 표시한다. 범위는 최근 50개
+기록된 Keeper 턴이며, 각 턴의 마지막 요청 관측값을 사용한다. 토큰 모드는
+기록된 요청별 입력 토큰(런타임 추정값이 포함될 수 있음), KiB 모드는 별도로 관측한 요청 본문
+크기다. 측정된 표본 수를 함께 표시하며 누락값을 0으로 넣지 않는다.
+마지막 턴이 미보고이면 `last unreported`를 표시한다. `/context`에서
+같은 턴의 세부 구성을 확인할 수 있다.
+
 Keeper별 Memory OS 건강 상태를 한 표로 보여준다. ordinary current
 snapshot과 source-bound snapshot을 별도 열로 표시하며, 각 행은 두 저장소의
 revision, facts, 크기와 source invalidation 수, 최근 ordinary 변화
@@ -1952,6 +1958,22 @@ scroll, `v` or `Esc` to return, and `r` to reload. A failed reload remains visib
 and labels retained metadata as a previous read. Invalid TOML remains readable
 with its parse error; a read status does not claim a write committed.
 
+`e` opens the raw source or retained draft in `$EDITOR`. Preview and save
+failures keep the edited text in this TUI session, scoped to the workspace and
+configuration path. Moving to another screen or temporarily losing workspace
+authority does not discard it; quitting the TUI ends the session. The save
+compares the revision read with the original source under the server's write
+lock, so another writer's changes cause a conflict instead of an overwrite.
+
+With a retained draft, `r` reads the current file without changing the draft or
+its save basis. `C` switches between the draft and that current snapshot.
+After comparing and combining changes in the editor, `u` adopts the displayed
+current revision while keeping your draft; `S` retries saving it. `U` instead
+replaces the draft with the displayed current text, and `X` discards the local
+draft and reads the file again. Adoption does not write anything. Another writer
+can still cause a new conflict. A lost response or uncertain durability keeps
+the draft and asks you to read the file before retrying.
+
 The `runtime.toml` view keeps comments and section headings on screen, while
 `j`/`k` select only rows that contain actual assignments. `PgUp`/`PgDn` jump
 by a visible page and land on the nearest assignment. The selected row is a
@@ -2042,7 +2064,8 @@ Per surface:
 | `b` | Board read | Switch focus between the post body and comments |
 | Right / `Enter` | Keepers | Open keeper detail |
 | Mouse click | Keepers | Select a row; click the selected row again to open its detail |
-| Right / `Enter` | Lanes | Open the selected standalone lane's exact runs |
+| Right / `Enter` | Lanes | Open the selected Lane's management surface |
+| `d` / `i` | Lanes overview | Read full selected-row observation / inventory diagnostics |
 | `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
 | Right / `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
@@ -2101,7 +2124,7 @@ Tab cycles the surfaces:
 Within a surface:
 
   Keepers   --Right/Enter-->  Keeper detail  --o-->  Keeper logs
-  Lanes     --Right/Enter-->  Standalone exact runs
+  Lanes     --Right/Enter-->  Selected Lane management
 
   Keeper list/detail  --c-->  Message input
 

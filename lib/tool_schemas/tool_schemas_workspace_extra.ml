@@ -8,7 +8,7 @@
     partial Goal surface.
 
     The [phase] and [action] enums are literals in those files, mirroring
-    [Goal_phase.all] and [Goal_phase.Public_action.all]. Nothing in TOML can
+    [Goal_phase.Kind.all] and [Goal_phase.Public_action.all]. Nothing in TOML can
     derive them from the variants, so [test_enum_mirror_sync] compares the
     published values against their owners — a constructor added to either
     variant without editing its file fails there rather than shipping a schema

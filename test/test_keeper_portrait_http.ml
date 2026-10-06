@@ -411,7 +411,7 @@ let test_router_preview_is_read_only () =
   with_router (fun ~config router ->
     let current = get ~router (path ~size:"72" keeper) in
     let equipment () = require_ok Fun.id
-      (Candle_equipment.current ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper) in
+      (Candle_equipment.reader ~now:Time_compat.now ~base_path:config.Workspace.base_path () ~keeper) in
     let before = equipment () in
     let preview_id = match before.Keeper_portrait_look.face with
       | Keeper_portrait_look.Glasses -> "shades"
@@ -704,9 +704,22 @@ beanie = %d
       ~args:(`Assoc ["slot", `String slot;"item",`String item]) in
     let accepted = function Tool_result.Completed _ as result -> Tool_result.data result
       | other -> fail (Tool_result.message other) in
+    let refused code = function
+      | Tool_result.Failed _ as result ->
+        check string "typed equip refusal code" code
+          Yojson.Safe.Util.(Tool_result.data result |> member "error_code" |> to_string)
+      | other -> fail ("expected refusal " ^ code ^ ": " ^ Tool_result.message other) in
+    (* The tool reports every refusal as [equipment_refused]; the library call
+       the tool makes names which rule refused it. *)
+    let equip_directly slot = Candle_equipment.equip ~now:Time_compat.now ~base_path
+      ~keeper:owner ~slot ~choice:(Candle_event.Item item) in
     let ledger_bytes () = Fs_compat.load_file (Candle_ledger.path ~base_path) in
     let initial = ledger_bytes () in
-    (match call id with Tool_result.Completed _ -> fail "equipped without purchase" | _ -> ());
+    refused "equipment_refused" (call id);
+    (match equip_directly (Keeper_portrait_item.slot item) with
+     | Error (Candle_equipment.Refused (Candle_balance.Unowned_equipment _)) -> ()
+     | Error error -> fail ("unowned item refused for another reason: " ^ Candle_equipment.error_to_string error)
+     | Ok _ -> fail "equipped without purchase");
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
     let read_roster () =
       Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
@@ -807,7 +820,11 @@ beanie = %d
        fail "purchased Item account unavailable");
     check string "purchase alone does not equip" before96.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
-    (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
+    refused "equipment_refused" (call ~slot:"face" id);
+    (match equip_directly Keeper_portrait_item.Face with
+     | Error (Candle_equipment.Refused (Candle_balance.Wrong_equipment_slot _)) -> ()
+     | Error error -> fail ("wrong slot refused for another reason: " ^ Candle_equipment.error_to_string error)
+     | Ok _ -> fail "head item equipped into face slot");
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
     let equipped = accepted (call id) in
     check bool "first choice changed" true Yojson.Safe.Util.(equipped |> member "changed" |> to_bool);
@@ -856,7 +873,7 @@ beanie = %d
     check bool "public roster and real TUI decoder preserve equipped input" true
       (reading = Keeper_portrait_equipment.Ready expected);
     check bool "restart-style replay preserves current equipment" true
-      (require_ok Fun.id (Candle_equipment.current ~now:Time_compat.now ~base_path ~keeper) = expected);
+      (require_ok Fun.id (Candle_equipment.reader ~now:Time_compat.now ~base_path () ~keeper) = expected);
     ignore (accepted (call "default"));
     check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"160" keeper)).body;
     let restored = get ~router (bound_path ~size:"96" starting keeper) in

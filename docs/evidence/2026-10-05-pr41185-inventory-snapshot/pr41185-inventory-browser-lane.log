@@ -1,0 +1,14 @@
+Testing `browser client routing'.
+This run has ID `8BHBJVO4'.
+
+  [OK]          ownership          0   inventory observes without pruning a p...
+  [OK]          ownership          1   optional document preserves existing w...
+  [OK]          ownership          2   colliding tab IDs and spoofed results.
+  [OK]          ownership          3   single selection and stale identity.
+  [OK]          ownership          4   resolved target expires before dispatch.
+  [OK]          ownership          5   expired queued actions do not execute.
+  [OK]          ownership          6   disconnect releases pending caller.
+  [OK]          ownership          7   source and live command policy.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-inventory-snapshot-20261005/test/_build/_tests/browser client routing'.
+Test Successful in 0.047s. 8 tests run.

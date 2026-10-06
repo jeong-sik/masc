@@ -1,5 +1,7 @@
 # TOML로 Lane Add-on 설치하기
 
+Web의 패키지 선택·필드 입력·초안 저장은 [Web 설치 안내](web-lane-addons.md)를 참고한다.
+
 Lane Add-on은 패키지를 파일로 설치·변경·제거하는 경로다. 기존 MSX 머신,
 Browser 세션, Keeper의 실행과 도구를 재사용한다. 패키지 하나가 여러 관측·관계 Lane을
 제공할 수 있다. MCP는 worker와 통신하는 규약이며, 설치 단위의 의미는 패키지가 제공하는
@@ -84,7 +86,7 @@ worker 시작이나 복구 의존성이 실패하면 기존 maintenance cadence�
 경우도 비어 있는 설정으로 취급한다. 제거 대상은 그 선언이 소유한 관측 worker이며, 기존 환경
 owner나 다른 설치를 종료하지 않는다. 과거 관측과 이미 보존한 선택 근거는 남는다.
 
-현재 `Detach` 도구·Dashboard 동작도 TOML로 관리되는 설치라면 일치하는 선언 파일을 제거한다.
+`masc_lane_detach` 도구와 Dashboard의 **Remove TOML + worker**도 TOML로 관리되는 설치라면 일치하는 선언 파일을 제거한다.
 그래야 다음 재조정에서 다시 설치되지 않는다. 선언이 이미 다른 revision으로 바뀌었거나 ID가
 중복되어 소유권이 불명확하면 그 파일을 임의로 지우지 않고 오류를 반환한다. 잘못된 선언도 먼저
 수정하거나 파일을 제거해야 한다. 제거 중 새로 저장된 파일을 이전 revision으로 간주해 지우지

@@ -6,7 +6,6 @@ val reader :
 (** Read once for a roster response; each lookup uses that immutable snapshot.
     Off means name-derived starting equipment. Disabled or corrupt data is an
     explicit error, never a fabricated starting picture. *)
-val current : now:(unit -> float) -> base_path:string -> keeper:string -> (Keeper_portrait_look.equipment, string) result
 
 val read_persisted :
   now:(unit -> float) -> base_path:string -> keeper:string ->

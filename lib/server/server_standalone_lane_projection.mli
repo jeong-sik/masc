@@ -28,10 +28,17 @@ type lane_configuration =
             (** [cli_slots] in declaration order, including rejected clients. *)
       ; admission_error : string option
       }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
   | Unconfigured of string
   | Registry_unavailable of string
 
 val snapshot_json : unit -> Yojson.Safe.t
+type observation
+val observe : unit -> observation
+val configuration : observation -> Standalone_lane.t -> lane_configuration
+val observation_to_json : observation -> Yojson.Safe.t
+(** A single immutable admission/run capture shared by the standalone detail
+    snapshot and the common inventory; never reparse rendered JSON. *)
 
 type detail_lookup =
   | Detail_found of Yojson.Safe.t

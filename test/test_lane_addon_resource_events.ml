@@ -80,7 +80,7 @@ let make_backend () =
     image_ready = (fun ~package:_ -> Ok ());
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
-    recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
+    recover_stop = (fun ~instance_id ~container_id ->
       match container_id with
       | Some id when id = Store.digest instance_id ->
           state.recovery := (instance_id, id) :: !(state.recovery); Ok ()

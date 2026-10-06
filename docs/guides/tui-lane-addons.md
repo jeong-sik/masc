@@ -1,15 +1,52 @@
 # TUI에서 TOML Lane Add-on 설치·연결하기
 
 같은 서버를 사용하는 `masc-tui --base-path <base-path> --port <server-port>`를 연다.
-`Lanes` 화면에서 `o` 또는 `A`로 Lane Add-ons를 연다. 둘은 같은 화면을 열며, Lanes 머리글과 아래 키 줄이 `o / A`로 함께 적는다.
+`Lanes` 화면에서 `o` 또는 `A`로 Lane Add-ons를 연다. 둘은 같은 화면을 열며, Lanes 하단 키 줄이 `o / A`로 함께 적는다.
 입력창의 `/addons`나 `:` 팔레트의 `go Lane Add-ons`로도 연다.
-`Lanes`는 standalone 실행과 실행 상세를 다룬다. Add-ons는 패키지 설치·연결·여러 Lane의 관측을 다룬다.
+`Lanes`는 Exact·Browser·기계·패키지를 한 목록에서 읽는다. Add-ons를 먼저 열지 않아도 선언과 설정 오류가 나온다. 선언 행 Enter는 원문을 표시하고 `E`로 편집한다. 수동 설치 행 Enter는 해당 인스턴스를 연다. Add-ons는 패키지 설치·연결·관측·이력의 상세 관리를 담당한다.
+`Lanes`의 `d`는 선택한 행의 전체 읽기, `i`는 목록 조회 진단이다. Add-ons 안에서 `i`를 누르면 패키지 설치기를 연다.
+
+## 목록에서 패키지 설치하기
+
+Add-ons의 `i`는 연결된 workspace의 로컬 패키지 탐색기를 연다. `j/k`로 선택하고
+Enter로 폴더를 열거나 패키지를 고른다. 현재 폴더와 바로 아래 폴더의 `lane.toml`을
+실제 manifest loader로 읽어 제목·revision·설명을 표시한다. 전체 디스크나 원격
+레지스트리를 검색하는 카탈로그는 아니다. 읽을 수 없거나 잘못된 manifest는 Issue로 남는다.
+
+Left는 상위 폴더, Right는 선택한 패키지의 폴더, `g`는 폴더 경로 입력,
+`p`는 기존 manifest 경로 직접 입력, `n`은 원문 TOML 선언 작성, `r`은 다시 읽기다.
+같은 workspace에서는 마지막 성공한 폴더를 기억하며 workspace가 바뀌면 초기화한다.
+기억한 폴더를 읽지 못하면 Left가 workspace 최상위 폴더를 연다. 긴 목록의 선택 행은 화면 안에
+유지하고, 선택 항목의 전체 경로·설명은 PgUp/PgDn으로 읽는다.
+
+패키지를 선택하면 manifest와 image 상태를 다시 읽는다. 이때부터 기존 schema 입력 폼을
+사용하며, 검토 후 Enter는 로컬 TOML 초안만 만든다. `s`를 눌러야 저장·적용을 요청한다.
+탐색과 미리보기는 image를 pull/build하거나 worker를 시작하지 않는다. image 검사 실패는
+unverified로 표시한다. binding schema가 없는 패키지는 탐색기에서 `n`을 눌러 원문 TOML
+선언을 쓴다. manifest 경로를 직접 입력했다면 Esc로 Add-ons 목록에 돌아가 `n`을 누른다.
+
+탐색은 읽는 시점의 경로와 symlink가 workspace 안에 있는지 확인한다. 기존 미리보기와
+같이 경로 확인 후 manifest를 여는 방식이므로, 동시에 파일·상위 폴더를 교체하는 writer를
+격리하는 원자적 filesystem sandbox는 아니다.
+
+## 설정을 남기고 켜기/끄기
+
+선언 TOML 초안을 연 뒤 `Space`로 활성화 값을 바꾸고 `s`로 저장한다.
+루트 `enabled`만 바꾸며 주석·다른 설정·작성 중인 초안은 유지한다.
+저장 성공은 파일 반영이며 worker 정리 완료와 다르다. `r`로 상태를 읽고
+Esc로 초안을 닫아 설치 목록을 본다. 끄기 요청 중인 worker나 정리 실패는
+계속 표시한다. 다시 켜면 이전 worker 정리가 확인된 뒤 새 worker가 붙는다.
+선언 파일과 보존 관측은 남으며 기존 제거 동작과 구별된다.
+[활성화 계약과 부분 읽기](lane-package-activity.md)를 참고한다.
+MSX·DOS는 별도의 [기계 활동 설정](machine-activity.md)을 사용한다.
 
 ## 설치 목록
 
 Add-ons를 열면 **설치 목록**이 나온다. 설치 선언(TOML)과 실행 인스턴스(worker)가 한 목록에 나란히 놓인다.
 머리글은 서로 다른 세 수를 섞지 않는다 — 선언 수, 실행 중 인스턴스 수, 실패한 worker 수.
 선언은 `desired/applied revision`, 인스턴스는 `phase`로 상태를 보여 준다. 선언이 있어도 인스턴스가 없을 수 있고, 수동 부착한 인스턴스는 선언 없이도 목록에 나온다.
+
+현재 선언과 설치된 revision이 다르면 제거 대신 복구 안내를 표시한다. `E`로 TOML의 변경을 해결하고 `r`로 적용된 revision을 확인한 뒤 제거한다. 이 상태에서 `d`는 파일이나 worker를 제거하지 않는다. 수동 부착이나 revision을 확인하지 못한 상태를 변경 충돌로 추정하지 않는다.
 
 `j/k`로 항목을 고르고 Enter로 연다. 커서가 가리키는 패키지의 설명으로 할 수 있는 일을 확인하고, 선언 항목의 Enter는 설치 선언 화면, 인스턴스 항목의 Enter는 Add-on 상세 화면이다.
 `i`는 패키지 설치기를 열고 `n`은 새 TOML 선언을 쓴다. `r`은 다시 읽는다. 읽기가 오래된 화면은 머리글에 `STALE`을 붙인다.
@@ -78,7 +115,7 @@ Keeper의 `accepted`와 Broadcast의 `committed`는 읽기·활용을 뜻하지 
 
 행동 메뉴는 JSON Schema의 enum/const와 필수 object 필드로 닫힌 값을 열거하고
 기존 서버와 같은 validator로 검사한다. 특정 패키지 이름이나 행동 이름을 추측하지 않는다.
-필수 자유 입력이 있는 스키마는 고급 `:act` 경로를 사용한다. `D`는 원문 보기이며
+필수 자유 입력이 있는 스키마는 `A`로 명령 입력을 열고 `act {…}`를 제출한다. `D`는 원문 보기이며
 원문 스키마·revision·연결·근거를 펼친다. 기본 화면에도 오류와 불완전한 입력은 표시된다.
 상세의 `Tab`은 Results → Links → Installation → Records 순으로 화면을 바꾼다.
 설치 TOML 원문은 설치 목록에서 편집 가능한 선언을 골라 `E`로 편집기를 열어 확인한다.
@@ -121,7 +158,7 @@ MSX `frames`, DOS `guest`, 통계 `statistics`도 같은 연결 계약을 사용
 | `l` | 현재 서버 원문과 revision을 읽고 내 초안을 보존 |
 | `u` / `U` | 초안을 유지해 현재 revision을 저장 기준으로 선택 / 현재 원문으로 초안 교체 |
 | `r` | 설치 상태 재조회: desired/applied revision·오류·인스턴스 phase 확인 |
-| `Tab`, `j/k`, `J/K` | 다음 화면, 현재 화면의 항목 이동, 내용 스크롤 |
+| `Tab`, `j/k`, `J/K` | 인스턴스 상세에서 다음 화면 / 현재 화면의 항목 이동 / 내용 스크롤 |
 
 저장 영수증은 파일 저장 결과다. 기존 재조정이 worker를 적용하며, TOML 저장은 이미지를 만들지 않는다.
 잘못된 선언은 `E`로 원문을 고친다. 충돌 시 `l`로 비교한 뒤 `u` 또는 `U`를 선택하고 `s`로 저장한다.
@@ -131,15 +168,16 @@ Keeper는 카탈로그의 정확한 reference로 기존 `keeper_skill`에서 본
 
 ## 관측·행동·근거·제거
 
-화면 안의 `:`는 Add-on 명령 입력이다. `o`는 선택한 인스턴스를 관측하고 `r`은 상태를 읽는다.
-`:slice {"run_id":"dos-demo"}`로 여러 Lane을 가로질러 읽는다. `since`·`until`은 Unix 초, `lane_id`는 표시된 정확한 Lane ID다.
+`A`는 Add-on 명령 입력을 연다. 아래 명령을 콜론 없이 입력하고 Enter로 제출한다.
+`:`는 전역 이동 팔레트다. `o`는 선택한 인스턴스를 관측하고 `r`은 상태를 읽는다.
+`slice {"run_id":"dos-demo"}`로 여러 Lane을 가로질러 읽는다. `since`·`until`은 Unix 초, `lane_id`는 표시된 정확한 Lane ID다.
 행동을 제공하는 인스턴스의 `action_schema`와 incarnation을 확인한 뒤 명시적으로 제출한다.
-`:act {"instance_id":"<ID>","expected_incarnation":"<incarnation>","request_id":"<new-ID>","action":{"kind":"increment"}}`
-`increment`는 DOS 예다. 다른 패키지는 표시된 스키마를 따른다. `t` 또는 `:action {동일 요청 JSON}`은 상태만 조회한다.
+`act {"instance_id":"<ID>","expected_incarnation":"<incarnation>","request_id":"<new-ID>","action":{"kind":"increment"}}`
+`increment`는 DOS 예다. 다른 패키지는 표시된 스키마를 따른다. `t` 또는 `A`에서 입력한 `action {동일 요청 JSON}`은 상태만 조회한다.
 queued·running·confirmed·failed_before_effect·outcome_unknown과 executor·근거를 함께 확인한다.
 Records에서 행을 `Space`로 표시한 뒤 `e`로 근거를 고정한다.
 표시한 행 수와 export 대상 인스턴스를 확인한다. Activity timeline의 선택 Lane과 export 대상 인스턴스는 별개다.
-직접 지정은 `:evidence {"instance_id":"<ID>","row_ids":["<row-ID>"]}`, 선택 전달은 `keeper_name`을 추가한다.
+직접 지정은 `A`에서 `evidence {"instance_id":"<ID>","row_ids":["<row-ID>"]}`를 입력하고, 선택 전달은 `keeper_name`을 추가한다.
 `e`의 마지막 선택인 `Preserve and share the reference via Broadcast`는 선택한 근거의
 읽기 가능한 참조를 workspace Broadcast로 공유한다. 기본값은 보존만 하기이며,
 선택 후 Enter로 제출한다. 직접 지정할 때는 `broadcast:true`와 보내기 동작마다 새 `request_id`를 추가하고 `keeper_name`은 함께 쓰지 않는다.
@@ -150,6 +188,22 @@ Records에서 행을 `Space`로 표시한 뒤 `e`로 근거를 고정한다.
 공유가 실패해도 근거는 보존되고 자동으로 다시 보내지 않는다.
 전달 중 예외로 결과를 확정할 수 없으면 `outcome_unknown`으로 표시한다.
 이 경우 실제 공유·접수 기록을 확인한 뒤 재전송 여부를 결정한다.
-`d` 또는 `:detach <instance-ID>`는 해당 설치와 소유 worker를 제거한다. DOS 설치 제거는 그 DOS 머신도 종료한다.
+`d` 또는 `A`에서 입력한 `detach <instance-ID>`는 해당 설치의 소유 worker를 정리한다.
+TOML 관리 설치라면 일치하는 설치 선언 파일도 디스크에서 삭제하므로, 다음 설정 읽기에서 자동으로 다시 설치되지 않는다.
+그 사이 변경된 선언은 거절하고, 다른 인스턴스가 이어받은 선언은 보존한다. DOS 설치 제거는 그 DOS 머신도 종료한다.
 통계·관측 패키지를 제거해도 별도 생산자는 계속 진행하며 과거 관측·근거는 남는다. `Esc`·`q`는 화면만 닫고, 기존 owner 작업 취소나 Keeper 필수 검토를 추가하지 않는다.
-목록에 없는 실행을 붙일 때는 `:attach {"manifest_path":…,"run_id":…,"binding":…}`로 선언 없이도 붙일 수 있다.
+목록에 없는 실행을 붙일 때는 `A`에서 `attach {"manifest_path":…,"run_id":…,"binding":…}`를 입력해 선언 없이도 붙일 수 있다.
+
+## Saved configuration and application
+
+The declaration editor keeps the accepted file separate from your draft. The
+application line follows that accepted file through startup, old-worker cleanup,
+applied, off, failure or unknown. Changing the draft with Space or E does not
+change that target until you explicitly save. A comparison read (`l`) keeps the
+previous target until you adopt the current revision (`u` or `U`).
+
+Application reads follow the existing refresh cadence while the panel is visible.
+Press `r` in the TOML view to request a read immediately. This read leaves your
+draft, save receipt and save errors intact and does not occupy the save request.
+A different reconciled source or worker-input revision is shown as unconfirmed;
+missing workers alone do not confirm Off.

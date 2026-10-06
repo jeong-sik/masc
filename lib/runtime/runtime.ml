@@ -32,6 +32,10 @@ type config_observation =
   ; source_revision : config_source_revision
   }
 
+type config_edit_error =
+  | Config_source_conflict of config_observation
+  | Config_edit_failed of string
+
 type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
@@ -615,6 +619,23 @@ let exact_output_target_source ?(env = Env_config_core.raw_value_opt) () =
   | Some path -> Replacement_catalog_targets { path }
 ;;
 
+(* Whether [r], named as an HTTP slot of an exact-output lane, is a rule-3
+   gap. This one predicate decides both the save refusal below and the
+   runtime listing editors read, so a picker can refuse the candidate before
+   anything is sent instead of learning it from the write's 400. *)
+let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source) (r : t) =
+  match target_source with
+  | Replacement_catalog_targets { path = _ } -> false
+  | Runtime_binding_targets ->
+    (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
+     | Runtime_execution.Agent_core _, None -> true
+     | Runtime_execution.Agent_core _, Some (_ : float) -> false
+     | ( Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ ), (Some _ | None) -> false)
+;;
+
 (* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
    built from its binding, and its whole-request deadline is the provider's
    [exact-body-timeout-s]. Without it plan admission refuses every request on
@@ -645,25 +666,18 @@ let exact_slot_body_deadline_gaps_of
   =
   let gap_of (lane : Runtime_schema.exact_output_lane_decl) slot_id =
     match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
-    | None -> None
-    | Some r ->
-      (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
-       | Runtime_execution.Agent_core _, None ->
-         Some
-           ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
-            : exact_slot_body_deadline_gap)
-       | Runtime_execution.Agent_core _, Some (_ : float) -> None
-       | ( Runtime_execution.Codex_app_server _
-         | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _
-         | Runtime_execution.Muse_serve _ ), (Some _ | None) -> None)
+    | Some r when exact_slot_lacks_body_deadline ~target_source r ->
+      Some
+        ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
+         : exact_slot_body_deadline_gap)
+    | Some _ | None -> None
   in
   match target_source with
   | Replacement_catalog_targets { path = _ } -> []
   | Runtime_binding_targets ->
     List.concat_map
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         List.filter_map (gap_of lane) lane.slot_ids)
+         if lane.enabled then List.filter_map (gap_of lane) lane.slot_ids else [])
       decls
 ;;
 
@@ -823,34 +837,32 @@ let missing_reference_error
     default_fallback_explanation
 ;;
 
+(** Resolved runtime.toml values carried from validation to publication. *)
+type materialized_config =
+  { runtimes : t list
+  ; default_runtime : t
+  ; default_route : string
+  ; keeper_assignments : (string * string) list
+  ; media_failover : string list
+  ; lanes : Runtime_lane.t list
+  ; lsp_servers : (string * (string * string list)) list
+  ; typesafeai : Runtime_schema.typesafeai
+  ; browser : Browser_configuration.t
+  ; machines : Machine_configuration.t
+  }
+
 let degrade_loaded_for_missing_catalog
-    ( ( runtimes
-      , configured_default
-      , default_route
-      , assignments
-      , media_failover
-      , lanes
-      , lsp_servers
-      , typesafeai ) :
-      t list
-      * t
-      * string
-      * (string * string) list
-      * string list
-      * Runtime_lane.t list
-      * (string * (string * string list)) list  * Runtime_schema.typesafeai )
+    (loaded : materialized_config)
     (report : missing_catalog_report)
-  : ( ( t list
-        * t
-        * string
-        * (string * string) list
-        * string list
-        * Runtime_lane.t list
-        * (string * (string * string list)) list  * Runtime_schema.typesafeai )
-      * startup_degradation
-    , string )
-    result
+  : (materialized_config * startup_degradation, string) result
   =
+  let { runtimes
+      ; default_runtime = configured_default
+      ; keeper_assignments = assignments
+      ; media_failover
+      ; lanes
+      ; _
+      } = loaded in
   let is_missing = runtime_missing_from_report report in
   let active_runtimes = List.filter (fun (rt : t) -> not (is_missing rt.id)) runtimes in
   let disabled_runtime_ids =
@@ -953,28 +965,18 @@ let degrade_loaded_for_missing_catalog
       }
     in
     Ok
-      ( ( active_runtimes
-        , configured_default
-        , default_route
-        , assignments
-        , kept_media_failover
-        , kept_lanes
-        , lsp_servers
-        , typesafeai )
+      ( { loaded with
+          runtimes = active_runtimes
+        ; media_failover = kept_media_failover
+        ; lanes = kept_lanes
+        }
       , degradation )
 ;;
 
 let materialize_config
     ?(validate_max_context = true)
-    (cfg : config)
-  : ( (t list
-       * t
-       * string
-       * (string * string) list
-       * string list
-       * Runtime_lane.t list
-       * (string * (string * string list)) list * Runtime_schema.typesafeai)
-      * Runtime_schema.exact_output_lane_decl list
+    (cfg : Runtime_schema.config)
+  : ( materialized_config * Runtime_schema.exact_output_lane_decl list
     , load_failure )
     result
   =
@@ -1042,16 +1044,20 @@ let materialize_config
     validate_runtime_references ~dropped_bindings runtimes lanes
       (media_failover_references cfg.media_failover)
   in
-  let* () =
-    validate_runtime_references ~dropped_bindings runtimes lanes
-      (verifier_exact_slot_references cfg.exact_output_lane_decls)
+  let active_exact_output_lanes =
+    List.filter (fun (lane : Runtime_schema.exact_output_lane_decl) -> lane.enabled)
+      cfg.exact_output_lane_decls
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
-      (exact_lane_cli_slot_references cfg.exact_output_lane_decls)
+      (verifier_exact_slot_references active_exact_output_lanes)
   in
   let* () =
-    validate_exact_lane_cli_slots ~runtimes cfg.exact_output_lane_decls
+    validate_runtime_references ~dropped_bindings runtimes lanes
+      (exact_lane_cli_slot_references active_exact_output_lanes)
+  in
+  let* () =
+    validate_exact_lane_cli_slots ~runtimes active_exact_output_lanes
   in
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
@@ -1062,28 +1068,24 @@ let materialize_config
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
      degraded boot [init_default_degraded_report]. *)
-  let loaded =
-    ( runtimes
-    , rt
-    , default_route
-    , assignments
-    , cfg.media_failover
-    , lanes
-    , cfg.lsp_servers
-    , cfg.typesafeai )
+  let loaded : materialized_config =
+    { runtimes
+    ; default_runtime = rt
+    ; default_route
+    ; keeper_assignments = assignments
+    ; media_failover = cfg.media_failover
+    ; lanes
+    ; lsp_servers = cfg.lsp_servers
+    ; typesafeai = cfg.typesafeai
+    ; browser = cfg.browser
+    ; machines = cfg.machines
+    }
   in
   Ok (loaded, cfg.exact_output_lane_decls)
 ;;
 
 let load_list_internal ~(config_path : string) ~validate_max_context
-  : ( (t list
-       * t
-       * string
-       * (string * string) list
-       * string list
-       * Runtime_lane.t list
-       * (string * (string * string list)) list * Runtime_schema.typesafeai)
-      * Runtime_schema.exact_output_lane_decl list
+  : ( materialized_config * Runtime_schema.exact_output_lane_decl list
     , load_failure )
     result
   =
@@ -1104,23 +1106,17 @@ let load_list_internal_text ~config_path:(_ : string) ~content ~validate_max_con
   materialize_config ~validate_max_context cfg
 ;;
 
-(* The public five-tuple stays as its callers destructure it; the operator's
-   language-server commands travel inside this module only and are read
-   back through [lsp_servers]. *)
+(* The public five-tuple stays as its callers destructure it. The remaining
+   runtime.toml settings travel in the named materialization to [set_loaded]. *)
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
   |> Result.map
-       (fun
-         ( ( runtimes
-           , rt
-           , _default_route
-           , assignments
-           , media_failover
-           , lanes
-           , _lsp_servers
-           , _typesafeai )
-         , _ ) ->
-         (runtimes, rt, assignments, media_failover, lanes))
+       (fun ((loaded : materialized_config), _) ->
+         ( loaded.runtimes
+         , loaded.default_runtime
+         , loaded.keeper_assignments
+         , loaded.media_failover
+         , loaded.lanes ))
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)
@@ -1140,6 +1136,8 @@ type loaded_state =
   ; media_failover : string list
   ; declared_media_failover : string list
   ; lanes : Runtime_lane.t list
+  ; browser : Browser_configuration.t option
+  ; machines : Machine_configuration.t option
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
   ; startup_degradation : startup_degradation option
@@ -1150,7 +1148,7 @@ type loaded_state =
            leaves them out and the startup report names them. *)
   }
 
-let empty_loaded_state =
+let empty_loaded_state : loaded_state =
   { default_runtime = None
   ; default_route = None
   ; runtimes = []
@@ -1158,6 +1156,8 @@ let empty_loaded_state =
   ; media_failover = []
   ; declared_media_failover = []
   ; lanes = []
+  ; browser = None
+  ; machines = None
   ; lsp_servers = []
   ; config_path = None
   ; startup_degradation = None
@@ -1204,36 +1204,31 @@ let set_loaded
     ?declared_media_failover
     ~config_path
     ~(exact_output_lane_decls : Runtime_schema.exact_output_lane_decl list)
-    ( runtimes
-    , rt
-    , default_route
-    , assignments
-    , media_failover
-    , lanes
-    , lsp_servers
-    , typesafeai ) =
+    (loaded : materialized_config) =
   (* Reuse observations only when the actual resolved binding is unchanged.
      Compare the identities frozen at materialization, never re-resolve old
      credentials/catalog facts after a reload. Removed/rebound rows retain no
      global registry entry; in-flight snapshots alone keep their old cells. *)
   let previous = (Atomic.get loaded_state_ref).runtimes in
   let preserve_candidate = preserve_candidate previous in
-  let runtimes = List.map preserve_candidate runtimes in
-  let rt = preserve_candidate rt in
+  let runtimes = List.map preserve_candidate loaded.runtimes in
+  let rt = preserve_candidate loaded.default_runtime in
   let declared_media_failover =
     match declared_media_failover with
     | Some declared -> declared
-    | None -> media_failover
+    | None -> loaded.media_failover
   in
   publish_loaded_state
     { default_runtime = Some rt
-    ; default_route = Some default_route
+    ; default_route = Some loaded.default_route
     ; runtimes
-    ; keeper_assignments = assignments
-    ; media_failover
+    ; keeper_assignments = loaded.keeper_assignments
+    ; media_failover = loaded.media_failover
     ; declared_media_failover
-    ; lanes
-    ; lsp_servers
+    ; lanes = loaded.lanes
+    ; browser = Some loaded.browser
+    ; machines = Some loaded.machines
+    ; lsp_servers = loaded.lsp_servers
     ; config_path = Some config_path
     ; startup_degradation
     ; exact_slots =
@@ -1242,11 +1237,11 @@ let set_loaded
           runtimes
           exact_output_lane_decls
     };
-  Runtime_typesafeai_policy.publish typesafeai;
+  Runtime_typesafeai_policy.publish loaded.typesafeai;
   Runtime_startup_state.note_runtime_loaded ()
 
 let init_default ~config_path =
-  let* loaded, exact_output_lane_decls =
+  let* (loaded : materialized_config), exact_output_lane_decls =
     load_list_internal ~config_path ~validate_max_context:true
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
@@ -1423,8 +1418,8 @@ let unpublish_exact_output_registry () =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
-    (match missing_runtime_model_capabilities ~config_path runtimes with
+  | Ok ((loaded : materialized_config), exact_output_lane_decls) ->
+    (match missing_runtime_model_capabilities ~config_path loaded.runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
        set_loaded ~config_path ~exact_output_lane_decls loaded;
@@ -1437,22 +1432,21 @@ let init_default_strict ~config_path =
 (* Prepare one immutable runtime publication. Boot and config edits share the
    same catalog exclusion so a save cannot reactivate an unavailable route. *)
 let prepare_degraded_loaded ~config_path
-    (((runtimes, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+    ((loaded : materialized_config), exact_output_lane_decls) =
   (* [\[runtime\].media_failover] as the file declares it, read before the
      catalog exclusion below drops what it could not resolve. The surface
      needs both: the admitted list it draws, and what was dropped, which is
      what stops the route being written back from a list missing them. *)
-  let _, _, _, _, declared_media_failover, _, _, _ = loaded in
+  let declared_media_failover = loaded.media_failover in
   let* loaded, startup_degradation =
-    match missing_runtime_model_capabilities ~config_path runtimes with
+    match missing_runtime_model_capabilities ~config_path loaded.runtimes with
     | None -> Ok (loaded, None)
     | Some report ->
         let* loaded, degradation = degrade_loaded_for_missing_catalog loaded report in
         Ok (loaded, Some degradation)
   in
-  let active_runtimes, _, _, _, _, _, _, _ = loaded in
   let* () =
-    validate_runtime_max_context active_runtimes
+    validate_runtime_max_context loaded.runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
   Ok
@@ -1468,7 +1462,7 @@ let initialize_degraded_loaded ~config_path parsed =
       (fun failure -> Runtime_config_error (to_diagnostic_text ~config_path failure))
       parsed
   in
-  let* loaded, exact_output_lane_decls, startup_degradation, declared_media_failover =
+  let* (loaded : materialized_config), exact_output_lane_decls, startup_degradation, declared_media_failover =
     prepare_degraded_loaded ~config_path parsed
     |> Result.map_error (fun msg -> Runtime_config_error msg)
   in
@@ -1497,13 +1491,18 @@ let init_default_degraded_observation (observation : config_observation) =
 ;;
 
 let runtime_state () = Atomic.get loaded_state_ref
+let browser_configuration () = (runtime_state ()).browser
+let machine_configuration () = (runtime_state ()).machines
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
 
-let get_default_and_runtimes () =
+let get_default_route_and_runtimes () =
   let state = runtime_state () in
-  state.default_runtime, state.runtimes
+  let route = match state.default_route with
+    | Some _ as route -> route
+    | None -> Option.map (fun (runtime : t) -> runtime.id) state.default_runtime in
+  route, state.default_runtime, state.runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
@@ -1783,7 +1782,7 @@ let verifier_exact_lane_resolution () =
                     selected_slots))))
 ;;
 
-let verifier_exact_lane_slot_ids () =
+let verifier_exact_lane_slots () =
   Result.bind (verifier_exact_lane_resolution ()) (fun lane ->
     match
       lane.admitted_catalog_slot_ids @ lane.admitted_cli_slot_ids, lane.slot_rejections
@@ -1796,14 +1795,16 @@ let verifier_exact_lane_slot_ids () =
         (Printf.sprintf
            "verifier_exact has no slot that can judge: %s"
            (String.concat "; " (List.map verifier_slot_rejection_to_string rejections)))
-    | (_ :: _ as slot_ids), _ -> Ok slot_ids)
+    | _ :: _, _ ->
+      Ok (List.map (fun id -> id, Types_core.Catalog_slot) lane.admitted_catalog_slot_ids
+          @ List.map (fun id -> id, Types_core.Cli_slot) lane.admitted_cli_slot_ids))
 ;;
 
 (* [Ok] carries the declared slots this lane cannot judge through, so a caller
    that reports readiness can also say why the lane is short of the
    declaration. An empty list means the whole declaration is usable.
 
-   Readiness and {!verifier_exact_lane_slot_ids} now answer from one
+   Readiness and {!verifier_exact_lane_slots} now answer from one
    admission. They used to disagree — readiness applied a second, stricter
    predicate to catalog slots — and that disagreement is what let the
    completion authority start on a lane that refused every review. *)
@@ -1853,17 +1854,13 @@ let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
 ;;
 
-let verifier_exact_slot_admission ~runtime_id =
-  let direct () = match get_runtime_by_id runtime_id with
-    | Some runtime -> verifier_runtime_admission runtime
-    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
-  match Runtime_exact_output_registry.current () with
-  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
-  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
-  | Ok registry ->
-    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Verifier) with
-     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
-     | Ok _ | Error _ -> direct ())
+let verifier_exact_slot_admission ~candidate_kind ~runtime_id =
+  match candidate_kind with
+  | Types_core.Cli_slot -> verifier_cli_slot_admission ~runtime_id
+  | Types_core.Catalog_slot | Types_core.Explicit_runtime ->
+    (match get_runtime_by_id runtime_id with
+     | Some runtime -> verifier_runtime_admission runtime
+     | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime"))
 ;;
 
 let is_local_runtime_id (id : string) : bool option =
@@ -1894,6 +1891,33 @@ let resolve_assignment_in (state : loaded_state) (assigned_id : string) =
 
 let resolve_assignment (assigned_id : string) =
   resolve_assignment_in (runtime_state ()) assigned_id
+;;
+
+type dashboard_runtime_resolved_snapshot =
+  { rs_default_route : string option
+  ; rs_default_runtime : t option
+  ; rs_runtimes : t list
+  ; rs_assignments : (string * string) list
+  ; rs_lanes : Runtime_lane.t list
+  ; rs_media_failover : string list
+  ; rs_declared_media_failover : string list
+  ; rs_config_path : string option
+  ; rs_resolve_assignment : string ->
+      [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+  }
+
+let dashboard_runtime_resolved_snapshot () =
+  let state = runtime_state () in
+  { rs_default_route = state.default_route
+  ; rs_default_runtime = state.default_runtime
+  ; rs_runtimes = state.runtimes
+  ; rs_assignments = state.keeper_assignments
+  ; rs_lanes = state.lanes
+  ; rs_media_failover = state.media_failover
+  ; rs_declared_media_failover = state.declared_media_failover
+  ; rs_config_path = state.config_path
+  ; rs_resolve_assignment = resolve_assignment_in state
+  }
 ;;
 
 type keeper_dispatch_snapshot =
@@ -2369,13 +2393,13 @@ let validate_fusion_change ~config_path content =
    [Route_unavailable] rather than [Unknown_route]. The payloads are the ones
    a run records. *)
 let fusion_seat_failure
-    ((runtimes, _, _, _, _, lanes, _, _), _, startup_degradation, _)
+    ((loaded : materialized_config), _, startup_degradation, _)
     route
   : Fusion_types.judge_failure option
   =
   let id = String.trim route in
-  if Option.is_some (find_declared_lane lanes id)
-     || List.exists (fun (runtime : t) -> String.equal runtime.id id) runtimes
+  if Option.is_some (find_declared_lane loaded.lanes id)
+     || List.exists (fun (runtime : t) -> String.equal runtime.id id) loaded.runtimes
   then None
   else (
     match
@@ -2489,11 +2513,11 @@ let validate_fusion_seats ~config_path ~validated content =
    [load_list_internal], and a broken [fusion] must not stop every Keeper turn
    with it; Fusion reports its own section per call. *)
 let exact_slot_body_deadline_gaps_of_validated
-    ((runtimes, _, _, _, _, _, _, _), exact_output_lane_decls, _, _)
+    ((loaded : materialized_config), exact_output_lane_decls, _, _)
   =
   exact_slot_body_deadline_gaps_of
     ~target_source:(exact_output_target_source ())
-    runtimes
+    loaded.runtimes
     exact_output_lane_decls
 ;;
 
@@ -2723,6 +2747,8 @@ let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
       "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
       feature
       lane_id
+  | Error (Runtime_exact_output_registry.Exact_lane_off _) ->
+    Log.Server.info "exact_output: lane %S is off; its candidate configuration is retained" lane_id
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Log.Server.warn
       "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"
@@ -2768,9 +2794,8 @@ let on_disk_text_rebuilds_exact_output_registry ~config_path =
   | Ok text ->
     (match parse_and_validate_config_text ~config_path text with
      | Error (_ : string) -> false
-     | Ok (loaded, lanes, _, _) ->
-       let runtimes, _, _, _, _, _, _, _ = loaded in
-       Result.is_ok (prepare_exact_output_replacement ~runtimes ~lanes))
+     | Ok ((loaded : materialized_config), lanes, _, _) ->
+       Result.is_ok (prepare_exact_output_replacement ~runtimes:loaded.runtimes ~lanes))
 ;;
 
 (* The registry is rebuilt from the runtimes the committed text loads, the
@@ -2958,7 +2983,7 @@ let commit_config_text_locked
     content
   =
   let observation = config_observation ~path content in
-  let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
+  let* (loaded : materialized_config), exact_output_lanes, startup_degradation, declared_media_failover =
     validate_save_text ~config_path:path content
     |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
@@ -2972,9 +2997,9 @@ let commit_config_text_locked
       ~exact_output_lane_decls:exact_output_lanes
       loaded
   in
-  let runtimes, _, _, _, _, _, _, _ = loaded in
   let* plan =
-    plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
+    plan_exact_output_commit
+      ~config_path:path ~runtimes:loaded.runtimes ~lanes:exact_output_lanes
     |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   match plan with
@@ -3066,6 +3091,42 @@ let save_config_text ?runtime_config_path content =
     content
 ;;
 
+let save_config_text_if_current ?runtime_config_path ~expected_source_path ~expected_source_revision content =
+  let failed detail = Config_edit_failed detail in
+  let* () =
+    if String_util.is_lowercase_sha256_hex expected_source_revision then Ok ()
+    else Error (failed "expected_source_revision must be lowercase SHA-256 hex")
+  in
+  let* () = if expected_source_path <> "" && not (String.contains expected_source_path '\000') then Ok ()
+    else Error (failed "expected_source_path must be a nonempty path without NUL") in
+  let* path = runtime_config_path_result ?runtime_config_path () |> Result.map_error failed in
+  let* locked =
+    with_runtime_config_lock_using File_lock_eio.with_durable_lock_observed path
+      (fun () ->
+        let* current_text = load_file_result path |> Result.map_error failed in
+        let current = config_observation ~path current_text in
+        if not (String.equal expected_source_path current.path)
+           || not (String.equal expected_source_revision
+                  (config_source_revision_to_string current.source_revision))
+        then Error (Config_source_conflict current)
+        else
+          let* () =
+            Keeper_config_journal.require_resolved ~runtime_config_path:path
+            |> Result.map_error failed
+          in
+          commit_runtime_config_text ~path content |> Result.map_error failed)
+    |> Result.map_error failed
+  in
+  match locked.value with
+  | Ok receipt -> Ok (attach_lock_warnings locked.warnings receipt)
+  | Error error ->
+    List.iter
+      (function Config_lock_release_unconfirmed detail ->
+        Log.Misc.warn "runtime source edit lock release unconfirmed: %s" detail)
+      locked.warnings;
+    Error error
+;;
+
 (* The read-modify-write form of [save_config_text]. A caller that loads the
    file itself and then hands the edited text to [save_config_text] loses any
    write that landed in between, because only the write is inside the lock.
@@ -3086,14 +3147,14 @@ let edit_config_text ?runtime_config_path edit =
 
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* loaded, exact_output_lanes, _degradation, _declared_media_failover =
+  let* (loaded : materialized_config), exact_output_lanes, _degradation, _declared_media_failover =
     validate_save_text ~config_path:path content
   in
-  let runtimes, _, _, _, _, _, _, _ = loaded in
   (* The commit's registry decision, without the write, so a preview cannot
      promise a save the commit then refuses. *)
   let* (_ : exact_output_commit_plan) =
-    plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
+    plan_exact_output_commit
+      ~config_path:path ~runtimes:loaded.runtimes ~lanes:exact_output_lanes
   in
   Ok ()
 ;;

@@ -71,6 +71,8 @@ let encode_bounded ~max_bytes json =
     | `Null -> consume 4
     | `Bool true -> consume 4
     | `Bool false -> consume 5
+    | `Float value when not (Float.is_finite value) ->
+        invalid_arg "sampling evidence contains a non-finite number"
     | (`Int _ | `Float _) as scalar -> consume (String.length (Yojson.Safe.to_string scalar))
     | `List items ->
         consume 2; sequence value items
@@ -81,7 +83,7 @@ let encode_bounded ~max_bytes json =
     | first :: rest -> write first; List.iter (fun item -> consume 1; write item) rest in
   try
     value json;
-    let bytes = Yojson.Safe.to_string json in
+    let bytes = Yojson.Safe.to_string ~std:true json in
     ignore (Yojson.Safe.from_string bytes);
     Ok bytes
   with
@@ -89,25 +91,16 @@ let encode_bounded ~max_bytes json =
   | Stack_overflow -> Error "sampling evidence nesting exceeds encoder capacity"
   | Yojson.Json_error _ | Invalid_argument _ -> Error "sampling evidence cannot be serialized"
 
+(* The host's own evidence is checked for serializability and re-parse, not for
+   size: its inputs were already bounded where they entered. The reply the
+   worker will receive is the one value measured against its bound. *)
+let encode_unbounded json = encode_bounded ~max_bytes:max_int json
+
 let package_response (answer : S.create_message_result) = {answer with _meta=None}
 
 let response_with_references (answer : S.create_message_result) references =
   let answer = package_response answer in
   {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])}
-
-let bound_refusal ~max_bytes message =
-  let json_len s = String.length (Yojson.Safe.to_string (`String s)) in
-  if String.length message <= max_bytes
-     && (String.length message = 0 || message.[0] = '{' || json_len message <= max_bytes) then message
-  else
-    let refusal = "sampling failed; outcome retained" in
-    if json_len refusal <= max_bytes then refusal
-    else
-      let compact = "refused" in
-      if json_len compact <= max_bytes then compact
-      else
-        let max_content = max 0 (max_bytes - 2) in
-        String.sub compact 0 (min (String.length compact) max_content)
 
 let validate_response ~max_bytes answer =
   let* bytes = encode_bounded ~max_bytes (S.create_message_result_to_yojson answer) in
@@ -124,7 +117,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
   let* () = if String.trim instance_id<>"" && String.trim route<>"" then Ok ()
     else Error "sampling requires an exact instance and nonblank host route" in
   let retain fields = Eio_unix.run_in_systhread (fun () ->
-    let* bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) in
+    let* bytes = encode_unbounded (`Assoc fields) in
     Store.write_blob store bytes)
     |> Result.map_error (fun _ -> "sampling request could not be retained") in
   let observation = ref Outside_observation in
@@ -184,7 +177,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     (* Once invocation has returned, cancellation must not orphan a known
        result between its immutable blob and the durable recovery index. *)
     let retained = Eio_unix.run_in_systhread (fun () ->
-        let outcome, bytes = match encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) with
+        let outcome, bytes = match encode_unbounded (`Assoc fields) with
           | Ok bytes -> outcome, Ok bytes
           | Error detail ->
               let outcome = match outcome with
@@ -194,7 +187,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
                 | Answer _ -> "answered" | Host_error _ -> "host_error"
                 | Invalid_response _ -> "invalid_response"
                 | Invocation_exception _ -> "outcome_unknown" in
-              outcome, encode_bounded ~max_bytes:package.resources.max_reply_bytes
+              outcome, encode_unbounded
                 (`Assoc (identity @ ["status",`String status;"error",`String detail])) in
         let* bytes = Result.map_error (fun _ -> "sampling outcome could not be retained") bytes in
         let* outcome, bytes = match outcome with
@@ -207,12 +200,12 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
                | Error detail ->
                    let invalid_fields = identity @
                      ["status",`String "invalid_response";"error",`String detail] in
-                   let bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                   let bytes = encode_unbounded
                      (`Assoc (invalid_fields @
                        ["response",S.create_message_result_to_yojson answer])) in
                    let* bytes = match bytes with
                      | Ok bytes -> Ok bytes
-                     | Error _ -> encode_bounded ~max_bytes:package.resources.max_reply_bytes
+                     | Error _ -> encode_unbounded
                          (`Assoc invalid_fields) in
                    Ok (Invalid_response (answer, detail), bytes))
           | Host_error _ | Invalid_response _ | Invocation_exception _ -> Ok (outcome, bytes) in
@@ -227,12 +220,17 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         let* () = match journal, primary with
           | Ok (), _ | _, Ok () -> Ok ()
           | Error _, Error _ -> Error "sampling outcome could not be indexed" in
-        let* _ = Store.write_blob store bytes |> Result.map_error (fun _ ->
-          "sampling outcome retained in recovery index") in
+        let references = `Assoc ["request",Types.evidence_to_json request;
+          "outcome",Types.evidence_to_json evidence] in
+        let* _ = Store.write_sampling_blob store bytes |> Result.map_error (fun _ ->
+          match encode_bounded ~max_bytes:package.resources.max_reply_bytes
+            (`Assoc ["status",`String "retention_error";"evidence",references]) with
+          | Ok bytes -> bytes
+          | Error _ -> "sampling outcome retained in recovery index") in
         let compact = record (Finished evidence) in
         ignore (Store.save_sampling_outcome store ~instance_id ~request_id compact);
         ignore (Store.save_sampling_request store ~instance_id ~request_id compact);
-        Ok (outcome, `Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence])) in
+        Ok (outcome, references)) in
     retained) in
     Eio.Fiber.check ();
     let* outcome, references = retained in
@@ -247,9 +245,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         (match Eio_unix.run_in_systhread (fun () ->
            encode_bounded ~max_bytes:package.resources.max_reply_bytes reply) with
          | Ok bytes -> Error bytes
-         | Error _ -> Error (bound_refusal ~max_bytes:package.resources.max_reply_bytes
-                               "sampling failed; outcome retained")) in
-    run () |> Result.map_error (bound_refusal ~max_bytes:package.resources.max_reply_bytes) in
+         | Error _ -> Error "sampling failed; outcome retained") in
+    run () in
   Ok {package; instance_id; store; observation; handler}
 
 let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =

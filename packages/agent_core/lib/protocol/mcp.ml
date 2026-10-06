@@ -8,7 +8,10 @@ open Types
 include Mcp_schema
 module Stdio_transport = struct
   module Transport = Mcp_protocol_eio.Stdio_transport
-  type t = { transport : Transport.t; max_size : int option }
+  type t =
+    { transport : Transport.t
+    ; max_size : int option
+    }
   let create ~stdin ~stdout ?max_size () =
     {transport = Transport.create ~stdin ~stdout ?max_size (); max_size}
   let close t = Transport.close t.transport

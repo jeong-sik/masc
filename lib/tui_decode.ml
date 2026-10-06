@@ -178,6 +178,7 @@ type keeper_lanes_snapshot = {
 }
 
 type standalone_lane_status =
+  | Standalone_off
   | Standalone_running
   | Standalone_idle
   | Standalone_degraded
@@ -185,6 +186,7 @@ type standalone_lane_status =
   | Standalone_unavailable
 
 type standalone_lane_configuration =
+  | Lane_off
   | Lane_ready
   | Lane_slotless
   | Lane_unconfigured
@@ -308,6 +310,8 @@ type planning_rollup = {
   pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
+  pr_paused : int;
+  pr_blocked : int;
 }
 
 type planning_backlog = {
@@ -1095,7 +1099,18 @@ let http_status_error ~status_code ~body =
           (String.length body)
       else body
   in
-  Printf.sprintf "HTTP %d: %s" status_code (Tui_terminal_text.sanitize_terminal_text detail)
+  (* The server's sentence can carry its own line breaks: the exact-lane save
+     refusal names the [providers.<id>] table and the missing key on their own
+     lines. [sanitize_terminal_text] escapes a line break as "\x0A", which
+     folds the whole message into one row and cuts the fix off the end. Keep
+     the breaks, sanitizing each line on its own, so a surface that draws one
+     row per line can show the whole message. *)
+  let detail =
+    String.split_on_char '\n' detail
+    |> List.map Tui_terminal_text.sanitize_terminal_text
+    |> String.concat "\n"
+  in
+  Printf.sprintf "HTTP %d: %s" status_code detail
 
 let decode_json_response_body ~allow_empty ~status_code ~body :
     (Yojson.Safe.t, string) result =
@@ -1397,12 +1412,7 @@ let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_criterion_revision = optional_string_field json "criterion_revision" in
   let* pg_title = required_string_field json "title" in
-  let* raw_phase = required_string_field json "phase" in
-  let* pg_phase =
-    match Goal_phase.parse raw_phase with
-    | Some phase -> Ok phase
-    | None -> Error (Printf.sprintf "unknown planning goal phase %S" raw_phase)
-  in
+  let* pg_phase = Goal_phase.of_fields json in
   let* pg_priority = required_int_field json "priority" in
   let* pg_due_date = optional_string_field json "due_date" in
   let* pg_metric = optional_string_field json "metric" in
@@ -1442,12 +1452,16 @@ let decode_planning_rollup json =
   in
   let* pr_done = required_int_field json "done_count" in
   let* pr_dropped = required_int_field json "dropped_count" in
+  let* pr_paused = required_int_field json "paused_count" in
+  let* pr_blocked = required_int_field json "blocked_count" in
   Ok
     { pr_active
     ; pr_verifying
     ; pr_awaiting_confirmation
     ; pr_done
     ; pr_dropped
+    ; pr_paused
+    ; pr_blocked
     }
 
 let decode_planning_backlog json =
@@ -1716,6 +1730,7 @@ type runtime_option = {
   ro_provider_id : string;
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
+  ro_exact_body_deadline_missing : bool;
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -1740,6 +1755,7 @@ type runtime_resolved_snapshot = {
   rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
+  rrs_default_route : string option;
   rrs_default_runtime_id : string option;
   rrs_media_failover : string list;
   rrs_media_failover_declared : string list;
@@ -1918,6 +1934,15 @@ let decode_runtime_option ~usage ~default_id json =
     | None -> Ok Exact_output_unsupported
     | Some group -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
   in
+  (* Whether an exact HTTP slot on this runtime would be refused on save
+     (its provider declares no exact-body-timeout-s). Optional: an older
+     server's rows lack it, and absence keeps the pickers' previous reading. *)
+  let* ro_exact_body_deadline_missing =
+    match optional_bool_field json "exact_body_deadline_missing" with
+    | Ok (Some value) -> Ok value
+    | Ok None -> Ok false
+    | Error detail -> Error detail
+  in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
@@ -1971,6 +1996,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_provider_id
     ; ro_model
     ; ro_exact_slot_group
+    ; ro_exact_body_deadline_missing
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens
@@ -2039,6 +2065,7 @@ let decode_runtime_resolved_snapshot json =
            source)
   in
   let* rrs_config_path = required_nullable_string_field json "config_path" in
+  let* rrs_default_route = required_nullable_string_field json "default_route" in
   let string_list_field name =
     let* items = required_list_field json name in
     decode_list
@@ -2096,6 +2123,8 @@ let decode_runtime_resolved_snapshot json =
                 && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
                 && default.ro_exact_slot_group = listed.ro_exact_slot_group
+                && Bool.equal default.ro_exact_body_deadline_missing
+                     listed.ro_exact_body_deadline_missing
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
@@ -2129,10 +2158,23 @@ let decode_runtime_resolved_snapshot json =
     in
     loop rrs_lanes
   in
+  let* () =
+    match rrs_default_route, rrs_default_runtime_id with
+    | None, None -> Ok ()
+    | Some route, Some runtime_id ->
+        (match Hashtbl.find_opt lane_by_id route with
+         | Some lane when List.nth_opt lane.rrl_runtime_ids 0 = Some runtime_id -> Ok ()
+         | Some _ -> Error "default_route disagrees with its lane's entry runtime"
+         | None when String.equal route runtime_id && Hashtbl.mem runtime_by_id route -> Ok ()
+         | None -> Error "default_route is absent from the resolved route list")
+    | Some _, None | None, Some _ ->
+        Error "default_route and default_runtime must be present together"
+  in
   Ok
     { rrs_usage
     ; rrs_generated_at_iso
     ; rrs_config_path
+    ; rrs_default_route
     ; rrs_default_runtime_id
     ; rrs_media_failover
     ; rrs_media_failover_declared
@@ -2855,12 +2897,12 @@ let rec decode_overview_goal_node json =
            | _ -> Ok None)
        | _ -> Ok None)
   in
-  let* og_phase =
-    match Goal_phase.parse raw_phase with
-    | Some phase -> Ok phase
-    | None ->
-        Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
-  in
+  let* og_phase = match Goal_phase.of_fields json with
+    | Ok phase -> Ok phase
+    | Error detail ->
+        (match Goal_phase.Kind.parse raw_phase with
+         | None -> Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
+         | Some _ -> Error (Overview_goals_malformed detail)) in
   let* og_priority = malformed (required_int_field json "priority") in
   let* og_criterion_revision = malformed (optional_string_field json "criterion_revision") in
   let* og_metric = malformed (optional_string_field json "metric") in
@@ -3197,6 +3239,7 @@ let decode_keeper_lanes_snapshot json =
   Ok { kls_generated_at; kls_count; kls_lanes }
 
 let standalone_lane_configuration_of_string = function
+  | "off" -> Ok Lane_off
   | "ready" -> Ok Lane_ready
   (* The server calls this one "degraded": configured, but nothing admitted.
      The word it shares with the status axis means something else there, so
@@ -3213,6 +3256,7 @@ let standalone_lane_configuration_of_string = function
    and the other two read "configuration no slot admitted" and "configuration
    registry unreadable". The sentence is written in one place now, here. *)
 let standalone_lane_configuration_phrase = function
+  | Lane_off -> "off; candidate configuration retained"
   | Lane_ready -> "configuration ready"
   | Lane_slotless -> "configured, but no slot admitted"
   | Lane_unconfigured -> "not configured"
@@ -3280,6 +3324,7 @@ let standalone_lane_answer (lane : standalone_lane) =
     }
 
 let standalone_lane_status_of_string = function
+  | "off" -> Ok Standalone_off
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
   | "degraded" -> Ok Standalone_degraded
@@ -3288,6 +3333,7 @@ let standalone_lane_status_of_string = function
   | other -> Error ("standalone lane status: unknown value " ^ other)
 
 let standalone_lane_status_to_string = function
+  | Standalone_off -> "off"
   | Standalone_running -> "running"
   | Standalone_idle -> "idle"
   | Standalone_degraded -> "degraded"
@@ -3358,7 +3404,7 @@ let decode_standalone_lane json =
     if observation_only then Ok ()
     else Error "standalone lane row is not observation-only"
   in
-  let* _configured = required_nullable_bool_field json "configured" in
+  let* configured = required_nullable_bool_field json "configured" in
   let* configuration_state = required_string_field json "configuration_state" in
   let* sl_configuration_state =
     standalone_lane_configuration_of_string configuration_state
@@ -3424,6 +3470,15 @@ let decode_standalone_lane json =
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
+  let* () = match sl_configuration_state, sl_status with
+    | Lane_off, Standalone_off when configured = Some true && not sl_required
+        && sl_admitted_slots=[] && sl_cli_slots=[] && sl_dropped_slots=[]
+        && sl_admission_error=None -> Ok ()
+    | Lane_off, _ | _, Standalone_off -> Error "off lane has inconsistent admission state"
+    | (Lane_ready | Lane_slotless | Lane_unconfigured | Lane_registry_unavailable),
+      (Standalone_running | Standalone_idle | Standalone_degraded
+      | Standalone_no_retained_observation | Standalone_unavailable) -> Ok ()
+  in
   let* sl_retained_run_count = required_int_field json "retained_run_count" in
   let* sl_running_count = required_int_field json "running_count" in
   let* sl_succeeded_count = required_int_field json "succeeded_count" in

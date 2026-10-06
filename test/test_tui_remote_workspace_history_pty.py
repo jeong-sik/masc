@@ -20,6 +20,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+from typing import Any
 
 import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_chat as _keyboard_chat
@@ -114,7 +115,7 @@ class WorkspaceWire:
         return _keyboard_harness.RawHttpResponse(200, json.dumps(payload).encode(),
                                  content_type="application/json")
 
-    def roster(self):
+    def roster(self) -> tuple[int, Any]:
         with self.lock:
             phase = self.phase
             self.events.append({"event": "roster", "phase": phase})
@@ -160,7 +161,7 @@ class WorkspaceWire:
 
 def run(binary: str, captures: Path | None) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     fixtures[ROSTER_PATH] = wire.roster
     fixtures[HISTORY_PATH] = wire.history
     fixtures[MEMORY_PATH] = wire.memory
@@ -168,8 +169,10 @@ def run(binary: str, captures: Path | None) -> None:
     fixtures["/health?full=1"] = wire.health
     context = _keyboard_harness.context_inspector_fixtures()
     context_path = "/api/v1/keepers/alpha/provider-input?turn_ref=trace-context%2342"
-    held_context = _keyboard_harness.GatedHttpResponse(context[context_path],
-        subsequent_response=context[context_path], hold_seconds=30.0)
+    context_reading = context[context_path]
+    assert isinstance(context_reading, tuple)
+    held_context = _keyboard_harness.GatedHttpResponse(context_reading,
+        subsequent_response=context_reading, hold_seconds=30.0)
     fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = context[
         "/api/v1/keepers/alpha/turn-records?limit=50"]
     fixtures[context_path] = held_context
@@ -187,6 +190,8 @@ def run(binary: str, captures: Path | None) -> None:
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), f"{label}: {screen(output)!r}"
 
+        metadata_path: Path | None = None
+        metadata_bytes: bytes | None = None
         try:
             _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
@@ -301,7 +306,7 @@ def run(binary: str, captures: Path | None) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
-            if "metadata_path" in locals() and "metadata_bytes" in locals():
+            if metadata_path is not None and metadata_bytes is not None:
                 metadata_path.write_bytes(metadata_bytes)
             wire.release_held.set()
             held_context.release.set()
@@ -320,9 +325,9 @@ def run(binary: str, captures: Path | None) -> None:
         http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
-def scoped_roster_authority(binary: str) -> None:
+def scoped_roster_authority(binary: str, *, matching_c: bool = False) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-    template = fixtures[ROSTER_PATH][1]
+    template = _keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH)
     class ScopedWire(WorkspaceWire):
         def __init__(self):
             super().__init__(template)
@@ -330,9 +335,20 @@ def scoped_roster_authority(binary: str) -> None:
             self.hold_roster = False
             self.roster_started = threading.Event()
             self.roster_release = threading.Event()
+        def prepare(self, base: str) -> None:
+            super().prepare(base)
+            if not matching_c:
+                return
+            keeper_path = Path(base, ".masc", "keepers", "alpha.json")
+            metadata = json.loads(keeper_path.read_text())
+            metadata["name"] = "c-only"
+            Path(base, ".masc", "keepers", "c-only.json").write_text(json.dumps(metadata))
+            keeper_path.unlink()
         def health(self):
             with self.lock:
-                base = "/fixture-workspace-b" if self.phase == "b" else "/fixture-workspace-c"
+                base = ("/fixture-workspace-b" if self.phase == "b" else
+                        self.local_base if matching_c else "/fixture-workspace-c")
+            assert base is not None, "scoped authority fixture was not prepared"
             _, payload = _keyboard_harness.fleet_safety_fixture()
             payload["paths"] = {"effective_base_path": base,
                                 "effective_masc_root": str(Path(base, ".masc"))}
@@ -344,9 +360,14 @@ def scoped_roster_authority(binary: str) -> None:
                 if held:
                     self.hold_roster = False
             payload = copy.deepcopy(template)
-            row = next(row for row in payload["keepers"] if row["name"] == "alpha")
+            keepers = payload["keepers"]
+            assert isinstance(keepers, list)
+            row = next(row for row in keepers
+                       if isinstance(row, dict) and row["name"] == "alpha")
             row["name"] = "b-only" if phase == "b" else "c-only"
-            row["meta"]["name"] = row["name"]
+            meta = row["meta"]
+            assert isinstance(meta, dict)
+            meta["name"] = row["name"]
             if held:
                 self.roster_started.set()
                 assert self.roster_release.wait(timeout=30), "scoped B roster was not released"
@@ -359,34 +380,38 @@ def scoped_roster_authority(binary: str) -> None:
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health,
                      "/api/v1/board?sort_by=hot": wire.board})
+    detour = b"Activity" if matching_c else b"Board"
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            # At 80 columns the Activity pane is not drawn. Board does not
+            # At 80 columns the Activity pane is not drawn. The detour does not
             # need the roster, so entering Keepers dispatches a scoped GET.
             _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=32, columns=80, needle=b"MASC Dashboard",
                 controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
-            await_screen(lambda text: b"workspace identity is unverified" in text
-                         and b"[workspace mismatch]" in text,
-                         "B authority did not refuse the unverified Board read")
+            _keyboard_harness.palette_go(process, fd, output, b"go " + detour, b"MASC " + detour)
+            if not matching_c:
+                await_screen(lambda text: b"workspace identity is unverified" in text
+                             and b"[workspace mismatch]" in text,
+                             "B authority did not refuse the unverified Board read")
             with wire.lock:
                 wire.hold_roster = True
             _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.roster_started,
                 timeout=WAIT_SECONDS), "the scoped B roster was not held"
-            _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
+            _keyboard_harness.palette_go(process, fd, output, b"go " + detour, b"MASC " + detour)
             wire.publish("b-after-late")
             _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=500,
-                             needle=b"MASC Board", controls=(_keyboard_harness.FULL_REDRAW,))
+                             needle=b"MASC " + detour, controls=(_keyboard_harness.FULL_REDRAW,))
             os.write(fd, b"r")
             # While a scoped read is held the full revalidation still owns
             # /health. Its exact Base footer is the applied identity barrier;
             # the wider frame keeps both workspace paths visible.
-            await_screen(lambda text: b"Base: /fixture-workspace-c" in text,
+            expected_base = _base.encode() if matching_c else b"/fixture-workspace-c"
+            await_screen(lambda text: b"Base: " + expected_base in text
+                         and (not matching_c or b"[workspace mismatch]" not in text),
                          "full C identity reading did not become current")
             c_boundary = len(output)
             _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
@@ -401,14 +426,15 @@ def scoped_roster_authority(binary: str) -> None:
         finally:
             wire.roster_release.set()
     _keyboard_harness.run_terminal_scenario(binary,
-        description="superseded scoped roster cannot replace a newer full workspace reading",
+        description="superseded scoped roster cannot replace a newer "
+            + ("matching" if matching_c else "foreign") + " full workspace reading",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=30.0, terminal_cols=80)
 
 
 def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1], root_only=root_only)
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH), root_only=root_only)
     queued = b"retained-workspace-a-queued-payload"
     class HeldAdmission(_keyboard_chat.AtomicChatFixture):
         def __init__(self):
@@ -491,7 +517,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
 def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
     """Actual /attach + /ref payloads survive A/B/A only for their original Keeper."""
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1], root_only=root_only)
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH), root_only=root_only)
     admission = _keyboard_chat.AtomicChatFixture(no_control_token=True)
     fixtures.update(admission.fixtures)
     beta_submitted = []
@@ -579,15 +605,19 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     roster = fixtures[ROSTER_PATH]
     fixtures.update(_keyboard_schedule.schedule_detail_http_fixtures())
-    wire = WorkspaceWire(roster[1])
-    schedule_template = fixtures[_keyboard_schedule.SCHEDULES_PATH][1]
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
+    schedule_template = _keyboard_harness.json_payload_fixture(fixtures, _keyboard_schedule.SCHEDULES_PATH)
     unknown_health = threading.Event()
     cancel_requests = []
     def schedules():
         with wire.lock:
             phase = wire.phase
         payload = copy.deepcopy(schedule_template)
-        payload["requests"][0]["requested_by"]["display_name"] = (
+        requests = payload["requests"]
+        assert isinstance(requests, list) and isinstance(requests[0], dict)
+        requested_by = requests[0]["requested_by"]
+        assert isinstance(requested_by, dict)
+        requested_by["display_name"] = (
             "workspace-b-schedule-owner" if phase.startswith("b") else "workspace-a-schedule-owner")
         return 200, payload
     def health():
@@ -649,7 +679,7 @@ def observer_workspace_retirement(binary: str) -> None:
     """A live old stream cannot carry its session, cursor or events into B."""
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     fixtures.update(_keyboard_observer.observer_http_fixtures())
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     release_a = threading.Event()
     release_b = threading.Event()
     subscriptions = []
@@ -723,7 +753,7 @@ def observer_workspace_retirement(binary: str) -> None:
 def identity_refresh_workspace_chain(binary: str) -> None:
     """Hold provider one's actual POST; withdrawal forbids provider two's POST."""
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     held_first = threading.Event()
     release_first = threading.Event()
     submitted = []
@@ -831,9 +861,11 @@ def bundle_identity_during_read(binary: str) -> None:
                 self.publish("b")
                 payload[1]["keepers"][0]["runtime_id"] = "cross-workspace-poison"
             return payload
-    wire = BundleWire(fixtures[ROSTER_PATH][1])
-    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
-                     "/health?full=1": wire.health})
+    wire = BundleWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
+    roster_and_health: _keyboard_harness.HttpFixtures = {
+        ROSTER_PATH: wire.roster, "/health": wire.health,
+        "/health?full=1": wire.health}
+    fixtures.update(roster_and_health)
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.resize_and_wait(process, fd, output,
             rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
@@ -867,7 +899,7 @@ def bundle_identity_during_read(binary: str) -> None:
 
 def settings_editor_workspace_change(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health,
                      _keyboard_keepers.KEEPER_SETTINGS_PATH: _keyboard_keepers.keeper_settings_fixture()})
@@ -912,9 +944,12 @@ def settings_editor_workspace_change(binary: str) -> None:
 
 def schedule_editor_workspace_change(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     fixtures.update(_keyboard_schedule.schedule_detail_http_fixtures())
-    fixtures[_keyboard_schedule.SCHEDULES_PATH][1]["requests"][0]["status"] = "scheduled"
+    requests = _keyboard_harness.json_payload_fixture(
+        fixtures, _keyboard_schedule.SCHEDULES_PATH)["requests"]
+    assert isinstance(requests, list) and isinstance(requests[0], dict)
+    requests[0]["status"] = "scheduled"
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health})
     posts: _keyboard_harness.HttpRequests = []
@@ -956,10 +991,11 @@ def schedule_editor_workspace_change(binary: str) -> None:
 
 def runtime_config_editor_workspace_change(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (200, {
         **_keyboard_runtime.runtime_config_read_metadata(),
         "path": "/workspace/config/runtime.toml", "source_text": _keyboard_runtime.config_navigation_source(),
+        "source_revision": hashlib.sha256(b"runtime_config_source\x00" + _keyboard_runtime.config_navigation_source().encode()).hexdigest(),
     })
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health})
@@ -1016,7 +1052,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
     # Exercise both the armed editor and an already admitted, held POST.
     for submit in (False, True):
         fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+        wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
         answer = _keyboard_harness.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
         admitted_answers: list[tuple[str, str]] = []
         answer_connections: list[socket.socket] = []
@@ -1044,9 +1080,11 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 return _keyboard_approvals.keeper_asks_response()
             b_asks.set()
             return 503, {"error": "B questions unavailable"}
-        fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+        roster_health_asks: _keyboard_harness.HttpFixtures = {
+            ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, _keyboard_harness.KEEPER_ASKS_PATH: asks,
-            _keyboard_approvals.KEEPER_ASK_ANSWER_PATH: _keyboard_harness.ConnectionHttpResponse(answer_request)})
+            _keyboard_approvals.KEEPER_ASK_ANSWER_PATH: _keyboard_harness.ConnectionHttpResponse(answer_request)}
+        fixtures.update(roster_health_asks)
         # A read must not satisfy the mutation-admission gate.
         with _keyboard_harness.test_http_endpoint({
             _keyboard_approvals.KEEPER_ASK_ANSWER_PATH: fixtures[
@@ -1133,7 +1171,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
 
 def github_workspace_withdrawal(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     release = threading.Event()
     def chunks():
         yield b'data: {"text":"A-device-code-visible"}\n\n'
@@ -1197,17 +1235,23 @@ def github_workspace_withdrawal(binary: str) -> None:
 def connector_workspace_withdrawal(binary: str) -> None:
     """Same IDs cannot transfer confirmation or a held two-request write."""
     fixtures = _keyboard_keepers.connector_unbind_all_fixtures()
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     base_connectors = fixtures[_keyboard_keepers.CONNECTORS_PATH]
+    assert callable(base_connectors)
     submitted = []
     held = threading.Event()
     released = threading.Event()
     returned = threading.Event()
     def connectors():
-        _, payload = base_connectors()
+        result = base_connectors()
+        assert isinstance(result, tuple)
+        _, payload = result
         with wire.lock:
             phase = wire.phase
-        payload["connectors"][0]["display_name"] = phase + "-Discord"
+        assert isinstance(payload, dict)
+        connectors = payload["connectors"]
+        assert isinstance(connectors, list) and isinstance(connectors[0], dict)
+        connectors[0]["display_name"] = phase + "-Discord"
         return 200, payload
     def unbind(body):
         with wire.lock:
@@ -1289,7 +1333,7 @@ def connector_workspace_withdrawal(binary: str) -> None:
 
 def tools_workspace_withdrawal(binary: str) -> None:
     fixtures = _keyboard_tools.skills_usage_clarity_http_fixtures()
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     old_started, old_release, old_returned = (threading.Event() for _ in range(3))
     new_started, new_release = threading.Event(), threading.Event()
     counts = {"a": 0, "b": 0}
@@ -1364,7 +1408,7 @@ def verification_workspace_withdrawal(binary: str) -> None:
     """Held A rows cannot restore an approval arm on B with the same IDs."""
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     fixtures.update(_keyboard_approvals.verification_verdict_fixtures())
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     old_started = threading.Event()
     old_release = threading.Event()
     old_returned = threading.Event()
@@ -1457,7 +1501,7 @@ def verification_workspace_withdrawal(binary: str) -> None:
 def task_dispatch_workspace_withdrawal(binary: str) -> None:
     """An A MCP initialization cannot create a task after B becomes current."""
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     initialized = threading.Event()
     release_initialize = threading.Event()
     initialize_returned = threading.Event()
@@ -1578,7 +1622,7 @@ def hold_observer_before_headers(fixtures):
 def resource_workspace_withdrawal(binary: str) -> None:
     for held_method in ("initialize", "resources/read"):
         fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+        wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
         started, release, returned = (threading.Event() for _ in range(3))
         foreground_armed = threading.Event()
         observer_requested, observer_release = hold_observer_before_headers(fixtures)
@@ -1656,7 +1700,7 @@ def resource_workspace_withdrawal(binary: str) -> None:
 
 def runtime_parameter_workspace_withdrawal(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     current_read = threading.Event()
     writes = []
 
@@ -1709,9 +1753,11 @@ def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None =
     for operation in ("chat", "pause", "boot-recovery"):
         fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         if operation == "boot-recovery":
-            row = fixtures[ROSTER_PATH][1]["keepers"][0]
-            row.update(keepalive_running=False, status="idle", phase="stopped")
-        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+            keepers = _keyboard_harness.json_payload_fixture(
+                fixtures, ROSTER_PATH)["keepers"]
+            assert isinstance(keepers, list) and isinstance(keepers[0], dict)
+            keepers[0].update(keepalive_running=False, status="idle", phase="stopped")
+        wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
         probes = threading.Event()
         armed = threading.Event()
         writes = []
@@ -1822,6 +1868,7 @@ if __name__ == "__main__":
     queued_workspace_inputs(binary)
     queued_workspace_inputs(binary, root_only=True)
     scoped_roster_authority(binary)
+    scoped_roster_authority(binary, matching_c=True)
     staged_payload_workspace_inputs(binary)
     staged_payload_workspace_inputs(binary, root_only=True)
     armed_schedule_and_runtime_workspace(binary)

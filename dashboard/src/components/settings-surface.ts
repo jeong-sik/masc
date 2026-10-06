@@ -1,24 +1,20 @@
-import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 // MASC Dashboard — Settings surface
 // Operator-facing settings only: runtime management, resolved paths, MCP server
 // health/inventory, notification thresholds, prompt/fusion/log/display controls.
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks'
 import { Effect, Option } from 'effect'
 import {
   SETTINGS_ROUTE_SECTION_IDS,
   type SettingsRouteSectionId,
 } from '../config/navigation'
 import { navigate, route } from '../router'
-import { fetchDashboardTools, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved, fetchRuntimeTomlConfig } from '../api/dashboard.js'
+import { fetchDashboardTools } from '../api/dashboard.js'
 import type {
   DashboardRuntimeProviderSnapshot,
-  DashboardRuntimeProvidersResponse,
-  DashboardToolInventoryItem,
-  CommittedRuntimeTomlConfig,
-  RuntimeDefaultsResponse,
   RuntimeResolvedResponse,
+  DashboardToolInventoryItem,
 } from '../api/dashboard.js'
 import {
   fetchDashboardConfig,
@@ -41,6 +37,8 @@ import {
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
 import {
+  executionWorkspaceAuthority,
+  refreshExecution,
   refreshShell,
   shellAuthSummary,
   shellConfigResolution,
@@ -58,9 +56,12 @@ import { OnboardingSettings } from './onboarding-settings'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
-import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
+import { settingsRuntimeSessionFor } from '../lib/settings-runtime-session'
+import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
+import { getData } from '../lib/async-state'
+import { runtimeTomlSessionFor } from '../lib/runtime-toml-session'
 import { declaredRuntimeLaneCandidates, declaredRuntimeLanes } from '../lib/runtime-toml-config'
-import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
+import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
@@ -84,7 +85,6 @@ import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
 import { createEffectResource } from '../lib/effect-resource'
 import { remotePrevious } from '../lib/remote-data'
-import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
@@ -96,7 +96,6 @@ import {
 type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
-type RuntimeRoutingSaveState = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsControlKind = 'live-read' | 'live-write' | 'browser-local' | 'unsupported'
 
 const settingsConfigResource = createEffectResource<
@@ -674,6 +673,19 @@ function runtimeSelectOptionsFromResolved(
     id: entry.id,
     label: `${entry.id} · ${entry.model}`,
   })))
+}
+
+function defaultRouteOptionsFromResolved(
+  resolved: RuntimeResolvedResponse | null,
+): RuntimeSelectOption[] {
+  const lanes = resolved?.lanes.filter(lane => lane.declared && lane.runtime_ids.length > 0).map(lane => ({
+    id: lane.id,
+    label: `${lane.id} · lane (${lane.runtime_ids.join(' → ')})`,
+  })) ?? []
+  return uniqueRuntimeSelectOptions([
+    ...lanes,
+    ...runtimeSelectOptionsFromResolved(resolved?.runtimes ?? []),
+  ])
 }
 
 function RuntimeRoutingSelect({
@@ -1585,270 +1597,70 @@ export function SettingsSurface() {
     }
   }
 
-  // runtime defaults / model routing — resolved from runtime.toml (SSOT)
-  const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
-  // single resolved-runtime document (bugs #14/#15/#36) — effective
-  // max-context + source, and the full keeper fleet joined against
-  // [runtime.assignments] with the [runtime].default rider made explicit.
-  const [runtimeResolved, setRuntimeResolved] = useState<RuntimeResolvedResponse | null>(null)
-  const [runtimeResolvedStatus, setRuntimeResolvedStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [runtimeProviders, setRuntimeProviders] = useState<DashboardRuntimeProvidersResponse | null>(null)
-  const [runtimeCatalogStatus, setRuntimeCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [runtimeRoutingStatus, setRuntimeRoutingStatus] = useState<RuntimeRoutingSaveState>('idle')
-  const [runtimeRoutingMessage, setRuntimeRoutingMessage] = useState('')
-  // Lane edits write the same runtime.toml, so they share the routing saving
-  // gate, but report next to the lane cards they changed.
-  const [runtimeLaneStatus, setRuntimeLaneStatus] = useState<RuntimeRoutingSaveState>('idle')
-  const [runtimeLaneMessage, setRuntimeLaneMessage] = useState('')
-  // The runtime.toml text the lane cards read declared candidates from. The
-  // resolved projection drops candidates the catalog did not admit, so it
-  // cannot be the base of a whole-order `set`.
-  const [runtimeTomlSource, setRuntimeTomlSource] = useState<RuntimeTomlSourceState>({ status: 'loading' })
-  // Set synchronously so a second click before the saving state renders
-  // cannot send a second write.
-  const runtimeWriteInFlight = useRef(false)
-
+  const runtimeAuthority = executionWorkspaceAuthority.value
+  const runtimeSession = runtimeAuthority ? settingsRuntimeSessionFor(runtimeAuthority) : null
+  const runtimeState = runtimeSession?.state.value
+  const sourceGeneration = runtimeTomlSourceGeneration.value
+  const runtimeObservation = exactLaneObservationRevision(runtimeAuthority)
+  // Raw editor writes finish independently of navigation. Observe its final
+  // projection publication even after that editor has unmounted.
+  const rawProjection = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).state.value.projectionRevision : 0
+  const commit = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).committed.value : null
+  const runtimeCommit = commit?.authority === runtimeAuthority && commit?.generation === sourceGeneration ? commit : null
+  useLayoutEffect(() => runtimeSession?.attach(), [runtimeSession])
   useEffect(() => {
-    let active = true
-    void (async () => {
-      try {
-        const resp = await fetchRuntimeDefaults()
-        if (!active) return
-        setRuntimeDefaults(resp)
-      } catch {
-        if (!active) return
-        setRuntimeDefaults(null)
-      }
-    })()
-    return () => { active = false }
-  }, [])
-
+    // This writer refreshes after setup resume; its own file notification must
+    // not race that final reading. Other writes refresh an idle Settings view.
+    void runtimeSession?.refreshOnObservation(runtimeCommit !== null).catch(() => {})
+  }, [runtimeSession, sourceGeneration, rawProjection, runtimeObservation, runtimeCommit])
   useEffect(() => {
-    let active = true
-    setRuntimeResolvedStatus('loading')
-    void (async () => {
-      try {
-        const resp = await fetchRuntimeResolved()
-        if (!active) return
-        setRuntimeResolved(resp)
-        setRuntimeResolvedStatus('ready')
-      } catch {
-        if (!active) return
-        setRuntimeResolved(null)
-        setRuntimeResolvedStatus('error')
-      }
-    })()
-    return () => { active = false }
-  }, [])
+    if (sec === 'routing' && runtimeSession?.state.peek().source.status !== 'loading') void runtimeSession?.readSource().catch(() => {})
+  }, [runtimeSession, sec])
+  const runtimeDefaults = runtimeState ? getData(runtimeState.defaults) ?? null : null
+  const runtimeResolved = runtimeState ? getData(runtimeState.resolved) ?? null : null
+  const runtimeProviders = runtimeState ? getData(runtimeState.providers) ?? null : null
+  const runtimeResolvedStatus = runtimeState?.resolved.status === 'loaded' ? 'ready'
+    : runtimeState?.resolved.status === 'error' ? 'error' : 'loading'
+  const runtimeCatalogStatus = runtimeState?.providers.status === 'loaded' ? 'ready'
+    : runtimeState?.providers.status === 'error' ? 'error' : 'loading'
+  const write = runtimeState?.write
+  const runtimeRoutingStatus = write && write.phase !== 'idle' && write.target === 'routing' ? write.phase : 'idle'
+  const runtimeLaneStatus = write && write.phase !== 'idle' && write.target === 'lane' ? write.phase : 'idle'
+  const runtimeRoutingMessage = write && write.phase !== 'idle' && write.target === 'routing' ? write.message : ''
+  const runtimeLaneMessage = write && write.phase !== 'idle' && write.target === 'lane' ? write.message : ''
+  const source = runtimeState?.source
+  const runtimeTomlSource: RuntimeTomlSourceState = source?.status === 'loaded'
+    ? { status: 'ready', sourceText: source.data.source_text }
+    : source?.status === 'error' ? { status: 'error', message: source.message } : { status: 'loading' }
 
-  useEffect(() => {
-    let active = true
-    setRuntimeCatalogStatus('loading')
-    void (async () => {
-      try {
-        const resp = await fetchRuntimeProviders()
-        if (!active) return
-        setRuntimeProviders(resp)
-        setRuntimeCatalogStatus('ready')
-      } catch {
-        if (!active) return
-        setRuntimeProviders(null)
-        setRuntimeCatalogStatus('error')
-      }
-    })()
-    return () => { active = false }
-  }, [])
-
-  async function reloadRuntimeTomlSourceSnapshot(): Promise<{ sourceText: string; sourceRevision: string } | null> {
-    try {
-      const config = await fetchRuntimeTomlConfig()
-      setRuntimeTomlSource({ status: 'ready', sourceText: config.source_text })
-      return { sourceText: config.source_text, sourceRevision: config.source_revision }
-    } catch (err) {
-      setRuntimeTomlSource({ status: 'error', message: errorToString(err) })
-      return null
-    }
+  async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, routeId: string | null): Promise<void> {
+    await runtimeSession?.save('routing', 'runtime.toml routing', options => patchRuntimeRouting(lane, routeId, options))
   }
-
-  useEffect(() => {
-    if (sec !== 'routing') return
-    void reloadRuntimeTomlSourceSnapshot()
-  }, [sec])
-
-  async function reloadRuntimeDefaultsSnapshot(): Promise<void> {
-    try {
-      const resp = await fetchRuntimeDefaults()
-      setRuntimeDefaults(resp)
-    } catch (err) {
-      setRuntimeDefaults(null)
-      throw err
-    }
-  }
-
-  async function reloadRuntimeResolvedSnapshot(): Promise<void> {
-    setRuntimeResolvedStatus('loading')
-    try {
-      const resp = await fetchRuntimeResolved()
-      setRuntimeResolved(resp)
-      setRuntimeResolvedStatus('ready')
-    } catch (err) {
-      setRuntimeResolved(null)
-      setRuntimeResolvedStatus('error')
-      throw err
-    }
-  }
-
-  async function reloadRuntimeProvidersSnapshot(): Promise<void> {
-    setRuntimeCatalogStatus('loading')
-    try {
-      const resp = await fetchRuntimeProviders()
-      setRuntimeProviders(resp)
-      setRuntimeCatalogStatus('ready')
-    } catch (err) {
-      setRuntimeProviders(null)
-      setRuntimeCatalogStatus('error')
-      throw err
-    }
-  }
-
-  async function refreshRuntimeSettingsSnapshot(): Promise<void> {
-    await Promise.all([
-      reloadRuntimeDefaultsSnapshot(),
-      reloadRuntimeResolvedSnapshot(),
-      reloadRuntimeProvidersSnapshot(),
-    ])
-  }
-
-  // Every Settings routing write lands here after the server committed it.
-  // The receipt carries the file as written, which the lane cards read, and a
-  // mounted RuntimeTomlEditor is told to re-read it.
-  async function finishRuntimeRoutingWrite(receipt: CommittedRuntimeTomlConfig): Promise<void> {
-    setRuntimeTomlSource({ status: 'ready', sourceText: receipt.source_text })
-    announceRuntimeTomlWritten()
-    await resumeSavedModelSetup()
-    await refreshRuntimeSettingsSnapshot()
-    await refreshRuntimeConfigConsumers()
-  }
-
-  async function handleRuntimeTomlSaved(): Promise<void> {
-    try {
-      await Promise.all([refreshRuntimeSettingsSnapshot(), reloadRuntimeTomlSourceSnapshot()])
-    } catch (err) {
-      console.warn('[Settings] runtime settings refresh failed after editor save:', err)
-    }
-  }
-
-  async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null): Promise<void> {
-    if (runtimeWriteInFlight.current) return
-    runtimeWriteInFlight.current = true
-    setRuntimeRoutingStatus('saving')
-    setRuntimeRoutingMessage('')
-    let receipt: CommittedRuntimeTomlConfig
-    try {
-      receipt = await patchRuntimeRouting(lane, runtimeId)
-    } catch (err) {
-      setRuntimeRoutingStatus('error')
-      setRuntimeRoutingMessage(errorToString(err))
-      runtimeWriteInFlight.current = false
-      return
-    }
-    try {
-      await finishRuntimeRoutingWrite(receipt)
-      setRuntimeRoutingStatus('saved')
-      setRuntimeRoutingMessage(`runtime.toml routing 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
-    } catch (err) {
-      setRuntimeRoutingStatus('error')
-      setRuntimeRoutingMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
-    } finally {
-      runtimeWriteInFlight.current = false
-    }
-  }
-
   async function applyMediaFailoverPatch(runtimeIds: string[]): Promise<void> {
-    if (runtimeWriteInFlight.current) return
-    runtimeWriteInFlight.current = true
-    setRuntimeRoutingStatus('saving')
-    setRuntimeRoutingMessage('')
-    let receipt: CommittedRuntimeTomlConfig
-    try {
-      receipt = await patchRuntimeMediaFailover(runtimeIds)
-    } catch (err) {
-      setRuntimeRoutingStatus('error')
-      setRuntimeRoutingMessage(errorToString(err))
-      runtimeWriteInFlight.current = false
-      return
-    }
-    try {
-      await finishRuntimeRoutingWrite(receipt)
-      setRuntimeRoutingStatus('saved')
-      setRuntimeRoutingMessage(`runtime.toml media_failover 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
-    } catch (err) {
-      setRuntimeRoutingStatus('error')
-      setRuntimeRoutingMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
-    } finally {
-      runtimeWriteInFlight.current = false
-    }
+    if (runtimeDefaults === null) return
+    await runtimeSession?.save('routing', 'runtime.toml media_failover', options => patchRuntimeMediaFailover(runtimeIds, options))
   }
-
-  // A candidate edit is applied to the order runtime.toml declares, read
-  // fresh just before the write: the card's order may be stale, and the
-  // resolved order omits candidates the catalog did not admit, which a `set`
-  // built from it would delete from the file. When the declared order cannot
-  // be read, the edit is refused rather than sent from the resolved order.
-  async function runtimeLaneEditOf(lane: string, write: RuntimeLaneWrite): Promise<RuntimeLaneEdit | string> {
-    if (write.kind === 'lane') return write.edit
-    const source = await reloadRuntimeTomlSourceSnapshot()
-    if (source === null) return 'runtime.toml 을 읽지 못해 후보 편집을 보내지 않았습니다'
-    const declared = declaredRuntimeLaneCandidates(source.sourceText, lane)
-    if (declared === null) {
-      return `runtime.toml 에서 ${runtimeLaneTableLabel(lane)} 의 candidates 를 읽지 못해 후보 편집을 보내지 않았습니다`
-    }
-    // Another writer changed this lane since the card rendered. Applying the
-    // clicked move to the new order would save an order the operator never
-    // saw, and the fresh source revision would let it pass the server CAS.
-    // The reload above already re-rendered the card from the new text.
-    if (declared.length !== write.rendered.length || declared.some((id, index) => id !== write.rendered[index])) {
-      return `${runtimeLaneTableLabel(lane)} 후보 순서가 다른 곳에서 바뀌어 편집을 보내지 않았습니다. 새로 불러온 순서를 확인하고 다시 시도하세요.`
-    }
-    const next = applyRuntimeLaneCandidateEdit(declared, write.edit)
-    return typeof next === 'string' ? next : {
-      action: 'set', runtimeIds: next, expectedSourceRevision: source.sourceRevision,
-    }
-  }
-
   async function applyRuntimeLaneWrite(lane: string, write: RuntimeLaneWrite): Promise<boolean> {
-    if (runtimeWriteInFlight.current) return false
-    runtimeWriteInFlight.current = true
-    setRuntimeLaneStatus('saving')
-    setRuntimeLaneMessage('')
-    try {
-      const edit = await runtimeLaneEditOf(lane, write)
-      if (typeof edit === 'string') {
-        setRuntimeLaneStatus('error')
-        setRuntimeLaneMessage(edit)
-        return false
+    if (!runtimeSession) return false
+    const action = write.kind === 'lane' ? write.edit.action : 'set'
+    const target = write.kind === 'lane' && write.edit.action === 'rename' ? `${lane} → ${write.edit.to}` : lane
+    return runtimeSession.save('lane', `runtime.toml lane ${action} (${target})`, async options => {
+      let edit: RuntimeLaneEdit
+      if (write.kind === 'lane') edit = write.edit
+      else {
+        const source = await runtimeSession.readSource()
+        const declared = declaredRuntimeLaneCandidates(source.source_text, lane)
+        if (declared === null) throw new Error(`runtime.toml 에서 ${runtimeLaneTableLabel(lane)} 의 candidates 를 읽지 못해 후보 편집을 보내지 않았습니다`)
+        if (declared.length !== write.rendered.length || declared.some((id, index) => id !== write.rendered[index]))
+          throw new Error(`${runtimeLaneTableLabel(lane)} 후보 순서가 다른 곳에서 바뀌어 편집을 보내지 않았습니다. 새로 불러온 순서를 확인하고 다시 시도하세요.`)
+        const next = applyRuntimeLaneCandidateEdit(declared, write.edit)
+        if (typeof next === 'string') throw new Error(next)
+        edit = { action: 'set', runtimeIds: next, expectedSourceRevision: source.source_revision }
       }
-      let receipt: CommittedRuntimeTomlConfig
-      try {
-        receipt = await patchRuntimeLane(lane, edit)
-      } catch (err) {
-        setRuntimeLaneStatus('error')
-        setRuntimeLaneMessage(errorToString(err))
-        return false
-      }
-      const target = edit.action === 'rename' ? `${lane} → ${edit.to}` : lane
-      try {
-        await finishRuntimeRoutingWrite(receipt)
-        setRuntimeLaneStatus('saved')
-        setRuntimeLaneMessage(`runtime.toml lane ${edit.action} (${target}) 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
-      } catch (err) {
-        setRuntimeLaneStatus('error')
-        setRuntimeLaneMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
-      }
-      return true
-    } finally {
-      runtimeWriteInFlight.current = false
-    }
+      // Candidate reads and token acquisition can both outlive this workspace.
+      if (!runtimeSession.current()) return Promise.reject(new Error('작업공간이 바뀌어 저장을 중지했습니다.'))
+      return patchRuntimeLane(lane, edit, options)
+    })
   }
 
   // display
@@ -1867,6 +1679,7 @@ export function SettingsSurface() {
   const runtimeCatalogEntries = runtimeProviders?.providers ?? []
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
+  const defaultRouteId = runtimeResolved?.default_route ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   // Declared runtime lanes with their ordered candidate chains — the live
@@ -1896,8 +1709,9 @@ export function SettingsSurface() {
       .map(id => ({ id, resolved: false, resolvedRuntimeIds: [], declared: declaredRuntimeLanesById?.get(id) ?? null })),
   ]
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
+  const defaultRouteOptions = defaultRouteOptionsFromResolved(runtimeResolved)
   const runtimeRoutingDisabled =
-    runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving' || runtimeResolvedStatus !== 'ready'
+    !runtimeSession?.canWrite()
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
   const hasRuntimePathResolution = runtimeResolution !== null
@@ -2037,6 +1851,15 @@ export function SettingsSurface() {
                     </div>`}
             `}
 
+            ${['runtime', 'routing', 'paths'].includes(sec) ? html`<div class="set-hint" data-testid="settings-runtime-workspace">
+              ${runtimeAuthority === null ? html`<p role="status">현재 작업공간을 확인한 뒤 Runtime 설정을 읽고 수정할 수 있습니다.</p>` : null}
+              <button type="button" class="set-rt-open" data-testid="settings-runtime-refresh"
+                disabled=${runtimeState?.write.phase === 'saving'}
+                onClick=${() => runtimeSession ? void runtimeSession.refresh().catch(() => {}) : void refreshExecution({ force: true }).catch(() => {})}>
+                ${runtimeAuthority === null ? '작업공간 확인' : '현재 Runtime 설정 읽기'}
+              </button>
+            </div>` : null}
+
             ${sec === 'runtime' && html`
               <${OnboardingSettings} />
               <div class="settings-runtime-live" data-testid="runtime-settings-live">
@@ -2074,28 +1897,31 @@ export function SettingsSurface() {
                       <span class="k">catalog entries</span>
                     </div>
                   </div>
-                  ${runtimeSelectOptions.length > 0
+                  ${defaultRouteOptions.length > 0
                     ? html`
                       <${RuntimeRoutingSelect}
-                        label="Default runtime"
-                        hint="[runtime].default · 새 keeper 가 시작될 런타임 id (provider.model)"
-                        value=${defaultRuntimeId}
-                        options=${runtimeSelectOptions}
+                        label="Default route"
+                        hint="[runtime].default · 새 keeper 가 걷는 레인 또는 런타임"
+                        value=${defaultRouteId}
+                        options=${defaultRouteOptions}
                         disabled=${runtimeRoutingDisabled}
                         testId="runtime-default-runtime"
                         required=${true}
-                        onChange=${(runtimeId: string | null) => {
-                          if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
+                        onChange=${(routeId: string | null) => {
+                          if (routeId && routeId !== defaultRouteId) void applyRuntimeRoutingPatch('default', routeId)
                         }}
                       />
                     `
                     : html`
-                      <${SetRow} label="Default runtime" hint="[runtime].default">
-                        ${defaultRuntimeId
-                          ? html`<span class="set-ro mono" data-testid="runtime-default-readonly">${defaultRuntimeId}</span>`
+                      <${SetRow} label="Default route" hint="[runtime].default">
+                        ${defaultRouteId
+                          ? html`<span class="set-ro mono" data-testid="runtime-default-readonly">${defaultRouteId}</span>`
                           : html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`}
                       <//>
                     `}
+                  <${SetRow} label="Entry runtime" hint="Runtime reached by the default route">
+                    <span class="set-ro mono" data-testid="runtime-default-entry">${defaultRuntimeId ?? '—'}</span>
+                  <//>
                   <${SetRow} label="Default model" hint="Resolved model API name">
                     <span class="set-ro mono" data-testid="runtime-default-model">${runtimeResolved?.default_runtime?.model ?? '—'}</span>
                   <//>
@@ -2148,21 +1974,22 @@ export function SettingsSurface() {
                   <div class="set-sub-h">Model routing</div>
                   <div class="settings-runtime-routing-editor" data-testid="runtime-routing-summary">
                     <${RuntimeRoutingSelect}
-                      label="Default"
-                      hint="[runtime].default · 기본 — keeper 채팅, 미할당 keeper 가 상속"
-                      value=${defaultRuntimeId}
-                      options=${runtimeSelectOptions}
+                      label="Default route"
+                      hint=${`[runtime].default · 진입 runtime ${defaultRuntimeId ?? '—'} · 미할당 keeper 가 상속`}
+                      value=${defaultRouteId}
+                      options=${defaultRouteOptions}
                       disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-default"
                       required=${true}
-                      onChange=${(runtimeId: string | null) => {
-                        if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
+                      onChange=${(routeId: string | null) => {
+                        if (routeId && routeId !== defaultRouteId) void applyRuntimeRoutingPatch('default', routeId)
                       }}
                     />
+                    ${runtimeState?.defaults.status === 'error' ? html`<p class="set-err">Media failover 설정을 읽지 못했습니다. 현재 Runtime 설정을 다시 읽으세요.</p>` : null}
                     <${RuntimeMediaFailoverEditor}
                       value=${mediaFailover}
                       options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingDisabled}
+                      disabled=${runtimeRoutingDisabled || runtimeDefaults === null}
                       onChange=${(runtimeIds: string[]) => void applyMediaFailoverPatch(runtimeIds)}
                     />
                     ${runtimeRoutingStatus === 'saving'
@@ -2208,7 +2035,7 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <${RuntimeTomlEditor} onSaved=${handleRuntimeTomlSaved} />
+              <${RuntimeTomlEditor} />
             `}
 
             ${sec === 'prompts' && html`

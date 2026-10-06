@@ -2,7 +2,9 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
+import { batch } from '@preact/signals'
 import { ApiRequestError, get, post, type AbortableRequestOptions } from './core'
+import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
@@ -2130,7 +2132,7 @@ function decodeCommittedRuntimeConfigApplication(
   }
 }
 
-export function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
+function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
   if (
     !isRecord(raw)
     || raw.state !== 'committed'
@@ -2156,6 +2158,22 @@ export function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntime
     commit,
     application,
   }
+}
+
+/** Decodes a runtime.toml write's commit receipt and tells every screen the
+ * file changed. The receipt proves the write whether or not the screen that
+ * sent it still waits for the answer, so the request announces it, not the
+ * screen. `onCommitted` runs in the same batch, before any screen hears it,
+ * so a writer that adopts its own receipt can take the new generation. */
+export function receiveRuntimeTomlCommit(raw: unknown, options: RuntimeTomlRequestOptions = {}): CommittedRuntimeTomlConfig {
+  return announceRuntimeTomlCommit(decodeCommittedRuntimeTomlConfig(raw), options)
+}
+
+/** The announcement half of receiveRuntimeTomlCommit. Only a write function,
+ * or a test double standing in for one, calls it; a screen never does. */
+export function announceRuntimeTomlCommit<T>(receipt: T, options: RuntimeTomlRequestOptions = {}): T {
+  batch(() => { announceRuntimeTomlWritten(); options.onCommitted?.() })
+  return receipt
 }
 
 function appliedAt(raw: unknown): string | number | null {
@@ -2232,8 +2250,11 @@ function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | 
   })
 }
 
-export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+export type RuntimeTomlRequestOptions = { beforeDispatch?: () => void; onCommitted?: () => void }
+
+export async function fetchRuntimeTomlConfig(options: RuntimeTomlRequestOptions = {}): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
 }
 
@@ -2300,15 +2321,83 @@ export async function fetchRuntimeResolved(
   return parseRuntimeResolvedResponse(raw)
 }
 
-export async function saveRuntimeTomlConfig(sourceText: string): Promise<CommittedRuntimeTomlConfig> {
-  await ensureDevToken()
-  return post<unknown>('/api/v1/runtime/config/raw', {
-    source_text: sourceText,
-  }).then(decodeCommittedRuntimeTomlConfig)
+export interface RuntimeTomlCurrentSource {
+  source_path: string
+  source_text: string
+  source_revision: string
 }
 
-export async function previewRuntimeTomlConfig(sourceText: string): Promise<RuntimeConfigPreview> {
+export class RuntimeTomlRevisionConflict extends Error {
+  constructor(message: string, readonly current: RuntimeTomlCurrentSource) {
+    super(message)
+    this.name = 'RuntimeTomlRevisionConflict'
+  }
+}
+
+/** Structured raw-route validation and authorization rejections occur before
+ * replacement; after-rename durability failures return a committed receipt. */
+export class RuntimeTomlSaveRejected extends Error {
+  constructor(message: string) { super(message); this.name = 'RuntimeTomlSaveRejected' }
+}
+
+export async function saveRuntimeTomlConfig(
+  sourceText: string,
+  expectedSourceRevision: string,
+  options: RuntimeTomlRequestOptions & { expectedSourcePath: string },
+): Promise<CommittedRuntimeTomlConfig> {
+  if (!/^[0-9a-f]{64}$/.test(expectedSourceRevision)) {
+    throw new Error('runtime.toml 저장 기준 revision이 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
+  }
+  if (typeof options.expectedSourcePath !== 'string' || options.expectedSourcePath === '' || options.expectedSourcePath.includes('\0')) {
+    throw new Error('runtime.toml 저장 기준 path가 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
+  }
   await ensureDevToken()
+  options.beforeDispatch?.()
+  try {
+    const raw = await post<unknown>('/api/v1/runtime/config/raw', {
+      source_text: sourceText,
+      expected_source_revision: expectedSourceRevision,
+      expected_source_path: options.expectedSourcePath,
+    })
+    return receiveRuntimeTomlCommit(raw, options)
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError && error.method === 'POST'
+      && error.path === '/api/v1/runtime/config/raw'
+      && (error.status === 400 || error.status === 401 || error.status === 403)
+      && !error.timeout && error.configApplied !== true
+      && error.configApplicationState !== 'indeterminate' && !error.authoritativeReloadRequired
+      && error.runtimeSync === undefined) {
+      const failure = error.responseData
+      if (isRecord(failure) && typeof failure.error === 'string' && failure.error.trim() !== ''
+        && (failure.ok === undefined || failure.ok === false)
+        && (error.status === 400 || typeof failure.auth_error_code === 'string' && failure.auth_error_code.trim() !== '')) {
+        throw new RuntimeTomlSaveRejected(error.message)
+      }
+    }
+    if (error instanceof ApiRequestError && error.status === 409) {
+      const failure = error.responseData
+      if (isRecord(failure) && failure.code === 'revision_conflict'
+        && typeof failure.error === 'string' && isRecord(failure.current)) {
+        const current = failure.current
+        if (typeof current.source_path === 'string' && current.source_path !== ''
+          && typeof current.source_text === 'string'
+          && typeof current.source_revision === 'string'
+          && /^[0-9a-f]{64}$/.test(current.source_revision)) {
+          throw new RuntimeTomlRevisionConflict(failure.error, {
+            source_path: current.source_path,
+            source_text: current.source_text,
+            source_revision: current.source_revision,
+          })
+        }
+      }
+    }
+    throw error
+  }
+}
+
+export async function previewRuntimeTomlConfig(sourceText: string, options: RuntimeTomlRequestOptions = {}): Promise<RuntimeConfigPreview> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
   const raw = await post<unknown>('/api/v1/runtime/config/raw/preview', {
     source_text: sourceText,
   })
@@ -2328,23 +2417,27 @@ export type RuntimeRoutingLane =
 
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
-  runtimeId: string | null,
+  routeId: string | null,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
-    runtime_id: runtimeId,
-  }).then(decodeCommittedRuntimeTomlConfig)
+    runtime_id: routeId,
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 export async function patchRuntimeMediaFailover(
   runtimeIds: readonly string[],
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: 'media_failover',
     runtime_ids: [...runtimeIds],
-  }).then(decodeCommittedRuntimeTomlConfig)
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 // A declared [runtime.lanes."<id>"] candidate chain. The server resolves the
@@ -2380,10 +2473,12 @@ function runtimeLaneEditBody(
 export async function patchRuntimeLane(
   lane: string,
   edit: RuntimeLaneEdit,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', runtimeLaneEditBody(lane, edit))
-    .then(decodeCommittedRuntimeTomlConfig)
+    .then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 export type RuntimeExactSlotAction = 'append' | 'drop' | 'move'
@@ -2394,26 +2489,30 @@ export async function patchRuntimeExactSlot(
   action: RuntimeExactSlotAction,
   runtimeId: string,
   direction?: RuntimeExactSlotDirection,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: `exact/${laneId}`,
     action,
     runtime_id: runtimeId,
     ...(direction === undefined ? {} : { direction }),
-  }).then(decodeCommittedRuntimeTomlConfig)
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,
   expectedAssignmentRevision: KeeperRuntimeAssignmentRevision,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig | {
   ok: true
   applied: false
   assignment_revision: KeeperRuntimeAssignmentRevision
 }> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   const raw = await post<unknown>('/api/v1/runtime/config/assignment', {
     keeper_name: keeperName,
     runtime_id: runtimeId,
@@ -2430,7 +2529,7 @@ export async function patchRuntimeAssignment(
       assignment_revision: assignmentRevision,
     }
   }
-  return decodeCommittedRuntimeTomlConfig(raw)
+  return receiveRuntimeTomlCommit(raw, options)
 }
 
 /**

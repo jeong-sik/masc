@@ -153,10 +153,10 @@ candidates = ["forbidden.verifier", "official.verifier"]
     | Ok snapshot -> snapshot | Error _ -> fail "embedded resolver snapshot unavailable" in
   (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
    | Ok _ -> () | Error detail -> fail detail);
-  let previous_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn in
-  Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn Runtime.verifier_exact_lane_slot_ids;
+  let previous_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn in
+  Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn Runtime.verifier_exact_lane_slots;
   Eio.Switch.on_release sw (fun () ->
-    Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn previous_slots);
+    Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn previous_slots);
   let calls = ref [] in
   let review () = AR.run ~sw:(Some sw)
     ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())

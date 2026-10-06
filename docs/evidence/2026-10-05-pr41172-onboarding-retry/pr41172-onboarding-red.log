@@ -1,0 +1,524 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-onboarding-retry-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts -t 'onboarding manual retry'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-onboarding-retry-20261005/dashboard
+
+ ❯ src/components/exact-lane-activity-panel.test.ts (55 tests | 2 failed | 51 skipped) 10090ms
+   ❯ Exact activity operator flow (46)
+     × settles only the resolved setup error after onboarding manual retry: success 5037ms
+     × settles only the resolved setup error after onboarding manual retry: refresh 5016ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > settles only the resolved setup error after onboarding manual retry: success
+AssertionError: expected <p role="alert"></p> to be null
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"첫 대화 준비"[39m
+          [33mclass[39m=[32m"set-card"[39m
+        [36m>[39m
+          [36m<h3>[39m
+            [0m첫 대화 준비[0m
+          [36m</h3>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"btn"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m준비 상태 새로고침[0m
+          [36m</button>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"set-hint"[39m
+          [36m>[39m
+            [0m작업 공간: [0m
+            [0m/fixture/A[0m
+            [36m<br />[39m
+            [0m모델: [0m
+            [0m선택 필요[0m
+          [36m</p>[39m
+          [36m<ul />[39m
+          [36m<form>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m현재 작업 공간에 선언된 HTTP 연결에 API 키를 적용합니다. CLI 로그인과 새 모델 추가는 아래 모델 연결 선택에서 진행하세요.[0m
+            [36m</p>[39m
+            [36m<label>[39m
+              [0m연결 [0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m연결 선택[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0mAPI 키 [0m
+              [36m<input[39m
+                [33mautocomplete[39m=[32m"off"[39m
+                [33mtype[39m=[32m"password"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mdisabled[39m=[32m""[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [0m비공개로 저장[0m
+            [36m</button>[39m
+          [36m</form>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"모델 연결 선택"[39m
+            [33mclass[39m=[32m"runtime-setup-picker"[39m
+          [36m>[39m
+            [36m<h4>[39m
+              [0m모델 연결 선택[0m
+            [36m</h4>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.[0m
+            [36m</p>[39m
+            [36m<fieldset>[39m
+              [36m<legend>[39m
+                [0m기존 연결[0m
+              [36m</legend>[39m
+            [36m</fieldset>[39m
+            [36m<fieldset>[39m
+              [36m<legend>[39m
+                [0m새 모델 추가[0m
+              [36m</legend>[39m
+              [36m<label>[39m
+                [0m공급자 [0m
+                [36m<select>[39m
+                  [36m<option[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m>[39m
+                    [0m공급자 선택[0m
+                  [36m</option>[39m
+                [36m</select>[39m
+              [36m</label>[39m
+            [36m</fieldset>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mdisabled[39m=[32m""[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m검증 후 선택 저장[0m
+            [36m</button>[39m
+          [36m</section>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+            [33mclass[39m=[32m"set-card"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m설정 재개[0m
+            [36m</button>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"Librarian 활동 설정"[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-3 space-y-3"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-expanded[39m=[32m"true"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m활동 설정 닫기[0m
+            [0m[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"space-y-3"[39m
+          [36m>[39m
+            [36m<p>[39m
+              [0m끄면 새 요청을 받지 않습니다. 이미 접수한 작업은 마무리하며 후보 설정은 보존합니다.[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m관측 상태: [0m
+              [0midle[0m
+              [0m · [0m
+              [0m0[0m
+              [0m 실행 중[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m파일 설정: 꺼짐 · HTTP 2 / CLI 1 후보[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-2"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-checked[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"Librarian 활동 초안"[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mrole[39m=[32m"switch"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m활동 초안: [0m
+                [0m꺼짐[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mdisabled[39m=[32m""[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m활동 설정 저장[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m현재 설정 읽기[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m초안 버리기[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m커밋 #7 · 라우팅 적용됨 · Skill catalog 변경 없음 (configured) · Exact registry 적용됨 · 파일 내구성 확인됨[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"alert"[39m
+            [36m>[39m
+              [0m설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.[0m
+            [36m</p>[39m
+            [36m<details>[39m
+              [36m<summary>[39m
+                [0m설정 파일과 저장 기준[0m
+              [36m</summary>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"break-all"[39m
+              [36m>[39m
+                [0m/workspace/runtime.toml[0m
+              [36m</p>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"break-all"[39m
+              [36m>[39m
+                [0m초안 기준: [0m
+                [0m4a8bd5cc084769872fc76c20f0413277951360670c83fe6e0ae72ce3f3d06921[0m
+              [36m</p>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"break-all"[39m
+              [36m>[39m
+                [0m현재 파일: [0m
+                [0m4a8bd5cc084769872fc76c20f0413277951360670c83fe6e0ae72ce3f3d06921[0m
+              [36m</p>[39m
+            [36m</details>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected:
+null
+
++ Received:
+<p
+  role="alert"
+>
+  설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.
+</p>
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:97:73
+     95|       ? { kind: 'failed', reason: 'activation_failed' } : { kind: 'act…
+     96|     if (kind === 'failed' || kind === 'authority') expect(view.getByTe…
+     97|     else await waitFor(() => expect(view.queryByText(/재개를 확인하지 못했습니다/)…
+       |                                                                         ^
+     98|     if (kind === 'refresh') expect(view.getAllByText(/fixture refresh …
+     99|     view.unmount()
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > settles only the resolved setup error after onboarding manual retry: refresh
+AssertionError: expected <p role="alert"></p> to be null
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"첫 대화 준비"[39m
+          [33mclass[39m=[32m"set-card"[39m
+        [36m>[39m
+          [36m<h3>[39m
+            [0m첫 대화 준비[0m
+          [36m</h3>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"btn"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m준비 상태 새로고침[0m
+          [36m</button>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"set-hint"[39m
+          [36m>[39m
+            [0m작업 공간: [0m
+            [0m/fixture/A[0m
+            [36m<br />[39m
+            [0m모델: [0m
+            [0m선택 필요[0m
+          [36m</p>[39m
+          [36m<ul />[39m
+          [36m<form>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m현재 작업 공간에 선언된 HTTP 연결에 API 키를 적용합니다. CLI 로그인과 새 모델 추가는 아래 모델 연결 선택에서 진행하세요.[0m
+            [36m</p>[39m
+            [36m<label>[39m
+              [0m연결 [0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m연결 선택[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0mAPI 키 [0m
+              [36m<input[39m
+                [33mautocomplete[39m=[32m"off"[39m
+                [33mtype[39m=[32m"password"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mdisabled[39m=[32m""[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [0m비공개로 저장[0m
+            [36m</button>[39m
+          [36m</form>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"모델 연결 선택"[39m
+            [33mclass[39m=[32m"runtime-setup-picker"[39m
+          [36m>[39m
+            [36m<h4>[39m
+              [0m모델 연결 선택[0m
+            [36m</h4>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.[0m
+            [36m</p>[39m
+            [36m<fieldset>[39m
+              [36m<legend>[39m
+                [0m기존 연결[0m
+              [36m</legend>[39m
+            [36m</fieldset>[39m
+            [36m<fieldset>[39m
+              [36m<legend>[39m
+                [0m새 모델 추가[0m
+              [36m</legend>[39m
+              [36m<label>[39m
+                [0m공급자 [0m
+                [36m<select>[39m
+                  [36m<option[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m>[39m
+                    [0m공급자 선택[0m
+                  [36m</option>[39m
+                [36m</select>[39m
+              [36m</label>[39m
+            [36m</fieldset>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mdisabled[39m=[32m""[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m검증 후 선택 저장[0m
+            [36m</button>[39m
+          [36m</section>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+            [33mclass[39m=[32m"set-card"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m설정 재개[0m
+            [36m</button>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"Librarian 활동 설정"[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-3 space-y-3"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-expanded[39m=[32m"true"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m활동 설정 닫기[0m
+            [0m[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"space-y-3"[39m
+          [36m>[39m
+            [36m<p>[39m
+              [0m끄면 새 요청을 받지 않습니다. 이미 접수한 작업은 마무리하며 후보 설정은 보존합니다.[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m관측 상태: [0m
+              [0midle[0m
+              [0m · [0m
+              [0m0[0m
+              [0m 실행 중[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m파일 설정: 꺼짐 · HTTP 2 / CLI 1 후보[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-2"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-checked[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"Librarian 활동 초안"[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mrole[39m=[32m"switch"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m활동 초안: [0m
+                [0m꺼짐[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mdisabled[39m=[32m""[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m활동 설정 저장[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m현재 설정 읽기[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m초안 버리기[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m커밋 #7 · 라우팅 적용됨 · Skill catalog 변경 없음 (configured) · Exact registry 적용됨 · 파일 내구성 확인됨[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"alert"[39m
+            [36m>[39m
+              [0m설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"alert"[39m
+            [36m>[39m
+              [0m설정 저장 후 목록 갱신 실패: fixture refresh failed[0m
+            [36m</p>[39m
+            [36m<details>[39m
+              [36m<summary>[39m
+                [0m설정 파일과 저장 기준[0m
+              [36m</summary>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"break-all"[39m
+              [36m>[39m
+                [0m/workspace/runtime.toml[0m
+              [36m</p>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"break-all"[39m
+              [36m>[39m
+                [0m초안 기준: [0m
+                [0m4a8bd5cc084769872fc76c20f0413277951360670c83fe6e0ae72ce3f3d06921[0m
+              [36m</p>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"break-all"[39m
+              [36m>[39m
+                [0m현재 파일: [0m
+                [0m4a8bd5cc084769872fc76c20f0413277951360670c83fe6e0ae72ce3f3d06921[0m
+              [36m</p>[39m
+            [36m</details>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected:
+null
+
++ Received:
+<p
+  role="alert"
+>
+  설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.
+</p>
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:97:73
+     95|       ? { kind: 'failed', reason: 'activation_failed' } : { kind: 'act…
+     96|     if (kind === 'failed' || kind === 'authority') expect(view.getByTe…
+     97|     else await waitFor(() => expect(view.queryByText(/재개를 확인하지 못했습니다/)…
+       |                                                                         ^
+     98|     if (kind === 'refresh') expect(view.getAllByText(/fixture refresh …
+     99|     view.unmount()
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed | 51 skipped (55)
+   Start at  07:42:33
+   Duration  11.68s (tests 87%, import 5%, transform 4%, environment 2%, setup 2%)
+
+ ELIFECYCLE  Test failed. See above for more details.

@@ -1,0 +1,8 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-1287723205.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41205-package-catalog-routing-20261005/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41205-package-catalog-routing-20261005 test/test_h2_request_body_admission.exe
+File "test/test_h2_request_body_admission.ml", line 447, characters 114-115:
+447 |       Yojson.Safe.Util.(Yojson.Safe.from_string response.body |> member "package" |> member "title" |> to_string)))
+                                                                                                                        ^
+Error: Syntax error

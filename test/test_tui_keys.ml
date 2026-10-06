@@ -403,36 +403,8 @@ let test_lanes_footer_opens_standalone_runs () =
        One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
        and "A:add-ons" as separate items reading as separate destinations,
        and the dispatch had always been one arm. *)
-    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:models  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o / A:Lane Add-ons  d:reading  i:read issues  e:exact: config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:open  a:exact: add slot  Space:activity  s:exact: models  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
-
-let test_lanes_scroll_reserves_standalone_matrix_rows () =
-  check Alcotest.int
-    "loading row plus title and divider"
-    3
-    (standalone_lanes_chrome ~row_count:None ~error:None ~truncated:false);
-  check Alcotest.int
-    "six lane rows plus title and divider"
-    8
-    (standalone_lanes_chrome
-       ~row_count:(Some 6)
-       ~error:None
-       ~truncated:false);
-  check Alcotest.int
-    "retained rows plus explicit stale warning"
-    9
-    (standalone_lanes_chrome
-       ~row_count:(Some 6)
-       ~error:(Some "offline")
-       ~truncated:false);
-  check Alcotest.int
-    "bounded-window warning spends one row"
-    9
-    (standalone_lanes_chrome
-       ~row_count:(Some 6)
-       ~error:None
-       ~truncated:true)
-;;
 
 let test_harness_footer_links_to_overview_task () =
 (* The four surfaces that own a detail -- Harness, Schedules, Verification,
@@ -709,7 +681,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  d:Category pane  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
@@ -1125,7 +1097,7 @@ let test_board_and_planning_explain_their_order () =
     (board_sort_explanation Board_hot);
   check str "trending formula" "net votes / √age-hours"
     (board_sort_explanation Board_trending);
-  check str "active phase set" "executing + verifying"
+  check str "active phase set" "all nonterminal goals (including suspended)"
     (planning_filter_explanation Planning_filter_active);
   check str "phase and priority order" "phase order, then P1→P5"
     (planning_sort_explanation Planning_sort_phase_priority);
@@ -2044,7 +2016,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  i:input  a:fragments / voice / account  u:restore / adopt revision  S:save draft  C:compare file  U:use current text  X:discard draft  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2196,7 +2168,12 @@ let test_config_pane_footer_actions () =
     enabled "e"
       (List.mem pane
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
-    List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
+    enabled "n" (pane = Config_presets);
+    (* [u] answers on two panes: restoring a preset, and adopting the current
+       runtime.toml revision for a retained draft. The other draft keys answer
+       on runtime.toml only. *)
+    enabled "u" (List.mem pane [ Config_presets; Config_runtime ]);
+    List.iter (fun key -> enabled key (pane = Config_runtime)) [ "S"; "C"; "U"; "X" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
     (* [a] answers on three panes: the prompt fragments, the keeper-voice
        screen the voice pane opens, and the account form on runtime.toml. *)
@@ -2460,6 +2437,28 @@ let test_the_sheet_carries_the_fact_detail_keys () =
     "j/k:scroll  PgUp/PgDn:page  g / G:top/bottom  Esc:close"
     Masc_tui_keys.memory_fact_detail_hints
 
+let test_chat_quiet_leave_respects_the_draft () =
+  let leaves = Masc_tui_keys.chat_quiet_leave in
+  List.iter (fun (input_supported, turn_active, draft_empty, expected) ->
+    Alcotest.(check bool) "printable Q follows viewport, turn and complete draft" expected
+      (leaves ~input_supported ~turn_active ~draft_empty "Q");
+    Alcotest.(check bool) "Ctrl-Q always leaves" true
+      (leaves ~input_supported ~turn_active ~draft_empty "\017");
+    Alcotest.(check bool) "lowercase q remains text" false
+      (leaves ~input_supported ~turn_active ~draft_empty "q"))
+    [ true, true, true, true; true, true, false, false
+    ; true, false, true, false; true, false, false, false
+    ; false, true, true, true; false, true, false, true
+    ; false, false, true, true; false, false, false, true ];
+  let chat = Masc_tui_keys.for_surface (Keepers Keeper_message) in
+  Alcotest.(check bool) "chat help names both quiet exits" true
+    (List.exists
+       (fun (binding : Masc_tui_keys.binding) ->
+         String.equal binding.key "Q / Ctrl-Q"
+         && binding.help = Some
+              "Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting")
+       chat)
+
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
   let global_threes =
     List.filter
@@ -2567,8 +2566,7 @@ let standalone_lane ~(lane : Standalone_lane.t) ~label : Tui_decode.standalone_l
       { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
-(* The four lanes the projection fixes, in its order
-   (server_standalone_lane_projection.ml). *)
+(* A compact exact subset for key/selection fixtures; not a production census. *)
 let four_standalone_lanes =
   [ standalone_lane ~lane:Standalone_lane.Board_attention ~label:"Board Attention"
   ; standalone_lane ~lane:Standalone_lane.Hitl_auto_judge ~label:"HITL Auto Judge"
@@ -2606,17 +2604,46 @@ let keeper_snapshot lanes : Tui_decode.keeper_lanes_snapshot =
 let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Lanes;
-  state.standalone_lanes <- Some (standalone_snapshot four_standalone_lanes);
+  let exact_snapshot = standalone_snapshot four_standalone_lanes in
+  state.standalone_lanes <- Some exact_snapshot;
+  let module Inventory = Masc.Tui_decode_lane_inventory in
+  let exact_rows = List.map (fun (lane : Tui_decode.standalone_lane) ->
+      { Inventory.id = Masc.Lane_id.to_wire (Builtin (Exact lane.sl_lane));
+        label=lane.sl_label; purpose="Fixture exact lane"; selection=Inventory.Exact lane.sl_lane;
+        state=Inventory.Exact_state (Inventory.Unconfigured "fixture has no admitted slots") })
+      four_standalone_lanes in
+  let machine = { Inventory.id="machine/dos"; label="DOS"; purpose="Shared machine";
+    selection=Inventory.Machine Masc.Machine_lane.Dos; state=Inventory.Machine_state (Inventory.Machine_enabled, Inventory.Stable) } in
+  state.lane_inventory <- Some { Inventory.observed_at=0.; exact_snapshot;
+    rows=exact_rows @ [machine]; package_read={directory="/fixture/lane-addons";
+      complete=true;owner_present=true;issues=[]} };
   state.lanes <- Some (keeper_snapshot (List.map keeper_lane keepers));
   state
+
+let test_inventory_selection_keeps_exact_editor_identity () =
+  let state = lanes_state () in
+  state.lanes_cursor <- 4;
+  Alcotest.(check bool) "machine selection cannot edit a neighbouring exact lane"
+    true (Option.is_none (selected_standalone_lane state));
+  state.lanes_cursor <- 2;
+  Alcotest.(check (option string)) "exact selection joins by typed identity"
+    (Some "librarian_exact")
+    (Option.map (fun lane -> Standalone_lane.to_id lane.Tui_decode.sl_lane) (selected_standalone_lane state));
+  state.standalone_lanes <- Option.map (fun (snapshot : Tui_decode.standalone_lanes_snapshot) ->
+    {snapshot with Tui_decode.sls_lanes=List.rev snapshot.sls_lanes}) state.standalone_lanes;
+  Alcotest.(check (option string)) "exact detail reorder does not change selected lane"
+    (Some "librarian_exact")
+    (Option.map (fun lane -> Standalone_lane.to_id lane.Tui_decode.sl_lane) (selected_standalone_lane state))
 
 let test_lanes_search_texts_lead_with_the_standalone_labels () =
   let state = lanes_state () in
   Alcotest.(check (option (list string)))
-    "only standalone labels are searchable"
-    (Some
-       [ "Board Attention"; "HITL Auto Judge"; "Librarian"
-       ; "Verifier" ])
+    "search includes exact and machine inventory identities"
+    (Some ["Board Attention exact/board_attention_exact Fixture exact lane";
+      "HITL Auto Judge exact/hitl_auto_judge Fixture exact lane";
+      "Librarian exact/librarian_exact Fixture exact lane";
+      "Verifier exact/verifier_exact Fixture exact lane";
+      "DOS machine/dos Shared machine"])
     (Masc_tui_surface_search.surface_row_texts state Lanes)
 
 (* Resources draws a list beside a reading, and j/k means one thing in each.
@@ -2761,7 +2788,7 @@ let planning_state () =
           ; pr_verifying = 0
           ; pr_awaiting_confirmation = 0
           ; pr_done = 0
-          ; pr_dropped = 0
+          ; pr_paused = 0; pr_blocked = 0; pr_dropped = 0
           }
       ; pl_backlog =
           { pb_todo = 0; pb_claimed = 0; pb_running = 0
@@ -2796,52 +2823,6 @@ let test_planning_detail_keeps_the_key_closed () =
   state.planning_mode <- Planning_detail "g-1";
   Alcotest.(check (option (list string))) "a goal is open" None
     (Masc_tui_surface_search.surface_row_texts state Planning)
-
-let hit_to_string = function
-  | Lanes_hit_standalone index -> Printf.sprintf "standalone %d" index
-  | Lanes_hit_none -> "none"
-
-let check_hit state ~terminal_rows ~row expected =
-  check str (Printf.sprintf "row %d" row) expected
-    (hit_to_string (lanes_overview_hit state ~terminal_rows ~row))
-
-(* The overview frame, row by row: 1 strip, 2 box top, 3 header, 4 divider,
-   5 standalone heading, 6 the Add-ons summary, 7 the table heading, and 8-11
-   the four standalone rows. Everything below is note/padding/footer chrome,
-   never a hidden Keeper table.
-
-   This list is a second hand count of what [render_lanes_overview] draws, and
-   it went on agreeing with the first while both were two rows short. The
-   screen itself answers in the PTY walk "a press selects the lane drawn under
-   it"; this case holds the edges around it. *)
-let test_overview_hit_reads_the_frame_rows () =
-  let state = lanes_state () in
-  check_hit state ~terminal_rows:40 ~row:7 "none";
-  check_hit state ~terminal_rows:40 ~row:8 "standalone 0";
-  check_hit state ~terminal_rows:40 ~row:11 "standalone 3";
-  check_hit state ~terminal_rows:40 ~row:12 "none";
-  check_hit state ~terminal_rows:40 ~row:12 "none";
-  check_hit state ~terminal_rows:40 ~row:13 "none";
-  check_hit state ~terminal_rows:40 ~row:14 "none";
-  check_hit state ~terminal_rows:40 ~row:15 "none"
-
-let test_overview_hit_pays_for_the_error_rows () =
-  let state = lanes_state () in
-  state.lanes_error <- Some "lane fixture failed";
-  (* Keeper-composite errors are not part of the Standalone frame geometry. *)
-  check_hit state ~terminal_rows:40 ~row:14 "none";
-  check_hit state ~terminal_rows:40 ~row:15 "none";
-  state.lanes_action_error <- Some "Cannot open detail: no lane is selected";
-  check_hit state ~terminal_rows:40 ~row:16 "none";
-  check_hit state ~terminal_rows:40 ~row:17 "none"
-
-let test_overview_hit_waits_for_the_matrix () =
-  (* The matrix's single loading note is not a lane row. *)
-  let state = lanes_state () in
-  state.standalone_lanes <- None;
-  check_hit state ~terminal_rows:40 ~row:8 "none";
-  check_hit state ~terminal_rows:40 ~row:11 "none";
-  check_hit state ~terminal_rows:40 ~row:12 "none"
 
 (* The detail tabs used to draw a hand-written hint string in the renderer,
    a second key list this module did not own. The strip must project the
@@ -3079,17 +3060,17 @@ let test_detail_search_counts_follow_the_active_pane () =
     let count () = Masc_tui_surface_search.surface_search_count state surface ~query:state.search_last in
     Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
     Alcotest.(check bool) (label ^ " list has a cursor") true
-      (Option.is_some (scrolled_surface_rows state surface));
+      (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     set_detail true;
     Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
     Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
       None (Masc_tui_surface_search.surface_row_texts state surface);
     Alcotest.(check bool) (label ^ " detail has no cursor") false
-      (Option.is_some (scrolled_surface_rows state surface));
+      (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     set_detail false;
     Alcotest.(check (option int)) (label ^ " return restores count") (Some 1) (count ());
     Alcotest.(check bool) (label ^ " return restores cursor") true
-      (Option.is_some (scrolled_surface_rows state surface));
+      (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     Alcotest.(check string) (label ^ " keeps settled query") "needle" state.search_last
   in
   check_pane "Harness" Harness
@@ -3115,7 +3096,7 @@ let test_changes_diff_uses_visible_search_rows () =
     Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
       (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
     Alcotest.(check bool) (label ^ " cursor available") true
-      (Option.is_some (scrolled_surface_rows state Changes)) in
+      (Option.is_some (scrolled_surface_rows state ~cols:80 Changes)) in
   check_list "list";
   state.changes_diff_row <- Some 0;
   Alcotest.(check (option (list string))) "diff has no hidden search rows" None
@@ -3123,7 +3104,7 @@ let test_changes_diff_uses_visible_search_rows () =
   Alcotest.(check (option int)) "diff has no hidden list count" None
     (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
   Alcotest.(check bool) "diff cannot move a hidden list cursor" false
-    (Option.is_some (scrolled_surface_rows state Changes));
+    (Option.is_some (scrolled_surface_rows state ~cols:80 Changes));
   state.changes_diff_row <- None;
   check_list "return";
   state.changes_diff_row <- Some 1;
@@ -3468,8 +3449,6 @@ let () =
             test_resources_footer_steps_through_detail
         ; Alcotest.test_case "Lanes opens standalone runs" `Quick
             test_lanes_footer_opens_standalone_runs
-        ; Alcotest.test_case "Lanes reserves standalone matrix rows" `Quick
-            test_lanes_scroll_reserves_standalone_matrix_rows
         ; Alcotest.test_case "Harness links to Overview task" `Quick
             test_harness_footer_links_to_overview_task
         ; Alcotest.test_case "Schedules names write and read controls" `Quick
@@ -3604,6 +3583,8 @@ let () =
             test_the_sheet_carries_the_fact_detail_keys
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"
             `Quick test_keeper_detail_reserves_lowercase_u_for_channel_unbind
+        ; Alcotest.test_case "empty chat Q leaves, draft Q types" `Quick
+            test_chat_quiet_leave_respects_the_draft
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "the sheet opens on the current surface" `Quick
@@ -3628,7 +3609,9 @@ let () =
             test_planning_detail_keeps_the_key_closed
         ] )
     ; ( "lanes rows"
-      , [ Alcotest.test_case "search leads with the standalone labels" `Quick
+      , [ Alcotest.test_case "inventory selection retains exact editor identity" `Quick
+            test_inventory_selection_keeps_exact_editor_identity
+        ; Alcotest.test_case "search includes all inventory families" `Quick
             test_lanes_search_texts_lead_with_the_standalone_labels
         ; Alcotest.test_case "sub-modes stay unsearchable" `Quick
             test_lanes_sub_modes_stay_unsearchable
@@ -3638,11 +3621,5 @@ let () =
             `Quick test_the_resource_reading_offers_no_row_search
         ; Alcotest.test_case "Resources without a list answers nothing" `Quick
             test_resources_without_a_list_answers_nothing
-        ; Alcotest.test_case "a click reads the frame rows" `Quick
-            test_overview_hit_reads_the_frame_rows
-        ; Alcotest.test_case "a click pays for the error rows" `Quick
-            test_overview_hit_pays_for_the_error_rows
-        ; Alcotest.test_case "a click waits for the matrix" `Quick
-            test_overview_hit_waits_for_the_matrix
         ] )
     ]

@@ -931,6 +931,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          (server_routes_http_routes_frontend.ml wraps GET and POST /graphql in
          [with_read_auth]). /graphql is not in [is_public_read_path], so an
          unauthenticated caller must be rejected on either transport. *)
+      | `GET, (("/api/v1/lane-addons/package-catalog" | "/api/v1/lane-addons/package-preview") as package_path) ->
+          with_h2_read_auth h2_reqd (fun state ->
+            let module Packages = Server_routes_http_routes_lane_addons in
+            let fields = Packages.query_fields httpun_request in
+            let result = match package_path with
+              | "/api/v1/lane-addons/package-catalog" -> Packages.package_catalog_payload state fields
+              | _ -> Packages.package_preview_payload state fields in
+            match result with
+            | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+            | Error detail -> h2_respond_json_value h2_reqd
+                (`Assoc ["error",`String detail]) ~status:`Bad_request ~extra_headers:cors)
+
       | `GET, "/graphql" ->
           with_h2_read_auth h2_reqd (fun _state ->
             let nonce = fresh_graphql_csp_nonce () in
@@ -1265,6 +1277,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               (Server_repository_pulls.snapshot_to_yojson
                  (Server_repository_pulls.current ()))
               ~extra_headers:cors)
+
+      | `GET, "/api/v1/lanes" ->
+          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
+            (fun state _agent_name ->
+              Server_lane_inventory.snapshot ~config:(Mcp_server.workspace_config state)
+              |> Server_lane_inventory.to_json
+              |> fun json -> h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/briefing" ->
           with_h2_public_read h2_reqd (fun state ->

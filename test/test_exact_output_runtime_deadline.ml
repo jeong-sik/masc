@@ -201,7 +201,7 @@ let expected_lane_ids =
 let lane_unavailable registry lane =
   match Registry.resolve_lane registry ~lane_id:lane with
   | Error (Registry.No_admitted_lane_slots _) -> true
-  | Error (Registry.Exact_lane_unconfigured _) | Ok _ -> false
+  | Error (Registry.Exact_lane_off _) | Error (Registry.Exact_lane_unconfigured _) | Ok _ -> false
 
 (* A connect deadline ends at the response headers, so a provider that
    declares only [connect-timeout-s] would read the Exact body with no
@@ -586,6 +586,36 @@ supports-structured-output = true
     (if probe then "[models.probe]\napi-name = \"gpt-5.6-luna\"\n[openai-responses.probe]\n" else "")
     trailer
 
+(* The save refusal and the runtime listing read one predicate: a configured
+   HTTP runtime whose provider declares no exact-body-timeout-s is a gap under
+   binding targets, a keyed one is not, and a replacement catalog makes the
+   bindings say nothing about it. *)
+let test_listing_and_refusal_share_the_gap_predicate () =
+  with_runtime_fixture @@ fun ~path:_ ~boot ~save:_ ->
+  boot (gap_beside_keyed_toml ());
+  let runtime id =
+    match
+      List.find_opt
+        (fun (r : Runtime_instance.t) -> String.equal r.id id)
+        (fst (Runtime.runtimes_and_media_failover ()))
+    with
+    | Some r -> r
+    | None -> Alcotest.failf "runtime %s is not loaded" id
+  in
+  let lacks ?(target_source = Runtime.Runtime_binding_targets) id =
+    Runtime.exact_slot_lacks_body_deadline ~target_source (runtime id)
+  in
+  check bool "the provider without a body deadline is a gap" true (lacks "nokey.other");
+  check bool "the keyed provider is not" false (lacks "openai-responses.probe");
+  check bool "a replacement catalog decides targets elsewhere" false
+    (lacks
+       ~target_source:(Runtime.Replacement_catalog_targets { path = "/catalog.toml" })
+       "nokey.other");
+  check (list string) "the same predicate drives the recorded gap" [ "nokey.other" ]
+    (List.map
+       (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> gap.slot_id)
+       (Runtime.exact_slot_body_deadline_gaps ()))
+
 let test_an_unrelated_save_keeps_an_existing_gap () =
   with_runtime_fixture @@ fun ~path:_ ~boot ~save ->
   boot (gap_beside_keyed_toml ());
@@ -664,6 +694,8 @@ let () =
           test_save_over_a_file_that_already_breaks_the_registry_keeps_it;
         test_case "saving the key restores an emptied mandatory lane" `Quick
           test_saving_the_key_restores_an_emptied_mandatory_lane;
+        test_case "listing and refusal share the gap predicate" `Quick
+          test_listing_and_refusal_share_the_gap_predicate;
         test_case "an unrelated save keeps an existing gap" `Quick
           test_an_unrelated_save_keeps_an_existing_gap;
         test_case "a break over a gap-only file is refused" `Quick

@@ -2098,7 +2098,10 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
+        # Leaving the chat returns to the Keepers list with the chat target
+        # selected: message navigation follows its explicit target, so the
+        # roster cursor is alpha, not the beta it held before the palette jump.
+        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"alpha"))
         os.write(master_fd, b"q")
 
     return interact

@@ -1,0 +1,22 @@
+{
+  "qualified_commit": "5334d702ce1365332d3aa2cc658a4af28a74d55d",
+  "tests": 221,
+  "suites": 4,
+  "vitest_exit": 0,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "source_sha256": {
+    "dashboard/src/lib/exact-lane-activity-session.ts": "9df70ab90d61142bfad6b346f1d191b01feb88b663eddfe419775c6c770e5918",
+    "dashboard/src/components/exact-lane-activity-panel.ts": "97b0c9cba67922dd85ce5419edc8c91851e003835864584f384a836799d517bc",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "72bfb9243c3904a3260693242df4938dfced11de611cd978c961ba1159983bf9",
+    "dashboard/src/components/model-setup-resume-control.ts": "3066e9d2d9ad9435cba5100a6376cc8254aa078bbf9a5f7f1588fcde4a8a492d",
+    "dashboard/src/components/runtime-toml-editor.ts": "36d34fc8eb539d49f066a9d03be5f275fda178d8571ee5e6b946ec9884011b5e",
+    "dashboard/src/components/settings-surface.test.ts": "533622961be91eb4e98e48c785f693242c197db3639f516684da4de7c1ea2ee5"
+  },
+  "raw_sha256": {
+    "vitest.log": "f45f4bf11e95387a30b70198be45a5ca178aa4b447f1afdf69a6a2dce43295c3",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "native_sources_unchanged_from": "9f26f8fba211112ff10a8d481fa8bd9e35f96468"
+}

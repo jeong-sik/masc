@@ -1,0 +1,43 @@
+Testing `tui_overview_providers'.
+This run has ID `VBO9DQSJ'.
+
+  [OK]          providers          0   unknown report evidence.
+  [OK]          providers          1   exact quota window history join.
+  [OK]          providers          2   account summary and reported gauges.
+  [OK]          providers          3   eighth-block meter.
+  [OK]          providers          4   values read in one unit.
+  [OK]          providers          5   failed read is one line.
+  [OK]          providers          6   empty read names missing usage.
+  [OK]          providers          7   unknown state is rejected.
+  [OK]          providers          8   history uses reported points.
+  [OK]          providers          9   empty reports remain observed in the t...
+  [OK]          providers         10   trend is built from the answer.
+  [OK]          providers         11   scope id is the server's.
+  [OK]          providers         12   USD cards preserve amounts without a f...
+  [OK]          providers         13   a silent account draws only its exhaus...
+  [OK]          providers         14   meter width is bounded.
+  [OK]          providers         15   observation clock follows local dates.
+> [FAIL]        providers         16   a window that gates nothing is not an ...
+  [OK]          providers         17   unknown role is rejected.
+  [OK]          providers         18   account emails name their accounts.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        providers         16   a window that gates nothing is not ...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT the exhausted tone is drawn with a code
+File "test/test_tui_overview_providers.ml", line 279, character 2:
+FAIL the exhausted tone is drawn with a code
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_tui_overview_providers.test_window_that_gates_nothing_is_not_an_ in file "test/test_tui_overview_providers.ml", line 279, characters 2-87
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/native40952-reconcile-20261005/_build/default/test/_build/_tests/tui_overview_providers/providers.016.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/native40952-reconcile-20261005/_build/default/test/_build/_tests/tui_overview_providers'.
+1 failure! in 0.005s. 19 tests run.

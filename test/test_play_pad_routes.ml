@@ -107,8 +107,11 @@ let eject_quietly () =
 let with_machine ~saves_name f =
   let dir = Filename.temp_dir "play-pad-dos-" "" in
   Fun.protect
-    ~finally:(fun () -> eject_quietly (); remove_tree dir)
+    ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
+      eject_quietly (); remove_tree dir)
     (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       dos_ok "load"
         (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
            ~saves_dir:(Filename.concat (Filename.concat dir "saves") saves_name)
@@ -239,7 +242,24 @@ let test_the_pad () =
       with_machine ~saves_name:"zzt" (fun () ->
         let none = call ~token:operator "GET" in
         check int "a program with no layout is a 404" 404 (status_of none);
-        check bool "naming the program" true (member "saves_name" (body_of none) = Some (`String "zzt")))))
+        check bool "naming the program" true (member "saves_name" (body_of none) = Some (`String "zzt")));
+      with_machine ~saves_name:"hello.com" (fun () ->
+        let none = call ~token:player "GET" in
+        check int "a standalone DOS program without a layout is a 404" 404 (status_of none);
+        check bool "the absence names the inventory file" true
+          (member "saves_name" (body_of none) = Some (`String "hello.com"));
+        let pads = Masc.Play_pad.pads_dir ~base_path in
+        mkdir_p pads;
+        Out_channel.with_open_bin (Filename.concat pads "hello.com.toml") (fun oc ->
+          output_string oc "[BTN_SOUTH]\nkeys = [\"return\"]\nlabel = \"continue\"\n");
+        let layout = call ~token:player "GET" in
+        check int "a standalone program can have a workspace layout" 200 (status_of layout);
+        check bool "the layout retains the full inventory name" true
+          (member "saves_name" (body_of layout) = Some (`String "hello.com"));
+        let pressed = press ~saves_name:"hello.com" ~token:operator "BTN_SOUTH" in
+        check int "the holder uses the standalone program's layout" 200 (status_of pressed);
+        check (pair string string) "the layout presses the actual machine key"
+          ("operator", "press return") (newest_activity ()))))
 
 let () =
   run "play-pad-routes"

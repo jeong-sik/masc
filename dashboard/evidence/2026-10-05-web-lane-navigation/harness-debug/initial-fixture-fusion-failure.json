@@ -1,0 +1,110 @@
+{
+  "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('group', { name: 'Internal agent filters' }).getByRole('button', { name: 'Fusion 0', exact: true })\u001b[22m\n",
+  "checks": [
+    "actual inventory link → real router → lazy Status Runtime editor focuses selected Exact Lane",
+    "same Runtime surface Exact→Browser→same Exact restores focus and retains raw draft",
+    "MSX and DOS generated links select their actual inline TOML nodes without insertion",
+    "missing Browser config is explained without selecting another backend or inserting text",
+    "declaration link preserves Unicode/space/hash path, focuses editor, rereads identity and retains dirty draft without spurious revision conflict",
+    "changed file identity blocks replacement; Retry rereads restored identity and preserves draft/original CAS basis",
+    "workspace A→B→A blocks target reads in B and restores the retained A draft after fresh read",
+    "manual worker ID+incarnation is selected; replaced incarnation cannot inherit its controls and can be reread"
+  ],
+  "reads": [
+    {
+      "p": "/api/v1/lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/dev-token",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/params",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/config/raw",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/standalone-lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/resolved",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/exact-lane-runs",
+      "query": "?run_kind=exact_output"
+    },
+    {
+      "p": "/api/v1/dashboard/verification-runs",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/fusion-runs",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/standalone-lanes",
+      "query": ""
+    }
+  ],
+  "writes": [],
+  "errors": [],
+  "unexpected": []
+}

@@ -1,0 +1,59 @@
+{
+  "checked_at": "2026-10-04T15:38:13.566320+00:00",
+  "tested_head": "c2e74cc3318a666d461164d23fcbec9089854069",
+  "scratch_checkout": "/private/tmp/masc-b10-settings-c2e74cc-20261005",
+  "source_scope": "Actual SettingsSurface and actual execution authority store; mutation case additionally calls actual patchRuntimeRouting. API read results, dev-token completion, and final core.post transport are controlled fixtures. Unrelated API boundaries reuse the original Settings test setup.",
+  "command": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "src/components/B10-settings-workspace-audit.test.ts",
+    "--reporter=verbose",
+    "--maxWorkers=1"
+  ],
+  "cwd": "/tmp/masc-b10-settings-c2e74cc-20261005/dashboard",
+  "exit_code": 0,
+  "tests": {
+    "passed": 3,
+    "failed": 0,
+    "meaning": "Tests assert existing defect behavior; this is defect reproduction, not product validation."
+  },
+  "environment": {
+    "node": "v26.3.0",
+    "vitest": "5.0.2",
+    "preact": "10.29.1",
+    "happy-dom": "20.9.0",
+    "dom": "happy-dom; no actual browser screenshot"
+  },
+  "source_sha256": {
+    "dashboard/src/components/settings-surface.ts": "398144d3e86ef34df91654708a2cba19fdd9ffcdfaaac1db9b36ba497e331e7a",
+    "dashboard/src/components/settings-surface.test.ts": "b7959cbfdf75926a91db362bfe4933e9912226b1680aa4c7a4be289edc7b95ca",
+    "dashboard/src/api/dashboard-runtime.ts": "6e2fcfb979453aa782de192683c3e47034a6fc4f91c08742570c37037572ead0",
+    "dashboard/src/api/dashboard.ts": "1f64fbaeccab930204f195070d55a733af015363321cb9853f207d47de9c6e60",
+    "dashboard/src/api/core.ts": "c82d87d1f09bf138c5578d3d38da1472fd0c25c0fe47387bd12c01490f04f727",
+    "dashboard/src/api/dev-token.ts": "8b4984076a242699c140c187754ccc3bfab3cef58a5a3ff0bb0aebf09fe43c83",
+    "dashboard/src/store.ts": "1c9380c0826f8f032fe56ac4167bec22dfb8af72c49b80c9ed007ea69c6d0365",
+    "dashboard/src/app.ts": "fbfb10c66d73f0527bc35dfcab276c59c1d863d12643893db80708a791ae5ee3",
+    "dashboard/src/components/dashboard-shell.ts": "d7612ea2ab7b2a35ee3aff2fb00f2db4611c709227b856a2bfc8a6ab8dc1bcc2",
+    "dashboard/src/router.ts": "aabd9fb8022bcc94469851c2d10d39e173f8b14898732a2024423e9b234e7b88",
+    "dashboard/src/lib/runtime-toml-session.ts": "d472b0154ec54efd9aa74056f9b710735f1995110bb60949206c1d564700b351",
+    "dashboard/src/lib/runtime-toml-source-generation.ts": "e63c361ccbb572ec21d292bb91823555e2a2b06533507fed9219bea24187ee90",
+    "dashboard/src/lib/runtime-config-receipt.test-fixture.ts": "7ade4336a8762f3c94b41069855e103d5b8fead3e0e3417587a2dc9a50fb3c67",
+    "dashboard/vitest.config.ts": "85f9b9788e6fd2b88264ec5c1f1c70f306ad512c4fa0b00c7f9563965eefdaeb",
+    "dashboard/vitest-setup.ts": "2476c842497ef3849d28b357fc65562f384156562a04b2ad2dfba041fedb790a",
+    "dashboard/package.json": "2c820c3d81db9d2c81263f91b15232d532dbad22302d84ec660fb0cba4d0f101",
+    "dashboard/pnpm-lock.yaml": "1a85e066a8baf940cf65df3cf18e76224684fcff6b47254b9c37d6647fd607a0"
+  },
+  "fixture_sha256": "c2789d0d6381b8b0482877327b8095f9fcb127b6031454888dffab57e0c0fd4b",
+  "log_sha256": "d26ef41c0f5e24be69431410be36d0f0f42aef0cba806c8027a0c37ccdd6b457",
+  "fixture_setup_origin": "Prefix of dashboard/src/components/settings-surface.test.ts through beforeEach/afterEach, at tested_head; custom 3 audit cases appended. No production source changed.",
+  "transport_boundary": "core.post records URI/body/current authority and throws. No HTTP mutation was sent and no server/file was changed.",
+  "limits": [
+    "Not full SPA or app remount execution; app key=currentTab is source evidence. Actual Settings component remains mounted in the fixture.",
+    "No backend save acceptance, deployment, native TUI, Dune, CI, or real user workspace was exercised.",
+    "Only default-routing mutation is executed to mocked transport; media-failover/lane mutation findings are source-confirmed.",
+    "Older fa5f560930d417d254fe1955b4ed579e74ce8cb4 compared by source only, not rerun."
+  ],
+  "original_log_sha256": "9210e234a4f6c725dd4ff04633f265d5d52489102f2e9ea895ee0be566e93b78",
+  "copied_log_normalization": "Trailing whitespace and outer blank lines removed from the copied log. Original executed log hash retained separately; source/test bytes unchanged."
+}

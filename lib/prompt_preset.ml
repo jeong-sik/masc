@@ -25,6 +25,7 @@ module Override = Prompt_override_persistence
 
 type lane =
   { id : string
+  ; enabled : bool
   ; slots : string list
   ; cli_slots : string list
   }
@@ -239,6 +240,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
              (fun (l : lane) ->
                `Assoc
                  [ "id", `String l.id
+                 ; "enabled", `Bool l.enabled
                  ; "slots", strings l.slots
                  ; "cli_slots", strings l.cli_slots
                  ])
@@ -293,7 +295,7 @@ let runtime_to_json ~assignments ~lanes : Yojson.Safe.t =
       , `Assoc
           (List.map
              (fun lane ->
-               lane.id, `Assoc [ "slots", strings lane.slots; "cli_slots", strings lane.cli_slots ])
+               lane.id, `Assoc [ "enabled", `Bool lane.enabled; "slots", strings lane.slots; "cli_slots", strings lane.cli_slots ])
              lanes) )
     ]
 ;;
@@ -324,9 +326,20 @@ let runtime_of_json (json : Yojson.Safe.t) =
             let* acc = acc in
             match value with
             | `Assoc lane_fields ->
+              (* Presets saved before lanes carried activity (v0.49.0 and
+                 earlier, same schema_version) have no [enabled]: every lane
+                 in them was live, and the runtime TOML reads an omitted
+                 [enabled] as true too. Absent means true; a present value
+                 that is not a boolean is still refused. *)
+              let* enabled =
+                match List.assoc_opt "enabled" lane_fields with
+                | Some (`Bool enabled) -> Ok enabled
+                | None -> Ok true
+                | Some _ -> Error ("lane " ^ id ^ " enabled must be a boolean")
+              in
               let* slots = string_list_field lane_fields "slots" in
               let* cli_slots = string_list_field lane_fields "cli_slots" in
-              Ok ({ id; slots; cli_slots } :: acc)
+              Ok ({ id; enabled; slots; cli_slots } :: acc)
             | _ -> Error ("lane " ^ id ^ " must be an object"))
           (Ok [])
           pairs
@@ -407,6 +420,7 @@ let runtime_of_text text =
       List.map
         (fun (d : Runtime_schema.exact_output_lane_decl) ->
           { id = d.Runtime_schema.id
+          ; enabled = d.Runtime_schema.enabled
           ; slots = d.Runtime_schema.slot_ids
           ; cli_slots = d.Runtime_schema.cli_slot_ids
           })
@@ -618,6 +632,21 @@ let list ~base_path =
 let finish (r : part_result) = { applied = List.rev r.applied; skipped = List.rev r.skipped }
 
 let restore_prompt_overrides ~base_path (entries : Override.entry list) =
+  let before = List.map (fun key -> key, Prompt_registry.resolve_prompt key)
+    [Prompt_names.candle_appraiser_grade;Prompt_names.candle_appraiser_relation;
+     Prompt_names.candle_appraiser_weights] in
+  let notify_changed () =
+    (* Managed default files are outside the preset surface. Use their captured
+       values and committed in-memory overrides; release cleanup does no I/O. *)
+    let overrides = Prompt_registry.override_entries () in
+    if List.exists (fun (key, (resolution : Prompt_registry.prompt_resolution)) ->
+      let override_value = List.find_opt (fun (entry : Override.entry) -> entry.key = key) overrides
+        |> Option.map (fun entry -> entry.Override.value) in
+      let _, effective = Prompt_registry_types.resolve_source
+        ~override_value ~file_value:resolution.file_value in
+      effective <> resolution.effective) before
+    then Candle_payout_worker.wake () in
+  Eio_guard.protect ~finally:notify_changed (fun () ->
   let wanted key =
     List.exists (fun (e : Override.entry) -> String.equal e.Override.key key) entries
   in
@@ -640,7 +669,7 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
   (* Each entry keeps the binding it was captured with, so a restored
      override reads as "written against an older default" when that is what
      it is, instead of looking freshly authored against today's text. *)
-  List.fold_left
+  let result = List.fold_left
     (fun acc (e : Override.entry) ->
       match Prompt_registry.restore_persisted_entry ~base_path e with
       | Ok () -> { acc with applied = e.Override.key :: acc.applied }
@@ -649,7 +678,8 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
         { acc with skipped = (e.Override.key, message) :: acc.skipped })
     cleared
     entries
-  |> finish
+  |> finish in
+  result)
 ;;
 
 let restore_instructions ~base_path instructions =
@@ -682,7 +712,7 @@ let lanes_table_prefix = Runtime_toml_namespace.(path Runtime) "exact_output_lan
 
 let lane_holds ~current_lanes lane =
   match List.find_opt (fun current -> String.equal current.id lane.id) current_lanes with
-  | Some current -> current.slots = lane.slots && current.cli_slots = lane.cli_slots
+  | Some current -> current.enabled = lane.enabled && current.slots = lane.slots && current.cli_slots = lane.cli_slots
   | None -> false
 ;;
 
@@ -716,14 +746,18 @@ let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes co
       then content
       else (
         let path = lanes_table_prefix ^ lane.id in
-        let content =
-          Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane.slots
-        in
-        Toml_line_editor.edit_table_multiline_array
-          content
-          ~path
-          ~key:"cli_slots"
-          ~values:lane.cli_slots))
+        let content = Toml_line_editor.edit_table_bool content ~path ~key:"enabled" ~value:lane.enabled in
+        match List.find_opt (fun current -> current.id = lane.id) current_lanes with
+        | Some current when current.slots = lane.slots && current.cli_slots = lane.cli_slots -> content
+        | Some _ | None ->
+          let content =
+            Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane.slots
+          in
+          Toml_line_editor.edit_table_multiline_array
+            content
+            ~path
+            ~key:"cli_slots"
+            ~values:lane.cli_slots))
     content
     lanes
 ;;

@@ -2819,6 +2819,7 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
 let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.exact_output_lane_decl, parse_error list) result
   =
+  let ( let* ) = Result.bind in
   let path = Ns.(path Runtime) ("exact_output_lanes." ^ id) in
   let unknown_key_errors =
     match tbl with
@@ -2826,7 +2827,8 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
       List.concat_map
         (fun (key, _) ->
            if
-             String.equal key "slots"
+             String.equal key "enabled"
+             || String.equal key "slots"
              || String.equal key "cli_slots"
              || String.equal key "max_output_tokens"
              || String.equal key "thinking"
@@ -2835,12 +2837,13 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
              error
                (path ^ "." ^ key)
                (Printf.sprintf
-                  "unknown exact-output lane key %S; expected slots, cli_slots, \
+                  "unknown exact-output lane key %S; expected enabled, slots, cli_slots, \
                    max_output_tokens or thinking"
                   key))
         entries
     | _ -> []
   in
+  let enabled_result = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:true in
   let slots_result =
     match Otoml.find_opt tbl Fun.id [ "slots" ] with
     (* Absent reads as empty, the same as [cli_slots] below. The lane's rule is
@@ -2918,11 +2921,18 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
     | Ok slots, Ok cli_slots, Ok max_output_tokens, Ok thinking ->
       Ok (slots, cli_slots, max_output_tokens, thinking)
   in
+  let* enabled = enabled_result in
+  let* () =
+    match Standalone_lane.of_id id with
+    | Some lane when not enabled && Standalone_lane.obligation lane = Standalone_lane.Required ->
+      Error (error (path ^ ".enabled") "required exact-output lane cannot be disabled")
+    | Some _ | None -> Ok ()
+  in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
   | _ :: _, Ok _ -> Error unknown_key_errors
   | [], (Error _ as error) -> error
-  | [], Ok ([], [], _, _) ->
+  | [], Ok ([], [], _, _) when enabled ->
     Error (error path "exact-output lane must have at least one slot")
   | [], Ok (slot_ids, cli_slot_ids, max_output_tokens, thinking) ->
     let rec validate_cli position seen = function
@@ -2947,7 +2957,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
         (match validate_cli 1 [] cli_slot_ids with
          | Error _ as error -> error
          | Ok () ->
-           Ok { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens; thinking })
+           Ok { Runtime_schema.id; enabled; slot_ids; cli_slot_ids; max_output_tokens; thinking })
       | slot_id :: rest ->
         if String.equal (String.trim slot_id) ""
         then
@@ -3327,6 +3337,10 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let egress_allowlists_result = parse_egress_allowlists toml in
   let lsp_servers_result = parse_lsp_servers toml in
   let typesafeai_result = parse_typesafeai toml in
+  let browser_result = Browser_configuration.parse toml
+    |> Result.map_error (fun message -> error (Ns.key Ns.Browser) message) in
+  let machines_result = Machine_configuration.parse toml
+    |> Result.map_error (fun message -> error (Ns.key Ns.Machines) message) in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs obsolete_namespaces_result
@@ -3341,6 +3355,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs egress_allowlists_result
     @ errs lsp_servers_result
     @ errs typesafeai_result
+    @ errs browser_result
+    @ errs machines_result
   in
   if all_errors <> []
   then Error all_errors
@@ -3377,6 +3393,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lsp_servers =
       extract_after_all_errors_guard ~label:"lsp_servers" lsp_servers_result
     in
+    let browser = extract_after_all_errors_guard ~label:(Ns.key Ns.Browser) browser_result in
+    let machines = extract_after_all_errors_guard ~label:(Ns.key Ns.Machines) machines_result in
     let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
@@ -3397,6 +3415,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ; egress_allowlists
         ; lsp_servers
         ; typesafeai
+        ; browser
+        ; machines
         })
 ;;
 

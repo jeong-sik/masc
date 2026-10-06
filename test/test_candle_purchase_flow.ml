@@ -395,6 +395,55 @@ let test_explicit_prices_and_unpriced_items () =
     rejected "already_owned" (buy config "keeper-a" "glasses"))
 ;;
 
+(* A season in force reprices the catalog and the purchase: the season's
+   entry wins, the receipt names the season, and the catalog carries it.
+   Outside the window the base price answers and the season is null.
+   Windows are wide on purpose: keeper tools read the real clock, so the
+   active window must contain any plausible test run. *)
+let test_season_in_force_reprices_catalog_and_purchase () =
+  with_workspace (fun _ _ config ->
+    credit config ~goal:"season-goal" ~keeper:"keeper-a" 1000;
+    write_config config
+      ("\n[shop.prices_milli]\ncrown = 500\nglasses = 200\n"
+       ^ "\n[shop.season.\"winter-sale\"]\nstarts = \"2000-01-01\"\nends = \"2099-12-31\"\n"
+       ^ "[shop.season.\"winter-sale\".prices_milli]\ncrown = 50\n");
+    let catalog =
+      call config "keeper-a" "keeper_candle_catalog" (`Assoc []) |> succeeded
+    in
+    check string "catalog names the active season" "winter-sale"
+      U.(member "season" catalog |> to_string);
+    let crown = U.(member "items" catalog |> to_list)
+      |> List.find (fun row -> U.(member "id" row |> to_string) = "crown") in
+    check string "catalog shows the season price" "50"
+      U.(member "price_milli" crown |> to_string);
+    let glasses = U.(member "items" catalog |> to_list)
+      |> List.find (fun row -> U.(member "id" row |> to_string) = "glasses") in
+    check string "unnamed items keep the base price" "200"
+      U.(member "price_milli" glasses |> to_string);
+    let receipt = buy config "keeper-a" "crown" |> succeeded in
+    check string "purchase pays the season price" "50"
+      U.(member "amount_milli" receipt |> to_string);
+    check string "receipt names the season" "winter-sale"
+      U.(member "season" receipt |> to_string);
+    check string "balance reflects the season debit" "950"
+      U.(member "account" receipt |> member "balance_milli" |> to_string);
+    (* The same season id in the past is over: base prices answer. *)
+    write_config config
+      ("\n[shop.prices_milli]\ncrown = 500\nglasses = 200\n"
+       ^ "\n[shop.season.\"winter-sale\"]\nstarts = \"2000-01-01\"\nends = \"2000-12-31\"\n"
+       ^ "[shop.season.\"winter-sale\".prices_milli]\ncrown = 50\n");
+    let catalog =
+      call config "keeper-a" "keeper_candle_catalog" (`Assoc []) |> succeeded
+    in
+    check bool "no season outside the window" true
+      U.(member "season" catalog = `Null);
+    let receipt = buy config "keeper-a" "glasses" |> succeeded in
+    check string "purchase pays the base price" "200"
+      U.(member "amount_milli" receipt |> to_string);
+    check bool "receipt season is null" true
+      U.(member "season" receipt = `Null))
+;;
+
 let test_large_tool_amounts_remain_exact () =
   with_workspace (fun _ _ config ->
     let amount = 9_007_199_254_740_993 in
@@ -728,6 +777,10 @@ let () =
               "large tool amounts stay exact decimal strings"
               `Quick
               test_large_tool_amounts_remain_exact
+          ; test_case
+              "a season in force reprices catalog and purchase"
+              `Quick
+              test_season_in_force_reprices_catalog_and_purchase
           ; test_case
               "corrupt rows and partial tails are never repaired by reads or purchase"
               `Quick

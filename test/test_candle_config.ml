@@ -229,11 +229,180 @@ let test_a_file_that_is_not_a_regular_file_disables_without_being_opened () =
           (contains ~affix:"not a regular file" reason)))
 ;;
 
+let season_text = {|
+[shop.season."winter-sale"]
+starts = "2026-12-01"
+ends = "2027-02-28"
+[shop.season."winter-sale".prices_milli]
+crown = 50
+|}
+
+let enabled_policy text =
+  match Candle_config.of_toml_string text with
+  | Candle_config.Enabled policy -> policy
+  | Candle_config.Off -> Alcotest.fail "expected an enabled config, got off"
+  | Candle_config.Disabled { reason } -> Alcotest.fail ("expected an enabled config: " ^ reason)
+;;
+
+let at text =
+  match Candle_time.of_rfc3339 text with
+  | Ok value -> value
+  | Error detail -> Alcotest.fail detail
+;;
+
+let crown =
+  match Keeper_portrait_item.of_id "crown" with
+  | Some item -> item
+  | None -> Alcotest.fail "catalog crown missing"
+;;
+
+let glasses =
+  match Keeper_portrait_item.of_id "glasses" with
+  | Some item -> item
+  | None -> Alcotest.fail "catalog glasses missing"
+;;
+
+(* A season is a named window with override prices: inside it the season's
+   entry wins, items it does not name fall back to base, and outside every
+   season the base price answers. Windows are inclusive on both days. *)
+let test_shop_seasons_price_by_window () =
+  let policy =
+    enabled_policy
+      (valid_text
+       ^ {|
+[shop.prices_milli]
+crown = 500
+glasses = 200
+|}
+       ^ season_text)
+  in
+  let check_price label expected actual =
+    Alcotest.(check bool) label true (expected = actual)
+  in
+  (* The last second before the window, the first day, the last day, and
+     the day after: containment is by UTC calendar day, inclusive. *)
+  let before = at "2026-11-30T23:59:59Z" in
+  let first = at "2026-12-01T00:00:00Z" in
+  let last = at "2027-02-28T23:59:59Z" in
+  let after = at "2027-03-01T00:00:00Z" in
+  Alcotest.(check bool) "no season before the window" true
+    (Candle_config.season_at policy ~at:before = None);
+  Alcotest.(check bool) "no season after the window" true
+    (Candle_config.season_at policy ~at:after = None);
+  (match Candle_config.season_at policy ~at:first with
+   | Some season ->
+     Alcotest.(check string) "season id" "winter-sale" (Candle_config.season_id season)
+   | None -> Alcotest.fail "first window day has no season");
+  (match Candle_config.season_at policy ~at:last with
+   | Some _ -> ()
+   | None -> Alcotest.fail "last window day has no season");
+  check_price "season price wins inside the window"
+    Candle_config.(Priced 50) (Candle_config.price_at policy ~at:first crown);
+  check_price "unnamed item falls back to base inside the window"
+    Candle_config.(Priced 200) (Candle_config.price_at policy ~at:first glasses);
+  check_price "base price answers outside the window"
+    Candle_config.(Priced 500) (Candle_config.price_at policy ~at:before crown);
+  check_price "price without a season is the base price"
+    Candle_config.(Priced 500) (Candle_config.price policy crown)
+;;
+
+(* Season misconfiguration disables Candle with a reason, like every other
+   malformed key: blank ids, unreadable days, a backward window, overlaps,
+   unknown keys, and noncanonical price entries. *)
+let test_shop_season_misconfiguration_disables () =
+  let refuse label suffix affix =
+    let reason = disabled_reason (Candle_config.of_toml_string (valid_text ^ suffix)) in
+    Alcotest.(check bool) label true (contains ~affix reason)
+  in
+  refuse "blank season id"
+    {|
+[shop.season."  "]
+starts = "2026-12-01"
+ends = "2027-02-28"
+|}
+    "must not be blank";
+  refuse "unreadable starts day"
+    {|
+[shop.season."bad-day"]
+starts = "2026-02-30"
+ends = "2027-02-28"
+|}
+    "YYYY-MM-DD";
+  refuse "unreadable ends day"
+    {|
+[shop.season."bad-day"]
+starts = "2026-12-01"
+ends = "tomorrow"
+|}
+    "YYYY-MM-DD";
+  refuse "backward window"
+    {|
+[shop.season."backward"]
+starts = "2027-03-01"
+ends = "2027-02-28"
+|}
+    "is after";
+  refuse "overlapping windows"
+    (season_text
+     ^ {|
+[shop.season."new-year"]
+starts = "2026-12-25"
+ends = "2027-01-05"
+|})
+    "overlap";
+  refuse "unknown season key"
+    {|
+[shop.season."extra-key"]
+starts = "2026-12-01"
+ends = "2027-02-28"
+discount = 10
+|}
+    "unknown key";
+  refuse "unknown key under shop"
+    "[shop]\nseasonal = true\n"
+    "unknown key";
+  refuse "noncanonical season price id"
+    {|
+[shop.season."bad-price"]
+starts = "2026-12-01"
+ends = "2027-02-28"
+[shop.season."bad-price".prices_milli]
+unknown_item = 1
+|}
+    "unknown key";
+  refuse "negative season price"
+    {|
+[shop.season."bad-price"]
+starts = "2026-12-01"
+ends = "2027-02-28"
+[shop.season."bad-price".prices_milli]
+crown = -1
+|}
+    "must be an integer";
+  (* Adjacent windows share no day and stay enabled; a season without
+     overrides is a banner over base prices, not an error. *)
+  let policy =
+    enabled_policy
+      (valid_text
+       ^ season_text
+       ^ {|
+[shop.season."spring"]
+starts = "2027-03-01"
+ends = "2027-05-31"
+|})
+  in
+  Alcotest.(check bool) "spring window resolves" true
+    (Candle_config.season_at policy ~at:(at "2027-04-01T00:00:00Z") <> None)
+;;
+
 let () =
   Alcotest.run
     "candle_config"
     [ ( "content"
       , [ Alcotest.test_case "optional shop prices preserve payouts" `Quick test_optional_shop_prices
+        ; Alcotest.test_case "shop seasons price by window" `Quick test_shop_seasons_price_by_window
+        ; Alcotest.test_case "shop season misconfiguration disables" `Quick
+            test_shop_season_misconfiguration_disables
         ; Alcotest.test_case "arithmetic and required-field boundaries" `Quick test_policy_boundaries
         ; Alcotest.test_case "half-life is explicit and strictly typed" `Quick test_explicit_half_life
         ; Alcotest.test_case "explicit policy is required" `Quick test_explicit_policy

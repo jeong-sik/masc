@@ -6,6 +6,7 @@ type account = {
   balance_milli : int;
   owned_items : Keeper_portrait_item.t list;
   catalog : entry list;
+  season : string option;
 }
 type t = Off | Disabled of string | Ready of account
 

@@ -15,16 +15,37 @@ type payout_policy = private {
 
 val grade_amount_milli : payout_policy -> Candle_grade.t -> int option
 
+type season = private
+  { id : string
+  ; starts : Ptime.date
+  ; ends : Ptime.date
+  ; prices : (Keeper_portrait_item.t * int) list
+  }
+(** A named shop window: both days inclusive, UTC. Windows in one policy
+    never overlap, so at most one season contains any instant. *)
+
 type policy = private
   { payout : payout_policy
   ; prices : (Keeper_portrait_item.t * int) list
+  ; seasons : season list
   ; half_life : Candle_decay.half_life
   }
 
+val season_id : season -> string
+
 type price = Unpriced | Priced of int
 val price : policy -> Keeper_portrait_item.t -> price
-(** The explicit current milli-Candle price. A missing entry is [Unpriced],
+(** The explicit base milli-Candle price. A missing entry is [Unpriced],
     including when the optional [shop] table is absent. *)
+
+val season_at : policy -> at:Candle_time.t -> season option
+(** The season whose window contains [at], if any. At most one: the
+    parser refuses overlapping windows. *)
+
+val price_at : policy -> at:Candle_time.t -> Keeper_portrait_item.t -> price
+(** The price in force at [at]: the active season's entry wins when the
+    season names the item, else the base price. Outside every season this
+    is {!price}. *)
 
 type t =
   | Off  (** There is no [candle.toml]. Nothing is recorded, paid or sold. *)
@@ -39,7 +60,11 @@ val of_toml_string : string -> t
     All payout fields, a nonempty grade amount table, matching nonblank grade
     criteria and explicit distribution policies are required. The optional
     [shop.prices_milli] table accepts only canonical catalog ids and
-    nonnegative integers. Grade amounts accept [0..max_int], independent of
+    nonnegative integers. Each optional [shop.season."<id>"] table names a
+    window ([starts]/[ends] as YYYY-MM-DD calendar days, [starts] not after
+    [ends]) with an optional [prices_milli] override table in the same
+    shape; blank ids, unreadable days, and overlapping windows disable
+    Candle. Grade amounts accept [0..max_int], independent of
     the weight range: payout intermediates are exact, while each allocation
     remains bounded by its configured total. Cumulative wallet overflow is
     checked at settlement. No default prices or payout values. *)

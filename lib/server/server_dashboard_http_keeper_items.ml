@@ -30,7 +30,10 @@ let catalog_entry_json (entry : Candle_shop.catalog_entry) =
 
 let ready_json ~keeper (view : Candle_status.view) =
   let catalog = List.map (fun item ->
-    { Candle_shop.item; price=Candle_config.price view.policy item }) Item.all in
+    { Candle_shop.item; price=Candle_config.price_at view.policy ~at:view.at item }) Item.all in
+  let season = match Candle_config.season_at view.policy ~at:view.at with
+    | None -> `Null
+    | Some season -> `String (Candle_config.season_id season) in
   `Assoc
     [ "status", `String "ready"
     ; "keeper", `String keeper
@@ -40,6 +43,7 @@ let ready_json ~keeper (view : Candle_status.view) =
     ; "owned_items", `List (List.map (fun item -> `String (Item.id item))
         (Candle_balance.owned view.balance ~keeper))
     ; "catalog", `List (List.map catalog_entry_json catalog)
+    ; "season", season
     ]
 ;;
 

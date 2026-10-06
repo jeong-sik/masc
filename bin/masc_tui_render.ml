@@ -5200,6 +5200,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       match account, state.item_account_error with
       | Some (Item_account.Ready account), _ ->
           "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
+          ^ (match account.season with
+             | None -> ""
+             | Some id -> " · Season " ^ Terminal_text.single_line id)
       | Some Item_account.Off, _ -> "  Candle off · preview only"
       | Some (Item_account.Disabled reason), _ ->
           "  Candle disabled: " ^ Terminal_text.single_line reason

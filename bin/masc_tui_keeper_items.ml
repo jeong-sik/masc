@@ -8,7 +8,13 @@ type account = {
   balance_milli : int;
   owned_items : Item.t list;
   catalog : entry list;
+  season : string option;
 }
+
+let season_of_json = function
+  | `Null -> Ok None
+  | `String id when String.trim id <> "" -> Ok (Some id)
+  | _ -> Error "Item account season must be null or a nonblank id"
 type t = Off | Disabled of string | Ready of account
 
 let exact_keys expected fields =
@@ -106,7 +112,7 @@ let decode ~keeper_name json =
         | "off" -> [ "status"; "keeper"; "account_revision" ]
         | "disabled" -> [ "status"; "keeper"; "reason"; "account_revision" ]
         | "ready" ->
-          [ "status"; "keeper"; "balance_milli"; "owned_items"; "catalog"; "account_revision" ]
+          [ "status"; "keeper"; "balance_milli"; "owned_items"; "catalog"; "account_revision"; "season" ]
         | _ -> [])
       json
   in
@@ -134,10 +140,12 @@ let decode ~keeper_name json =
       let* catalog = decode_list ~context:"catalog" decode_entry catalog_json in
       let catalog_items = List.map (fun entry -> entry.item) catalog in
       let* () = unique_items ~context:"catalog" catalog_items in
+      let* season_json = field "season" fields in
+      let* season = season_of_json season_json in
       let ids items = List.sort String.compare (List.map Item.id items) in
       if ids catalog_items <> ids Item.all
       then Error "Item catalog is incomplete"
       else if not (List.for_all (fun item -> List.mem (Item.id item) (ids catalog_items)) owned_items)
       then Error "owned Item is absent from catalog"
-      else Ok (revision, Ready { balance_milli; owned_items; catalog })
+      else Ok (revision, Ready { balance_milli; owned_items; catalog; season })
     | _ -> Error ("unknown Item account status " ^ status)

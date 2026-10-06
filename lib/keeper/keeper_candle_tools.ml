@@ -52,8 +52,13 @@ let run ~operation ~base_path ~keeper_name ~args =
     Ok (account_json account)
   | Catalog ->
     let* () = input (Candle_json.finish ~context fields) in
-    let* catalog = shop (Candle_shop.catalog ~base_path) in
-    Ok (`Assoc [ "items", `List (List.map entry_json catalog) ])
+    let* catalog = shop (Candle_shop.catalog ~now:Time_compat.now ~base_path) in
+    let season =
+      match catalog.Candle_shop.season with
+      | None -> `Null
+      | Some id -> `String id
+    in
+    Ok (`Assoc [ "season", season; "items", `List (List.map entry_json catalog.Candle_shop.entries) ])
   | Equip ->
     let* slot_id, fields = input (Candle_json.field ~context "slot" Candle_json.as_string fields) in
     let* id, fields = input (Candle_json.field ~context "item" Candle_json.as_string fields) in
@@ -82,12 +87,18 @@ let run ~operation ~base_path ~keeper_name ~args =
     let* receipt =
       shop (Candle_shop.purchase ~now:Time_compat.now ~base_path ~keeper ~item)
     in
+    let season =
+      match receipt.Candle_shop.season with
+      | None -> `Null
+      | Some id -> `String id
+    in
     Ok
       (`Assoc
           [ "account", account_json receipt.account
           ; "item", `String (Item.id receipt.item)
           ; "amount_milli", `String (string_of_int receipt.amount_milli)
           ; "purchased_at", Candle_time.to_yojson receipt.purchased_at
+          ; "season", season
           ])
 ;;
 

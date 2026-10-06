@@ -11,11 +11,17 @@ type catalog_entry =
   ; price : Candle_config.price
   }
 
+type catalog =
+  { entries : catalog_entry list
+  ; season : string option
+  }
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t
   ; amount_milli : int
   ; purchased_at : Candle_time.t
+  ; season : string option
   }
 
 type error =
@@ -63,12 +69,17 @@ let account ~now ~base_path ~keeper =
   Ok (account_of view.balance (Keeper_id.Keeper_name.to_string keeper))
 ;;
 
-let catalog ~base_path =
+let catalog ~now ~base_path =
   let* policy = policy ~base_path in
+  let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
+  let season = Option.map Candle_config.season_id (Candle_config.season_at policy ~at) in
   Ok
-    (List.map
-       (fun item -> { item; price = Candle_config.price policy item })
-       Keeper_portrait_item.all)
+    { entries =
+        List.map
+          (fun item -> { item; price = Candle_config.price_at policy ~at item })
+          Keeper_portrait_item.all
+    ; season
+    }
 ;;
 
 let purchase ~now ~base_path ~keeper ~item =
@@ -76,10 +87,13 @@ let purchase ~now ~base_path ~keeper ~item =
   let keeper = Keeper_id.Keeper_name.to_string keeper in
   Candle_ledger.update ~base_path (fun view ->
     let* current_policy = policy ~base_path in
-    let* amount_milli = match Candle_config.price current_policy item with
+    let* purchased_at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
+    let season =
+      Option.map Candle_config.season_id (Candle_config.season_at current_policy ~at:purchased_at)
+    in
+    let* amount_milli = match Candle_config.price_at current_policy ~at:purchased_at item with
       | Candle_config.Unpriced -> Error (Unpriced item)
       | Candle_config.Priced amount -> Ok amount in
-    let* purchased_at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
     let* prepared = Candle_status.prepare ~at:purchased_at ~half_life:current_policy.half_life (Candle_ledger.events view)
       |> Result.map_error (fun error -> Account_invalid error) in
     let balance = prepared.balance in
@@ -94,7 +108,7 @@ let purchase ~now ~base_path ~keeper ~item =
     in
     Ok
       ( prepared.policy_events @ [ event ]
-      , { account = account_of balance keeper; item; amount_milli; purchased_at } ))
+      , { account = account_of balance keeper; item; amount_milli; purchased_at; season } ))
   |> Result.map_error (function
     | Candle_ledger.Refused error -> error
     | ( Candle_ledger.Read_failed _

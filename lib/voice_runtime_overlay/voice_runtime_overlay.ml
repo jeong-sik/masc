@@ -9,6 +9,7 @@ type transport =
   | Elevenlabs_direct
   | Voice_mcp
   | Macos_say
+  | Espeak_ng
   | Whisper_cli
 
 type auth_mode =
@@ -52,6 +53,7 @@ let string_of_transport = function
   | Elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
   | Macos_say -> "macos_say"
+  | Espeak_ng -> "espeak_ng"
   | Whisper_cli -> "whisper_cli"
 ;;
 
@@ -83,17 +85,26 @@ let voice_mcp_adapter =
 (* The two that run a command rather than reach an address.
 
    They are separate kinds rather than one "local command" because the argv
-   each takes is different -- say wants -v and -o, whisper-cli wants -m, -l and
-   -f -- and picking between them by looking at the command name would be a
-   string classifier deciding how to call a program. A kind names a calling
-   convention here the same way it names a wire protocol for the other three.
+   each takes is different -- say wants -v and -o, espeak-ng wants -v and -w,
+   whisper-cli wants -m, -l and -f -- and picking between them by looking at
+   the command name would be a string classifier deciding how to call a
+   program. A kind names a calling convention here the same way it names a
+   wire protocol for the other three.
 
-   Neither takes a credential: nothing leaves the machine. *)
+   None takes a credential: nothing leaves the machine. *)
 let macos_say_adapter =
   { canonical_name = "macos-say"
   ; transport = Macos_say
   ; auth_mode = No_auth
   ; aliases = [ "macos-say"; "macos_say"; "say" ]
+  }
+;;
+
+let espeak_ng_adapter =
+  { canonical_name = "espeak-ng"
+  ; transport = Espeak_ng
+  ; auth_mode = No_auth
+  ; aliases = [ "espeak-ng"; "espeak_ng" ]
   }
 ;;
 
@@ -110,6 +121,7 @@ let adapters =
   ; elevenlabs_direct_adapter
   ; voice_mcp_adapter
   ; macos_say_adapter
+  ; espeak_ng_adapter
   ; whisper_cli_adapter
   ]
 ;;
@@ -131,6 +143,7 @@ let adapter_for_endpoint_kind = function
   | Voice_config.Elevenlabs_direct -> elevenlabs_direct_adapter
   | Voice_config.Voice_mcp -> voice_mcp_adapter
   | Voice_config.Macos_say -> macos_say_adapter
+  | Voice_config.Espeak_ng -> espeak_ng_adapter
   | Voice_config.Whisper_cli -> whisper_cli_adapter
 ;;
 
@@ -199,7 +212,7 @@ type speaker =
 
 let speaker_of_transport = function
   | Openai_compat | Elevenlabs_direct -> Over_http
-  | Macos_say -> By_command
+  | Macos_say | Espeak_ng -> By_command
   | Voice_mcp -> By_mcp_tool
   | Whisper_cli -> Does_not_speak
 ;;
@@ -337,7 +350,7 @@ let endpoint_address (endpoint : Voice_config.endpoint) =
      | Ok url -> Some url
      | Error _ -> None)
   | Openai_compat | Elevenlabs_direct -> endpoint_base_url endpoint
-  | Macos_say | Whisper_cli -> None
+  | Macos_say | Espeak_ng | Whisper_cli -> None
 ;;
 
 let is_elevenlabs_voice_id value =
@@ -386,7 +399,7 @@ let http_request_for_tts
       (Printf.sprintf
          "voice config endpoint %s uses voice_mcp and cannot build HTTP TTS request"
          endpoint.id)
-  | Some _, (Macos_say | Whisper_cli) ->
+  | Some _, (Macos_say | Espeak_ng | Whisper_cli) ->
     Error
       (Printf.sprintf
          "voice config endpoint %s runs a command and has no HTTP TTS request"
@@ -464,7 +477,7 @@ let elevenlabs_catalogue_url base_url =
 let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key =
   let adapter = adapter_for_endpoint endpoint in
   match adapter.transport with
-  | Macos_say | Whisper_cli ->
+  | Macos_say | Espeak_ng | Whisper_cli ->
     Error
       (Printf.sprintf
          "voice config endpoint %s runs a command and has no HTTP voice catalogue"
@@ -503,6 +516,7 @@ let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_k
    this. And -l auto detected Korean at p = 0.9986 on a sample from say, so
    there is no language to configure. *)
 let macos_say_command = "say"
+let espeak_ng_command = "espeak-ng"
 let whisper_cli_command = "whisper-cli"
 
 let endpoint_command (endpoint : Voice_config.endpoint) ~default =
@@ -552,6 +566,15 @@ let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message 
             ; message
             ]
       }
+  | Espeak_ng ->
+    let command = endpoint_command endpoint ~default:espeak_ng_command in
+    (* A blank voice is not an error: espeak-ng then uses its default voice,
+       the same one a reader who never picked one has been listening to. -w
+       writes WAVE; measured 2026-10-07 with espeak-ng 1.52.0, the file came
+       back as 16-bit mono 22050 Hz WAVE. The message rides argv, never a
+       shell. *)
+    let voice_args = if String.trim voice = "" then [] else [ "-v"; String.trim voice ] in
+    Ok { argv = (command :: voice_args) @ [ "-w"; output_file; message ] }
 ;;
 
 (* The command that lists the voices installed on this machine.
@@ -568,6 +591,9 @@ let voice_listing_command_for_endpoint (endpoint : Voice_config.endpoint) =
   | Macos_say ->
     let command = endpoint_command endpoint ~default:macos_say_command in
     Ok { argv = [ command; "-v"; "?" ] }
+  | Espeak_ng ->
+    let command = endpoint_command endpoint ~default:espeak_ng_command in
+    Ok { argv = [ command; "--voices" ] }
   | Whisper_cli ->
     Error
       (Printf.sprintf "voice config endpoint %s transcribes and has no voices"
@@ -659,7 +685,7 @@ let stt_command_for_endpoint (endpoint : Voice_config.endpoint) ~audio_file ~mod
          "voice config endpoint %s is reached over %s, not by running a command"
          endpoint.Voice_config.id
          (string_of_transport adapter.transport))
-  | Macos_say ->
+  | Macos_say | Espeak_ng ->
     Error
       (Printf.sprintf "voice config endpoint %s speaks and does not transcribe"
          endpoint.Voice_config.id)
@@ -702,7 +728,7 @@ let stt_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key ~audio_
       (Printf.sprintf
          "voice config endpoint %s uses voice_mcp and cannot build HTTP STT request"
          endpoint.id)
-  | Some _, (Macos_say | Whisper_cli) ->
+  | Some _, (Macos_say | Espeak_ng | Whisper_cli) ->
     Error
       (Printf.sprintf
          "voice config endpoint %s runs a command and has no HTTP STT request"

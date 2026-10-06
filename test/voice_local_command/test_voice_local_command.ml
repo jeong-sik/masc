@@ -122,13 +122,44 @@ let test_say_is_told_which_container_to_write () =
    hand a player bytes it cannot decode, or report a live clip as reaped. *)
 let test_each_kind_names_the_container_it_writes () =
   let format kind = Masc.Voice_bridge.clip_format_for_kind kind in
-  Alcotest.(check bool) "say writes WAVE" true
-    (format Voice_config.Macos_say = Voice_bridge_core.Wav);
+  List.iter
+    (fun kind ->
+      Alcotest.(check bool) "a command speaker writes WAVE" true
+        (format kind = Voice_bridge_core.Wav))
+    [ Voice_config.Macos_say; Voice_config.Espeak_ng ];
   List.iter
     (fun kind ->
       Alcotest.(check bool) "everything over a wire answers MP3" true
         (format kind = Voice_bridge_core.Mp3))
     [ Voice_config.Openai_compat; Voice_config.Elevenlabs_direct; Voice_config.Voice_mcp ]
+
+(* The espeak-ng argv that was run, measured 2026-10-07 with espeak-ng 1.52.0:
+   -v en -w out.wav "hello" came back as 16-bit mono 22050 Hz WAVE. *)
+let test_espeak_is_asked_for_a_voice_and_a_file () =
+  let argv =
+    argv_of
+      (Overlay.tts_command_for_endpoint
+         (endpoint ~kind:Voice_config.Espeak_ng "espeak-local")
+         ~voice:"en" ~message:"hello keeper" ~output_file:"/tmp/out.wav")
+  in
+  Alcotest.(check (list string))
+    "the argv that was run"
+    [ "espeak-ng"; "-v"; "en"; "-w"; "/tmp/out.wav"; "hello keeper" ]
+    argv
+
+(* A reader who never picked a voice has been listening to the default voice
+   all along, and espeak-ng uses it when told nothing. *)
+let test_no_espeak_voice_leaves_the_flag_off () =
+  let argv =
+    argv_of
+      (Overlay.tts_command_for_endpoint
+         (endpoint ~kind:Voice_config.Espeak_ng "espeak-local")
+         ~voice:"  " ~message:"hello" ~output_file:"/tmp/out.wav")
+  in
+  Alcotest.(check (list string))
+    "no -v at all"
+    [ "espeak-ng"; "-w"; "/tmp/out.wav"; "hello" ]
+    argv
 
 let test_whisper_is_asked_for_the_model_and_the_file () =
   let argv =
@@ -211,15 +242,18 @@ let test_each_half_refuses_the_other () =
    | Error message ->
      Alcotest.(check bool) "and says which way round it is" true
        (Astring.String.is_infix ~affix:"does not speak" message));
-  match
-    Overlay.stt_command_for_endpoint
-      (endpoint ~kind:Voice_config.Macos_say "macos-say")
-      ~audio_file:"/tmp/heard.wav" ~model:"/models/m.bin"
-  with
-  | Ok _ -> Alcotest.fail "a speaker must not be asked to transcribe"
-  | Error message ->
-    Alcotest.(check bool) "and says which way round it is" true
-      (Astring.String.is_infix ~affix:"does not transcribe" message)
+  List.iter
+    (fun kind ->
+      match
+        Overlay.stt_command_for_endpoint
+          (endpoint ~kind "speaker")
+          ~audio_file:"/tmp/heard.wav" ~model:"/models/m.bin"
+      with
+      | Ok _ -> Alcotest.fail "a speaker must not be asked to transcribe"
+      | Error message ->
+        Alcotest.(check bool) "and says which way round it is" true
+          (Astring.String.is_infix ~affix:"does not transcribe" message))
+    [ Voice_config.Macos_say; Voice_config.Espeak_ng ]
 
 (* An HTTP endpoint asked for a command is told what it is reached over, not
    told the command is missing. *)
@@ -315,6 +349,107 @@ let test_a_say_voice_is_looked_up_as_say_reads_names () =
     (Bridge.Say_lacks_it { installed = 5 }) (lookup "Eddy");
   Alcotest.check has "a name nothing prints"
     (Bridge.Say_lacks_it { installed = 5 }) (lookup "NoSuchVoice")
+
+(* What espeak-ng actually printed, taken from the machine on 2026-10-07 with
+   espeak-ng 1.52.0: the header, a voice with no aliases, one with one, and
+   one with two glued together. *)
+let espeak_output =
+  "Pty Language       Age/Gender VoiceName          File                 Other Languages\n\
+   \ 5  am              --/M      Amharic            sem/am\n\
+   \ 2  en-us           --/M      English_(America)  gmw/en-US            (en 3)\n\
+   \ 5  cmn             --/M      Chinese_(Mandarin,_latin_as_English) sit/cmn              (zh-cmn 5)(zh 5)\n\
+   \ 5  ko              --/M      Korean             ko\n"
+
+let espeak_voices () = Bridge.espeak_catalogue_of_output espeak_output
+
+let test_every_espeak_row_becomes_a_voice () =
+  Alcotest.(check int) "four rows, four voices" 4 (List.length (espeak_voices ()))
+
+let test_the_language_is_the_second_column () =
+  let mandarin =
+    List.find
+      (fun (v : Bridge.catalogue_voice) ->
+        v.Bridge.voice_id = "Chinese (Mandarin, latin as English)")
+      (espeak_voices ())
+  in
+  Alcotest.(check (option string)) "the language as printed" (Some "cmn")
+    mandarin.Bridge.voice_language
+
+(* The aliases after the file are selections -v answers to: -v en spoke
+   English and -v zh reached Mandarin on the machine this was taken from.
+   Glued groups share no space, so they are read as groups, not tokens. *)
+let test_glued_aliases_are_all_read () =
+  let aliases_of id =
+    (List.find
+       (fun (v : Bridge.catalogue_voice) -> v.Bridge.voice_id = id)
+       (espeak_voices ()))
+      .Bridge.voice_aliases
+  in
+  Alcotest.(check (list string)) "the one alias" [ "en" ] (aliases_of "English (America)");
+  Alcotest.(check (list string)) "both glued aliases" [ "zh-cmn"; "zh" ]
+    (aliases_of "Chinese (Mandarin, latin as English)");
+  Alcotest.(check (list string)) "no aliases where none are printed" []
+    (aliases_of "Korean")
+
+(* A voice name's own parentheses hold no space, so they never qualify as an
+   alias group: (America) is part of the name, not a selection. *)
+let test_a_voice_names_own_parentheses_are_not_aliases () =
+  let american =
+    List.find
+      (fun (v : Bridge.catalogue_voice) ->
+        v.Bridge.voice_id = "English (America)")
+      (espeak_voices ())
+  in
+  Alcotest.(check bool) "America is not offered as a selection" false
+    (List.mem "America" american.Bridge.voice_aliases)
+
+(* Aliases ride the catalogue JSON so a picker can offer them; rows without
+   any keep the shape they always had. *)
+let test_aliases_ride_the_catalogue_json () =
+  let mandarin =
+    List.find
+      (fun (v : Bridge.catalogue_voice) ->
+        v.Bridge.voice_id = "Chinese (Mandarin, latin as English)")
+      (espeak_voices ())
+  in
+  Alcotest.(check string) "the aliases are listed"
+    {|{"id":"Chinese (Mandarin, latin as English)","name":"Chinese (Mandarin, latin as English)","language":"cmn","aliases":["zh-cmn","zh"]}|}
+    (Yojson.Safe.to_string (Bridge.catalogue_voice_json mandarin));
+  let korean =
+    List.find
+      (fun (v : Bridge.catalogue_voice) -> v.Bridge.voice_id = "Korean")
+      (espeak_voices ())
+  in
+  Alcotest.(check string) "no aliases, no field"
+    {|{"id":"Korean","name":"Korean","language":"ko"}|}
+    (Yojson.Safe.to_string (Bridge.catalogue_voice_json korean))
+
+let test_the_espeak_header_never_becomes_a_voice () =
+  Alcotest.(check int) "the header names columns, not a voice" 0
+    (List.length
+       (Bridge.espeak_catalogue_of_output
+          "Pty Language       Age/Gender VoiceName          File                 Other Languages\n"))
+
+let test_a_short_espeak_row_is_dropped () =
+  Alcotest.(check int) "nothing to choose, nothing offered" 0
+    (List.length (Bridge.espeak_catalogue_of_output "Pty Language\n 5  ko\n"))
+
+(* espeak-ng's -v answers to the name, the language and the aliases alike.
+   Unlike say it refuses an unknown voice itself -- measured 2026-10-07, -v
+   NoSuchVoiceXYZ exited 1 -- so this check fails fast with the name before
+   the clip does. *)
+let test_an_espeak_voice_is_looked_up_as_espeak_reads_names () =
+  let lookup voice = Bridge.espeak_voice_in_catalogue (espeak_voices ()) ~voice in
+  Alcotest.(check bool) "a printed name" true (lookup "Korean");
+  Alcotest.(check bool) "a name with its spaces back" true (lookup "English (America)");
+  Alcotest.(check bool) "a printed language" true (lookup "en-us");
+  Alcotest.(check bool) "a bare alias" true (lookup "en");
+  Alcotest.(check bool) "a glued alias" true (lookup "zh");
+  Alcotest.(check bool) "in another ASCII case" true (lookup "EN");
+  Alcotest.(check bool) "a name in another ASCII case" true (lookup "korean");
+  Alcotest.(check bool) "with space around it" true (lookup " ko ");
+  Alcotest.(check bool) "the underscore form -v refuses" false (lookup "English_(America)");
+  Alcotest.(check bool) "a name nothing prints" false (lookup "NoSuchVoice")
 
 (* Where a clip is stored, and how a reader finds it again. The token in the
    URL says nothing about the container -- the endpoint that spoke decided
@@ -453,6 +588,10 @@ let () =
             test_say_is_told_which_container_to_write
         ; Alcotest.test_case "each kind names the container it writes" `Quick
             test_each_kind_names_the_container_it_writes
+        ; Alcotest.test_case "espeak-ng is asked for a voice and a file" `Quick
+            test_espeak_is_asked_for_a_voice_and_a_file
+        ; Alcotest.test_case "no espeak-ng voice leaves the flag off" `Quick
+            test_no_espeak_voice_leaves_the_flag_off
         ] )
     ; ( "transcribing"
       , [ Alcotest.test_case "whisper is asked for the model and the file" `Quick
@@ -493,6 +632,24 @@ let () =
             test_a_line_naming_no_voice_is_dropped
         ; Alcotest.test_case "a say voice is looked up as say reads names" `Quick
             test_a_say_voice_is_looked_up_as_say_reads_names
+        ] )
+    ; ( "the voices espeak-ng has"
+      , [ Alcotest.test_case "every printed row becomes a voice" `Quick
+            test_every_espeak_row_becomes_a_voice
+        ; Alcotest.test_case "the language is the second column" `Quick
+            test_the_language_is_the_second_column
+        ; Alcotest.test_case "glued aliases are all read" `Quick
+            test_glued_aliases_are_all_read
+        ; Alcotest.test_case "a voice name's own parentheses are not aliases" `Quick
+            test_a_voice_names_own_parentheses_are_not_aliases
+        ; Alcotest.test_case "the header never becomes a voice" `Quick
+            test_the_espeak_header_never_becomes_a_voice
+        ; Alcotest.test_case "a short row is dropped" `Quick
+            test_a_short_espeak_row_is_dropped
+        ; Alcotest.test_case "a voice is looked up as espeak-ng reads names" `Quick
+            test_an_espeak_voice_is_looked_up_as_espeak_reads_names
+        ; Alcotest.test_case "aliases ride the catalogue json" `Quick
+            test_aliases_ride_the_catalogue_json
         ] )
     ; ( "what each kind will not do"
       , [ Alcotest.test_case "each half refuses the other" `Quick

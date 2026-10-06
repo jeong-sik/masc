@@ -17,9 +17,14 @@ export type LaneActivityDraft = { base: LaneActivityDocument; enabled: boolean }
  * the file cannot change; the raw POST's beforeDispatch moves it to `sent`;
  * the turn its response settles moves it to `answered`, or to `committed`
  * when that response is a verified commit whose durability is unconfirmed.
- * `source` is the text it submits, so a later read can tell whether that
- * write landed. */
-export type SaveAttempt = { stage: 'checking' | 'sent' | 'answered' | 'committed'; readonly source: string }
+ * `base` is the file it was saved over and `source` the text it submits, so
+ * a later read can tell whether that write landed even after the draft is
+ * gone. */
+export type SaveAttempt = {
+  stage: 'checking' | 'sent' | 'answered' | 'committed'
+  readonly base: LaneActivityDocument
+  readonly source: string
+}
 /** Server activity for lanes that report it apart from the file. A `reading`
  * value is identified by object identity, so any later read, save or
  * workspace change that replaces it also discards its late response. */
@@ -140,7 +145,7 @@ export class LaneActivitySession<L, O> {
     const sourceGeneration = runtimeTomlSourceGeneration.peek()
     const observe = this.spec.observe
     const observation: LaneActivityObservation<O> = observe ? { kind: 'reading' } : unobserved
-    this.update({ phase: 'reading', current: null, observation, error: null })
+    this.update({ phase: 'reading', current: null, observation, error: null, notice: null })
     await Promise.all([this.readFile(authority, version, sourceGeneration),
       observe ? this.observe(observe, observation) : undefined])
   }
@@ -170,12 +175,14 @@ export class LaneActivitySession<L, O> {
     }
   }
   /** What a successful read decides about the draft and an uncertain write.
-   * The read is the evidence: an unchanged base revision means the write did
-   * not replace the file, and a file holding exactly the submitted text means
-   * an unanswered write did. A committed write whose durability is unconfirmed
-   * is not settled by seeing its text, which proves visibility, not
-   * durability. Any other file keeps the doubt until the draft is reapplied
-   * to it or discarded, and save stays refused meanwhile. */
+   * The read is the evidence, compared with the file the write was saved
+   * over: an unchanged revision means the write did not replace the file, and
+   * a file holding exactly the submitted text means an unanswered write did.
+   * A committed write whose durability is unconfirmed is not settled by seeing
+   * its text, which proves visibility, not durability. Any other file keeps
+   * the doubt until the draft is reapplied to it or discarded, and save stays
+   * refused meanwhile. A draft discarded while the file was unread is
+   * replaced by the file just read, so reapply stays reachable. */
   private settleRead(current: LaneActivityDocument, enabled: boolean): Partial<LaneActivityState<O>> {
     const { draft, uncertain } = this.state.peek()
     const fresh = { base: current, enabled }
@@ -183,15 +190,16 @@ export class LaneActivitySession<L, O> {
       const retain = draft !== null && (this.modified() || draft.base.source_path !== current.source_path)
       return { draft: retain ? draft : fresh, notice: null }
     }
-    if (draft !== null && draft.base.source_path === current.source_path) {
-      if (draft.base.source_revision === current.source_revision)
-        return { draft, uncertain: null, notice: '이전 저장은 파일을 바꾸지 않았습니다. 초안을 다시 저장할 수 있습니다.' }
+    const kept = draft ?? fresh
+    if (uncertain.base.source_path === current.source_path) {
+      if (uncertain.base.source_revision === current.source_revision)
+        return { draft: kept, uncertain: null, notice: '이전 저장은 파일을 바꾸지 않았습니다.' }
       if (current.source_text === uncertain.source)
         return uncertain.stage === 'committed'
-          ? { draft, notice: '저장한 내용이 파일에 보이지만 디스크 반영은 확인되지 않았습니다. 활동 값만 다시 적용해 확정하세요.' }
+          ? { draft: kept, notice: '저장한 내용이 파일에 보이지만 디렉터리 동기화는 확인되지 않았습니다. 이 화면에서는 확인할 수 없습니다. 이대로 두려면 활동 값만 다시 적용하세요.' }
           : { draft: fresh, uncertain: null, notice: '이전 저장이 파일에 반영된 것을 확인했습니다.' }
     }
-    return { draft, notice: '파일이 다른 내용으로 바뀌었습니다. 이전 저장 결과를 확인할 수 없습니다. 활동 값만 다시 적용하거나 초안을 버리세요.' }
+    return { draft: kept, notice: '파일이 다른 내용으로 바뀌었습니다. 이전 저장 결과를 확인할 수 없습니다. 활동 값만 다시 적용하거나 초안을 버리세요.' }
   }
   toggle(authority: ExecutionWorkspaceAuthority) {
     const { draft, current } = this.state.peek()
@@ -208,8 +216,10 @@ export class LaneActivitySession<L, O> {
     try {
       if (draft.base.source_path !== current.source_path) throw new Error('다른 파일에는 기존 초안을 재적용할 수 없습니다. 먼저 초안을 버리세요.')
       this.spec.write(current.source_text, this.lane, draft.enabled)
-      this.update({ draft: { ...draft, base: current }, uncertain: null, error: null,
-        notice: '활동 값만 현재 설정에 다시 적용했습니다. 저장 버튼으로 확정하세요.' })
+      const pending = this.spec.read(current.source_text, this.lane).enabled !== draft.enabled
+      this.update({ draft: { ...draft, base: current }, uncertain: null, error: null, notice: pending
+        ? '활동 값만 현재 설정에 다시 적용했습니다. 저장 버튼으로 확정하세요.'
+        : '현재 설정이 이미 이 활동 값입니다. 저장할 변경이 없습니다.' })
     } catch (error) { this.update({ error: errorToString(error) }) }
   }
   discard(authority: ExecutionWorkspaceAuthority) {
@@ -233,7 +243,7 @@ export class LaneActivitySession<L, O> {
     catch (error) { this.update({ error: errorToString(error) }); return false }
     const version = ++this.version, options = this.options(authority, version)
     const sourceGeneration = runtimeTomlSourceGeneration.peek()
-    const attempt: SaveAttempt = { stage: 'checking', source }
+    const attempt: SaveAttempt = { stage: 'checking', base: draft.base, source }
     let committed = false
     this.attempt = attempt
     this.update({ phase: 'saving', error: null, notice: null, followupError: null, setupResumeError: null })
@@ -270,7 +280,12 @@ export class LaneActivitySession<L, O> {
     } catch (error) {
       if (attempt.stage === 'sent') attempt.stage = 'answered'
       const sent = attempt.stage === 'answered'
-      if (this.owns(authority, version)) {
+      if (committed) {
+        // The file is written; a later failure belongs to the follow-up and
+        // says nothing about the write.
+        if (this.owns(authority, version)) this.update({ followupError:
+          [this.state.peek().followupError, `설정 저장 후 후속 처리 실패: ${errorToString(error)}`].filter(Boolean).join(' ') })
+      } else if (this.owns(authority, version)) {
         if (error instanceof RuntimeTomlRevisionConflict) {
           try {
             const conflictCurrent = sourceGeneration === runtimeTomlSourceGeneration.peek() ? error.current : null
@@ -302,6 +317,9 @@ export class LaneActivitySession<L, O> {
       // an operator read, since a read racing the unanswered write would
       // misjudge it.
       announceRuntimeTomlWriteUncertain(); this.spec.announceObservation(authority)
+      // That announcement also reached this session, whose notice would name
+      // another screen; the write in doubt is this session's own.
+      this.update({ notice: null })
     }
     return committed && this.admits(authority)
   }

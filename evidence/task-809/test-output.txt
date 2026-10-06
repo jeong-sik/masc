@@ -1,0 +1,58 @@
+command: cd masc && dune build lib/ 2>&1 | head -40; echo "exit=$?"
+exit=0
+
+command: cd masc && dune build test/test_tool_workspace_coverage.exe 2>&1 | head -10
+(no output)
+build_exit=0
+
+command: cd masc && ./_build/default/test/test_tool_workspace_coverage.exe 2>&1 | tail -30
+  [OK]          coverage         10   dispatch_status_summary_and_cap.
+  [OK]          coverage         11   dispatch_status_done_summary.
+  [OK]          coverage         12   dispatch_status_leaves_unlinked_task_un...
+  [OK]          coverage         13   dispatch_status_surfaces_task_goal_link.
+  [OK]          coverage         14   dispatch_status_surfaces_awaiting_verif...
+  [OK]          coverage         15   dispatch_status_hides_completed_stale_a...
+  [OK]          coverage         16   dispatch_status_players_prefer_live_boa...
+  [OK]          coverage         17   dispatch_removed_named_workspace_tools.
+  [OK]          coverage         18   dispatch_check_transition_claim_auto_bi...
+  [OK]          coverage         19   dispatch_check_claim_next_marks_current...
+  [OK]          coverage         20   dispatch_status_multi_assignment_curren...
+  [OK]          coverage         21   dispatch_check_owned_current_drift_fail...
+  [OK]          coverage         22   dispatch_status_surfaces_owned_current_...
+  [OK]          coverage         23   dispatch_status_suppresses_lifecycle_gu...
+  [OK]          coverage         24   dispatch_status_treats_registered_keepe...
+  [OK]          coverage         25   dispatch_status_no_owned_reports_drift_...
+  [OK]          coverage         26   get_string_present.
+  [OK]          coverage         27   get_string_missing.
+  [OK]          coverage         28   get_bool_true.
+  [OK]          coverage         29   get_bool_false.
+  [OK]          coverage         30   get_bool_missing.
+  [OK]          coverage         31   next_hint_todo lists claim and cancel, ...
+  [OK]          coverage         32   next_hint_claimed lists submit, start, ...
+  [OK]          coverage         33   next_hint_in_progress lists submit and ...
+  [OK]          coverage         34   next_hint_awaiting_verification offers ...
+  [OK]          coverage         35   next_hint_done is empty (terminal).
+  [OK]          coverage         36   next_hint_cancelled is empty (terminal).
+
+Full test results in /Users/dancer/me/.masc/playground/polisher/masc/_build/_tests/Tool_workspace
+Test Successful in 0.455s. 37 tests run.  ← 1차 실행(신규 2건 추가 전)
+최종(신규 2건 포함) 실행에서도 run_exit=0 확인 — 총 39 tests run.
+
+command: cd masc && dune build bin/masc_tui.exe
+exit=0
+
+command: cd masc && dune build @check (내 변경 적용 상태)
+packages/agent_core/test/test_tls_cancellability.ml:32 — Common_name.t 오류
+packages/agent_core/test/test_mcp_integration.ml:104 — sampling_handler 라벨 오류
+→ 동일 오류를 내 변경 이전 main 4f7400f1 워크트리에서 재현 확인(기존 빨강, 범위 밖)
+
+새 회귀 테스트의 결정적 근거(1차 FAIL→정정 실측):
+[failure] missing expected substring "identity resolution for test-agent" —
+resolve_agent_name 은 agents dir 를 readdir 하지 않고 exact-file Sys.file_exists 로
+조기 true → identity 경계는 이 픽스처로 강제 불가(자체 계약상 조용한 빈 값).
+"active agent roster" 도 list_dir 의 Sys.is_directory 가드로 미발생.
+→ status 단언을 session binding read 1건 + 배너 + degraded 로 확정,
+dispatch_check_refuses_when_state_reads_fail 은 identity 경계를 직접 강제
+(agents 가 dir 가 아니면 resolve_agent_name 이 Sys.readdir 로 실패하는
+inspect_state 경로는 session-bound:true 에서 실제로 발생 — 확인된 WARN:
+is_agent_session_bound failed for test-agent: Sys_error("…/.masc/agents: Not a directory"))

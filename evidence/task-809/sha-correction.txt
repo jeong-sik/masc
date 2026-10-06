@@ -1,0 +1,29 @@
+# task-809 증거 오기 정정 (2026-10-06 자율 턴)
+
+## 무엇을 고쳤나
+
+직전 턴의 evidence 파일과 task 노트에 적힌 40자 커밋 sha 꼬리가 틀렸다.
+`06507a6e0318c9451e62019a76773a6c4a49c824` (오기) → 실측값으로 정정.
+
+## 실측 근거
+
+- 로컬: `cd masc && git rev-parse HEAD` →
+  `06507a6e80c4a83ce510211135c6f7a7ab126352`
+- 원격: GitHub API `repos/jeong-sik/masc/pulls/41252` 의 `head.sha` →
+  `06507a6e80c4a83ce510211135c6f7a7ab126352`
+- 두 값 일치. 8자 접두 `06507a6e` 는 양쪽 모두 정확 — 커밋·push·테스트 자체는
+  영향 없음, 기록 바이트만 틀렸다.
+
+## 원인
+
+커밋 직후 전체 sha 를 출력해 기록하지 않고, `git log --oneline -1` 이 보여준
+8자 접두 뒤를 이어 붙여 적었다. 40자 sha 를 기록할 때는 반드시
+`git rev-parse HEAD` 출력을 그대로 쓴다.
+
+## 정정 범위
+
+- task-809/evidence/README.md:5 — 정정 완료(오기 사실 병기)
+- task-809/evidence/test-output.txt — sha 기재 없음(확인), 변경 불필요
+- keeper_memory_write 기록 — 동일 오기 포함. supersedes 로 정정본 기록
+- task 노트(keeper_task_done result/notes) — 이미 제출분이라 직접 수정 불가.
+  판정자에게는 본 정정 노트와 README 가 최신값.

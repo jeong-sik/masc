@@ -22,7 +22,7 @@ const read = (text: string, lane: string) => ({ enabled: text.split('\n').includ
 const write = (text: string, lane: string, enabled: boolean) =>
   text.split('\n').map(row => row.startsWith(`${lane} = `) ? line(lane, enabled) : row).join('\n')
 const observations = vi.fn()
-const afterCommit = vi.fn<(signal: AbortSignal) => Promise<string | null>>()
+const afterCommit = vi.fn<(signal: AbortSignal) => Promise<boolean>>()
 const spec: LaneActivitySpec<string, never> = { key: lane => lane, read, write, afterCommit, announceObservation: observations }
 const fakes = laneActivitySessions(spec)
 const others = laneActivitySessions<string>({ key: lane => lane, read, write, announceObservation: () => undefined })
@@ -58,7 +58,7 @@ beforeEach(() => {
     if (expected !== revision(stored)) throw new RuntimeTomlRevisionConflict('changed', { source_path: path, source_text: stored, source_revision: revision(stored) })
     stored = text; return receipt(text)
   })
-  afterCommit.mockResolvedValue(null)
+  afterCommit.mockResolvedValue(true)
   consumers.refreshRuntimeConfigConsumers.mockResolvedValue(undefined)
 })
 afterEach(() => { fakes.resetForTesting(); others.resetForTesting() })
@@ -215,13 +215,13 @@ describe('Lane activity session', () => {
   })
 
   it('announces a commit to Settings and the lane observers after its follow-up', async () => {
-    afterCommit.mockResolvedValueOnce('setup resume unconfirmed')
+    afterCommit.mockResolvedValueOnce(false)
     const { authority, session } = await draft()
     expect(await session.save(authority)).toBe(true)
     expect(afterCommit).toHaveBeenCalledTimes(1)
     expect(settings.announceRuntimeTomlCommitted).toHaveBeenCalledWith(authority)
     expect(observations).toHaveBeenCalledWith(authority)
-    expect(session.state.value.setupResumeError).toBe('setup resume unconfirmed')
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
     expect(session.state.value.uncertain).toBeNull()
     expect(stored).toBe(write(base, 'alpha', false))
   })
@@ -237,34 +237,51 @@ describe('Lane activity session', () => {
 
   it('clears a setup-resume error only when the latest resume succeeds, from any screen', async () => {
     const active = { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
-    afterCommit.mockResolvedValueOnce('setup resume unconfirmed')
+    afterCommit.mockResolvedValueOnce(false)
     const { authority, session } = await draft()
     expect(await session.save(authority)).toBe(true)
-    expect(session.state.value.setupResumeError).toBe('setup resume unconfirmed')
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
     const older = deferred<unknown>()
     core.post.mockReturnValueOnce(older.promise).mockRejectedValueOnce(new Error('activation failed'))
     const first = resumeSavedModelSetup(), second = resumeSavedModelSetup()
     expect((await second).kind).toBe('failed')
     older.resolve(active)
     expect((await first).kind).toBe('active')
-    expect(session.state.value.setupResumeError).toBe('setup resume unconfirmed')
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
     core.post.mockResolvedValueOnce(active)
     expect((await resumeSavedModelSetup()).kind).toBe('active')
     expect(session.state.value.setupResumeError).toBeNull()
   })
 
-  it('aborts the follow-up when ownership moves and leaves a durable commit certain', async () => {
-    const resume = deferred<string | null>()
+  it('aborts the follow-up when ownership moves, leaves a durable commit certain and warns that resume is unconfirmed', async () => {
+    const resume = deferred<boolean>()
     let aborted = false
     afterCommit.mockImplementationOnce(async signal => { signal.addEventListener('abort', () => { aborted = true }); return resume.promise })
     const { authority, session } = await draft()
     const saving = session.save(authority)
     await vi.waitFor(() => expect(afterCommit).toHaveBeenCalledTimes(1))
-    workspace('/fixture/B'); resume.resolve(null)
+    workspace('/fixture/B'); resume.resolve(true)
     expect(await saving).toBe(false)
     expect(aborted).toBe(true)
     expect(session.state.value.uncertain).toBeNull()
     expect(settings.announceRuntimeTomlCommitted).not.toHaveBeenCalled()
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
+    const returned = workspace('/fixture/A')
+    await session.read(returned)
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
+  })
+
+  it('keeps a setup-resume warning when a later save is refused before writing', async () => {
+    afterCommit.mockResolvedValueOnce(false)
+    const { authority, session } = await draft()
+    expect(await session.save(authority)).toBe(true)
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
+    session.toggle(authority)
+    api.previewRuntimeTomlConfig.mockResolvedValueOnce({ ok: true, can_save: false })
+    expect(await session.save(authority)).toBe(false)
+    expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
+    expect(await session.save(authority)).toBe(true)
+    expect(session.state.value.setupResumeError).toBeNull()
   })
 
   it('keeps a revision conflict certain and retains the draft', async () => {

@@ -45,7 +45,9 @@ let transition config id action =
   let ctx : Masc.Workspace_types.context = { config; agent_name = "operator" } in
   Goals.handle_goal_transition ~tool_name:"masc_goal_transition"
     ~start_time:(Tool_timing.start ()) ctx
-    (`Assoc ["goal_id", `String id; "action", `String action])
+    (`Assoc (["goal_id", `String id; "action", `String action]
+             (* A drop must say why; the other actions take no note here. *)
+             @ (if action = "drop" then ["note", `String "scenario no longer needs this Goal"] else [])))
 let change config id action = ignore (transition config id action |> success)
 let proof config id = match Goal_verification.get_record_authoritative config ~goal_id:id with
   | Ok (Some record) -> record
@@ -245,7 +247,7 @@ let test_drop_cancels_left_over_todo () = with_workspace @@ fun config _ ->
   (match task_status config todo with
    | Masc_domain.Cancelled { cancelled_by; reason = Some reason; _ } ->
        check string "cancelled by the dropping actor" "operator" cancelled_by;
-       check string "the reason names the goal" (Printf.sprintf "Goal %s was dropped." goal.id) reason
+       check string "the reason names the goal" (Printf.sprintf "Goal %s was dropped: scenario no longer needs this Goal" goal.id) reason
    | _ -> fail "orphaned todo was not cancelled with a reason");
   (match task_status config shared, task_status config held, task_status config unlinked with
    | Masc_domain.Todo, Masc_domain.Claimed { assignee = "holder"; _ }, Masc_domain.Todo -> ()
@@ -264,8 +266,31 @@ let test_drop_cancels_left_over_todo () = with_workspace @@ fun config _ ->
   check bool "a repeated drop is a no-op" true Yojson.Safe.Util.(again |> member "noop" |> to_bool);
   check bool "a no-op drop reports no task work" true Yojson.Safe.Util.(again |> member "tasks" = `Null)
 
+let test_drop_without_reason_is_refused () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let todo = add_task ~goal_id:goal.id config "still wanted" in
+  let ctx : Masc.Workspace_types.context = { config; agent_name = "operator" } in
+  List.iter (fun (label, note) ->
+      let result = Goals.handle_goal_transition ~tool_name:"masc_goal_transition"
+          ~start_time:(Tool_timing.start ()) ctx
+          (`Assoc (["goal_id", `String goal.id; "action", `String "drop"] @ note)) in
+      refused result;
+      check bool (label ^ " names the missing reason") true
+        (let message = Tool_result.message result in
+         let sub = "drop needs a note" in
+         let n = String.length sub in
+         let rec go i = i + n <= String.length message && (String.sub message i n = sub || go (i + 1)) in
+         go 0);
+      phase GP.Executing (saved config goal.id);
+      (match task_status config todo with
+       | Masc_domain.Todo -> ()
+       | _ -> fail (label ^ " touched a linked Task")))
+    [ "no note", []; "blank note", ["note", `String "   "] ]
+
 let () = run "Goal suspension" ["drop", [
   test_case "drop cancels leftover todo, keeps shared and held work" `Quick test_drop_cancels_left_over_todo;
+  test_case "drop without a reason is refused and changes nothing" `Quick test_drop_without_reason_is_refused;
 ]; "contract", [
   test_case "restore every live state across both suspension kinds" `Quick test_restore_matrix;
   test_case "terminal refusal and Drop/Reopen escape" `Quick test_terminal_and_escape;

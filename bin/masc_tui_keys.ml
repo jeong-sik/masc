@@ -719,6 +719,7 @@ let for_surface = function
       ; b Act "a" "confirm proof"
           ~help:"read the proven Goal evidence; press again to confirm that exact proof"
       ; b Act "x" "drop"
+          ~help:"type why the goal is dropped; Enter drops it and cancels its unclaimed tasks"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
@@ -1138,6 +1139,16 @@ let board_compose_armed_bindings ~reply =
 
 let footer_hints_board_compose_armed ~reply =
   hints_of_bindings (board_compose_armed_bindings ~reply)
+
+(* No [q] here either: while a drop reason has the keys, every printable
+   scalar is a letter of it. *)
+let goal_drop_reason_bindings =
+  [ b Act "Enter" "drop" ~help:"drop the goal with this reason; its unclaimed tasks are cancelled"
+  ; b Meta "Esc" "cancel" ~help:"close the reason; the goal stays as it is"
+  ]
+
+let footer_hints_goal_drop_reason =
+  "type why  " ^ hints_of_bindings goal_drop_reason_bindings
 
 (* A pane's own keys, then the keys all seven panes share. *)
 let config_pane_bindings pane =

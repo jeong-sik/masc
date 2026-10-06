@@ -73,6 +73,16 @@ val bindings : t -> (Yojson.Safe.t list, string) result
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads
     still require their own durability and payload verification. *)
+type binding_inventory = {
+  records : (string * Yojson.Safe.t) list;
+  issues : (string * string) list;
+  complete : bool;
+}
+val binding_inventory : root:string -> binding_inventory
+(** Read binding metadata without constructing a store, reconciling observation
+    sequences, syncing, writing or creating directories. Per-file failures leave
+    readable siblings available and make [complete] false. Offload filesystem I/O.
+    These bytes are observations, never mutation or durability authority. *)
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;

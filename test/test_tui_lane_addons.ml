@@ -40,6 +40,9 @@ let read directory session =
     ~body:(Yojson.Safe.to_string (Owner.document_to_json document)) |> ok
 
 let create_and_conflict_repair () = with_directory (fun directory ->
+  ignore (Draft.create ".toml" |> ok);
+  check bool "enumerated suffix-only declaration is selectable" true
+    (Draft.editable_source_path ~directory (Filename.concat directory ".toml"));
   let session = { (Draft.create "observer.toml" |> ok) with text=source } in
   let created = save directory session in
   let session = Draft.after_response session created in
@@ -94,7 +97,8 @@ let file_identity_and_draft_sessions () = with_directory (fun directory ->
     (Result.is_error (Draft.decode_response (Draft.Read (Filename.concat directory "other.toml")) ~status:200
       ~body:(Yojson.Safe.to_string (Owner.document_to_json document))));
   List.iter (fun name -> check bool "only one TOML filename" true (Result.is_error (Draft.create name)))
-    ["../outside.toml";"nested/file.toml";"file.json";".toml"])
+    ["../outside.toml";"nested/file.toml";"file.json"];
+  check bool "suffix-only filename follows the declaration loader" true (Result.is_ok (Draft.create ".toml")))
 
 let configuration_and_ports () =
   let json = Yojson.Safe.from_string {|{

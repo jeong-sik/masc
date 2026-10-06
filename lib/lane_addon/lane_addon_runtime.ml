@@ -32,6 +32,17 @@ type backend = {
   image_ready : package:package -> (unit, string) result;
 }
 type configuration_owner = { id : string; source_path : string; revision : string }
+type inventory_presence = Live | Retained
+type inventory_instance = {
+  instance_id : string; incarnation : string; run_id : string;
+  package_id : string; title : string; package_revision : string;
+  configuration : configuration_owner option;
+  presence : inventory_presence; phase : phase;
+}
+type inventory = {
+  owner_present : bool; instances : inventory_instance list;
+  issues : (string * string) list; complete : bool;
+}
 type visibility = Shared | Operator_only | Keeper_only of string
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = { owner : skill_export_owner; instance_id : string; package : package }
@@ -774,6 +785,53 @@ let historical_inventory m =
         Log.Misc.warn "Lane retained binding omitted from inventory: %s" detail;
         None) bindings in
   Ok (without_live_bindings m visible)
+let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let stored = offload (fun () -> Lane_addon_store.binding_inventory ~root) in
+  let manager = Hashtbl.find_opt managers root in
+  let live = match manager with
+    | None -> []
+    | Some m -> entries m |> List.map (fun (e : entry) ->
+        { instance_id=e.instance_id; incarnation=e.instance_id; run_id=e.run_id;
+          package_id=e.package.id; title=e.package.title; package_revision=e.package.revision;
+          configuration=e.configuration; presence=Live; phase=e.phase }) in
+  let bindings = List.map snd stored.records in
+  let decode path json =
+    let* () = unique_json json in
+    let* json = normalize_retained_binding ~bindings json in
+    let* fields = object_ json in
+    let* instance_id = text fields "instance_id" in
+    let* () = if Filename.basename path = Lane_addon_store.digest instance_id ^ ".json"
+      then Ok () else Error "binding filename does not match its instance identity" in
+    let* incarnation = text fields "incarnation" in
+    let* () = if incarnation=instance_id then Ok ()
+      else Error "retained incarnation does not match its instance identity" in
+    let* run_id = text fields "run_id" in
+    let* package_id = text fields "addon_id" in
+    let* title = text fields "title" in
+    let* package_revision = text fields "revision" in
+    let* configuration = match List.assoc_opt "configuration" fields with
+      | None -> Error "missing retained configuration owner"
+      | Some _ -> configuration_of_fields fields in
+    let* phase = match List.assoc_opt "phase" fields with
+      | Some value -> phase_of_json value | None -> Error "missing retained phase" in
+    let phase = match phase with
+      | Detached -> Detached
+      | Failed detail -> Failed detail
+      | Detaching when Option.exists (fun m -> Hashtbl.mem m.recovering instance_id) manager -> Detaching
+      | Attached | Observing | Detaching ->
+          Failed "previous process; explicit detach can verify container cleanup" in
+    Ok {instance_id;incarnation;run_id;package_id;title;package_revision;
+        configuration;presence=Retained;phase} in
+  let retained,issues = List.fold_left (fun (values,issues) (path,json) ->
+    match decode path json with
+    | Error detail -> values,(path,detail)::issues
+    | Ok value when List.exists (fun (current : inventory_instance) ->
+        current.instance_id=value.instance_id) live -> values,issues
+    | Ok value -> value::values,issues) ([],stored.issues) stored.records in
+  {owner_present=Option.is_some manager;
+   instances=List.sort (fun (a : inventory_instance) b -> String.compare a.instance_id b.instance_id) (live @ retained);
+   issues=List.sort_uniq Stdlib.compare issues; complete=stored.complete && issues=[]})
 let persisted_binding m id =
   let* bindings = runtime_result (read_retained_bindings m) in
   match List.find_opt (function

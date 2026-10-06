@@ -30,7 +30,7 @@ function rawFieldsText(fields: Record<string, unknown>): string {
 function isDeclarationFile(directory: string, sourcePath: string): boolean {
   const fileName = sourcePath.slice(sourcePath.lastIndexOf('/') + 1)
   const expectedPath = `${directory}${directory.endsWith('/') ? '' : '/'}${fileName}`
-  return sourcePath === expectedPath && fileName.length > '.toml'.length
+  return sourcePath === expectedPath && fileName.length >= '.toml'.length
     && fileName.endsWith('.toml') && !fileName.includes('\\') && !fileName.includes('\0')
 }
 

@@ -544,9 +544,10 @@ describe('Lane declaration editing through the status surface', () => {
       })) } })
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByText('Configuration read: incomplete')
-    for (const sourcePath of paths.slice(0, -1)) {
+    for (const sourcePath of paths.slice(0, -2)) {
       expect(screen.queryByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeNull()
     }
+    expect(screen.getByRole('button', { name: `Edit TOML ${directory}/.toml`, exact: true })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: `Edit TOML ${path}`, exact: true }))
     await waitFor(() => expect(source(screen).value).toBe(original))
     expect(files.fetchLaneDeclaration).toHaveBeenCalledTimes(1)

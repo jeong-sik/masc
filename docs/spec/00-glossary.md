@@ -1078,6 +1078,17 @@ status: reference
   불변식; #39077).
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
+**Default Route (기본 경로)**
+: `[runtime].default`가 파일에 적힌 그대로의 값 — 선언된 lane의 id이거나 runtime의 id다.
+  배정이 없는 Keeper는 이 route로 해석된다. `Runtime.resolve_assignment`를 거쳐 해석되므로,
+  route가 lane을 이름하면 그 lane의 후보 순서를 걷는다. **Entry runtime**은 그 route가
+  진입하는 runtime이고, route가 lane을 이름하면 그 lane의 head 후보다.
+  `Runtime.get_default_route`는 파일이 적은 route를, `Runtime.get_default_runtime_id`는
+  진입 runtime을 답한다. 둘은 원래 한 값이었다 — default가 runtime만 이름할 수 있었고,
+  그래서 배정 없는 Keeper가 lane을 걷으려면 lane이 그 runtime의 id를 달고 있어야 했다.
+  Runtime 편집기는 설정된 default route를 그 entry runtime과 따로 보여준다(#40824).
+  → [Runtime.get_default_route](../../lib/runtime/runtime.mli) · [config/runtime.toml](../../config/runtime.toml)
+
 **Exact Lane Slot 교체·이동 (Exact lane slot replacement and move)**
 : Dashboard 런타임 편집기가 exact-output lane의 선언된 후보 하나를 자리
   그대로 다른 후보로 바꾸거나(`Runtime_route_exact_slot_replaced`,
@@ -1360,7 +1371,7 @@ status: reference
   충분히 넓고 목록이 비어 있지 않을 때만, 그림은 그만큼 좁아진다.
   → [Lane_activity](../../lib/lane_activity/lane_activity.mli),
   [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
-  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
+  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.ml),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
 
 **Agent Core Hook**
@@ -1855,6 +1866,23 @@ status: reference
   경계: 이 "role"은 프롬프트 `<role>` 블록(Keeper Prompt)도, Message의 role도, Board
   Interest 판정의 `keeper_role`도 아니다 — Fusion 심판의 위상 종류다.
   → [Fusion_types.judge_role](../../lib/fusion_core/fusion_types.mli)
+
+**Fusion Judge Conclusion (심판 종합)**
+: Fusion 심판이 내는 하나의 종합(`Fusion_types.judge_synthesis`). 심판 모델은
+  `ppx_deriving_yojson`의 variant 인코딩(예: `["Answer", ...]`) 대신 LLM이 내기 쉬운
+  named-field JSON을 내고, 같은 typed field 정의에서 출력 schema와 parser가 함께
+  만들어진다(`Fusion_judge_parse`). 필드는 `consensus`·`contradictions`·
+  `partial_coverage`·`unique_insights`·`blind_spots`·`resolved_answer`·`decision`
+  일곱이고, `decision.kind`는 `answer`·`recommend`·`insufficient` 셋 중 하나다.
+  `answer`는 `answer`, `recommend`는 `action`과 `rationale`, `insufficient`는
+  `missing`(문자열 배열)을 요구한다. `answer`와 `recommend`는 공백뿐인 결정 내용과
+  `resolved_answer`를 거절하고, `insufficient`는 답을 지어내지 않고 빈
+  `resolved_answer`를 반환할 수 있다 — 여기서 "비어 있지 않음"은 유니코드 공백을
+  넘는 내용을 뜻한다. 제시된 배열 항목 하나가 잘못되면 종합 전체를 `Error`로
+  거절한다. 이 종합은 Board meta_json과 요청 Keeper의 메인 chat lane으로 전달된다
+  (Fusion Delivery Obligation).
+  → [Fusion_judge_parse](../../lib/fusion_core/fusion_judge_parse.mli),
+  [RFC-0252 §7.2](../rfc/RFC-0252-fusion-panel-judge-deliberation.md)
 
 **Fusion Route (경로 이름)**
 : Fusion 자리에 적히는 값. Keeper 배정과 같은 규칙(`Runtime.resolve_assignment`)으로

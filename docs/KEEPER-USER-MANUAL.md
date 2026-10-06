@@ -299,3 +299,9 @@ operator pause and shutdown still prevent execution. The global
 `autonomous.enabled` setting controls automatic startup and spontaneous work.
 The live periodic interval is `keeper.keepalive_interval_sec`; wake hints do
 not reset its pending deadline or create work by themselves.
+
+## Goal suspension
+
+[Goal lifecycle controls](guides/GOAL-LIFECYCLE.md) explain Pause/Resume and
+Block/Unblock. These suspend Goal progression and new verification work; linked
+Tasks and other Keeper turns continue independently.

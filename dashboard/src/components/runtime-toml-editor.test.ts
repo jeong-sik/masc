@@ -625,7 +625,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
       expect(container.textContent).toContain('Skill catalog 게시됨')
       expect(container.textContent).toContain('파일 내구성 확인됨')
     })
@@ -920,7 +920,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.keyDown(textarea, { key: 's', metaKey: true })
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
     })
   })
 
@@ -1244,7 +1244,7 @@ describe('RuntimeTomlEditor', () => {
 
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
     })
     expect((container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value).toBe(nextSource)
   })
@@ -1259,7 +1259,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).not.toBeNull())
-    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
     expect(container.querySelector('textarea')?.value).toBe(draft)
     expect(container.querySelector('[aria-label="현재 서버 원문"]')?.textContent).toBe(current.source_text)
     expect(container.querySelector('[aria-label="편집 기준 원문"]')?.textContent).toBe(baseConfig.source_text)
@@ -1270,7 +1270,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('textarea')?.value).toBe(draft)
     expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(draft, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(draft, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: current.source_path })))
   })
 
   it('replaces the draft with the displayed current file only on the separate replace action', async () => {
@@ -1303,7 +1303,7 @@ describe('RuntimeTomlEditor', () => {
     const amended = `${current.source_text}# after explicit replace\n`
     fireEvent.input(container.querySelector('textarea')!, { target: { value: amended } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(amended, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(amended, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: current.source_path })))
   })
 
   it('reads current text for comparison without replacing a dirty draft or its save basis', async () => {
@@ -1924,7 +1924,7 @@ is-non-interactive = true
     fireEvent.click(save)
     await waitFor(() => {
       expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce()
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
       expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
     })
 

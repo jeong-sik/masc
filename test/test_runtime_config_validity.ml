@@ -5588,6 +5588,47 @@ let test_runtime_max_context_missing_both_sources_rejected_at_load () =
            check bool "load error names the max-context field" true
              (String_util.contains_substring msg "max-context")))
 
+let test_resolved_routing_snapshot_survives_lane_reload () =
+  let original = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore original) (fun () ->
+    let config candidates = Printf.sprintf {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.a]
+api-name = "chat-a"
+max-context = 1024
+[models.b]
+api-name = "chat-b"
+max-context = 1024
+[local.a]
+[local.b]
+[runtime]
+default = "primary"
+[runtime.lanes.primary]
+candidates = [%s]
+[runtime.assignments]
+reviewer = "primary"
+|} candidates in
+    with_temp_runtime_toml (config "\"local.a\", \"local.b\"") (fun before_path ->
+      (match Runtime.init_default ~config_path:before_path with
+       | Ok () -> () | Error message -> fail message);
+      let before = Runtime.dashboard_runtime_resolved_snapshot () in
+      with_temp_runtime_toml (config "\"local.b\", \"local.a\"") (fun after_path ->
+        (match Runtime.init_default ~config_path:after_path with
+         | Ok () -> () | Error message -> fail message);
+        let after = Runtime.dashboard_runtime_resolved_snapshot () in
+        let candidates snapshot = match snapshot.Runtime.rs_resolve_assignment "primary" with
+          | `Lane lane -> Runtime_lane.ordered_candidates lane
+          | `Missing | `Unavailable _ -> fail "declared primary lane did not resolve" in
+        check (list string) "captured resolver retains the old lane order"
+          ["local.a"; "local.b"] (candidates before);
+        check (list string) "new resolver follows the reloaded lane order"
+          ["local.b"; "local.a"] (candidates after);
+        check (option string) "old default agrees with old lane head"
+          (Some "local.a") (Option.map (fun (rt : Runtime_instance.t) -> rt.id) before.rs_default_runtime);
+        check (option string) "new default agrees with new lane head"
+          (Some "local.b") (Option.map (fun (rt : Runtime_instance.t) -> rt.id) after.rs_default_runtime))))
+
 let test_runtime_assignment_default_rider_resolves_to_default_runtime () =
   let runtime_toml =
     "[providers.local]\n\
@@ -6668,6 +6709,8 @@ let () =
           test_case
             "assignments: unassigned keeper rides [runtime].default"
             `Quick test_runtime_assignment_default_rider_resolves_to_default_runtime;
+          test_case "resolved routing snapshot survives lane reload" `Quick
+            test_resolved_routing_snapshot_survives_lane_reload;
           test_case
             "repo runtime.toml declares every mandatory exact-output lane"
             `Quick test_repo_runtime_toml_declares_mandatory_exact_output_lanes;

@@ -1,0 +1,27 @@
+{
+  "original_head": "df9f6f2170d86d18501cb501f0e96dbed7c36b54",
+  "source_sha256": {
+    "bin/masc_tui_overview_providers.ml": "21403c60efd73c8827e10da987ebbc018eb2142fa96a3ae41afebc7c6e6540f8",
+    "bin/masc_tui_usage_trend.ml": "c21b6beec6bbbe43ef8d7dd86d7226a6e9f37c1a9c7a56a44718815167d2237d",
+    "test/test_tui_overview_providers.ml": "3d13fc1adc9ff7162690e15bada4dd80abf2d169125490207bbd6db70fb311db",
+    "test/test_tui_usage_studio_pty.py": "457936d9cec7f3913bfe3b3bd4b787ce42506e0bb3c0f75c988c290894631dcf"
+  },
+  "binary_sha256": {
+    "bin/masc_tui.exe": "66721a5737d3c19c9928c39de07392ec609c0294f03b8bf7ac0d77db09ab363d",
+    "test/test_tui_overview_providers.exe": "bc0993347edf046448b57e1c1491cef7c61452e523b2a58701cda6f7491fab71"
+  },
+  "raw_logs_sha256": {
+    "red-build.log": "ecbf9e2fff6396c202e6cdb56fdc895a0b2503ccca7b1d2730762e344895ea53",
+    "red.log": "9199e4e07092f70afdbd2e7baa8d689d48cff5dc15a8bb9c2a0668dbd0b4d725",
+    "red-identities.json": "ee1e42769f0beb2a8b08cae0631356de2fff42e26a5d6330f59828a81caa7835",
+    "green-build.log": "0612970ac99b677dddd2db92a0c5ab4b67321cbb8312fca8dbe8036eef8fca4c",
+    "green.log": "999d22a73dfb9beb368e470c2bcf8bb0b187a28f24861bf93b8d000d75f47799",
+    "studio-pty.log": "98a7f641ded02392a57f77e0bad83665f9849e02dc1ac25766bdfd64a608477d"
+  },
+  "results": {
+    "red_failed": 3,
+    "native_total": 20,
+    "green_failed": 0,
+    "pty_journeys": 2
+  }
+}

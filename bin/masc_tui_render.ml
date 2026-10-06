@@ -3196,7 +3196,9 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
 let runtime_lane_notice_style = function
   | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
   | Masc_tui_types.Lane_write_pending -> Theme.warn ()
-  | Masc_tui_types.Lane_write_confirmed -> Theme.info ()
+  | Masc_tui_types.Lane_write_committed receipt ->
+    if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Theme.warn ()
+    else Theme.info ()
 
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
@@ -3417,7 +3419,7 @@ let render_exact_lane_provider_editor (state : state) editor =
    | Masc_tui_types.Lane_write_posting ->
      box_line_styled buf cols ~style:(Theme.info ()) "  Saving candidate order..."
    | Masc_tui_types.Lane_write_rereading _ ->
-     box_line_styled buf cols ~style:(Theme.info ()) "  Reloading saved candidate order..."
+     box_line_styled buf cols ~style:(Theme.info ()) "  Reading current candidate order..."
    | Masc_tui_types.Lane_write_idle -> ());
   (match Masc_tui_types.runtime_picker_projection
      ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows ~cols) state with
@@ -3580,7 +3582,7 @@ let render_exact_lane_provider_editor (state : state) editor =
      box_line_styled buf cols ~style:(Theme.recede ())
        "  J/K reorder · x remove · Enter/d settings · e TOML · Esc back";
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Changes save immediately; success is shown after the saved order reloads");
+       "  Changes save immediately; file and application results are shown separately");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;

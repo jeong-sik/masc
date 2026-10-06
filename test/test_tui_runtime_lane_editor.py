@@ -1637,13 +1637,13 @@ def run_replace_and_promote(executable: str) -> None:
             finally:
                 release_catalog.set()
             _keyboard_harness.wait_for_output(process, fd, output, b"gpt-6-luna medium", start=0, timeout=5.0)
-            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Reading current candidate order")
         finally:
             release.set()
         _keyboard_harness.wait_for_output(process, fd, output, b"> 2/2  [CLI] gpt-6-luna medium",
                           start=0, timeout=5.0)
-        _keyboard_harness.wait_for_output(process, fd, output, b"current candidate order reloaded",
-                          start=0, timeout=5.0)
+        if b"exact lanes applied" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("replacement readback lost its application receipt")
         posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
         expected = [{"lane": "exact/librarian_exact", "action": "replace",
                      "runtime_id": current, "replacement_runtime_id": replacement}]
@@ -1666,8 +1666,8 @@ def run_replace_and_promote(executable: str) -> None:
             release.set()
         _keyboard_harness.wait_for_output(process, fd, output, b"> 1/2  [CLI] gpt-6-luna medium",
                           start=mark, timeout=5.0)
-        _keyboard_harness.wait_for_output(process, fd, output, b"current candidate order reloaded",
-                          start=mark, timeout=5.0)
+        if b"exact lanes applied" not in _keyboard_harness.screen_text(bytes(output)):
+            raise AssertionError("promotion readback lost its application receipt")
         posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
         if posted[-1] != {"lane": "exact/librarian_exact", "action": "move",
                           "runtime_id": replacement, "direction": "first"}:

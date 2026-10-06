@@ -15656,7 +15656,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       state.runtime_lane_cursor_after_write <- None;
       Masc_tui_types.settle_runtime_lane_write state ~written result;
       (match result with
-       | Ok () ->
+       | Ok _receipt ->
            state.runtime_lane_pick <- None;
            state.runtime_lane_replacement_selection <- replacement_selection;
            Option.iter
@@ -16145,7 +16145,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Ok snapshot ->
             state.standalone_lanes <- Some snapshot;
             (match state.runtime_lane_write with
-             | Masc_tui_types.Lane_write_rereading (Masc_tui_types.Standalone_lanes_list, answered_at)
+             | Masc_tui_types.Lane_write_rereading (Masc_tui_types.Standalone_lanes_list, answered_at, _receipt)
                when generation > answered_at ->
                  (match state.runtime_lane_replacement_selection, state.slot_editor with
                   | Some (target, previous, next), Some editor

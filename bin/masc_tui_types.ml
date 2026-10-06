@@ -1791,9 +1791,10 @@ type runtime_lane_list =
 type runtime_lane_write =
   | Lane_write_idle
   | Lane_write_posting
-  | Lane_write_rereading of runtime_lane_list * int
+  | Lane_write_rereading of runtime_lane_list * int * Masc_tui_runtime_config_receipt.t
       (* The list's load generation when the write answered. A load of that
-         list launched after it is the first to carry the write. *)
+         list launched after it reads current execution state; the receipt
+         independently says whether the saved configuration was applied. *)
 
 (* What the lane editor says about its last key or write. Both the Runtime
    and the Lanes view draw it, and a new view, a moved cursor or a newly
@@ -1803,12 +1804,12 @@ type runtime_lane_notice =
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
-  | Lane_write_confirmed
-      (* A key that would write, pressed while the previous write is out. *)
+  | Lane_write_committed of Masc_tui_runtime_config_receipt.t
+      (* File commit and application facts, not inferred from a list GET. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
-  | Lane_write_confirmed -> "Saved · current candidate order reloaded"
+  | Lane_write_committed receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
@@ -10507,10 +10508,10 @@ let same_runtime_lane_list a b =
    waiting for a re-read of the list it changed that starts after this
    point; the caller launches that re-read. *)
 let settle_runtime_lane_write (state : state) ~written = function
-  | Ok () ->
-    state.runtime_lane_notice <- None;
+  | Ok receipt ->
+    state.runtime_lane_notice <- Some (Lane_write_committed receipt);
     state.runtime_lane_write <-
-      Lane_write_rereading (written, runtime_lane_list_generation state written)
+      Lane_write_rereading (written, runtime_lane_list_generation state written, receipt)
   | Error detail ->
     state.runtime_lane_notice <- Some (Lane_write_refused detail);
     state.runtime_lane_write <- Lane_write_idle
@@ -10523,15 +10524,18 @@ let runtime_lane_list_reread (state : state) ~list ~generation result =
    | Ok () -> set_runtime_lane_list_freshness state list Lane_list_read
    | Error _ -> ());
   match state.runtime_lane_write with
-  | Lane_write_rereading (written, answered_at)
+  | Lane_write_rereading (written, answered_at, receipt)
     when same_runtime_lane_list written list && generation > answered_at ->
     state.runtime_lane_write <- Lane_write_idle;
     (match result with
      | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
-     | Ok () -> state.runtime_lane_notice <- Some Lane_write_confirmed);
+     | Ok () -> ());
+    (* A pending-key notice may cover the receipt while this read is out.
+       Navigation dismissal and newer refusals must survive its completion. *)
     (match state.runtime_lane_notice with
-     | Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Some (Lane_write_refused _ | Lane_write_confirmed) | None -> ())
+     | Some Lane_write_pending ->
+         state.runtime_lane_notice <- Some (Lane_write_committed receipt)
+     | Some (Lane_write_committed _ | Lane_write_refused _) | None -> ())
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =

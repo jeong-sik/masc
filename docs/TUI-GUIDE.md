@@ -639,9 +639,16 @@ the shared model's settings in other lanes.
 `a` adds a fallback. `1` moves the selected candidate to the first position
 within its HTTP or CLI group, preserving the other candidates' relative order.
 HTTP candidates always run before CLI candidates. `J/K` move within a group,
-`x` removes, and Esc returns. These changes save immediately. The success
-message appears after the saved order is read back; a failed read is shown as
-unverified rather than successful.
+`x` removes, and Esc returns. These changes save immediately. The result
+shows file durability separately from application: exact lanes may be applied,
+unchanged with a reason, or unavailable until restart. When the prior exact
+configuration is kept, correct the reported configuration problem before
+restarting. The notice also names pending Keeper settings and lock warnings.
+A subsequent list refresh does not turn a held application into success. If
+that read fails, the commit result remains visible beside the stale-list warning.
+Long result messages wrap to the terminal width. Navigation dismisses the notice;
+a delayed reread does not restore it. Keeper values overridden by environment
+settings remain visible as warnings even when no restart is required.
 
 Standalone Lane model settings use the same form as Config → Models. In the
 Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's

@@ -7,7 +7,7 @@ import {
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { errorToString } from './format-string'
-import type { ModelSetupResumeState } from './model-setup-resume'
+import { modelSetupResumeState } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
 import { announceRuntimeTomlCommitted } from './runtime-toml-session'
 
@@ -15,13 +15,11 @@ export type LaneActivityDocument = RuntimeTomlCurrentSource
 export type LaneActivityDraft = { base: LaneActivityDocument; enabled: boolean }
 /** One activity save. `checking` covers the preview and the token wait, when
  * the file cannot change; the raw POST's beforeDispatch moves it to `sent`;
- * the turn its response settles moves it to `answered`, or to `committed`
- * when that response is a verified commit whose durability is unconfirmed.
- * `base` is the file it was saved over and `source` the text it submits, so
- * a later read can tell whether that write landed even after the draft is
- * gone. */
+ * the turn its response settles moves it to `answered`. `base` is the file it
+ * was saved over and `source` the text it submits, so a later read can say
+ * what the file shows even after the draft is gone. */
 export type SaveAttempt = {
-  stage: 'checking' | 'sent' | 'answered' | 'committed'
+  stage: 'checking' | 'sent' | 'answered'
   readonly base: LaneActivityDocument
   readonly source: string
 }
@@ -58,7 +56,7 @@ export type LaneActivitySpec<L, O> = {
 type Registered = {
   dirty(): boolean
   invalidate(authority: ExecutionWorkspaceAuthority | null, generation: number): void
-  completeSetupResume(authority: ExecutionWorkspaceAuthority, result: ModelSetupResumeState): void
+  setupResumed(authority: ExecutionWorkspaceAuthority): void
 }
 const registries: Array<() => Iterable<Registered>> = []
 function* allSessions(): Iterable<Registered> { for (const sessions of registries) yield* sessions() }
@@ -107,8 +105,8 @@ export class LaneActivitySession<L, O> {
     const { uncertain, phase } = this.state.peek()
     return this.modified() || uncertain !== null || phase === 'saving' || phase === 'followup'
   }
-  completeSetupResume(authority: ExecutionWorkspaceAuthority, result: ModelSetupResumeState) {
-    if (result.kind === 'active' && this.admits(authority) && this.authority === authority) {
+  setupResumed(authority: ExecutionWorkspaceAuthority) {
+    if (authority.workspaceRoot === this.workspaceRoot && this.state.peek().setupResumeError !== null) {
       this.update({ setupResumeError: null })
     }
   }
@@ -175,14 +173,14 @@ export class LaneActivitySession<L, O> {
     }
   }
   /** What a successful read decides about the draft and an uncertain write.
-   * The read is the evidence, compared with the file the write was saved
-   * over: an unchanged revision means the write did not replace the file, and
-   * a file holding exactly the submitted text means an unanswered write did.
-   * A committed write whose durability is unconfirmed is not settled by seeing
-   * its text, which proves visibility, not durability. Any other file keeps
-   * the doubt until the draft is reapplied to it or discarded, and save stays
-   * refused meanwhile. A draft discarded while the file was unread is
-   * replaced by the file just read, so reapply stays reachable. */
+   * A read never settles the doubt. The server reads the file without the
+   * lock its writes take, so a write still queued can land after a read that
+   * shows the old revision, and seeing the submitted text proves neither that
+   * the write is durable nor that it was this one. The read only tells the
+   * operator what the file shows; reapply or discard settles the doubt, and
+   * the next save is checked against the revision the operator adopted. A
+   * draft discarded while the file was unread is replaced by the file just
+   * read, so reapply stays reachable. */
   private settleRead(current: LaneActivityDocument, enabled: boolean): Partial<LaneActivityState<O>> {
     const { draft, uncertain } = this.state.peek()
     const fresh = { base: current, enabled }
@@ -190,16 +188,13 @@ export class LaneActivitySession<L, O> {
       const retain = draft !== null && (this.modified() || draft.base.source_path !== current.source_path)
       return { draft: retain ? draft : fresh, notice: null }
     }
-    const kept = draft ?? fresh
-    if (uncertain.base.source_path === current.source_path) {
-      if (uncertain.base.source_revision === current.source_revision)
-        return { draft: kept, uncertain: null, notice: '이전 저장은 파일을 바꾸지 않았습니다.' }
-      if (current.source_text === uncertain.source)
-        return uncertain.stage === 'committed'
-          ? { draft: kept, notice: '저장한 내용이 파일에 보이지만 디렉터리 동기화는 확인되지 않았습니다. 이 화면에서는 확인할 수 없습니다. 이대로 두려면 활동 값만 다시 적용하세요.' }
-          : { draft: fresh, uncertain: null, notice: '이전 저장이 파일에 반영된 것을 확인했습니다.' }
-    }
-    return { draft: kept, notice: '파일이 다른 내용으로 바뀌었습니다. 이전 저장 결과를 확인할 수 없습니다. 활동 값만 다시 적용하거나 초안을 버리세요.' }
+    const sameFile = uncertain.base.source_path === current.source_path
+    const notice = sameFile && current.source_revision === uncertain.base.source_revision
+      ? '파일은 아직 저장 전 그대로입니다. 보낸 저장은 반영되지 않았거나 늦게 반영될 수 있습니다. 활동 값만 다시 적용해 다시 저장하거나 초안을 버리세요.'
+      : sameFile && current.source_text === uncertain.source
+        ? '보낸 내용이 파일에 보입니다. 디스크에 안전하게 기록됐는지는 이 화면에서 확인할 수 없습니다. 이대로 두려면 활동 값만 다시 적용하세요.'
+        : '파일이 다른 내용으로 바뀌었습니다. 이전 저장 결과를 확인할 수 없습니다. 활동 값만 다시 적용하거나 초안을 버리세요.'
+    return { draft: draft ?? fresh, notice }
   }
   toggle(authority: ExecutionWorkspaceAuthority) {
     const { draft, current } = this.state.peek()
@@ -262,7 +257,6 @@ export class LaneActivitySession<L, O> {
       if (saved.source_path !== draft.base.source_path || saved.source_text !== source || receipt.commit.source_revision !== saved.source_revision)
         throw new Error('저장 응답이 제출한 파일과 일치하지 않습니다. 현재 설정을 다시 읽으세요.')
       committed = true
-      if (receipt.commit.durability !== 'durable') attempt.stage = 'committed'
       announceRuntimeTomlWritten()
       this.update({ phase: 'followup', receipt, current: null, observation: unobserved,
         uncertain: receipt.commit.durability === 'durable' ? null : attempt,
@@ -340,9 +334,17 @@ export function laneActivitySessions<L, O = never>(spec: LaneActivitySpec<L, O>)
   }
 }
 
-export function completeLaneActivitySetupResume(authority: ExecutionWorkspaceAuthority, result: ModelSetupResumeState) {
-  for (const session of allSessions()) session.completeSetupResume(authority, result)
-}
+// The resume state holds only the latest request's result, so a superseded
+// success never clears a newer failure, and a resume from any screen counts.
+// Each request enters `resuming` as it starts; its success counts only while
+// the workspace authority it started under still owns the page.
+let resumeAuthority: ExecutionWorkspaceAuthority | null = null
+effect(() => {
+  const state = modelSetupResumeState.value, authority = executionWorkspaceAuthority.peek()
+  if (state.kind === 'resuming') { resumeAuthority = authority; return }
+  if (state.kind !== 'active' || authority === null || authority !== resumeAuthority) return
+  for (const session of allSessions()) session.setupResumed(authority)
+})
 
 effect(() => {
   const authority = executionWorkspaceAuthority.value, generation = runtimeTomlSourceGeneration.value

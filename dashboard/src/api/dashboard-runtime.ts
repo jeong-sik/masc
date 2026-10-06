@@ -2412,8 +2412,10 @@ export async function patchRuntimeRouting(
 
 export async function patchRuntimeMediaFailover(
   runtimeIds: readonly string[],
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: 'media_failover',
     runtime_ids: [...runtimeIds],
@@ -2453,8 +2455,10 @@ function runtimeLaneEditBody(
 export async function patchRuntimeLane(
   lane: string,
   edit: RuntimeLaneEdit,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', runtimeLaneEditBody(lane, edit))
     .then(decodeCommittedRuntimeTomlConfig)
 }

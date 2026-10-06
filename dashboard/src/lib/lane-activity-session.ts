@@ -5,7 +5,7 @@ import {
   type CommittedRuntimeTomlConfig,
 } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
-import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { announceRuntimeTomlWritten, announceRuntimeTomlWriteUncertain, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { errorToString } from './format-string'
 import { modelSetupResumeState } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
@@ -324,7 +324,7 @@ export class LaneActivitySession<L, O> {
       // The file may have changed. Other screens hear so; this draft waits for
       // an operator read, since a read racing the unanswered write would
       // misjudge it.
-      announceRuntimeTomlWritten(); this.spec.announceObservation(authority)
+      announceRuntimeTomlWriteUncertain(); this.spec.announceObservation(authority)
       // That announcement also reached this session, whose notice would name
       // another screen; the write in doubt is this session's own.
       this.update({ notice: null })

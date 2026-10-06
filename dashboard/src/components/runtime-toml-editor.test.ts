@@ -449,7 +449,7 @@ describe('RuntimeTomlEditor', () => {
     render(null, container); announceRuntimeTomlWritten()
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(draft))
-    expect(container.textContent).toContain('다른 화면에서 저장되었습니다')
+    expect(container.textContent).toContain('다른 화면의 설정 변경 요청')
     expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
   })
@@ -595,7 +595,7 @@ describe('RuntimeTomlEditor', () => {
     announceRuntimeTomlWritten()
 
     await waitFor(() => {
-      expect(container.textContent).toContain('다른 화면에서 저장되었습니다')
+      expect(container.textContent).toContain('다른 화면의 설정 변경 요청')
     })
     expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(draft)

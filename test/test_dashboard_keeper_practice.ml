@@ -121,7 +121,7 @@ let test_practice_counts_autonomous_mix () =
     ]
   in
   let json = Practice.to_json (Practice.summarize_rows ~keeper_name:"mix" rows) in
-  check string "schema" "keeper.practice.v1" Json.(json |> member "schema" |> to_string);
+  check string "schema" "keeper.practice.v2" Json.(json |> member "schema" |> to_string);
   check string "keeper" "mix" Json.(json |> member "keeper" |> to_string);
   let window = Json.(json |> member "window") in
   check int "tail rows" 6 Json.(window |> member "tail_rows" |> to_int);
@@ -264,7 +264,7 @@ let test_practice_fleet_shape_and_limit_clamp () =
   check bool "generated_at" true Json.(json |> member "generated_at" |> to_float >= 0.0);
   List.iter
     (fun item ->
-      check string "item schema" "keeper.practice.v1" Json.(item |> member "schema" |> to_string))
+      check string "item schema" "keeper.practice.v2" Json.(item |> member "schema" |> to_string))
     items
 ;;
 
@@ -373,6 +373,91 @@ let test_practice_clamps_high_limit () =
   check int "clamped high limit" 200 Json.(json |> member "limit" |> to_int)
 ;;
 
+let test_practice_affordance_response_join () =
+  (* Each recognized autonomous turn answers its observed affordances with
+     its mode and outcome; a turn offering two answers for both; a direct
+     turn answers for none. Unknown labels count unrecognized, never
+     defaulted; non-string items read as absent. *)
+  let rows =
+    [ turn_row
+        [ "execution_path", `String "autonomous_cycle"
+        ; "turn_mode", `String "tool_use"
+        ; "outcome", `String "success"
+        ; "observed_affordances", `List [ `String "task_claim" ]
+        ]
+    ; turn_row
+        [ "execution_path", `String "autonomous_cycle"
+        ; "turn_mode", `String "noop"
+        ; "outcome", `String "success"
+        ; "observed_affordances", `List [ `String "task_claim"; `String "board_curation" ]
+        ]
+    ; turn_row
+        [ "execution_path", `String "autonomous_cycle"
+        ; "outcome", `String "error"
+        ; "observed_affordances", `List [ `String "task_audit" ]
+        ]
+    ; turn_row
+        [ "execution_path", `String "autonomous_cycle"
+        ; "turn_mode", `String "text_response"
+        ; "outcome", `String "success"
+        ; "observed_affordances"
+          , `List [ `String "task_verify"; `String " task_claim"; `String ""; `Int 42 ]
+        ]
+    ; turn_row
+        [ "execution_path", `String "direct_turn"
+        ; "turn_mode", `String "tool_use"
+        ; "outcome", `String "success"
+        ; "observed_affordances", `List [ `String "task_claim" ]
+        ]
+    ]
+  in
+  let json = Practice.to_json (Practice.summarize_rows ~keeper_name:"afford" rows) in
+  let auto = Json.(json |> member "autonomous") in
+  let response affordance =
+    Json.(auto |> member "affordance_response" |> member affordance)
+  in
+  let modes affordance = Json.(response affordance |> member "modes") in
+  let outcomes affordance = Json.(response affordance |> member "outcomes") in
+  let claim = response "task_claim" in
+  check int "task_claim offered" 2 Json.(claim |> member "offered" |> to_int);
+  check int "task_claim tool_use" 1 Json.(modes "task_claim" |> member "tool_use" |> to_int);
+  check int "task_claim noop" 1 Json.(modes "task_claim" |> member "noop" |> to_int);
+  check int "task_claim success" 2 Json.(outcomes "task_claim" |> member "success" |> to_int);
+  let curation = response "board_curation" in
+  check int "board_curation offered" 1 Json.(curation |> member "offered" |> to_int);
+  check int "board_curation noop" 1 Json.(modes "board_curation" |> member "noop" |> to_int);
+  let audit = response "task_audit" in
+  check int "task_audit offered" 1 Json.(audit |> member "offered" |> to_int);
+  check int "task_audit mode absent" 1 Json.(modes "task_audit" |> member "absent" |> to_int);
+  check int "task_audit error" 1 Json.(outcomes "task_audit" |> member "error" |> to_int);
+  check int "message_sweep never offered" 0
+    Json.(response "message_sweep" |> member "offered" |> to_int);
+  check int "unrecognized affordance labels" 3
+    Json.(auto |> member "unrecognized_affordance_labels" |> to_int);
+  check bool "role null without a role input" true Json.(json |> member "role" = `Null)
+;;
+
+let test_practice_role_comes_from_meta () =
+  with_config
+  @@ fun config ->
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String "role-keeper"
+          ; "trace_id", `String "trace-role-keeper"
+          ; "activation_mode", `String "manual"
+          ])
+    with
+    | Ok meta -> meta
+    | Error err -> fail ("meta_of_json failed: " ^ err)
+  in
+  let json = Practice.to_json (Practice.summarize_keeper ~config ~meta ~limit:10 ()) in
+  let role = Json.(json |> member "role") in
+  check string "activation mode" "manual" Json.(role |> member "activation_mode" |> to_string);
+  check bool "paused" false Json.(role |> member "paused" |> to_bool)
+;;
+
 let test_practice_writer_vocabulary_coupling () =
   (* Paths and modes come from the writer's own label functions, so a
      writer rename breaks this test instead of silently landing
@@ -425,6 +510,8 @@ let () =
         ; test_case "malformed" `Quick test_practice_counts_malformed_lines
         ; test_case "high clamp" `Quick test_practice_clamps_high_limit
         ; test_case "vocabulary coupling" `Quick test_practice_writer_vocabulary_coupling
+        ; test_case "affordance response" `Quick test_practice_affordance_response_join
+        ; test_case "role from meta" `Quick test_practice_role_comes_from_meta
         ] )
     ]
 ;;

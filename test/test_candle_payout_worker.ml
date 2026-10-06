@@ -292,8 +292,6 @@ let test_a_payout_with_a_keeper_to_pay_gets_candidates_and_keeps_waiting () =
   | None -> fail "no Candidates row"
 ;;
 
-(* A start for the base path that already runs, and a start for another base
-   path while one runs, are refused. The refused base path's payout waits. *)
 let test_policy_edit_releases_a_rejected_owner () =
   with_workspace @@ fun env config ->
   enable_candle config;
@@ -318,6 +316,8 @@ let test_policy_edit_releases_a_rejected_owner () =
     check int "rejected retry does not become a pulse loop" 2 !calls)
 ;;
 
+(* A start for the base path that already runs, and a start for another base
+   path while one runs, are refused. The refused base path's payout waits. *)
 let test_a_start_while_a_worker_runs_is_refused () =
   with_workspace
   @@ fun env config ->

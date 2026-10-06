@@ -1,0 +1,56 @@
+{
+  "provider": "glm",
+  "dispatches": 2969,
+  "released_by_other_share": 0.909,
+  "chance_baseline_share": 0.031,
+  "by_local_hour": {
+    "08": {
+      "dispatches": 1,
+      "released_by_other_share": 0.0,
+      "full_share_lower_bound": 0.0,
+      "call_seconds_p50": 45.8
+    },
+    "09": {
+      "dispatches": 221,
+      "released_by_other_share": 0.783,
+      "full_share_lower_bound": 0.043,
+      "call_seconds_p50": 7.5
+    },
+    "10": {
+      "dispatches": 228,
+      "released_by_other_share": 0.811,
+      "full_share_lower_bound": 0.616,
+      "call_seconds_p50": 31.3
+    },
+    "11": {
+      "dispatches": 396,
+      "released_by_other_share": 0.947,
+      "full_share_lower_bound": 0.668,
+      "call_seconds_p50": 17.2
+    },
+    "12": {
+      "dispatches": 470,
+      "released_by_other_share": 0.949,
+      "full_share_lower_bound": 0.665,
+      "call_seconds_p50": 14.8
+    },
+    "13": {
+      "dispatches": 638,
+      "released_by_other_share": 0.931,
+      "full_share_lower_bound": 0.706,
+      "call_seconds_p50": 9.8
+    },
+    "14": {
+      "dispatches": 658,
+      "released_by_other_share": 0.906,
+      "full_share_lower_bound": 0.186,
+      "call_seconds_p50": 7.7
+    },
+    "15": {
+      "dispatches": 357,
+      "released_by_other_share": 0.922,
+      "full_share_lower_bound": 0.382,
+      "call_seconds_p50": 7.0
+    }
+  }
+}

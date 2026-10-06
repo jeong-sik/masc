@@ -1,0 +1,32 @@
+name: Installer dependency contract (macOS)
+
+# The restricted-PATH installer contract (test/test_installer_dependencies.py)
+# symlinks the host tools into a temp host-bin and runs the installer with
+# PATH=host-bin only. On macOS /usr/bin/shasum is a perl wrapper that refuses
+# to run when $0 is not its canonical path, so a symlinked shasum dies with
+# "perl ... can't run host-bin/shasum". That only shows up on a macOS runner,
+# so the release-build macOS job caught it first. Run the contract on macos-14
+# here as well, so a change to the test or scripts/install.sh is checked on the
+# platform where the wrapper behaves differently.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'test/test_installer_dependencies.py'
+      - 'scripts/install.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Restricted-PATH installer contract on macOS
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Run the installer dependency contract
+        run: python3 test/test_installer_dependencies.py -v

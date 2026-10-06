@@ -13,7 +13,7 @@ let rollup ~active ~done_ : Masc_tui_types.planning_rollup =
   ; pr_verifying = 0
   ; pr_awaiting_confirmation = 0
   ; pr_done = done_
-  ; pr_dropped = 0
+  ; pr_paused = 0; pr_blocked = 0; pr_dropped = 0
   }
 
 let test_no_goals_is_the_count_alone () =
@@ -51,7 +51,7 @@ let test_one_mark_means_one_stage_across_the_two_rows () =
          ; pr_verifying = 1
          ; pr_awaiting_confirmation = 1
          ; pr_done = 1
-         ; pr_dropped = 1
+         ; pr_paused = 0; pr_blocked = 0; pr_dropped = 1
          })
   in
   let backlog =

@@ -11,7 +11,13 @@
       "test/test_lane_addon_application.ml": "70f506a95af970f82566f48f5b237da720e08c1dc0e16be0ae5defa1ea7c254e"
     }
   },
-  "syntax": 11,
+  "syntax": {
+    "files": 11,
+    "passed": 11,
+    "compiler": "5.5.1",
+    "source_commit": "4e672fa75d584e128f81f3966b1bc78cb5a5ce5a",
+    "command": "python3 docs/evidence/2026-10-05-lane-application/check-syntax.py 4e672fa75d584e128f81f3966b1bc78cb5a5ce5a"
+  },
   "runtime_tests": "Authored only: accepted-startup barrier, live/historical cleanup and incomplete readings; terminal replacement/deletion held during publication then failed and retried without repeating cleanup; cold directory sync failure and recovery. Direct reconciliation, not a Pulse scheduling test. Not typechecked or executed.",
   "limits": [
     "No local Dune or full project build",
@@ -26,11 +32,5 @@
     "Root compiler probe confirmed a record label inference conflict; cleanup publication now uses terminal_phase so worker phase projection keeps its original type. Reduced probe only; full Runtime typecheck still absent."
   ],
   "source_checkpoint": "c0f169251c599705c7c091b97e43be4cf0f88540",
-  "authored_direct_runtime_scenarios": 5,
-  "parent_refresh": {
-    "previous_base": "24ddb0d7d315299246a9dabfe6d2b9025ab2ecb2",
-    "current_base": "4187f3f1f41a57b9bb507b60cfdd85a78973d699",
-    "merge_checkpoint": "aeed858b4f28292b8e8bc2ec8914ffa1bd051364",
-    "delta": "Onboarding setup retry callback and Web tests/evidence; read source before merging. lib/test/bin and Dune/opam inputs are unchanged. Reuse only the unchanged pure-module/syntax evidence; no new Web or runtime execution claim."
-  }
+  "authored_direct_runtime_scenarios": 5
 }

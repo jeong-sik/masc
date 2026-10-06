@@ -33,7 +33,8 @@ val finish : t -> call_id:string -> unit
 val release : t -> unit
 (** The held blocks reached the stream. Delivers the receipts that waited
     for them, in commit order; later receipts are delivered at commit. A
-    second call does nothing. *)
+    second call does nothing. A turn that ends before its message starts
+    never streams its held blocks, and their receipts are never delivered. *)
 
 val hooks : t -> Agent_core.Hooks.hooks -> Agent_core.Hooks.hooks
 (** The pre-hook binds the invocation before execution. The post-hook reports

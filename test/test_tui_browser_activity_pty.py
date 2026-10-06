@@ -1,10 +1,9 @@
-"""Use the actual TUI to draft Exact activity and save through preview + CAS.
+"""Actual TUI Browser draft/save keys against synthetic Runtime HTTP.
 
-HTTP is synthetic. Opening, toggling, closing, reopening and Required refusal
-must not write. Preview failure retains the draft; conflict recovery reapplies
-only activity over the latest file. Read/reopen follows external activity when
-no unsaved change is pending. This suite needs a separately built binary
-from the tested source and is not a backend/model execution proof.
+Opening/toggling/navigation cannot write. Explicit save previews and uses CAS;
+conflict recovery retains current unrelated settings and moves accepted flat
+Automation paths into the canonical table. The live backend stays independently
+Off. Requires a separately built matching TUI; not a real Browser/server test.
 """
 import hashlib
 import json
@@ -12,6 +11,7 @@ import os
 import re
 import sys
 import threading
+import tomllib
 
 import tui_keyboard_harness as h
 import tui_keyboard_keepers as lanes
@@ -21,15 +21,8 @@ from test_tui_runtime_account_form_pty import commit_receipt
 RAW = runtime.RUNTIME_CONFIG_RAW_PATH
 PREVIEW = RAW + '/preview'
 PATH = '/workspace/config/runtime.toml'
-SOURCE = '''# retain operator notes
-[runtime.exact_output_lanes.librarian_exact]
-slots = ["first", "second"]
-cli_slots = ["client"]
-enabled = true
-
-[runtime.exact_output_lanes.board_attention_exact]
-slots = ["first"]
-'''
+SOURCE = '# retain operator notes\n[browser]\ngeckodriver = "/fixture/driver"\nbinary = "/fixture/browser"\n\n[browser.live]\nenabled = false\n'
+CANONICAL_OFF = '# retain operator notes\n[browser.automation]\nenabled = false\ngeckodriver = "/fixture/driver"\nbinary = "/fixture/browser"\n\n[browser.live]\nenabled = false\n'
 CONCURRENT = SOURCE + '\n[providers.extra]\nvalue = "concurrent"\n'
 
 
@@ -51,6 +44,7 @@ class Server:
                              'source_text': self.text, 'source_revision': revision(self.text)}
             request = json.loads(body)
             self.saves.append(request)
+            assert request['expected_source_path'] == PATH, 'save lost its observed configuration path'
             if request['expected_source_revision'] != revision(self.text):
                 return 409, {'code': 'revision_conflict', 'error': 'file changed', 'current': {
                     'source_path': PATH, 'source_text': self.text, 'source_revision': revision(self.text)}}
@@ -66,17 +60,13 @@ class Server:
 
     def inventory(self, _body):
         with self.lock:
-            off = 'enabled = false' in self.text
+            browser = tomllib.loads(self.text).get('browser', {})
         status, value = lanes.lane_inventory_response()
-        exact = next(row for row in value['exact_snapshot']['lanes'] if row['lane_id'] == 'librarian_exact')
-        row = next(row for row in value['rows'] if row['id'] == 'exact/librarian_exact')
-        exact.update(declared_slots=['first', 'second'], declared_cli_slots=['client'],
-                     admitted_slots=[] if off else ['first', 'second'], cli_slots=[] if off else ['client'],
-                     configuration_state='off' if off else 'ready', status='off' if off else 'idle')
-        row['state']['configuration'] = ({'kind': 'off', 'declared_slots': ['first', 'second'],
-                                         'declared_cli_slots': ['client']} if off else {
-            'kind': 'configured', **{key: exact[key] for key in (
-                'declared_slots', 'declared_cli_slots', 'admitted_slots', 'cli_slots', 'dropped_slots', 'admission_error')}})
+        for row in value['rows']:
+            if row['selection']['kind'] == 'browser':
+                lane = row['selection']['lane']
+                enabled = browser.get(lane, {}).get('enabled', True)
+                row['state']['activity'] = 'on' if enabled else 'off'
         return status, value
 
 
@@ -97,10 +87,10 @@ def run(binary):
         h.palette_go(process, fd, output, b'go keepers', b'MASC Keepers')
         h.select_keeper_row(process, fd, output, b'alpha')
         h.palette_go(process, fd, output, b'go lanes', b'All lanes')
-        select(process, fd, output, 'exact/librarian_exact', b'Librarian')
+        select(process, fd, output, 'browser/automation', b'Browser automation')
         h.send_and_wait(process, fd, output, b' ', b'Current file: On')
         with server.lock:
-            server.text = SOURCE.replace('enabled = true', 'enabled = false')
+            server.text = CANONICAL_OFF
         h.send_and_wait(process, fd, output, b'r', b'Current file: Off')
         h.drain_until_quiet(process, fd, output)
         screen = h.screen_text(bytes(output))
@@ -115,9 +105,9 @@ def run(binary):
         assert server.previews == 0 and not server.saves, 'following the current file submitted a write'
         h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
         h.send_and_wait(process, fd, output, b'?', b'MASC Cheat Sheet')
-        h.send_and_wait(process, fd, output, b'\x1b', b'MASC Exact activity')
+        h.send_and_wait(process, fd, output, b'\x1b', b'MASC Browser activity')
         for dismiss in (b'?', b'\x1b'):
-            print(f'Compact help hidden key: {dismiss!r}', flush=True)
+            print(f'Compact Browser help hidden key: {dismiss!r}', flush=True)
             h.send_and_wait(process, fd, output, b'?', b'MASC Cheat Sheet')
             h.resize_and_wait(process, fd, output, rows=12, columns=120,
                               needle=b'terminal too small')
@@ -125,11 +115,12 @@ def run(binary):
             h.drain_until_quiet(process, fd, output)
             h.resize_and_wait(process, fd, output, rows=32, columns=120,
                               needle=b'MASC Cheat Sheet')
-            # Too_small owns hidden-modal keys. Dismiss only after help is visible.
+            # The compact fallback owns hidden keys; dismiss visible help only.
             h.send_and_wait(process, fd, output, b'\x1b', b'Current file: On')
             visible = h.screen_text(bytes(output))
-            assert b'Activity draft: Off' in visible, 'help dismissal closed the activity draft'
-            assert server.previews == 0 and not server.saves, 'compact help dispatched a write'
+            assert b'Activity draft: Off' in visible, 'help dismissal closed the Browser activity draft'
+            with server.lock:
+                assert server.previews == 0 and not server.saves, 'compact help dispatched a write'
         h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
         h.send_and_wait(process, fd, output, b' ', b'Current file: On')
         h.drain_until_quiet(process, fd, output)
@@ -146,19 +137,26 @@ def run(binary):
         h.send_and_wait(process, fd, output, b'u', b'Activity reapplied to current settings')
         h.send_and_wait(process, fd, output, b's', b'Current file: Off')
         with server.lock:
-            assert server.text == CONCURRENT.replace('enabled = true', 'enabled = false')
+            configured = tomllib.loads(server.text)
+            assert configured['browser']['automation'] == {
+                'enabled': False, 'geckodriver': '/fixture/driver', 'binary': '/fixture/browser'}
+            assert 'geckodriver' not in configured['browser'] and 'binary' not in configured['browser']
+            assert configured['browser']['live']['enabled'] is False
+            assert configured['providers']['extra']['value'] == 'concurrent'
+            assert '# retain operator notes' in server.text
             assert server.saves[-1]['expected_source_revision'] == revision(CONCURRENT)
         h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
-        select(process, fd, output, 'exact/board_attention_exact', b'Board Attention')
-        h.send_and_wait(process, fd, output, b' ', b'Current file: On')
-        h.send_and_wait(process, fd, output, b' ', b'cannot be switched off')
-        assert len(server.saves) == 2, 'Required lane refusal submitted a write'
+        select(process, fd, output, 'browser/live', b'Live browser')
+        h.send_and_wait(process, fd, output, b' ', b'Current file: Off')
+        h.send_and_wait(process, fd, output, b' ', b'Activity draft: On')
+        assert len(server.saves) == 2, 'changing another backend draft wrote configuration'
         h.send_and_wait(process, fd, output, b'q', b'All lanes')
         os.write(fd, b'q')
 
-    h.run_terminal_scenario(binary, description='Exact activity draft, retained candidate order and conflict recovery',
+    h.run_terminal_scenario(binary, description='Browser activity draft, flat path migration and conflict recovery',
         interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=32)
-    print('Exact activity focused PTY: PASS (synthetic HTTP)')
+    print('Browser activity focused PTY: PASS (synthetic HTTP)')
+
 
 def run_compact_quit(binary):
     server = Server()
@@ -171,7 +169,7 @@ def run_compact_quit(binary):
         h.palette_go(process, fd, output, b'go keepers', b'MASC Keepers')
         h.select_keeper_row(process, fd, output, b'alpha')
         h.palette_go(process, fd, output, b'go lanes', b'All lanes')
-        select(process, fd, output, 'exact/librarian_exact', b'Librarian')
+        select(process, fd, output, 'browser/automation', b'Browser automation')
         h.send_and_wait(process, fd, output, b' ', b'Current file: On')
         h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
         h.resize_and_wait(process, fd, output, rows=12, columns=120,
@@ -179,8 +177,8 @@ def run_compact_quit(binary):
         os.write(fd, b'q')
         h.drain_until_quiet(process, fd, output)
         h.resize_and_wait(process, fd, output, rows=32, columns=120,
-                          needle=b'MASC Exact activity')
-        assert b'Activity draft: Off' in h.screen_text(bytes(output)), 'compact quit closed the hidden Exact draft'
+                          needle=b'MASC Browser activity')
+        assert b'Activity draft: Off' in h.screen_text(bytes(output)), 'compact quit closed the hidden Browser draft'
         assert server.previews == 0 and not server.saves, 'compact quit dispatched a write'
         h.resize_and_wait(process, fd, output, rows=12, columns=120,
                           needle=b'terminal too small')
@@ -188,9 +186,9 @@ def run_compact_quit(binary):
         os.write(fd, b'q')
         h.wait_for_output(process, fd, output, b'Goodbye!', start=exit_start, timeout=3.0)
 
-    h.run_terminal_scenario(binary, description='Compact overlay owns Exact quit',
+    h.run_terminal_scenario(binary, description='Compact overlay owns Browser quit',
         interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=32)
-    print('Exact compact quit PTY: PASS (synthetic HTTP)')
+    print('Browser compact quit PTY: PASS (synthetic HTTP)')
 
 
 if __name__ == '__main__':

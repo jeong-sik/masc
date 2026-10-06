@@ -1,6 +1,6 @@
 type owner = { workspace : string * string; lane : Standalone_lane.t }
 type document = Masc_tui_runtime_config_edit.document
-type write = { source_text : string; expected_source_path : string; expected_source_revision : string }
+type write = { source_text : string; expected_source_revision : string; expected_source_path : string }
 type draft = { base : document; desired : bool }
 type phase = Idle | Reading of int | Writing of int
 type t = {
@@ -128,7 +128,7 @@ let start_save ~generation t =
   let* was_enabled,_,_ = activity t.owner.lane draft.base in
   let* () = if was_enabled=draft.desired then Error "No activity change to save." else Ok () in
   let* source_text = apply draft.desired t.owner.lane draft.base in
-  let write = {source_text;expected_source_path=draft.base.path;expected_source_revision=draft.base.source_revision} in
+  let write = {source_text;expected_source_revision=draft.base.source_revision;expected_source_path=draft.base.path} in
   Ok ({t with phase=Writing generation;message=None},
       {owner=t.owner;generation;operation=Save write},write)
 let finish_save request result t =

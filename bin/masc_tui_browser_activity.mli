@@ -1,5 +1,5 @@
-(** Configuration-preserving Exact activity draft. No I/O or model dispatch. *)
-type owner = { workspace : string * string; lane : Standalone_lane.t }
+(** Configuration-preserving Browser activity draft. No I/O or model dispatch. *)
+type owner = { workspace : string * string; lane : Browser_lane.Lane_name.t }
 type document = Masc_tui_runtime_config_edit.document
 type t
 type request

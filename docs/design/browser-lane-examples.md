@@ -66,13 +66,23 @@ Runtime 원문 편집기나 admin raw endpoint로 검증·저장한 활동 값�
 설치되지 않았다면 설정을 저장하고 재개하는 것만으로 설치되지 않는다.
 그 경우에도 재시작해야 한다. All Lanes의 활동 값과 executor 등록 여부를
 각각 확인한다. 등록됐다는 표시는 세션이나 브라우저 프로세스의 정상 동작을
-보장하지 않는다. 전용 Browser 활동 편집 화면은 아직 제공하지 않는다.
+보장하지 않는다. TUI의 All Lanes에서 Browser 행을 고르고 `Space`로 활동
+화면을 연다. `Space`는 초안만 바꾸며 `s`가 preview와 revision 확인을 거쳐
+저장한다. `r`로 현재 파일을 읽고, 충돌 시 `u`로 활동 변경만 최신 설정에
+재적용한 뒤 `s`로 저장한다. `x`는 초안을 버리고 `Esc`는 초안을 보존한 채
+돌아간다. 화면 이동·작업공간 왕복에서 초안을 유지하며 파일 경로가 바뀌면
+명시적으로 초안을 버린 뒤 새 파일을 편집한다. Web은 Runtime 원문 편집기를
+사용한다.
 
 승인된 accepting 배포 단계에서는 `enabled` 생략을 켜짐으로 읽는다.
 Automation 경로는 `[browser.automation]`이 정본이다. 이 단계에서는 기존
 `[browser] geckodriver/binary`도 받지만 두 자리를 함께 쓰면 저장을 거절한다.
 기존 파일에 `[browser.automation] enabled`를 추가할 때는 경로도 같은 표로
-옮겨야 한다. 운영 파일 변경과 후속 strict 전환은 별도 배포 단계다.
+옮겨야 한다. TUI에서 Live나 Stagehand 활동을 저장하면 이 경로는 그대로 남는다.
+Automation 활동을 저장할 때는 기존 `[browser]` 표의 경로를 같은 초안에서
+옮기고 다른 backend 설정을 보존한다. inline/dotted 표를 안전하게 바꿀 수
+없으면 저장 전에 원문 편집을 안내한다. 운영 파일 변경과 후속 strict 전환은
+별도 배포 단계다.
 
 ## 열린 업무 화면에서 근거 찾기
 

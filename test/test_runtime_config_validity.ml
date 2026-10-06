@@ -6404,12 +6404,12 @@ extension = "/fixture/extension"
     let on_state = Runtime.For_testing.snapshot () in
     let revision = Runtime.config_source_revision_to_string
       (Runtime.config_observation ~path on).source_revision in
-    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
         ~expected_source_revision:revision off with
      | Ok _ -> () | Error _ -> fail "fresh Browser save refused");
     check_published "visible save publishes off with retained paths" off;
     check string "same off bytes on disk" off (Fs_compat.load_file path);
-    (match Runtime.save_config_text_if_current ~runtime_config_path:path
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
         ~expected_source_revision:revision on with
      | Error (Runtime.Config_source_conflict _) -> ()
      | Ok _ | Error (Runtime.Config_edit_failed _) -> fail "stale Browser save must conflict");

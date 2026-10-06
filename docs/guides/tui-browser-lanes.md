@@ -81,6 +81,18 @@ extension and profile paths apply at server startup, including when a previously
 unconfigured backend is added. See [backend activity settings](../design/browser-lane-examples.md#backend별-활동-설정)
 for the current Runtime TOML editing workflow and restart requirements.
 
+From All Lanes, select a Browser row and press `Space` to edit its activity.
+`Space` changes the retained draft; `s` previews and saves against the file
+revision you read. `r` reads current settings, `u` reapplies only your activity
+choice after a conflict, `x` discards it, and `Esc` returns with the draft kept.
+These drafts belong to the workspace and backend. A changed configuration path
+requires discarding the old draft before editing the new file. Opening, toggling
+or leaving the screen never saves. A successful save rereads both the file and
+Lane inventory. Saving Automation activity moves existing flat `geckodriver` and
+`binary` paths under `[browser]` into `[browser.automation]`. Saving Live or
+Stagehand activity leaves those paths where they are. Inline/dotted forms that
+cannot be preserved by the line editor require the Runtime source editor.
+
 ## Verification
 
 `test/test_browser_surface.ml` covers page selection, empty browsers and failures.

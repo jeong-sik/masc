@@ -450,6 +450,8 @@ type async_msg =
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result
   | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
+  | Browser_activity_read of Masc_tui_browser_activity.request * (Masc_tui_browser_activity.document, string) result
+  | Browser_activity_saved of Masc_tui_browser_activity.request * Masc_tui_browser_activity.write_result
   | Runtime_config_view_loaded of
       int * string option
       * (Masc_tui_runtime_config_view.reading, string) result

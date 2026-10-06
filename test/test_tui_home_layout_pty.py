@@ -32,7 +32,7 @@ def explicit_pane_choice(executable):
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        _keyboard_harness.wait_for_output(process, fd, output, b"Approvals and questions: not fully read \xc2\xb7 confirm queue", start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0, timeout=10)
         # A key below the shared pane floor must not turn an invisible
         # press into a preference that appears after the terminal grows.
         _keyboard_harness.send_and_wait(process, fd, output, b"\x0c", b"Activity pane needs")
@@ -81,7 +81,7 @@ def short_home_keeps_destinations(executable):
 
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
-        _keyboard_harness.wait_for_output(process, fd, output, b"Approvals and questions: not fully read \xc2\xb7 confirm queue", start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0, timeout=10)
         _keyboard_harness.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
         _keyboard_harness.select_keeper_row(process, fd, output, b"beta")
         _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Esc:list")

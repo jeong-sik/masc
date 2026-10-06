@@ -2151,16 +2151,16 @@ status: reference
 : Task 를 만든 에이전트나 사람의 이름(`created_by`). 만들 때 한 번 적히고 바뀌지 않는다.
   Keeper 는 자기가 만든 `Todo` 를 자동 claim 대상에서 뺀다.
 
-**Submitter**
-: 판정을 기다리는 제출을 한 에이전트. Task 전이 상태(`Claimed`, `InProgress`,
-  `AwaitingVerification`)에 적힌 에이전트 이름과 판정 쪽 코드가 부르는
-  `AwaitingVerification.assignee`·반려 기록의 `producer`·verification 레코드의 외부
-  스키마 키 `worker`가 모두 이 한 사람이다. 앞의 두 상태에서는 지금 일을 맡은 쪽이고,
-  `AwaitingVerification` 에서는 제출한 쪽이다.
+**Assignee**
+: Task 를 맡거나 맡아서 완료를 낸 에이전트(`assignee`). Task 전이 상태(`Claimed`,
+  `InProgress`, `AwaitingVerification`)에 적힌 에이전트 이름과 판정 쪽 코드가 부르는
+  반려 기록의 `producer`·verification 레코드의 외부 스키마 키 `worker`가 모두 이 한
+  사람의 별칭이다. 앞의 두 상태에서는 지금 일을 맡은 쪽이고, `AwaitingVerification`
+  에서는 완료를 제출한 쪽이다. 옛 문서의 "Submitter"는 이 항목을 가리킨다.
   → [Types_core](../../lib/types/types_core.mli)
 
 **Claim**
-: `Todo` 인 Task 를 맡는 전이. 한 Submitter 는 `Claimed` 와 `InProgress` 를 합쳐 하나만
+: `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
   가질 수 있고, 이 검사는 claim 할 때만 한다. Keeper 의 claim 은 곧바로 Start 를 이어
   보낸다.
   **다른 뜻과 구별한다**: Memory 쪽의 `claim`은 전이가 아니라 Fact의 문장 필드다(→ Fact).
@@ -2174,7 +2174,7 @@ status: reference
 **Submission**
 : 맡은 쪽이 증거와 함께 완료를 내는 전이(`Submit_for_verification`). 상태는
   `AwaitingVerification` 이 되고 새 Verification ID 를 받는다. 판정을 기다리는 Task 는
-  claim 한도에 세지 않는다. Submitter 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
+  claim 한도에 세지 않는다. Assignee 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
   바뀐다.
 
 **Verification ID**
@@ -2182,7 +2182,7 @@ status: reference
   운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
   필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
   `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
-  읽는 사이에 Submitter가 재제출한 경우, 낡은 판정이 새 제출에 붙는 것을 막는다.
+  읽는 사이에 Assignee가 재제출한 경우, 낡은 판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
@@ -2190,7 +2190,7 @@ status: reference
 
 **Verdict**
 : `Verdict_approved` 또는 `Verdict_rejected { reason }`. 승인은 `Done`, 반려는
-  Submitter 의 `InProgress` 다.
+  Assignee 의 `InProgress` 다.
 
 **Handoff Context**
 : Task 에 붙어 다니는 인계 메모. summary, reason, next_step, evidence_refs, updated_by
@@ -2211,7 +2211,7 @@ status: reference
 
 **Operator Attention**
 : 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는
-  `Held_without_actor`, `Producer_record_unreadable`(제출한 Submitter 의 기록을 읽지
+  `Held_without_actor`, `Producer_record_unreadable`(Assignee 의 기록을 읽지
   못한 것)이다.
   **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
   Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목

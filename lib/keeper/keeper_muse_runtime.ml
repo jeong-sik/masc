@@ -604,7 +604,7 @@ type mcp_blocks =
   | Streaming
 
 let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~raw_trace_run ~turn_count
-    ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position on_event =
+    ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position ~receipts on_event =
   let emit event = Option.iter (fun callback -> callback event) on_event in
   let next_tool_index = ref 1 in
   let tool_indexes = Hashtbl.create 8 in
@@ -628,7 +628,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
      finds nothing held. *)
   let rec release_mcp_blocks () =
     match !mcp_blocks with
-    | Streaming | Held [] -> mcp_blocks := Streaming
+    | Streaming | Held [] ->
+      mcp_blocks := Streaming;
+      Option.iter Keeper_official_client_tool_receipts.release receipts
     | Held held ->
       mcp_blocks := Held [];
       List.iter emit (List.rev held);
@@ -776,6 +778,10 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
         Keeper_official_client_text_stream.tool_row text_stream;
         let index = !next_tool_index in
         incr next_tool_index;
+        Option.iter
+          (fun receipts ->
+             Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
+          receipts;
         Hashtbl.replace tool_indexes call_id index;
         emit_mcp_block
           (Agent_core.Types.ContentBlockStart
@@ -787,6 +793,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
              }))
   ; on_tool_finished =
       (fun ~call_id ->
+        Option.iter
+          (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id)
+          receipts;
         Option.iter
           (fun index ->
              Hashtbl.remove tool_indexes call_id;
@@ -813,7 +822,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
-    ~on_official_client_result_handoff ~on_native_action ~on_usage_report
+    ~on_official_client_result_handoff ~on_native_action ~on_usage_report ~on_tool_execution
     ~(config : Serve.config) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -827,6 +836,21 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
   | Some env, Some clock ->
     (* DET-OK: a caller that installs no hooks runs the empty hook set. *)
     let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+    (* The bridge can answer a call before [Turn_started] opens the message;
+       its receipt waits with its held block. *)
+    let receipts =
+      Option.map
+        (fun notify ->
+           Keeper_official_client_tool_receipts.create
+             ~delivery:Keeper_official_client_tool_receipts.Held_until_released
+             ~notify)
+        on_tool_execution
+    in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
       Session_store.load ~base_path ~keeper_name
@@ -1283,6 +1307,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let stream =
       stream_projection
+        ~receipts
         ~quota_scope:(Some quota_scope)
         ~keeper_name
         ~runtime_id
@@ -1741,7 +1766,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_action ?on_usage_report ~event_bus ~raw_trace ~on_event ~config () =
+    ?on_native_action ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition = Atomic.make Keeper_provider_attempt_effect.No_effect_observed in
@@ -1801,6 +1826,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~on_official_client_result_handoff
         ~on_native_action
         ~on_usage_report
+        ~on_tool_execution
         ~config)
   in
   { result
@@ -1810,7 +1836,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
 ;;
 
 module For_testing = struct
-  let test_projection ~turn_count ~position ~on_usage_report on_event =
+  let test_projection ?receipts ~turn_count ~position ~on_usage_report on_event =
     stream_projection ~quota_scope:None
       ~keeper_name:"test"
       ~runtime_id:"muse.test"
@@ -1822,6 +1848,7 @@ module For_testing = struct
       ~on_turn_started:(fun (_ : observed_turn) -> ())
       ~on_message_started:(fun () -> ())
       ~position
+      ~receipts
       on_event
   ;;
 
@@ -1860,11 +1887,12 @@ module For_testing = struct
         }
     | Mcp_tool_finished of { call_id : string }
 
-  let project_stream_inputs ~during inputs =
+  let project_stream_inputs ?receipts ~during inputs =
     let emitted = ref [] in
     let feed = ref (fun (_ : stream_input) -> ()) in
     let projection =
       test_projection
+        ?receipts
         ~turn_count:1
         ~position:Keeper_usage_resolution.Fresh
         ~on_usage_report:None

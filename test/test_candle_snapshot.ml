@@ -479,6 +479,28 @@ let test_a_clock_that_gives_no_time_refuses_the_step () =
   no_ledger "refused" config
 ;;
 
+(* #40054: the appraiser lane settles money; it does not gate the pass record.
+   A pass records its Snapshot while the lane is unavailable. Only settlement
+   sees Disabled. *)
+let test_a_pass_records_its_snapshot_while_the_appraiser_is_unavailable () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  Candle_status.install_appraiser_check (fun () -> Error "lane publication unavailable");
+  Fun.protect
+    ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+    (fun () ->
+      check
+        bool
+        "settlement view is disabled"
+        true
+        (match Candle_status.current ~base_path:(base_path_of config) with
+         | Candle_config.Disabled _ -> true
+         | Candle_config.Off | Candle_config.Enabled _ -> false);
+      is_ok "snapshot records" (record config);
+      check (list string) "written" [ "goal-1" ] (goal_ids (ledger_events config)))
+;;
+
 let () =
   run
     "candle_snapshot"
@@ -534,6 +556,10 @@ let () =
             "a clock that gives no time refuses the step"
             `Quick
             test_a_clock_that_gives_no_time_refuses_the_step
+        ; test_case
+            "a pass records its snapshot while the appraiser is unavailable"
+            `Quick
+            test_a_pass_records_its_snapshot_while_the_appraiser_is_unavailable
         ] )
     ]
 ;;

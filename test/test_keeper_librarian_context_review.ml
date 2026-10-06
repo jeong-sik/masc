@@ -231,7 +231,15 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require |> Option.get in
     Alcotest.(check int) "queue-triggered conversation still commits Memory" (seeded.revision + 1) current.revision;
     Alcotest.(check int) "conversation evidence applies its disposition" 0 (List.length current.facts));
-  let run = match List.filter (fun (r : Runs.run) -> r.actor = keeper_id) (Runs.list_runs registry) with
+  (* Exact-run rows only: since #40709 the absorb gate also registers each
+     pre-dispatch evaluation in this registry under the same actor, with run
+     ids the runtime builds from the "librarian-absorb-" prefix
+     (keeper_librarian_runtime.ml). Only Cancel_absorb reaches the gate here,
+     so only it saw two rows. Same rule as test_keeper_librarian_absorb_gate. *)
+  let run = match List.filter (fun (r : Runs.run) ->
+      r.actor = keeper_id
+      && not (String.starts_with ~prefix:"librarian-absorb-" r.run_id))
+      (Runs.list_runs registry) with
     | [run] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "expected one run" in
   let output = match run.status with Runs.Completed {output; _} -> output

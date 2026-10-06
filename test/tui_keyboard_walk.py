@@ -118,7 +118,7 @@ from tui_keyboard_harness import (
 )
 from tui_keyboard_keepers import (
     KEEPER_LANES_PATH,
-    STANDALONE_LANES_PATH,
+    LANE_INVENTORY_PATH,
     acting_pane_ctrl_l_cycle_interaction,
     compact_input_gate_http_fixtures,
     hitl_lane_run_detail_response,
@@ -143,7 +143,7 @@ from tui_keyboard_keepers import (
     run_tab_strip_keeps_current_entry_regression,
     seed_long_roster,
     standalone_lane_runtime_config_response,
-    standalone_lanes_response,
+    lane_inventory_response,
     verifier_lane_run_detail_response,
     verifier_lane_runs_response,
     wheel_scrolls_and_clicks_do_not,
@@ -348,7 +348,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
         )
     )
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
-    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    lanes_fixtures[LANE_INVENTORY_PATH] = lane_inventory_response()
     lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
     lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
     lanes_fixtures[

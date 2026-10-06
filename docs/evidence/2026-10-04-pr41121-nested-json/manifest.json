@@ -1,0 +1,11 @@
+{
+  "tests": 42,
+  "suites": 2,
+  "files": {
+    "README.md": "9b256033f3b05832ae315a03b44eacd6fbd3395d617def331b57d2918f6d5f7a",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "green.log": "36d519c10c3deb59802bfaebb11b6de8197d9dd8284d20eb49638600dc600f46",
+    "red.log": "d905817a52d2f91d07f60ecaf1547807cf72c5371302312e84e24ea36028d627",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

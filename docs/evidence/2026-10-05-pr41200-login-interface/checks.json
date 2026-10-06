@@ -1,0 +1,44 @@
+{
+  "original_head": "d5b0c3e1008a5d0ef4b91ea88a02bd1f706eabe5",
+  "base": "87123f7df94a27ded447b5b05d01c2f5178de029",
+  "source_sha256": {
+    "bin/masc_tui_account_login.mli": "44fa69489af61d21cfe09e1bf0a2784b3e2e8a4779fd32d0f7ff35270b514689",
+    "bin/masc_tui_account_login.ml": "abf4987367ceaf7a304a723f7c81b6e53f25c2f65584ed125cbb2443f76c83ee",
+    "bin/masc_tui.ml": "31daf0fb025cbaa2be007859b60ab0c54279ea7e69bf599f3475e959893e3502",
+    "test/test_tui_account_login.ml": "7c2d21470828d67b2bede7df9160348133ba92c35fcbe0e1db5d999bfe9d6338",
+    "bin/dune": "80ceac5ac586f635167f09b1007ceac7033dd254547f34c04a0644a2456301be",
+    "test/dune": "48f83b947cb5fe7e58278c613bc559ec3325045b4ad9ae7db5513f456d0654c7"
+  },
+  "logs_sha256": {
+    "focused-build.log": "905f4d70d5fbc7dd5044c8e7586fa84bccb0f0ea067ca05516d79c90be95431d",
+    "original-tests.log": "dc80b79fc6f8ef0902bb3c3dc90c5f0d9f6c35b1708dfa8bf8a1d08760c0cf11",
+    "original-case-018.log": "de2363bc8ff517f4f3eb3b3efc2273ccfd3d7b090711483247b053a2c18a5b38",
+    "original-case-019.log": "2cda2bc391b35179e8baf2ae137b42b52b2550be87d89911a5dc101eeecb3db5",
+    "repaired-build.log": "7074e1550cc588a7f569cf74e3bf09f53db4ca1ee6c284adba623fd92adb46ae",
+    "repaired-tests.log": "c2e14526583acac81c1b2cf02337c5a910a050744c26d6c05555ac16e2d06434",
+    "main-source-comparison.json": "fd1c45f18c74b6854bc774390d2c304ed094807e8c1122f2ca587f9acba282ea",
+    "original-binary-sha256.txt": "758edc031d44e2fd254746aabc44f198d8044df52a88d5dc50fd29ddec0d3274"
+  },
+  "final_binary_sha256": "84d39a9a38395527ac1e3113579fb0183899393692af1b0f78eb67a41df6ee7d",
+  "checks": {
+    "original_build": 0,
+    "original_tests": {
+      "exit": 1,
+      "total": 42,
+      "pass": 40,
+      "fail": 2
+    },
+    "repaired_build": 0,
+    "repaired_tests": {
+      "total": 42,
+      "pass": 42,
+      "fail": 0
+    },
+    "fragment_parse": "PASS",
+    "product_diff_check": "PASS"
+  },
+  "commands": [
+    "DUNE_JOBS=2 opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_tui_account_login.exe",
+    "_build/default/test/test_tui_account_login.exe"
+  ]
+}

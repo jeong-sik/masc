@@ -94,8 +94,19 @@ Operational meaning:
   [`Runtime_lane.ordered_candidates`](../lib/runtime/runtime_lane.ml).
 - The materialized config is held in memory (`Runtime.loaded_state_ref`).
   It is replaced at boot and when a write commits through
-  `Runtime.save_config_text` (dashboard raw save, keeper assignment).
+  the shared runtime config commit path. Full-source editor saves enter through
+  `Runtime.save_config_text_if_current`, comparing `expected_source_path` and
+  `expected_source_revision` under the config write lock before validating and committing.
   A hand edit to the file takes effect at the next restart.
+- `POST /api/v1/runtime/config/raw` requires `source_text`,
+  `expected_source_revision` from the original GET's `source_revision`, and
+  `expected_source_path` from that same GET's `path`.
+  A missing or malformed revision or path returns 400. A changed path or source returns 409
+  with `code: "revision_conflict"` and `current.source_path`, `source_text`, and
+  `source_revision`; it does not write the file or publish runtime state.
+  `/raw/preview` remains text-only and does not authorize a later overwrite.
+  Source revisions are opaque to API clients; the server's source identity
+  uses the existing domain-separated SHA-256 contract.
 
 Operational meaning:
 

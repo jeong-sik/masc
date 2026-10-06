@@ -323,7 +323,9 @@ def runtime_resolved_runtime(
     }
 
 
-def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpResponse:
+def runtime_resolved_response(
+    *, runtime_a_in_two_lanes: bool = False
+) -> tuple[int, dict[str, object]]:
     runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
     return (
         200,
@@ -331,6 +333,7 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             "generated_at_iso": "2026-08-24T10:20:02Z",
             "source": RUNTIME_RESOLVED_PATH,
             "config_path": "/workspace/config/runtime.toml",
+            "default_route": "runtime-a",
             "default_runtime": runtime_a,
             # The two routes that are not lanes. Both lists are required by
             # the decoder; empty is a configuration (no vision runtimes), and
@@ -651,12 +654,11 @@ def runtime_surface_interaction(
             # catalog, then the standalone Lanes surface ("off the ring"),
             # and [p] there returns to the lanes tab. The old two-stop step
             # waited for the tab header right after leaving the catalog and
-            # starved on the standalone surface instead, whose header stays
-            # "(not loaded)" because this fixture serves no
-            # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
+            # starved on the standalone surface instead, which stays
+            # unread because this fixture serves no /api/v1/lanes body. Walk the full circuit
             # so the return leg is what gets asserted.
             send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
-            send_and_wait(process, master_fd, output, b"p", b"Runtime lanes (3 lanes, 5 slots)")
+            send_and_wait(process, master_fd, output, b"p", b"Candidate orders (3 lanes, 5 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the

@@ -28,6 +28,10 @@ type outcome =
   ; unplaced_rows : int
         (** Raw rows after the newest resolved row that name no attempt or
             carry no observation to settle. *)
+  ; undecodable : string list
+        (** Why each raw row after the newest resolved row that does not
+            decode -- as a cost row or as its observation -- was not settled,
+            oldest first. *)
   }
 
 (** The Keeper's raw rows after its newest resolved row, oldest first, from
@@ -53,5 +57,6 @@ val settle
 
 (** {!settle} before an execution starts. Failures are logged and the
     execution goes on: what could not be settled stays in the ledger as raw
-    rows and is settled before a later execution. *)
+    rows and is settled before a later execution. Rows that do not decode
+    are logged as a warning with the oldest one's reason. *)
 val settle_before_execution : masc_root:string -> agent_name:string -> unit

@@ -294,8 +294,12 @@ let test_exact_runtime_lookup () =
     (Option.is_none (T.find_runtime ~runtime_id:"account-three.model.6" rows))
 
 let one_binding name =
-  T.parse
-    [ "[models." ^ name ^ "]"; ""; "[local." ^ name ^ "]"; "max-tokens = 16384" ]
+  let rows =
+    parse
+      [ "[models." ^ name ^ "]"; ""; "[local." ^ name ^ "]"; "max-tokens = 16384" ]
+  in
+  check int "fixture yields one row" 1 (List.length rows);
+  rows
 
 let contains line needle =
   let n = String.length needle in

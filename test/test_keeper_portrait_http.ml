@@ -411,7 +411,7 @@ let test_router_preview_is_read_only () =
   with_router (fun ~config router ->
     let current = get ~router (path ~size:"72" keeper) in
     let equipment () = require_ok Fun.id
-      (Candle_equipment.current ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper) in
+      (Candle_equipment.reader ~now:Time_compat.now ~base_path:config.Workspace.base_path () ~keeper) in
     let before = equipment () in
     let preview_id = match before.Keeper_portrait_look.face with
       | Keeper_portrait_look.Glasses -> "shades"
@@ -856,7 +856,7 @@ beanie = %d
     check bool "public roster and real TUI decoder preserve equipped input" true
       (reading = Keeper_portrait_equipment.Ready expected);
     check bool "restart-style replay preserves current equipment" true
-      (require_ok Fun.id (Candle_equipment.current ~now:Time_compat.now ~base_path ~keeper) = expected);
+      (require_ok Fun.id (Candle_equipment.reader ~now:Time_compat.now ~base_path () ~keeper) = expected);
     ignore (accepted (call "default"));
     check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"160" keeper)).body;
     let restored = get ~router (bound_path ~size:"96" starting keeper) in

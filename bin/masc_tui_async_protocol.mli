@@ -116,6 +116,8 @@ type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
+  | Lane_application_loaded of Masc_tui_lane_application.ticket
+      * (Masc_tui_lane_addons.configuration, string) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result

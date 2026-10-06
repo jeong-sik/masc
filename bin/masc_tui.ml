@@ -4006,6 +4006,22 @@ let lane_addons_input_failure detail =
 let lane_addons_detail_failure detail =
   Some (Masc_tui_lane_addons.Detail_read_failure detail)
 
+let launch_lane_application state ~mailbox =
+  let module Addons = Masc_tui_lane_addons in
+  match state.lane_addons with
+  | None -> ()
+  | Some view ->
+      (match Addons.begin_application_read view with
+       | None -> ()
+       | Some (view, ticket) ->
+           state.lane_addons <- Some view;
+           let host=server_peer_host and port=state.port in
+           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+             ~deliver:(fun result -> Lane_application_loaded (ticket,result))
+             (fun () -> Result.bind
+               (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons")
+               Addons.decode_configuration))
+
 let lane_addons_request_failure detail =
   Some (Masc_tui_lane_addons.Request_failure detail)
 
@@ -4078,7 +4094,8 @@ let launch_lane_declaration state ~mailbox ~edit request =
     state.lane_addons_generation <- state.lane_addons_generation + 1;
     let generation = state.lane_addons_generation in
     let document_key = Some (match request with Document.Read path -> Filename.basename path | Document.Save session -> session.file_name) in
-    state.lane_addons <- Some {view with generation;loading=true;error=None;editor_ready=false;document_key};
+    state.lane_addons <- Some {view with generation;loading=true;error=None;editor_ready=false;document_key;
+      application_reading=Masc_tui_lane_application.empty};
     let host = server_peer_host and port = state.port in
     let perform () =
       let ( let* ) = Result.bind in
@@ -4125,8 +4142,11 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
     | Addons.Action_status action -> Some action, view.action_receipt
     | _ -> view.last_action, view.action_receipt in
   let presentation = match request with Addons.Subscriptions _ -> Addons.Technical | _ -> view.presentation in
+  let application_reading = match lane_addons_request_failure_kind request with
+    | `Request -> Masc_tui_lane_application.empty
+    | `Inventory | `Detail -> view.application_reading in
   let pending_view = { view with generation; loading = true; error = None;
-    draft = None;action_menu=None;last_action;action_receipt;presentation } in
+    application_reading; draft = None;action_menu=None;last_action;action_receipt;presentation } in
   state.lane_addons <- Some pending_view;
   let host = server_peer_host and port = state.port in
   let broadcast_path=Filename.concat
@@ -13389,6 +13409,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       chat_notice state ~keeper_name:(Some keeper_name) ~kind (String.concat "\n" lines);
       drain_queued_message state ~base_path ~mailbox
+  | Lane_application_loaded (ticket,result) ->
+      map_lane_addons state (fun view ->
+        Masc_tui_lane_addons.finish_application_read view ticket result)
   | Lane_subscriptions_loaded (generation,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -13402,7 +13425,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         then {view with loading=false} else
         match result with
         | Error (`Inventory detail) ->
-            {view with loading=false;error=None;snapshot_read_error=Some detail}
+            {view with loading=false;error=None;snapshot_read_error=Some detail;
+              application_reading=Masc_tui_lane_application.accept (Error detail)}
         | Error (`Detail detail) ->
             {view with loading=false;error=lane_addons_detail_failure detail}
         | Error (`Request detail) ->
@@ -13421,6 +13445,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               | `Unchanged -> view.snapshot_read_error
               | `Read -> None
               | `Failed detail -> Some detail in
+            let view = match reply.lar_inventory_read with
+              | `Unchanged -> view
+              | `Failed detail -> Masc_tui_lane_addons.receive_application_inventory view (Error detail)
+              | `Read ->
+                  let configuration = Option.bind reply.lar_snapshot (fun snapshot -> snapshot.Masc_tui_lane_addons.configuration) in
+                  Masc_tui_lane_addons.receive_application_inventory view
+                    (match configuration with Some configuration -> Ok configuration
+                     | None -> Error "Configuration observation is unavailable") in
             {view with loading=false;error=reply.lar_diagnostic;
             snapshot_read_error;
             action_receipt=(match reply.lar_action with None -> view.action_receipt | Some _ -> reply.lar_action);
@@ -13470,7 +13502,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                the save, and it is drawn above the draft the reader is in. *)
             | Document.Rejected failure ->
                 {view with error=lane_addons_request_failure failure.message;scroll=0}
-            | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))})
+            | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))});
+      (match state.lane_addons with
+       | Some view when view.generation=generation -> launch_lane_application state ~mailbox
+       | Some _ | None -> ())
   (* The capture messages carry the keeper the capture was started for, and
      each is dropped unless that capture is still the one in flight. The
      wizard's carry the number of the save they answer, dropped the same way
@@ -20236,6 +20271,8 @@ and is loaded on demand through keeper_skill.
                      | "esc" when view.help_open -> update {view with help_open=false;scroll=0}
                      | "?" -> update {view with help_open=not view.help_open;scroll=0}
                      | _ when view.help_open -> ()
+                     | "r" when Option.is_some view.document_key ->
+                         launch_lane_application state ~mailbox:async_messages
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" when view.presentation<>Addons.Summary -> update {view with presentation=Addons.Summary;
                          focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
@@ -27084,7 +27121,8 @@ and is loaded on demand through keeper_skill.
                | Some action -> Masc_tui_lane_addons.Action_status action
                | None -> Masc_tui_lane_addons.Inspect in
              launch_lane_addons state ~mailbox:async_messages request
-         | _ -> ());
+         | Some _ -> launch_lane_application state ~mailbox:async_messages
+         | None -> ());
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

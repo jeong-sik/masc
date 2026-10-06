@@ -1,6 +1,7 @@
 module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
+module Application = Masc_tui_lane_application
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
@@ -14,6 +15,7 @@ type declaration = {
   source_path : string; installation_id : string option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
+  application : Application.observation option;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -57,13 +59,14 @@ type t = {
   current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
+  application_reading : configuration Application.reading;
   snapshot_read_error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
+let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; application_reading=Application.empty; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -98,13 +101,11 @@ let configuration = function
       let* directory = get text "directory" json in
       let* complete = get boolean "complete" json in
       let* declarations = get (array (fun json ->
-        let* source_path = get text "source_path" json in
-        let* installation_id = get text "id" json in
-        let* enabled = get boolean "enabled" json in
-        let* desired = get text "desired_revision" json in
+        let* application = Application.decode json in
+        let {Application.source_path;installation_id;enabled;desired_revision=desired;_} = application.target in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration})) "declarations" json in
+        Ok {source_path;installation_id=Some installation_id;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration;application=Some application})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -112,8 +113,22 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only;application=None}]) declarations issues in
       Ok (Some {directory;complete;declarations})
+let decode_configuration json =
+  let* configuration = get configuration "configuration" json in
+  match configuration with Some configuration -> Ok configuration
+  | None -> Error "Configuration observation is unavailable"
+let begin_application_read view =
+  if view.loading then None else
+  Option.map (fun (application_reading, ticket) ->
+    {view with application_reading}, ticket)
+    (Application.start ~generation:view.generation view.application_reading)
+let finish_application_read view ticket result =
+  {view with application_reading=Application.finish ~generation:view.generation
+      ticket result view.application_reading}
+let receive_application_inventory view result =
+  {view with application_reading=Application.accept result}
 let phase json =
   let* kind = get text "kind" json in
   match kind with
@@ -597,6 +612,34 @@ let timeline_lines ?(instances=[]) ?selected ~width rows =
           if List.exists (fun (row : Row.row) ->
             String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) rows then None
           else Some (instance.title ^ " | " ^ phase_label instance.phase ^ " | no observations in this view")) instances
+let track_application view target =
+  match Application.value view.application_reading with
+  | None -> Application.Unavailable "Waiting for an application observation"
+  | Some (Error detail) -> Application.Unavailable detail
+  | Some (Ok configuration) ->
+      (* The server folds a parsed declaration's issues into its own application
+         observation, which a complete inventory reports as Failed. Only a file
+         that has no observation, because it could not be parsed, answers with
+         its raw issues. *)
+      let issues = List.concat_map (fun (d : declaration) ->
+        match d.application with
+        | Some _ -> []
+        | None ->
+            if d.source_path=target.Application.source_path
+               || d.installation_id=Some target.installation_id then d.issues else []) configuration.declarations in
+      if issues <> [] then Application.Unavailable (String.concat "; " issues)
+      else Application.track ~target ~complete:configuration.complete
+        (List.filter_map (fun (d : declaration) -> d.application) configuration.declarations)
+let declaration_application view (declaration : declaration) =
+  match declaration.application with
+  | None -> "Application unknown · declaration could not be read"
+  | Some observation -> Application.describe (track_application view observation.target)
+let document_application_lines view session =
+  ["Accepted file application · " ^ (match Document.application_target session with
+    | Error detail -> Application.describe (Application.Unavailable detail)
+    | Ok target -> Application.describe (track_application view target));
+   (if Application.pending view.application_reading then "Refreshing application · draft remains editable"
+    else "Application follows visible-pane refresh · r:read now")]
 let configuration_lines view snapshot = match snapshot.configuration with
   | None -> ["TOML configuration status unknown"]
   | Some config ->
@@ -609,6 +652,7 @@ let configuration_lines view snapshot = match snapshot.configuration with
           | Some false, None -> "   Configured off · no current worker observed"
           | Some true, _ -> "   Configured on"
           | None, _ -> "   Desired activity unknown");
+         "   " ^ declaration_application view declaration;
          "   desired " ^ Option.value ~default:"unknown" declaration.desired;
          "   applied " ^ Option.value ~default:"none" declaration.applied]
         @ (if Document.editable_source_path ~directory:config.directory declaration.source_path then []
@@ -841,7 +885,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     | None -> []
     | Some text -> [(if view.naming then "New TOML filename: " else "Add-on command: ") ^ text] in
   let document = match selected_document view with
-    | None -> [] | Some session -> Document.summary session in
+    | None -> [] | Some session -> document_application_lines view session @ Document.summary session in
   List.concat_map wrap
     (["?:help  Esc:back  J/K:scroll"] @ diagnostic_lines view @ content @ draft @ document
      @ action_lines view @ receipt)
@@ -1109,6 +1153,7 @@ let overview_lines ~width view =
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
                   then Some "  E:edit" else None) |> Option.value ~default:"" in
                 [marker ^ name ^ " · " ^ status ^ " · " ^ Filename.basename declaration.source_path;
+                 "    " ^ declaration_application view declaration;
                  "    Enter:installation" ^ edit]
             | `Instance item ->
                 let group_header = match view.overview_mode with
@@ -1142,6 +1187,12 @@ let overview_lines ~width view =
                       |> List.map (fun line -> "    " ^ line)
                   | _ -> [] in
                 group_header @ [lead]
+                @ (match view.overview_mode, snapshot.configuration with
+                   | Current_installations, Some config ->
+                       List.filter_map (fun (d : declaration) ->
+                         if Some d.source_path=item.source_path && d.installation_id=item.installation_id
+                         then Some ("    " ^ declaration_application view d) else None) config.declarations
+                   | Current_installations, None | Retained_runs, _ -> [])
                 @ (match view.overview_mode with Current_installations -> []
                    | Retained_runs -> ["    Instance " ^ item.id])
                 @ (if index=view.instance_cursor then

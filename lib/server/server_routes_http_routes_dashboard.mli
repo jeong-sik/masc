@@ -46,6 +46,15 @@ module For_testing : sig
   (** The routing POST after authentication: parse the body, call the
       Runtime writer it names, answer with the receipt or the refusal. *)
 
+  val handle_runtime_config_raw_post :
+    Mcp_server.server_state ->
+    string ->
+    Httpun.Request.t ->
+    Httpun.Reqd.t ->
+    string ->
+    unit
+  (** The raw-source POST after authentication, including its revision guard. *)
+
   val handle_runtime_assignment_post_with :
     set_assignment:
       (runtime_config_path:string ->

@@ -25,6 +25,10 @@ type config_observation = private
   ; source_revision : config_source_revision
   }
 
+type config_edit_error =
+  | Config_source_conflict of config_observation
+  | Config_edit_failed of string
+
 type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
@@ -853,6 +857,19 @@ val save_config_text :
     model catalog cannot serve. So removing or renaming a
     [\[runtime.lanes.<id>\]] table here is refused while a seat names it, as it
     is through {!remove_runtime_lane}. *)
+
+val save_config_text_if_current :
+  ?runtime_config_path:string ->
+  expected_source_path:string ->
+  expected_source_revision:string ->
+  string ->
+  (config_commit_receipt, config_edit_error) result
+(** Save an editor's complete source only if its observed path and lowercase
+    SHA-256 revision still identify the file. Read, comparison and commit share the config
+    write lock. A conflict returns the current immutable observation without
+    writing the file or changing runtime/registry state. A matching revision
+    uses {!save_config_text}'s validation, durability and application contract.
+    Invalid revisions and read/validation/write failures are [Config_edit_failed]. *)
 
 val commit_config_text_locked :
   ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->

@@ -448,9 +448,8 @@ type async_msg =
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Runtime_config_view_loaded of
       int * string option
-      * (string * string list * Masc_tui_runtime_config_view.metadata, string) result
-      (* Read generation and captured runtime ID to edit; [None] is a source
-         refresh without a model-settings entry request. *)
+      * (Masc_tui_runtime_config_view.reading, string) result
+      (* Read generation and captured model-settings entry request. *)
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
   | Runtime_param_written of

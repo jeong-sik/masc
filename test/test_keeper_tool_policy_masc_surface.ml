@@ -14,22 +14,28 @@ let test_model_surface_exposes_direct_board_operations () =
 
 (* The keeper lane admits any name on the model surface and never reads
    [required_permission], so the projection is the only thing keeping a
-   Worker-level Keeper away from an operator tool. Every model-visible tool
-   the catalog classifies must therefore be one a Worker token could call over
-   MCP. [masc_board_delete] is the one exception: its handler refuses anyone
-   but the post's author. *)
+   Worker-level Keeper away from an operator tool. Every descriptor the model
+   can see, under any name, whose internal tool the catalog classifies must
+   therefore be one a Worker token could call over MCP. [masc_board_delete] is
+   the one exception: its handler refuses anyone but the post's author. *)
 let test_model_surface_stays_within_worker_permissions () =
-  let names = Masc.Keeper_tool_policy.keeper_model_tool_names () in
+  let module Descriptor = Masc.Keeper_tool_descriptor in
   let handler_checks_the_author = [ "masc_board_delete" ] in
   let beyond_worker =
-    Tool_catalog.explicit_metadata
-    |> List.filter_map (fun (name, (meta : Tool_catalog.metadata)) ->
-      if
-        List.mem name names
-        && (not (List.mem name handler_checks_the_author))
-        && not (Masc_domain.has_permission Masc_domain.Worker meta.required_permission)
-      then Some name
-      else None)
+    Descriptor.all_descriptors ()
+    |> List.filter_map (fun (descriptor : Descriptor.t) ->
+      let internal = descriptor.internal_name in
+      match
+        Descriptor.keeper_model_names descriptor,
+        List.assoc_opt internal Tool_catalog.explicit_metadata
+      with
+      | [], _ | _ :: _, None -> None
+      | _ :: _, Some (meta : Tool_catalog.metadata) ->
+        if
+          List.mem internal handler_checks_the_author
+          || Masc_domain.has_permission Masc_domain.Worker meta.required_permission
+        then None
+        else Some internal)
     |> List.sort_uniq String.compare
   in
   check (list string) "model-visible tools a Worker token may not call" [] beyond_worker

@@ -110,6 +110,24 @@ type lane_resolution_error =
   | Exact_lane_off of { lane_id : string }
   | No_admitted_lane_slots of { lane_id : string }
 
+val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
+(** Wake a consumer after a successful publication changes this lane's
+    declaration or admitted target identities, including absent-to-present.
+    Callbacks run outside the publication mutex and must only signal work,
+    never run it inline. Callback exceptions, including callback cancellation,
+    are isolated from the already-committed publication result.
+    The returned function unsubscribes the consumer.
+
+    Closing a replacement fence also wakes every consumer when {!current}
+    refused a reader with [Publication_busy] while the fence stood, whether
+    the write committed, failed or kept the previous registry: that reader
+    parked work only the fence's end can admit. A fence that refused no
+    reader wakes only the consumers its commit changed.
+
+    Credential values are absent from admitted target identities; changing
+    only a credential value, or an external provider recovering, is not an
+    event from this subscription. *)
+
 val publish
   :  ?runtime_observations:(string * runtime_observation) list
   -> ?required_lane_ids:string list
@@ -197,18 +215,6 @@ val current : unit -> (t, publication_error) result
 (** Return the currently published registry. Returns [Publication_busy] while
     a replacement reservation fences new acquisitions, and
     [Registry_not_published] before bootstrap has published one. *)
-
-val next_availability_change : unit -> unit Eio.Promise.t
-(** Observe the next publication, withdrawal, or end of a replacement fence.
-    Capture this promise before inspecting {!current}; await it outside any
-    locks. On wake, capture the next promise before rereading current state.
-    Several changes may coalesce into one wake; this is not a commit receipt.
-
-    Failed/aborted and retained transactions also wake observers after closing
-    their fence: work deferred by [Publication_busy] can acquire again. Failed
-    admission and rejected reservations do not change availability or signal.
-    Resolution only enqueues waiters, outside the publication mutex. The owner
-    of each waiting fiber controls its cancellation and lifetime. *)
 
 val rejected_slots : t -> rejected_slot list
 

@@ -257,10 +257,17 @@ val log_call :
   ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
+  ?input_fingerprint:string ->
+  ?output_fingerprint:string ->
   ?on_committed:(unit -> unit) ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
+    [input_fingerprint] / [output_fingerprint] are the I/O identity the loop
+    guard's cross-cycle seed (task-627) reads back off the row; computed from
+    the raw input and output at the call boundary, not from the row's redacted
+    and truncated [input]/[output]. A row without them cannot match a live
+    call and the seed skips it.
     [record_kind] defaults to [Tool_call]; [Composition_run] is the explicit
     terminal aggregate for a composition and must not be interpreted as a
     second physical invocation. [Lifecycle_event] is an opening or progress

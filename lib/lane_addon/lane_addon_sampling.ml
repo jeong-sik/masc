@@ -154,10 +154,13 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     let request = Store.blob_reference request_bytes in
     (* Refuse before publishing: if the failure reply cannot fit the envelope
        the transport allows for this request, do not write a request that
-       cannot be answered. [refusal_bytes] is that budget, measured like the
-       wire frame: the receipt travels as a JSON string (quotes and escapes
-       inside the message) and the frame ends in one counted newline. *)
-    let* () =
+       cannot be answered. Only the transport path carries a measured budget
+       ([error_bytes]); the in-process handler is judged by the same bounded
+       encoders downstream, like the terminal contract. The receipt travels
+       as a JSON string and the frame ends in one counted newline. *)
+    let* () = match error_bytes with
+      | None -> Ok ()
+      | Some _ ->
       let references = `Assoc ["request",Types.evidence_to_json request;
         "outcome",Types.evidence_to_json request] in
       let reply = `Assoc ["status",`String "invalid_response";"evidence",references] in

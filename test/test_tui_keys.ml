@@ -2044,7 +2044,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  i:input  a:fragments / voice / account  u:restore / adopt revision  S:save draft  C:compare file  U:use current text  X:discard draft  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2196,7 +2196,12 @@ let test_config_pane_footer_actions () =
     enabled "e"
       (List.mem pane
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
-    List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
+    enabled "n" (pane = Config_presets);
+    (* [u] answers on two panes: restoring a preset, and adopting the current
+       runtime.toml revision for a retained draft. The other draft keys answer
+       on runtime.toml only. *)
+    enabled "u" (List.mem pane [ Config_presets; Config_runtime ]);
+    List.iter (fun key -> enabled key (pane = Config_runtime)) [ "S"; "C"; "U"; "X" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
     (* [a] answers on three panes: the prompt fragments, the keeper-voice
        screen the voice pane opens, and the account form on runtime.toml. *)

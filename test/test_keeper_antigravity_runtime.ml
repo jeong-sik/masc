@@ -211,8 +211,7 @@ path = %S
 
 [models.gemini]
 api-name = "gemini-fixture"
-max-context = 128000
-max-prompt-bytes = 1048576
+max-context = 524288
 
 [antigravity.gemini]
 
@@ -1123,7 +1122,7 @@ let test_spawn_failure_is_pre_dispatch () =
                    | Error
                        (Agent_core.Error.Config
                           (Agent_core.Error.InvalidConfig { field; _ })) ->
-                     check string "override refused field" "max_prompt_bytes" field
+                     check string "override refused field" "prompt_ceiling_bytes" field
                    | Error error ->
                      fail
                        ("oversized system prompt override produced the wrong error: "
@@ -1287,9 +1286,9 @@ let plain_user_message text : Agent_core.Types.message =
 
 let capacity_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
     ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
-    ~declared_max_prompt_bytes ~system_prompt ~goal source =
+    ~prompt_ceiling_bytes ~system_prompt ~goal source =
   Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
-    ~declared_max_prompt_bytes
+    ~prompt_ceiling_bytes
     ~system_prompt
     ~goal
     ?on_model_input_window_observation
@@ -1302,23 +1301,23 @@ let capacity_projection ?on_model_input_window_observation ?carried_front_seed ?
     source
 ;;
 
-let test_undeclared_capacity_is_refused () =
+let test_unresolved_window_is_refused () =
   match
     capacity_projection
-      ~declared_max_prompt_bytes:None
+      ~prompt_ceiling_bytes:None
       ~system_prompt:"system"
       ~goal:"goal"
       None
   with
   | Error
       (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig { field = "max_prompt_bytes"; _ })) ->
+         (Agent_core.Error.InvalidConfig { field = "prompt_ceiling_bytes"; _ })) ->
     ()
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok _ -> fail "Antigravity admitted history without max-prompt-bytes"
+  | Ok _ -> fail "Antigravity admitted history without a prompt ceiling"
 ;;
 
-let test_declared_capacity_windows_history_and_reports_the_cut () =
+let test_ceiling_windows_history_and_reports_the_cut () =
   let observed = ref None in
   let assistant_tool_use : Agent_core.Types.message =
     { role = Assistant
@@ -1353,7 +1352,7 @@ let test_declared_capacity_windows_history_and_reports_the_cut () =
   let _labelled, history_atoms = Runtime_model_input_tail_window.annotate history in
   match
     capacity_projection
-      ~declared_max_prompt_bytes:(Some 8192)
+      ~prompt_ceiling_bytes:(Some 8192)
       ~system_prompt:"system"
       ~goal:"goal"
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
@@ -1430,7 +1429,7 @@ let test_appended_gate_reference_is_inside_the_window () =
   in
   match
     capacity_projection
-      ~declared_max_prompt_bytes:(Some 8192)
+      ~prompt_ceiling_bytes:(Some 8192)
       ~system_prompt:"system"
       ~goal:"goal"
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
@@ -1493,7 +1492,7 @@ let test_gate_only_floor_observes_an_empty_durable_range () =
   let projected =
     match
       capacity_projection
-        ~declared_max_prompt_bytes:(Some 8192)
+        ~prompt_ceiling_bytes:(Some 8192)
         ~system_prompt:"system"
         ~goal:"goal"
         ~on_model_input_window_observation:(fun reading -> observed := Some reading)
@@ -1578,7 +1577,7 @@ let project_with_capacity ?on_model_input_window_observation ?carried_front_seed
       ?librarian_front
       ?on_carried_front
       ~turn_start
-      ~declared_max_prompt_bytes:(Some capacity)
+      ~prompt_ceiling_bytes:(Some capacity)
       ~system_prompt:"system"
       ~goal:"goal"
       None
@@ -1661,7 +1660,7 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
             { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
   in
   match
-    capacity_projection ~librarian_front:refused ~declared_max_prompt_bytes:(Some 1_000_000)
+    capacity_projection ~librarian_front:refused ~prompt_ceiling_bytes:(Some 1_000_000)
       ~system_prompt:"system" ~goal:"goal" None
   with
   | Error error -> fail (Agent_core.Error.to_string error)
@@ -1719,7 +1718,7 @@ let assert_goes_alone ~reason ~capacity snapshot =
     capacity_projection
       ~librarian_front:(fun _ ->
         Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
-      ~declared_max_prompt_bytes:(Some capacity) ~system_prompt:"system" ~goal:"goal"
+      ~prompt_ceiling_bytes:(Some capacity) ~system_prompt:"system" ~goal:"goal"
       None
   with
   | Error error -> fail (Agent_core.Error.to_string error)
@@ -2000,14 +1999,14 @@ let test_fixed_sections_at_capacity_are_refused () =
   in
   match
     capacity_projection
-      ~declared_max_prompt_bytes:(Some capacity)
+      ~prompt_ceiling_bytes:(Some capacity)
       ~system_prompt:"system"
       ~goal:"goal"
       None
   with
   | Error
       (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig { field = "max_prompt_bytes"; _ })) ->
+         (Agent_core.Error.InvalidConfig { field = "prompt_ceiling_bytes"; _ })) ->
     ()
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok _ -> fail "fixed sections filled the declared capacity"
@@ -2279,11 +2278,11 @@ let () =
         , [ test_case
               "an undeclared capacity is refused"
               `Quick
-              test_undeclared_capacity_is_refused
+              test_unresolved_window_is_refused
           ; test_case
               "declared capacity windows history and reports the cut"
               `Quick
-              test_declared_capacity_windows_history_and_reports_the_cut
+              test_ceiling_windows_history_and_reports_the_cut
           ; test_case
               "the appended Gate reference stays inside the window"
               `Quick

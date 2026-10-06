@@ -1049,14 +1049,15 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 다섯
-  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
-  닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
-  이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
-  `Exact_lane_run_registry.lane`은 `Verifier`를 뺀 넷이고, `standalone_lane`·
-  `lane_of_standalone`으로 이 타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에
-  남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
-  Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
+: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 일곱
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`·
+  `Browser_stagehand`·`Candle_appraiser`)은 닫힌 타입 `Standalone_lane.t` 하나다.
+  `Standalone_lane.all`이 열거하고 `to_id`가 이름을 적는다. `Runtime.exact_lane`은
+  이 타입을 그대로 쓴다. 실행 기록의 `Exact_lane_run_registry.lane`은 `Verifier`와
+  `Browser_stagehand`를 뺀 다섯이고, `standalone_lane`·`lane_of_standalone`으로 이
+  타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에 남는다. 그 경로를 선언하는 설정은
+  `Exact-output route`이고, Keeper turn이 runtime 후보를 시도하는 순서
+  (`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
   공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
@@ -1068,6 +1069,18 @@ status: reference
   fallback하지 않고 typed 시작 오류 `Server_root_switch_unavailable`로 거절된다(#38426).
   Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Standalone_lane](../../lib/runtime/standalone_lane.mli) · [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+
+**Lane family (레인 가족)**
+: 운영자가 한 목록에서 함께 읽는 Lane 종류의 묶음. 닫힌 타입 `Lane_id.family` 하나이고
+  `Exact_family`·`Browser_family`·`Machine_family`·`Package_family` 넷이다(wire 문자열
+  `exact`·`browser`·`machine`·`package`). `Lane_id.t`는 `Builtin`(exact-output lane·
+  Browser Lane backend·machine)과 `Package`(Lane Add-on 선언 파일)로 나뉘고,
+  `Lane_id.family`가 그 id를 가족으로 접는다. wire id는 `family/name` 꼴이다
+  (`Lane_id.to_wire`, 구분자 `/`). TUI의 `Lanes` 개요는 모든 Lane family를 한 목록으로
+  읽고, 각 가족은 따로 읽히므로 이 목록은 가족을 가로지르는 원자적 트랜잭션이 아니다
+  (`docs/guides/lane-inventory.md`). 위의 **Lane**(고정 실행 경로)이나 **Standalone Lane**
+  (그 경로의 관찰)과 다른 층이다 — 이쪽은 운영자 목록의 행 분류다.
+  → [Lane_id](../../lib/lane_registry/lane_id.ml) · [lane-inventory guide](../guides/lane-inventory.md)
 
 **Chat Lane (채팅 레인)**
 : Keeper에게 대화 메시지가 들어오고 결과가 배달되는 표면. dashboard·커넥터
@@ -1125,19 +1138,18 @@ status: reference
   → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
   [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
 
-**Max Prompt Bytes (최대 프롬프트 바이트)**
-: MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한
-  (`[models.<이름>].max-prompt-bytes`, `Runtime_schema.model.max_prompt_bytes`).
-  클라이언트는 자기 컨텍스트 창을 스스로 소유하고, 상한을 넘는 seed는 typed
-  terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
-  29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
-  10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
-  (#38740). Muse 는 넘친 입력을 거절하지 않고 조용히 요약으로 줄이므로, MASC 가
-  `max-context` 에서 `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(Muse Code
-  1.4.0 실측, `Runtime_muse_prompt_capacity`). 선언값은 이보다 작을 때만 쓴다.
-  운영자에게는 묻지 않는다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
-  MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
-  → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
+**Client Start-prompt Ceiling (클라이언트 시작 프롬프트 상한)**
+: MASC 가 공식 클라이언트의 첫 턴에 심는 history(시작 프롬프트)의 바이트 상한.
+  넘친 입력을 typed 오류로 알리지 않는 클라이언트에만 있다.
+  Antigravity 는 끝까지 간 실측 2,078,915 바이트와 `2 × max-context` 중 작은
+  값이다. 토큰당 2바이트는 보장이 아니라 어림값이다. agy 는 공개하지 않은
+  저장 한도를 넘으면 세션을 지우고(agy 1.2.6 changelog), 그 아래에서도 스스로
+  대화를 압축한다. Muse Code 는 넘친 입력을 조용히 요약하므로 상한을
+  `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(`Runtime_muse_prompt_capacity`).
+  Claude Code·Codex 는 이 상한이 없다. 넘치면 provider 가 typed overflow 로
+  알리고, keeper 는 이어 보낼 범위를 줄여 다시 보낸다. 운영자가 바이트 수를
+  적는 설정은 없다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다.
+  → [Runtime_client_prompt_ceiling](../../lib/runtime/runtime_client_prompt_ceiling.mli)
 
 **Attempt Dispatch (시도 파견 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
@@ -1161,9 +1173,9 @@ status: reference
   [keeper_turn_driver](../../lib/keeper/keeper_turn_driver.mli)
 
 **Standalone Lane**
-: TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
+: TUI의 `MASC Lanes` 인벤토리(`Lanes` 탭)가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (고정 실행 경로) 다섯을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
+  (고정 실행 경로) 일곱을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
   경로이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
   실행했는지의 관찰이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·

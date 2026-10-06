@@ -215,6 +215,33 @@ let held_of_carried carried =
   |> List.map (fun item -> item.held)
 ;;
 
+type carried_summary =
+  { label : string
+  ; bytes : int
+  ; sha256_prefix : string
+  ; resent_every_resume : bool
+  }
+
+let carried_label = function
+  | Session_store.Context_block block -> "block:" ^ Prompt_block_id.to_string block
+  | Session_store.Context_carrier -> "carrier"
+  | Session_store.Librarian_working_state -> "librarian_working_state"
+  | Session_store.Historical_task_reference -> "historical_task_reference"
+;;
+
+let carried_sha256_prefix_length = 12
+
+let carried_summaries ?composed_context messages =
+  carried_context ~composed_context messages
+  |> List.map (fun item ->
+    { label = carried_label item.held.Session_store.context
+    ; bytes = String.length (encode_history_message item.message)
+    ; sha256_prefix =
+        String.sub item.held.Session_store.sha256 0 carried_sha256_prefix_length
+    ; resent_every_resume = item.resent_when_held
+    })
+;;
+
 let start_held_context ?composed_context messages =
   held_of_carried (carried_context ~composed_context messages)
 ;;
@@ -646,8 +673,8 @@ let continuity_observation_input ~trace_id ~continuity front =
    starts without a ledger too (RFC keeper-context-window-in-tokens §13.4).
 
    [own_first_atom] is the front the calling lane already chose for its own
-   reason — Claude Code cuts its start seed to the runtime's declared
-   max-prompt-bytes. A seed at or past that cut decides, even when it is
+   reason — Antigravity cuts its start seed to the ceiling derived from its
+   window. A seed at or past that cut decides, even when it is
    older than [turn_start]: the range the last answered request carried is
    this lane's continuity, and the turn start is only where a lane with no
    seed begins. Without a seed the range starts at the later of the lane's

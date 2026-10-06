@@ -172,6 +172,12 @@ let validate_auth body =
   | _ -> unavailable "selected account has an invalid auth document"
   with Yojson.Json_error _ -> unavailable "selected account has an unreadable auth document"
 
+(* What one preparation did, so [prepare] can say when it replaced a
+   generation: the file it no longer admits may have been edited. *)
+type preparation =
+  | Admitted
+  | Replaced_other_settings of { replaced_revision : string }
+
 let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source =
   let* source_bytes = read_optional ~ownership_root:account_home source in
   match source_bytes with
@@ -215,7 +221,7 @@ let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~sour
              (* A previous current.json rename may have become visible even when
                 its parent fsync failed. Reconfirm that pointer before admission. *)
              sync_store store;
-             Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home }
+             Ok ({ config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home }, Admitted)
            | None | Some _ ->
              (* The generation runs settings other than the current managed
                 ones: an earlier masc wrote another policy, or the file was
@@ -224,8 +230,11 @@ let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~sour
                 included, and its new revision starts Keeper sessions afresh,
                 since the host commits a session's permission profile when the
                 session starts. *)
-             publish body))
-     | None | Some _ -> publish source_bytes)
+             let* prepared = publish body in
+             Ok (prepared, Replaced_other_settings { replaced_revision = revision })))
+     | None | Some _ ->
+       let* prepared = publish source_bytes in
+       Ok (prepared, Admitted))
 
 (* The vendor launcher (v3) keeps its sign-in at [muse/auth.json] under
    XDG_CONFIG_HOME, and under [HOME/.config] when that is unset. *)
@@ -268,7 +277,14 @@ let prepare_with_store_sync ~sync_store ~account_home =
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"
             (fun () -> prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source)) with
-    | Ok result -> result
+    | Ok (Ok (prepared, Admitted)) -> Ok prepared
+    | Ok (Ok (prepared, Replaced_other_settings { replaced_revision })) ->
+      Log.Runtime_agent.info
+        "Muse managed configuration %s for %s held settings other than the current \
+         managed settings; generation %s now carries its sign-in"
+        replaced_revision selected_account_home prepared.account_revision;
+      Ok prepared
+    | Ok (Error error) -> Error error
     | Error _ -> unavailable "credential generation lock failed")
 
 let prepare ~account_home =

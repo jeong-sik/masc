@@ -243,7 +243,6 @@ is-non-interactive = true
 [models."{binding_id}"]
 api-name = "{model_alias}"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "{effort}"

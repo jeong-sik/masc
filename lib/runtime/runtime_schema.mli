@@ -19,11 +19,6 @@ type api_format =
   | Muse_serve_runtime
 [@@deriving show, eq]
 
-val api_format_reads_max_prompt_bytes : api_format -> bool
-(** Whether a runtime of this format reads [max-prompt-bytes]: Claude Code,
-    Antigravity, Codex and Muse Code do; no other format does, so a
-    declaration on any other runtime bounds nothing the provider checks. *)
-
 type output_schema_channel =
   | Holds_output_schema
   | No_output_schema_channel
@@ -268,7 +263,6 @@ type model_spec =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
   ; turn_timeout_s : float option
-  ; max_prompt_bytes : int option
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]

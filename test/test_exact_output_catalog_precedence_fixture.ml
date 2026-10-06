@@ -436,51 +436,47 @@ let test_registry_availability_wakes () =
   let accept result = match result with Ok value -> value
     | Error error -> Alcotest.fail (Registry.publication_error_to_string error) in
   let publish () = accept (Registry.publish ~lanes:(transaction_lanes "available") snapshot) in
-  let pending promise = Alcotest.(check bool) "still waiting" false (Eio.Promise.is_resolved promise) in
-  let signalled promise = Alcotest.(check bool) "availability changed" true (Eio.Promise.is_resolved promise) in
-  let before = Registry.next_availability_change () in
-  pending before;
-  ignore (publish ()); signalled before;
-  let next = Registry.next_availability_change () in
-  pending next;
-  (* Admission failures do not mutate the registry or complete this promise. *)
-  (match Registry.publish ~required_lane_ids:["absent"] ~lanes:[] snapshot with
-   | Error (Registry.Required_lane_unavailable _) -> ()
-   | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
-   | Ok _ -> Alcotest.fail "invalid publication accepted");
-  pending next;
-  let retained () = match Registry.prepare_retention () with
-    | Some prepared -> prepared | None -> Alcotest.fail "published registry missing" in
-  ignore (accept (Registry.transact_replacement (retained ()) ~apply_write:(fun () ->
-    pending next; Registry.current () |> require_publication_busy "retained fence";
-    Registry.Not_committed ())));
-  signalled next;
-  let next = Registry.next_availability_change () in
-  let raised = try
+  let wakes = ref 0 in
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:"available" (fun () -> incr wakes) in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    let expect label count = Alcotest.(check int) label count !wakes in
+    ignore (publish ());
+    expect "first publication declares the lane" 1;
+    (* Admission failures do not mutate the registry or wake anyone. *)
+    (match Registry.publish ~required_lane_ids:["absent"] ~lanes:[] snapshot with
+     | Error (Registry.Required_lane_unavailable _) -> ()
+     | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+     | Ok _ -> Alcotest.fail "invalid publication accepted");
+    expect "a refused publication wakes nobody" 1;
+    let retained () = match Registry.prepare_retention () with
+      | Some prepared -> prepared | None -> Alcotest.fail "published registry missing" in
+    ignore (accept (Registry.transact_replacement (retained ()) ~apply_write:(fun () ->
+      Registry.current () |> require_publication_busy "retained fence";
+      expect "nothing wakes while the fence stands" 1;
+      Registry.Not_committed ())));
+    expect "a failed write that turned a reader away wakes it" 2;
+    let raised = try
+      ignore (accept (Registry.transact_replacement (retained ())
+        ~apply_write:(fun () ->
+          Registry.current () |> require_publication_busy "raising fence";
+          raise Injected_parent_sync_failure))); false
+      with Injected_parent_sync_failure -> true in
+    Alcotest.(check bool) "original exception survives wake" true raised;
+    expect "a raised write that turned a reader away wakes it" 3;
     ignore (accept (Registry.transact_replacement (retained ())
-      ~apply_write:(fun () -> raise Injected_parent_sync_failure))); false
-    with Injected_parent_sync_failure -> true in
-  Alcotest.(check bool) "original exception survives wake" true raised;
-  signalled next;
-  let next = Registry.next_availability_change () in
-  ignore (accept (Registry.transact_replacement (retained ())
-    ~apply_write:(fun () -> Registry.Committed ())));
-  signalled next;
-  let stale = retained () in
-  ignore (publish ());
-  let next = Registry.next_availability_change () in
-  (match Registry.transact_replacement stale ~apply_write:(fun () -> Alcotest.fail "stale write ran") with
-   | Error Registry.Replacement_base_changed -> ()
-   | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
-   | Ok _ -> Alcotest.fail "stale base admitted");
-  pending next;
-  ignore (accept (Registry.unpublish ())); signalled next;
-  (* Multiple publications before a waiter resumes do not consume its signal. *)
-  let next = Registry.next_availability_change () in
-  ignore (publish ()); let latest = publish () in
-  signalled next;
-  Alcotest.(check bool) "coalesced wake reads latest registry" true
-    (latest == accept (Registry.current ()))
+      ~apply_write:(fun () -> Registry.Committed ())));
+    expect "an unchanged commit that turned no reader away wakes nobody" 3;
+    ignore (accept (Registry.transact_replacement (retained ())
+      ~apply_write:(fun () -> Registry.Not_committed ())));
+    expect "a failed write that turned no reader away wakes nobody" 3;
+    let stale = retained () in
+    ignore (publish ());
+    expect "an unchanged republication wakes nobody" 3;
+    (match Registry.transact_replacement stale ~apply_write:(fun () -> Alcotest.fail "stale write ran") with
+     | Error Registry.Replacement_base_changed -> ()
+     | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+     | Ok _ -> Alcotest.fail "stale base admitted");
+    expect "a stale reservation wakes nobody" 3)
 ;;
 
 let test_offline_runtime_save_converges_by_write_stage () =

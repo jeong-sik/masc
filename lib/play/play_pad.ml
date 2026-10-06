@@ -201,13 +201,10 @@ label = "0 입력 (배치)"
    the game under. *)
 let builtin_layouts = [ ("samguk3", samguk3) ]
 
-(* The saves name becomes a file name here. Inventory names carry no path and
-   no dot (masc_dos_load refuses them), so anything else did not come from
-   the inventory. *)
+(* The saves name is the inventory entry, including a standalone program's
+   extension. Use the loader's boundary: one plain name, not a path or drive. *)
 let is_file_component name =
-  name <> ""
-  && String.equal (Filename.basename name) name
-  && not (String.contains name '.')
+  name <> "" && not (Dos_lane.escapes name)
 
 let workspace_file_error path detail =
   Printf.sprintf "workspace pad layout %s: %s" path detail

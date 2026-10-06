@@ -9,6 +9,14 @@ let auth_ok = function
   | Ok value -> value
   | Error error -> fail (Masc_domain.masc_error_to_string error)
 
+(* The FIFO preflight children end with an alarm and the parent's wait can be
+   interrupted by a caught signal -- SIGCHLD among them -- before the child
+   reports. EINTR is the kernel asking us to wait again, not a failed wait;
+   without the retry the same tree passed or failed by delivery timing. *)
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
 let with_workspace f =
   let base_path = Filename.temp_dir "token-rotation-transaction-" "" in
   Eio_main.run @@ fun env ->
@@ -561,7 +569,7 @@ let test_fifo_diagnostic_listing_refuses_without_blocking () =
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> prerr_endline (Printexc.to_string exn); exit 2)
   | pid ->
-    let _, status = Unix.waitpid [] pid in
+    let _, status = waitpid_nointr pid in
     match status with
     | Unix.WEXITED 0 -> ()
     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
@@ -597,7 +605,7 @@ let test_publication_fifo_snapshots_refuse_without_blocking () =
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> prerr_endline (Printexc.to_string exn); exit 2)
   | pid ->
-    let _, status = Unix.waitpid [] pid in
+    let _, status = waitpid_nointr pid in
     match status with
     | Unix.WEXITED 0 -> ()
     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->

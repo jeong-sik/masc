@@ -12,10 +12,11 @@ from contextlib import contextmanager
 
 from tui_keyboard_harness import (
     CSI_RE,
+    json_payload_fixture,
     FRAME_END,
     FULL_REDRAW,
-    HttpFixture,
     HttpFixtures,
+    HttpResponse,
     HttpRequests,
     Interaction,
     approval_selection_snapshot,
@@ -36,7 +37,7 @@ from tui_keyboard_harness import (
 KEEPER_ASK_ANSWER_PATH = "/api/v1/keepers/ask-answer"
 
 
-def keeper_asks_response(*, long_question: bool = False) -> HttpFixture:
+def keeper_asks_response(*, long_question: bool = False) -> HttpResponse:
     return (
         200,
         {
@@ -382,7 +383,10 @@ def blocked_gate_detail_interaction() -> Interaction:
 # never as its byte.
 def concealed_input_http_fixtures() -> HttpFixtures:
     fixtures = blocked_gate_detail_http_fixtures()
-    row = fixtures["/api/v1/dashboard/gate"][1]["approval_queue"][0]
+    gate = json_payload_fixture(fixtures, "/api/v1/dashboard/gate")
+    approval_queue = gate["approval_queue"]
+    assert isinstance(approval_queue, list) and isinstance(approval_queue[0], dict)
+    row = approval_queue[0]
     row["input"] = {
         "connector": "discord",
         "content": CONCEAL_ATTACK_CONTENT,

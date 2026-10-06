@@ -76,6 +76,11 @@ val opens_keepers : message_mode:bool -> string -> bool
     declined it. Message mode never treats the printable {!keepers_jump} key
     as this jump. *)
 
+val chat_quiet_leave : input_supported:bool -> turn_active:bool -> draft_empty:bool -> string -> bool
+(** [Q] leaves a transcript-only viewport, or an active turn with an empty
+    visible draft. Ctrl-Q leaves independently of the draft and turn state.
+    Neither key requests a turn interrupt. *)
+
 val cancels_two_press :
   input_seen:bool -> key:string option -> second_press:string list -> bool
 (** Whether the input the loop just read cancels a standing two-press

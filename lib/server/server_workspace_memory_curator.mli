@@ -11,6 +11,16 @@ val request : base_path:string -> refresh
 val output_schema : Yojson.Safe.t
 
 module For_testing : sig
+  (** The production configuration predicate, with only provider execution
+      and its input bound replaced by the fixture. *)
+  val start_configured
+    : sw:Eio.Switch.t
+    -> base_path:string
+    -> max_input_bytes:int
+    -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
+       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string, string) result)
+    -> unit
+
   (** The lane run itself: measured HTTP slots as one exact-output flow.
       Runtime preparation rejects CLI slots until they expose a context window. *)
   val execute

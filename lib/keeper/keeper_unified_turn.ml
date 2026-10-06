@@ -146,7 +146,79 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
-let autonomous_yield_request ~base_path ~keeper_name =
+(* #41157: the heartbeat intake classifies a retained Connector selection
+   whose attention row is unreadable as missing and leaves it pending. The
+   yield paths used to treat every pending Connector as actionable, so the
+   same unreadable pointer re-yielded at each tool boundary and the source
+   never completed. Ask the attention store the same batched question the
+   intake asks -- one scan per probe, never a read per pointer -- and drop
+   the pointers it does not know. A read failure keeps the previous
+   always-ready behavior: the row may still be readable inside the turn,
+   and an unreadable store must not silence newly arrived readable
+   messages.
+
+   Each source turn owns its memo, so interleaved Keepers cannot evict one
+   another. A cached subset is valid only for the same queried IDs and store
+   version: ingress records a row before enqueueing its pointer. *)
+let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
+  let memo = ref None in
+  fun (pending : Keeper_event_queue.t) ->
+    let event_ids =
+      Keeper_event_queue.to_list pending
+      |> List.filter_map (fun (s : Keeper_event_queue.stimulus) ->
+             match s.Keeper_event_queue.payload with
+             | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
+             | _ -> None)
+      |> List.sort_uniq String.compare
+    in
+    match event_ids with
+    | [] -> pending
+    | event_ids ->
+      let present () =
+        let store_path =
+          Keeper_external_attention.attention_path
+            ~base_path ~keeper_name
+        in
+        let version =
+          match Unix.stat store_path with
+          | exception Unix.Unix_error _ -> None
+          | stat ->
+            Some (stat.Unix.st_dev, stat.Unix.st_ino,
+                  stat.Unix.st_mtime, stat.Unix.st_ctime, stat.Unix.st_size)
+        in
+        match version, !memo with
+        | Some current, Some (previous, queried_ids, table)
+          when current = previous && queried_ids = event_ids -> Some table
+        | _ ->
+          on_attention_read ();
+          (match
+             Keeper_external_attention.recorded_items_by_event_ids
+               ~base_path ~keeper_name ~event_ids
+           with
+          | Error _ ->
+            memo := None;
+            None
+          | Ok recorded ->
+            let table = Hashtbl.create (List.length recorded) in
+            List.iter
+              (fun (recorded_id, _) -> Hashtbl.replace table recorded_id ())
+              recorded;
+            memo := Option.map (fun version -> version, event_ids, table) version;
+            Some table)
+      in
+      match present () with
+      | None -> pending
+      | Some table ->
+        Keeper_event_queue.to_list pending
+        |> List.filter (fun (s : Keeper_event_queue.stimulus) ->
+               match s.Keeper_event_queue.payload with
+               | Keeper_event_queue.Connector_attention { event_id; _ } ->
+                 Hashtbl.mem table event_id
+               | _ -> true)
+        |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
+;;
+
+let autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name =
   match Keeper_chat_yield_request.request
           ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
   | Error _ as error -> error
@@ -155,6 +227,7 @@ let autonomous_yield_request ~base_path ~keeper_name =
     (match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
      | Error _ as error -> error
      | Ok pending ->
+       let pending = filter_pending pending in
        let ready =
          Keeper_event_queue.to_list pending
          |> List.filter
@@ -175,6 +248,14 @@ let autonomous_yield_request ~base_path ~keeper_name =
            (Some
               Keeper_agent_run.
                 { reason = Durable_stimulus_waiting summary })))
+;;
+
+let autonomous_yield_request ~base_path ~keeper_name =
+  let filter_pending =
+    make_connector_pointer_filter ~on_attention_read:(fun () -> ())
+      ~base_path ~keeper_name
+  in
+  autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name
 ;;
 
 (* #28809: an approved Gate resolution whose one-shot grant is still unspent
@@ -326,10 +407,11 @@ let connector_attention_preemption_request ~now pending =
         }
 ;;
 
-let connector_attention_waiting ~base_path ~keeper_name =
+let connector_attention_waiting_with_filter ~filter_pending ~base_path ~keeper_name =
   match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
   | Error _ as error -> error
   | Ok pending ->
+    let pending = filter_pending pending in
     let request =
       connector_attention_preemption_request ~now:(Time_compat.now ()) pending
     in
@@ -346,7 +428,18 @@ let connector_attention_waiting ~base_path ~keeper_name =
     Ok request
 ;;
 
-let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
+let connector_attention_waiting ~base_path ~keeper_name =
+  let filter_pending =
+    make_connector_pointer_filter ~on_attention_read:(fun () -> ())
+      ~base_path ~keeper_name
+  in
+  connector_attention_waiting_with_filter ~filter_pending ~base_path ~keeper_name
+;;
+
+let make_autonomous_yield_probe ~on_attention_read ~wake ~base_path ~keeper_name =
+  let filter_pending =
+    make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name
+  in
   match wake with
   (* A nonempty [Woken] is the event queue input already selected for this
      turn. It may yield for chat delivery. Two successors may preempt at a
@@ -365,16 +458,35 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
          (match hitl_replay_yield_request ~base_path ~keeper_name with
           | Error _ as error -> error
           | Ok (Some _) as request -> request
-          | Ok None -> connector_attention_waiting ~base_path ~keeper_name))
+          | Ok None ->
+            connector_attention_waiting_with_filter ~filter_pending
+              ~base_path ~keeper_name))
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
-    fun () -> autonomous_yield_request ~base_path ~keeper_name
+    fun () ->
+      autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name
   (* Not reachable: [~wake] here originates in [run_keeper_cycle], which the
      chat lane does not call. The autonomous yield request is the conservative answer — it
      asks whether this lane should step aside, and a chat turn that somehow
      arrived here should step aside on the same terms. *)
   | Keeper_registry.Chat_request ->
-    fun () -> autonomous_yield_request ~base_path ~keeper_name
+    fun () ->
+      autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name
 ;;
+
+let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
+  make_autonomous_yield_probe ~on_attention_read:(fun () -> ())
+    ~wake ~base_path ~keeper_name
+;;
+
+module For_testing = struct
+  let autonomous_yield_probe ~wake ~base_path ~keeper_name =
+    let reads = ref 0 in
+    let probe =
+      make_autonomous_yield_probe ~on_attention_read:(fun () -> incr reads)
+        ~wake ~base_path ~keeper_name
+    in
+    probe, (fun () -> !reads)
+end
 
 (* RFC-0377 admits a whole conversation backlog as one wake: intake batches
    one connector conversation's pending rows together with every other ready

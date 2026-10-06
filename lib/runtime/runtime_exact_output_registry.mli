@@ -112,7 +112,9 @@ type lane_resolution_error =
 
 val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
 (** Wake a consumer after a successful publication changes this lane's
-    declaration or admitted target identities, including absent-to-present.
+    declaration, admitted target identities, or materialized runtime bindings,
+    including absent-to-present. Runtime binding equality includes opaque
+    credential identity; no secret is rendered or persisted.
     Callbacks run outside the publication mutex and must only signal work,
     never run it inline. Callback exceptions, including callback cancellation,
     are isolated from the already-committed publication result.
@@ -124,9 +126,10 @@ val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
     parked work only the fence's end can admit. A fence that refused no
     reader wakes only the consumers its commit changed.
 
-    Credential values are absent from admitted target identities; changing
-    only a credential value, or an external provider recovering, is not an
-    event from this subscription. *)
+    Credential changes are observed only for slots with runtime observations
+    in a successful publication. Standalone overlay targets without a runtime
+    observation, environment changes or refresh outside publication, and an
+    external provider recovering are not events from this subscription. *)
 
 val publish
   :  ?runtime_observations:(string * runtime_observation) list

@@ -383,6 +383,91 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       Worker.For_testing.stop ~base_path)))
 
+let credential_snapshot ~curator_key ~other_key =
+  let module Exact = Agent_core.Exact_output in
+  let overlay = Exact_output_fixture.catalog_document
+      ~api_key_envs:["curator-test", "CURATOR_TEST_KEY"; "other-test", "OTHER_TEST_KEY"]
+      ~source:"curator-credential-publication-test"
+      [ { Exact_output_fixture.id = "curator-test"; base_url = "http://127.0.0.1:9/v1" }
+      ; { Exact_output_fixture.id = "other-test"; base_url = "http://127.0.0.1:9/v1" } ] in
+  let io : Exact.resolver_io = { getenv = (function
+      | "CURATOR_TEST_KEY" -> Ok curator_key
+      | "OTHER_TEST_KEY" -> Ok other_key
+      | _ -> Ok None) } in
+  let observation slot_id key =
+    let config = Llm_provider.Provider_config.make ~kind:OpenAI_compat
+        ~model_id:"fixture-model" ~base_url:"http://127.0.0.1:9/v1"
+        ~api_key:(Option.value ~default:"" key) () in
+    let binding = Agent_core.Binding_identity.of_provider_config ~transport:Http config
+      |> require in
+    slot_id, Registry.{
+      candidate = Runtime_candidate_backpressure.create_candidate
+        ~binding:(Runtime_candidate_backpressure.Resolved_http_binding binding);
+      quota_scope = Runtime_quota_window.scope_of_credential ~provider_id:slot_id None } in
+  match Exact.load_resolver_snapshot ~io ~catalog:(Exact.Full_replacement overlay) () with
+  | Ok snapshot -> snapshot,
+      [observation "curator-test" curator_key; observation "other-test" other_key]
+  | Error _ -> Alcotest.fail "credential fixture snapshot failed"
+
+let test_credential_publication_resumes_pending_fact () = with_registry (fun () ->
+  with_base (fun base_path clock ->
+    let before, before_observations = credential_snapshot ~curator_key:(Some "fixture-before")
+        ~other_key:(Some "other-before") in
+    let unrelated, unrelated_observations = credential_snapshot ~curator_key:(Some "fixture-before")
+        ~other_key:(Some "other-after") in
+    let after, after_observations = credential_snapshot ~curator_key:(Some "fixture-after")
+        ~other_key:(Some "other-after") in
+    Alcotest.(check string) "credential rotation keeps catalog identity"
+      (Exact_output_fixture.catalog_generation_fingerprint before)
+      (Exact_output_fixture.catalog_generation_fingerprint after);
+    registry_ok (Registry.publish ~runtime_observations:before_observations ~lanes:[curator_lane] before) |> ignore;
+    commit base_path "Existing fact waits for a corrected credential";
+    let calls = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls;
+      if !calls = 1 then Error "injected credential refusal"
+      else Ok (answer selected, "curator-test") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "initial refusal leaves pending work" 1 !calls;
+      registry_ok (Registry.publish ~runtime_observations:before_observations ~lanes:[curator_lane] before) |> ignore;
+      registry_ok (Registry.publish ~runtime_observations:unrelated_observations ~lanes:[curator_lane] unrelated) |> ignore;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "same and unrelated credentials do not retry" 1 !calls;
+      let prepared = registry_ok (Registry.prepare_replacement ~runtime_observations:after_observations
+        ~lanes:[curator_lane] ~excused_lane_ids:[]
+        ~load_resolver_snapshot:(fun () -> Ok after)) in
+      registry_ok (Registry.transact_replacement prepared
+        ~apply_write:(fun () -> Registry.Not_committed ())) |> ignore;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "failed credential publication does not retry" 1 !calls;
+      registry_ok (Registry.transact_replacement prepared
+        ~apply_write:(fun () -> Registry.Committed ())) |> ignore;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "committed credential rotation resumes unchanged fact" 2 !calls;
+      Alcotest.(check int) "pending fact classified" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      Worker.For_testing.stop ~base_path)))
+
+let test_missing_credential_publication_notifies () = with_registry (fun () ->
+  let missing, missing_observations = credential_snapshot ~curator_key:None ~other_key:None in
+  let available, available_observations = credential_snapshot ~curator_key:(Some "fixture-key") ~other_key:None in
+  let registry = registry_ok (Registry.publish ~runtime_observations:missing_observations ~lanes:[curator_lane] missing) in
+  (match Registry.resolve_lane registry ~lane_id:curator_lane.id with
+   | Ok lane -> Alcotest.(check int) "missing credential remains admitted" 1
+       (List.length lane.selected_slots)
+   | Error _ -> Alcotest.fail "credential failure removed an admitted slot");
+  let calls = ref 0 in
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id (fun () -> incr calls) in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    registry_ok (Registry.publish ~runtime_observations:missing_observations ~lanes:[curator_lane] missing) |> ignore;
+    Alcotest.(check int) "unchanged missing credential does not notify" 0 !calls;
+    registry_ok (Registry.publish ~runtime_observations:available_observations ~lanes:[curator_lane] available) |> ignore;
+    Alcotest.(check int) "available frozen credential notifies" 1 !calls;
+    registry_ok (Registry.publish ~runtime_observations:available_observations ~lanes:[curator_lane] available) |> ignore;
+    Alcotest.(check int) "unchanged available credential does not notify" 1 !calls))
+
 let test_subscriber_cancellation_keeps_commit_receipt () = with_registry (fun () ->
   let snapshot = curator_snapshot "http://127.0.0.1:9/v1" in
   registry_ok (Registry.publish ~lanes:[curator_lane] snapshot) |> ignore;
@@ -463,6 +548,10 @@ let () = Alcotest.run "workspace curator lane"
         test_transaction_recovery_is_relevant_and_committed
     ; Alcotest.test_case "subscriber cancellation preserves committed receipt" `Quick
         test_subscriber_cancellation_keeps_commit_receipt
+    ; Alcotest.test_case "credential publication resumes existing fact" `Quick
+        test_credential_publication_resumes_pending_fact
+    ; Alcotest.test_case "missing credential publication notifies" `Quick
+        test_missing_credential_publication_notifies
     ; Alcotest.test_case "publication survives an in-flight failure" `Quick
         test_publication_during_failed_call_keeps_wake
     ; Alcotest.test_case "re-enable wakes retained facts" `Quick test_reenable_wakes_retained_facts

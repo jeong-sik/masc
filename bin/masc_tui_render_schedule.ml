@@ -417,6 +417,15 @@ let workspace_layout ~inner_width =
   Table.fit ~inner_width ~width:workspace_column_width ~flex:Workspace_path
     ~drop_order:[ Workspace_sync; Workspace_branch ] workspace_columns
 
+(* The repository list read as a list, all mandatory columns in: name,
+   status and the path's floor (sync and branch are the two the narrow list
+   gives up). This is where a narrow mode's threshold comes from, so it is
+   measured by the table's own floor rather than copied as a second number
+   that can age apart from the columns (task-2025). *)
+let workspace_floor_width =
+  Table.floor ~width:workspace_column_width ~flex:Workspace_path
+    ~drop_order:[ Workspace_sync; Workspace_branch ] workspace_columns
+
 let workspace_cells ~(layout : workspace_column Table.layout) values =
   List.map
     (function
@@ -516,6 +525,13 @@ let system_log_layout ~inner_width =
     ~drop_order:[ Log_category; Log_keeper; Log_module ]
     [ Log_time; Log_level; Log_module; Log_keeper; Log_category; Log_message ]
 
+(* The log read as a log: time, level and the message's floor -- the three
+   the narrow list never gives up (task-2025). *)
+let system_log_floor_width =
+  Table.floor ~width:system_log_column_width ~flex:Log_message
+    ~drop_order:[ Log_category; Log_keeper; Log_module ]
+    [ Log_time; Log_level; Log_module; Log_keeper; Log_category; Log_message ]
+
 let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
     ~(layout : system_log_column Table.layout) values =
   List.map
@@ -595,6 +611,14 @@ let verification_title_width ~inner_width ~submitter_width =
       (verification_cells ~submitter_width ~title_width:0 verification_no_values)
   in
   max verification_minimum_title_width (inner_width - named)
+
+(* The request list at its floor (task-2025): the submitter rides in at the
+   width the caller measured from the page -- it names who owes the work,
+   which the narrow pane keeps -- and the title at its own minimum. *)
+let verification_floor_width ~submitter_width =
+  Table.used_width
+    (verification_cells ~submitter_width
+       ~title_width:verification_minimum_title_width verification_no_values)
 
 let verification_header_row ~submitter_width ~title_width =
   Table.header_row
@@ -734,6 +758,22 @@ let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
   ; sl_wake_width = wake_width
   ; sl_delivery_width = delivery_width
   }
+
+(* The schedules list at its floor (task-2025). The state word is the last
+   thing the narrow list gives up, so the floor keeps it; the wake rides in
+   at the width the caller measured from the page, like the target and the
+   delivery, and the rest count at the least reading any page gives them --
+   the due stamp at its three-cell floor, the narrow pane's own rule. *)
+let schedule_floor_width ~wake_width =
+  Table.floor
+    ~width:(function
+      | Schedule_status -> schedule_status_width
+      | Schedule_due -> Masc_tui_message_layout.display_width "DUE"
+      | Schedule_target -> schedule_minimum_target_width
+      | Schedule_wake -> wake_width
+      | Schedule_delivery -> schedule_minimum_delivery_width
+      | Schedule_recurrence -> schedule_minimum_recurrence_width)
+    ~flex:Schedule_recurrence ~drop_order:schedule_drop_order schedule_columns
 
 let schedule_cell ~status_style ~wake_style ~recurrence_style
     ~(layout : schedule_layout) values = function
@@ -913,6 +953,28 @@ let kauto_recurrence_width words =
     kauto_minimum_recurrence_width words
   |> min kauto_maximum_recurrence_width
 
+(* The automation tab at its floor (task-2025): the mark, the state word,
+   the two clocks and the summary's minimum -- the four facts the tab was
+   rewritten to state. The status and clock widths are the caller's
+   constants, measured from the contract's word list and the stamp format
+   and the same on every page; the outcome, recurrence and actor columns
+   are measured from the page, so they count here at the least reading any
+   page can give them ({!schedule_minimum_delivery_width},
+   {!kauto_minimum_recurrence_width}, {!kauto_minimum_by_width}). Below the
+   result, even the narrowest legal page draws the row wider than the pane,
+   which is the frame's cut again; the caller adds its own two-cell lead
+   outside this number. *)
+let kauto_floor_width ~status_width ~clock_width =
+  Table.floor
+    ~width:(function
+      | Kauto_mark -> kauto_mark_width
+      | Kauto_status -> status_width
+      | Kauto_triggered | Kauto_received | Kauto_requested -> clock_width
+      | Kauto_outcome -> schedule_minimum_delivery_width
+      | Kauto_recurrence -> kauto_minimum_recurrence_width
+      | Kauto_by -> kauto_minimum_by_width
+      | Kauto_what -> kauto_minimum_what_width)
+    ~flex:Kauto_what ~drop_order:kauto_drop_order kauto_columns
 (* The status, clock and outcome widths are the caller's: this module does
    not link the schedule contract, so the status comes measured from the
    contract's own word list, the clock from the stamp format, and the
@@ -1080,6 +1142,13 @@ let lane_run_layout ~inner_width =
   Table.fit ~inner_width ~width:lane_run_column_width ~flex:Lane_slot
     ~drop_order:lane_run_drop_order lane_run_columns
 
+(* The run list at its floor: subject, status and the slot's minimum -- the
+   run's what and how-it-ended, which the narrow list never gives up
+   (task-2025). *)
+let lane_run_floor_width =
+  Table.floor ~width:lane_run_column_width ~flex:Lane_slot
+    ~drop_order:lane_run_drop_order lane_run_columns
+
 (* The identity column is named by the caller: the Verifier's runs are about a
    task or a goal, every other lane's about who asked. *)
 let lane_run_cell ~identity_header ~status_style ~slot_width values = function
@@ -1182,6 +1251,12 @@ let change_drop_order = [ Change_turn; Change_task; Change_op; Change_result ]
 
 let change_layout ~inner_width =
   Table.fit ~inner_width ~width:change_column_width ~flex:Change_summary
+    ~drop_order:change_drop_order change_columns
+
+(* The change list at its floor: which file and what it did there -- the two
+   the narrow list never gives up (task-2025). *)
+let change_floor_width =
+  Table.floor ~width:change_column_width ~flex:Change_summary
     ~drop_order:change_drop_order change_columns
 
 let change_cell ~op_style ~result_style ~summary_width values = function
@@ -1494,6 +1569,12 @@ let harness_layout ~inner_width =
   Table.fit ~inner_width ~width:harness_column_width ~flex:Harness_reason
     ~drop_order:harness_drop_order harness_columns
 
+(* The verdict list at its floor: which task was judged, what the judge said,
+   and why -- the three the narrow list never gives up (task-2025). *)
+let harness_floor_width =
+  Table.floor ~width:harness_column_width ~flex:Harness_reason
+    ~drop_order:harness_drop_order harness_columns
+
 let harness_cell ~verdict_style ~reason_width values = function
   | Harness_time ->
       Table.cell ~header:"TIME" ~width:harness_time_width values.hrow_time
@@ -1777,6 +1858,12 @@ let board_drop_order =
 
 let board_layout ~inner_width =
   Table.fit ~inner_width ~width:board_column_width ~flex:Board_title
+    ~drop_order:board_drop_order board_columns
+
+(* The board list at its floor: the kind mark, the title's minimum and the
+   age -- the three a row is read for (task-2025). *)
+let board_floor_width =
+  Table.floor ~width:board_column_width ~flex:Board_title
     ~drop_order:board_drop_order board_columns
 
 let board_cell ~styles ~age_header ~title_width values = function

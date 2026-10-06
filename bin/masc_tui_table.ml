@@ -112,6 +112,38 @@ let fit ~inner_width ~width ~flex ~drop_order columns =
   let gaps = cell_gap * max 0 (List.length shown - 1) in
   { shown; flex_width = max (width flex) (inner_width - others - gaps) }
 
+(* The least width a table is still a table at: everything [fit] would keep
+   after dropping what [drop_order] names, the flexible column at its floor,
+   measured by the same [needs] arithmetic [fit] settles with. This is where
+   a narrow mode's threshold comes from -- the surface fits or it is
+   stacked -- so it is computed from the table's own description rather
+   than copied into a second number that can age apart from it.
+
+   Kept beside [fit] and sharing its [needs] so the two cannot disagree: a
+   [floor] that forgot a gap or a column would promise a threshold [fit]
+   then contradicts on the same pane. *)
+let floor ~width ~flex ~drop_order columns =
+  let flex_count = List.length (List.filter (fun col -> col = flex) columns) in
+  if flex_count = 0 then
+    invalid_arg
+      "Masc_tui_table.floor: the flexible column is not among the columns"
+  else if flex_count > 1 then
+    invalid_arg
+      "Masc_tui_table.floor: the flexible column is listed more than once";
+  (* The mandatory row: what [fit] is still drawing when everything
+     [drop_order] names has gone, the flexible column at its floor. [fit]
+     stops dropping at the first state that fits, and the needs along that
+     descent only shrink, so this row's needs is both the least width any
+     state fits at and the width below which [fit] arrives here still not
+     fitting -- the frame's cut, exactly at this number. *)
+  let mandatory =
+    List.filter
+      (fun col -> col = flex || not (List.mem col drop_order))
+      columns
+  in
+  List.fold_left (fun total col -> total + width col) 0 mandatory
+  + (cell_gap * max 0 (List.length mandatory - 1))
+
 (* Where a reading gives way is the column's choice. An identifier keeps both
    ends and folds in the middle: cut at the head it reads as a different
    identifier, and a number cut at either end is a wrong number. A sentence

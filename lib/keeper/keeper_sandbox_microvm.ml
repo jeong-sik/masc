@@ -1028,6 +1028,36 @@ let work_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ work_volume_guest_root ]
 ;;
 
+(* ── Checkouts and their build output ─────────────────────────────────
+   The boot-time work volume helper removes real build output while no guest
+   holds the volume, and the in-guest scan links each checkout's [_build] to
+   the build volume once the guest is up. Both walk the same checkouts. *)
+
+(** How far below a keeper's work root a checkout is looked for.
+
+    Observed layouts put them at depth 1 ([polisher/masc-t362]) and depth 2
+    ([lane-smith/repos/wt-370]). Three leaves room for one more level without
+    turning this into a whole-tree walk. *)
+let build_root_scan_depth = 3
+
+(** A checkout is a directory holding [dune-project].
+
+    That is the marker for the build output this addresses: [_build] is
+    dune's name and dune's alone. Other ecosystems pin host descriptors the
+    same way through their own output directories -- [node_modules],
+    [target], [dist] -- and are {i not} handled here (measured: npm deletes
+    and replaces a [node_modules] symlink on every install, defeating this
+    mechanism outright). Naming that gap is
+    deliberate, so a reader does not read this as covering every keeper. *)
+let build_root_marker = "dune-project"
+
+let build_output_dir_name = "_build"
+
+(** A checkout holding this file keeps its real [_build] through a guest
+    boot. The guest's idle build cleanup payload
+    ([config/scripts/keeper-build-cleanup.py]) skips the same name. *)
+let build_keep_marker = ".masc-keep-build"
+
 let trim_guest_root = "/masc-trim"
 let trim_capability = "CAP_SYS_ADMIN"
 let work_volume_trim_name ~keeper_name =
@@ -1039,16 +1069,75 @@ let work_volume_trim_name ~keeper_name =
 (* util-linux's path on the Debian and Ubuntu bases of the catalog images
    (measured in [masc-sandbox:general] and [masc-keeper-sandbox:local]). *)
 let fstrim_guest_path = "/usr/sbin/fstrim"
+let mount_guest_path = "/usr/bin/mount"
+
+(** Removes the real [_build] of every checkout under [keeper_root] that the
+    in-guest scan would otherwise leave on the work volume as
+    {!Link_refused_real_directory}: the same depth, the same [dune-project]
+    marker, the keeper root itself and [.git] skipped. A checkout made and
+    built while its guest runs has a real [_build] before any scan can link
+    it, so without this its output stays on the work volume for good. The
+    helper runs it before the guest boots, so no process can hold the
+    output. [find] without [-L] never follows a symlinked [_build], and
+    [-type d] does not match one. A checkout holding {!build_keep_marker}
+    keeps its output. A failed removal is printed and does not stop the
+    trim that follows. *)
+let build_output_removal_script ~keeper_root =
+  let root = Filename.quote keeper_root in
+  Printf.sprintf
+    {sh|if [ -d %s ]; then
+  cd %s
+  find . -maxdepth %d \( -name .git -prune \) -o \( -name %s -type d -prune -print \) |
+  while IFS= read -r b; do
+    c=${b%%/%s}
+    [ "$c" != . ] || continue
+    [ -e "$c/%s" ] || continue
+    [ ! -e "$c/%s" ] || continue
+    if rm -rf -- "$b"; then
+      printf 'build output removed: %%s\n' "${b#./}"
+    else
+      printf 'build output not removed: %%s\n' "${b#./}"
+    fi
+  done
+fi|sh}
+    root
+    root
+    (build_root_scan_depth + 1)
+    build_output_dir_name
+    build_output_dir_name
+    build_root_marker
+    build_keep_marker
+;;
 
 (* The ext4 default survives the helper's unmount and makes later keeper
    deletes discard their blocks without granting the keeper capabilities.
-   Resolve the mounted device instead of assuming a virtio disk number. *)
-let work_volume_reclaim_script =
+   Resolve the mounted device instead of assuming a virtio disk number.
+
+   The helper's own mount drops discard before the build output goes, so the
+   removal rewrites only metadata and the host-side cost lands in [fstrim],
+   which changes nothing on the filesystem. Measured 2026-10-06 on container
+   1.3.1 with [masc-sandbox:general], 20 GB of build output (250 x 80 MB plus
+   20,000 small files): removal took 7.7 s with discard on and 0.07 s with it
+   off, the [fstrim] after it 7.4 s, and the host image went from 20 GB to
+   15 MB either way. If the helper's budget runs out, it runs out inside
+   [fstrim], and the next boot's [fstrim] returns the rest. A refused remount
+   only moves that cost back into the removal, so it is reported, not fatal. *)
+let work_volume_reclaim_script ~keeper_name =
+  let keeper_root =
+    Filename.concat trim_guest_root (Playground_paths.sanitize_keeper_name keeper_name)
+  in
   Printf.sprintf
     "work_device=$(/usr/bin/findmnt --noheadings --output SOURCE --target %s)\n\
      /usr/sbin/tune2fs -o discard \"$work_device\"\n\
+     %s -o remount,nodiscard %s || echo 'remount nodiscard refused; removing with discard on'\n\
+     %s\n\
      %s -v %s"
-    trim_guest_root fstrim_guest_path trim_guest_root
+    trim_guest_root
+    mount_guest_path
+    trim_guest_root
+    (build_output_removal_script ~keeper_root)
+    fstrim_guest_path
+    trim_guest_root
 ;;
 
 (** Apple's work volume is a sparse ext4 image, and a guest delete leaves its
@@ -1064,8 +1153,9 @@ let work_volume_reclaim_script =
     on container 1.3.1, [--user 0 --cap-add CAP_SYS_ADMIN] gives [CapEff]
     00000000a82425fb (the default set plus SYS_ADMIN), and with [--cap-drop
     ALL] first it is 0000000000200000, SYS_ADMIN only. The root is read-only
-    and the network is off. A fixed shell script enables ext4 discard and
-    runs [fstrim] by absolute path, so the image's
+    and the network is off. A fixed shell script enables ext4 discard,
+    removes the keeper's real build output ({!build_output_removal_script})
+    and runs [fstrim] by absolute path, so the image's
     own entrypoint ([opam] on the ocaml image) never runs with the
     capability. *)
 let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
@@ -1075,7 +1165,7 @@ let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
     ; "--network"; "none"; "--read-only"
     ; "--entrypoint"; "/bin/sh"
     ; "--volume"; volume_name ^ ":" ^ trim_guest_root
-    ; image; "-eu"; "-c"; work_volume_reclaim_script ]
+    ; image; "-eu"; "-c"; work_volume_reclaim_script ~keeper_name ]
 ;;
 
 let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
@@ -1524,10 +1614,11 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    (2026-09-24) to keep its allocated size after the guest deletes
    everything inside it -- `fstrim` inside the guest, run as root, answers
    "Operation not permitted", because the guest's capability set is empty
-   (the disk itself accepts discard, measured 2026-09-26). A keeper's `_build` on its own disposable
-   volume, apart from the work volume that holds the checkout, is what
-   makes "delete the volume, make a new one" a host-disk reclaim path on
-   Apple. *)
+   (the disk itself accepts discard, measured 2026-09-26). The boot helper
+   now sets the work volume's ext4 discard default, so a delete there returns
+   its blocks; the build volume gets no such default, and what linked
+   checkouts built on it is returned by deleting the volume and making a new
+   one at every boot. *)
 
 (** Guest mount point of the per-keeper build volume, distinct from
     {!work_volume_guest_root}. *)
@@ -1586,10 +1677,11 @@ type build_link_plan =
 
 (** Deciding is separate from acting so the refusal is testable.
 
-    A real [_build] is not deleted. It holds build output this module did not
-    create, and silently discarding it to install a link would trade a disk
-    problem for lost work; the caller reports it and leaves the checkout
-    building on the unified work volume. Retargeting a stale link is
+    The scan runs inside a live guest, where a keeper's build may be using a
+    real [_build], so the plan never deletes one: the caller reports it and
+    the checkout keeps building on the unified work volume until the next
+    boot's helper removes it ({!build_output_removal_script}), unless the
+    checkout holds {!build_keep_marker}. Retargeting a stale link is
     different -- removing a symlink removes no data. *)
 let plan_build_link ~target = function
   | Build_absent -> Link_create target
@@ -1643,27 +1735,8 @@ let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
    host-side file operation on the bundle would silently miss the tree."
    So the walk, the [_build] state read, and the symlink itself all run
    inside the guest over [container exec]; only the *decision*
-   ({!plan_build_link}) stays host-side and pure. *)
-
-(** How far below a keeper's work root a checkout is looked for.
-
-    Observed layouts put them at depth 1 ([polisher/masc-t362]) and depth 2
-    ([lane-smith/repos/wt-370]). Three leaves room for one more level without
-    turning this into a whole-tree walk. *)
-let build_root_scan_depth = 3
-
-(** A checkout is a directory holding [dune-project].
-
-    That is the marker for the build output this addresses: [_build] is
-    dune's name and dune's alone. Other ecosystems pin host descriptors the
-    same way through their own output directories -- [node_modules],
-    [target], [dist] -- and are {i not} handled here (measured: npm deletes
-    and replaces a [node_modules] symlink on every install, defeating this
-    mechanism outright). Naming that gap is
-    deliberate, so a reader does not read this as covering every keeper. *)
-let build_root_marker = "dune-project"
-
-let build_output_dir_name = "_build"
+   ({!plan_build_link}) stays host-side and pure. The checkouts it walks are
+   the ones {!build_output_removal_script} walks at boot. *)
 
 (** One [find] and one read loop, run with the keeper's work root as the
     exec's [container_cwd] so every path [find] prints is already relative
@@ -1757,16 +1830,17 @@ let build_link_rows_of_scan rows =
 ;;
 
 (** The refusal a caller reports for a row whose plan is
-    {!Link_refused_real_directory}: a real [_build] this module did not
-    create, left in place rather than deleted. *)
+    {!Link_refused_real_directory}: a real [_build] the live guest keeps
+    until the next boot's helper removes it. *)
 let build_link_refusal_message ~checkout =
   Printf.sprintf
-    "%s/%s is a real directory holding build output this code did not create; \
-     it is left on the unified work volume rather than deleted. Next: remove \
-     or move it by hand if the build cache is not wanted, and the link is \
-     installed on the following turn."
+    "%s/%s is a real directory, so it stays on the unified work volume while \
+     this guest runs. The next guest boot removes it before the guest starts \
+     and this scan then links the checkout to the build volume; a checkout \
+     holding %s keeps it."
     checkout
     build_output_dir_name
+    build_keep_marker
 ;;
 
 (** The [(checkout, target)] pairs a plan actually needs a guest command

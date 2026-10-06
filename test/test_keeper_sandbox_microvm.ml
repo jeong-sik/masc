@@ -1609,8 +1609,8 @@ let test_plan_build_link_never_deletes_real_build_output () =
     "stale link -> retarget (removing a symlink loses no data)"
     true
     (M.plan_build_link ~target (M.Build_symlink "/masc-build/old") = M.Link_retarget target);
-  (* The one that matters: a real directory holds output this module did not
-     create, so it is reported and left alone. *)
+  (* The one that matters: the scan runs in a live guest whose build may be
+     using a real directory, so it is reported and left for the boot helper. *)
   Alcotest.(check bool)
     "real directory -> refused, never deleted"
     true
@@ -1748,9 +1748,102 @@ let test_build_link_refusal_message_names_the_checkout () =
     true
     (Astring.String.is_infix ~affix:"repos/wt-370/_build" message);
   Alcotest.(check bool)
-    "says it was left alone, not deleted"
+    "names the marker that keeps it through a boot"
     true
-    (Astring.String.is_infix ~affix:"rather than deleted" message)
+    (Astring.String.is_infix ~affix:M.build_keep_marker message)
+;;
+
+(* The boot helper's removal runs against a real tree: which directories it
+   deletes is decided by find, test and rm, so only running the script shows
+   it. *)
+let test_build_output_removal_script_removes_only_unkept_dune_output () =
+  let root = temp_dir "build_output_removal_" in
+  let keeper_root = Filename.concat root "k" in
+  (* Checked again after the parent exists: "k/." exists once "k" does. *)
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      if not (Sys.file_exists dir) then Unix.mkdir dir 0o755)
+  in
+  let touch path =
+    mkdir_p (Filename.dirname path);
+    Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "x")
+  in
+  let under rel = Filename.concat keeper_root rel in
+  let build rel = under (Filename.concat rel M.build_output_dir_name) in
+  let checkout ?(keep = false) rel =
+    touch (under (Filename.concat rel M.build_root_marker));
+    if keep then touch (under (Filename.concat rel M.build_keep_marker));
+    touch (Filename.concat (build rel) "default/t.exe")
+  in
+  let exists path =
+    match Unix.lstat path with
+    | _ -> true
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
+  in
+  checkout "masc";
+  checkout "masc/.worktrees/task-1";
+  checkout "my repo";
+  checkout ".";
+  checkout "a/b/c/d";
+  checkout ~keep:true "kept";
+  checkout "r/.git";
+  touch (Filename.concat (build "notdune") "f");
+  let elsewhere = Filename.concat root "elsewhere" in
+  touch (Filename.concat elsewhere "f");
+  touch (under (Filename.concat "linked" M.build_root_marker));
+  Unix.symlink elsewhere (build "linked");
+  let ic =
+    Unix.open_process_args_in
+      "/bin/sh"
+      [| "/bin/sh"; "-eu"; "-c"; M.build_output_removal_script ~keeper_root |]
+  in
+  let out = In_channel.input_all ic in
+  Alcotest.(check bool) "script exits 0" true (Unix.close_process_in ic = Unix.WEXITED 0);
+  List.iter
+    (fun rel -> Alcotest.(check bool) (rel ^ " build output removed") false (exists (build rel)))
+    [ "masc"; "masc/.worktrees/task-1"; "my repo" ];
+  List.iter
+    (fun (rel, why) -> Alcotest.(check bool) (rel ^ " kept: " ^ why) true (exists (build rel)))
+    [ ".", "the keeper root is not a checkout the scan links"
+    ; "a/b/c/d", "deeper than the scan looks"
+    ; "kept", "holds the keep marker"
+    ; "r/.git", "inside .git"
+    ; "notdune", "no dune-project"
+    ; "linked", "a symlink, not a real directory"
+    ];
+  Alcotest.(check bool) "the link is still a link" true
+    ((Unix.lstat (build "linked")).st_kind = Unix.S_LNK);
+  Alcotest.(check bool) "the link's target is untouched" true
+    (Sys.file_exists (Filename.concat elsewhere "f"));
+  Alcotest.(check bool) "the checkout itself stays" true
+    (Sys.file_exists (under (Filename.concat "masc" M.build_root_marker)));
+  Alcotest.(check (list string)) "one line per removal"
+    [ "build output removed: masc/.worktrees/task-1/_build"
+    ; "build output removed: masc/_build"
+    ; "build output removed: my repo/_build"
+    ]
+    (out
+     |> String.split_on_char '\n'
+     |> List.filter (fun line -> not (String.equal line ""))
+     |> List.sort String.compare)
+;;
+
+let test_build_output_removal_script_skips_a_missing_keeper_root () =
+  let root = temp_dir "build_output_removal_absent_" in
+  let ic =
+    Unix.open_process_args_in
+      "/bin/sh"
+      [| "/bin/sh"
+       ; "-eu"
+       ; "-c"
+       ; M.build_output_removal_script ~keeper_root:(Filename.concat root "never-booted")
+      |]
+  in
+  let out = In_channel.input_all ic in
+  Alcotest.(check bool) "script exits 0" true (Unix.close_process_in ic = Unix.WEXITED 0);
+  Alcotest.(check string) "nothing to report" "" out
 ;;
 
 let test_build_link_actions_only_includes_create_and_retarget () =
@@ -1904,11 +1997,15 @@ let test_work_volume_trim_argv_grants_one_capability () =
     (adjacent ~flag:"--entrypoint" ~value:"/bin/sh" argv);
   Alcotest.(check bool) "mounts the work volume at the trim root" true
     (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
-  Alcotest.(check (list string)) "fail closed while configuring discard and trimming"
+  (* Build output goes after this mount drops discard and before fstrim,
+     which returns its blocks; the removal walks this keeper's root only. *)
+  Alcotest.(check (list string)) "fail closed while configuring discard, removing build output and trimming"
     [ "masc-sandbox:general"; "-eu"; "-c"
     ; "work_device=$(/usr/bin/findmnt --noheadings --output SOURCE --target /masc-trim)\n\
        /usr/sbin/tune2fs -o discard \"$work_device\"\n\
-       /usr/sbin/fstrim -v /masc-trim" ]
+       /usr/bin/mount -o remount,nodiscard /masc-trim || echo 'remount nodiscard refused; removing with discard on'\n"
+      ^ M.build_output_removal_script ~keeper_root:"/masc-trim/x"
+      ^ "\n/usr/sbin/fstrim -v /masc-trim" ]
     (let n = List.length argv in
      List.filteri (fun i _ -> i >= n - 4) argv)
 ;;
@@ -3312,6 +3409,10 @@ let () =
             test_build_link_rows_of_scan_decides_purely
         ; Alcotest.test_case "build link refusal message names the checkout" `Quick
             test_build_link_refusal_message_names_the_checkout
+        ; Alcotest.test_case "boot removal deletes only unkept dune build output" `Quick
+            test_build_output_removal_script_removes_only_unkept_dune_output
+        ; Alcotest.test_case "boot removal skips a keeper root that does not exist" `Quick
+            test_build_output_removal_script_skips_a_missing_keeper_root
         ; Alcotest.test_case "build link actions only includes create and retarget" `Quick
             test_build_link_actions_only_includes_create_and_retarget
         ; Alcotest.test_case "build link targets include already-correct links" `Quick

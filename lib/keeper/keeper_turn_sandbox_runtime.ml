@@ -1246,7 +1246,9 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
     for a guest whose checkouts rarely change mid-turn. The gap this
     leaves: a checkout the keeper creates after this guest's first
     adoption keeps writing to the unified work volume until the guest
-    restarts. *)
+    restarts, when the boot's work volume helper removes that real [_build]
+    before the guest starts ({!Keeper_sandbox_microvm.build_output_removal_script})
+    and this scan links the checkout. *)
 let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> ()
@@ -1270,7 +1272,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
          (fun (row : Keeper_sandbox_microvm.build_link_row) ->
            match row.plan with
            | Link_refused_real_directory ->
-             Log.Keeper.warn
+             Log.Keeper.warn ~keeper_name:t.meta.name
                "%s"
                (Keeper_sandbox_microvm.build_link_refusal_message ~checkout:row.checkout)
            | Link_already_correct | Link_create _ | Link_retarget _ -> ())
@@ -1297,15 +1299,15 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
              (match run_argv_with_status ?timeout_sec apply with
               | Unix.WEXITED 0, _ -> ()
               | _, out ->
-                Log.Keeper.warn
+                Log.Keeper.warn ~keeper_name:t.meta.name
                   "microvm_build_link_apply_failed: %s"
                   (Keeper_sandbox_runtime.docker_failure_output_for_log out))
            | (_, out), _ ->
-             Log.Keeper.warn
+             Log.Keeper.warn ~keeper_name:t.meta.name
                "microvm_build_link_mkdir_failed: %s"
                (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
      | _, out ->
-       Log.Keeper.warn
+       Log.Keeper.warn ~keeper_name:t.meta.name
          "microvm_build_scan_failed: %s"
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;

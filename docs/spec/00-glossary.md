@@ -1093,9 +1093,11 @@ status: reference
 
 **Client Start-prompt Ceiling (클라이언트 시작 프롬프트 상한)**
 : MASC 가 공식 클라이언트의 첫 턴에 심는 history(시작 프롬프트)의 바이트 상한.
-  넘친 입력을 오류로 알리지 않고 조용히 줄이는 클라이언트에만 있다.
+  넘친 입력을 typed 오류로 알리지 않는 클라이언트에만 있다.
   Antigravity 는 끝까지 간 실측 2,078,915 바이트와 `2 × max-context` 중 작은
-  값이다. 토큰당 2바이트는 보장이 아니라 어림값이다. Muse Code 는
+  값이다. 토큰당 2바이트는 보장이 아니라 어림값이다. agy 는 공개하지 않은
+  저장 한도를 넘으면 세션을 지우고(agy 1.2.6 changelog), 그 아래에서도 스스로
+  대화를 압축한다. Muse Code 는 넘친 입력을 조용히 요약하므로 상한을
   `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(`Runtime_muse_prompt_capacity`).
   Claude Code·Codex 는 이 상한이 없다. 넘치면 provider 가 typed overflow 로
   알리고, keeper 는 이어 보낼 범위를 줄여 다시 보낸다. 운영자가 바이트 수를

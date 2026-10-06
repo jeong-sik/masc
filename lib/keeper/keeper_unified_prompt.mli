@@ -150,7 +150,6 @@ val build_prompt :
   ?workspace_memory:Workspace_memory_ledger.observation ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
-  ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts

@@ -1,0 +1,47 @@
+{
+  "prepared": [
+    {
+      "number": 41018,
+      "old": "6084a6946ee868529112277a29c13698657a7e06",
+      "head": "d75e63ee38c1ab800b490b334428f5ccf7f90dfe"
+    },
+    {
+      "number": 41037,
+      "old": "270f392e72981b4c016d93f0a6999f64a7017957",
+      "head": "31b9e19d95a29b61f0ec4fdf64b2ce1d6b3bbdd2"
+    },
+    {
+      "number": 41040,
+      "old": "109e1b6db42f44d049c3b206719ea2942da3c67a",
+      "head": "5c74215923bc04e9e1d6b7e68645a32a7b5154ea"
+    },
+    {
+      "number": 41043,
+      "old": "feeefca17af69f6e8cf4601ffcc442d6bbff3dbe",
+      "head": "89eea233f8460b172ef843b7111cd70d0264695a"
+    },
+    {
+      "number": 41045,
+      "old": "032b51b4132f30b2d2bda832ea1b2bab002f9a19",
+      "head": "935cf029cd6d56038334884dbc8e4a1e3b106a02"
+    }
+  ],
+  "qualified_source": "d75e63ee38c1ab800b490b334428f5ccf7f90dfe",
+  "leaf_before_evidence": "935cf029cd6d56038334884dbc8e4a1e3b106a02",
+  "differences_from_qualified_source": [
+    "changelog.d/41037.md",
+    "changelog.d/41040.md",
+    "changelog.d/41043.md",
+    "changelog.d/41045.md",
+    "docs/evidence/2026-10-04-v0490-partial-roster/README.md",
+    "docs/evidence/2026-10-04-v0490-partial-roster/baseline-failure.txt",
+    "docs/evidence/2026-10-04-v0490-partial-roster/baseline-screen.txt"
+  ],
+  "partial_roster_log_sha256": "a908310281d41fbc1d289bbb20f6d27d6432823d2c8fc5ddb532519205e5253e",
+  "binary_sha256": "f15bb7b65cd14dc8dd017a153641c04e19ce2bca75d347a8de10b9b5f2e16e3c",
+  "partial_roster_handle": 77219,
+  "exit": 0,
+  "source_identical": true,
+  "rebuilt_leaf": false,
+  "release_qualification": false
+}

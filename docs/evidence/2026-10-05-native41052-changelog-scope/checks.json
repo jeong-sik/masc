@@ -1,0 +1,39 @@
+{
+  "release": {
+    "tag": "v0.49.0",
+    "commit": "8304fa2124ca3100958f6df8fb512963538678ab",
+    "published_at": "2026-10-04T08:03:19Z",
+    "source": "gh api repos/jeong-sik/masc/releases/tags/v0.49.0"
+  },
+  "review_comments": [
+    4179646986,
+    4179644293,
+    4179646875
+  ],
+  "same_cause_extra_owner": 41040,
+  "baseline_heads": {
+    "41018": "83042ceafb39c27635dc8a175f0e5c899b559cbf",
+    "41037": "817e16005ddd5ee3a2fd45f5465878552ef43eb0",
+    "41040": "199eeca06bd69336307422eec9a3663bd448d50b",
+    "41043": "c4fb7990b20f9a2cc356cc751f911cc2355cd0b6",
+    "41045": "1566887ad6befe80b56c297f1d0a7a458ffdcecb"
+  },
+  "product_source_tree_sha256": {
+    "41018": "5ea6ea3c4ce7efd8c57548bee207b9d7f5304c9810a7c03b2379cd67c4f743b8",
+    "41037": "5ea6ea3c4ce7efd8c57548bee207b9d7f5304c9810a7c03b2379cd67c4f743b8",
+    "41040": "5ea6ea3c4ce7efd8c57548bee207b9d7f5304c9810a7c03b2379cd67c4f743b8",
+    "41043": "5ea6ea3c4ce7efd8c57548bee207b9d7f5304c9810a7c03b2379cd67c4f743b8",
+    "41045": "5ea6ea3c4ce7efd8c57548bee207b9d7f5304c9810a7c03b2379cd67c4f743b8"
+  },
+  "product_source_equal_baseline": true,
+  "raw_log_sha256": {
+    "native41052-changelog-old-assembly.log": "0a51644206bf51e2e7fe6434e4749caf76ad0974ef6232e7257ae3e116cae706",
+    "native41052-changelog-new-assembly.log": "a8368f7411a448fc744e23d8680c27aaec6513f519ef772a32b66e7fe29725db",
+    "native41052-changelog-fragment-check.log": "b73222b0711446a5dc9f7eb3327b640c31debf3a73f739138fbde39f7c9c9836",
+    "native41052-changelog-pr-guards.log": "f3df7928572477c472a22ced44297a06f4e5e56f43f8c4c21fa63f784209f1b8"
+  },
+  "changed_scope": "changelog plus evidence documentation only; no executable/fixture/workflow/build source changes",
+  "native_tests": "not rerun; unchanged source retains earlier separately pinned scope",
+  "TerminalBench": "unrun",
+  "recorded_at": "2026-10-04T22:52:23.107857+00:00"
+}

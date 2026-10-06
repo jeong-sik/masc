@@ -1,0 +1,11 @@
+folded 4 fragment(s) into ## [Unreleased] of /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/native41052-changelog-scope-jsegt0wo/old-CHANGELOG.md
+
+Actual targeted Unreleased output:
+
+
+### Fixed
+
+- Keep an authoritative Item account visible during an automatic partial-roster refresh, while failed or revoked authority still withdraws it. #41037
+- Keep sampling callback metadata in private evidence, preserve bounded failure identity and classification, and expose consistent package response and receipt contracts. #41040
+- Repair lane editor release fixtures for model replacement, promotion and differential terminal redraws, and separate drop and move in invalid-action diagnostics. #41043
+- Keep runtime lane editor tests aligned with displayed model labels and consume terminal output while awaiting routing writes. #41045

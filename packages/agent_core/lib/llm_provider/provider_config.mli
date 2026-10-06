@@ -204,9 +204,9 @@ type t =
       {!Slot_scheduler.create}). [None] keeps one arrival-order queue for
       every request. Like [max_concurrent_requests] it describes the
       endpoint, so every config naming one endpoint identity must declare
-      the same value. Must be [>= 1] when declared. It orders the queue of an
-      admitted endpoint, so with [max_concurrent_requests = None] there is
-      no queue and it has nothing to order. *)
+      the same value. Must be [>= 1] when declared, and declared only with
+      [max_concurrent_requests]: without it the endpoint has no queue to
+      order, and [Complete] rejects the config before dispatch. *)
   ; admission_class : Admission_class.t
     (** Which queue this request joins while the endpoint's permits are all
       held. It only orders the queue when the endpoint declares

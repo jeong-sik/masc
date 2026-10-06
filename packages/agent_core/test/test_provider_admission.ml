@@ -263,6 +263,38 @@ let test_zero_priority_run_limit_rejected_before_dispatch () =
   | Error _ -> fail "expected AcceptRejected, got a different error kind"
 ;;
 
+let test_run_limit_without_max_rejected_before_dispatch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config
+      ~base_url:"http://run-limit-without-max.test:1"
+      ~admission_priority_run_limit:3
+      ()
+  in
+  match
+    Complete.complete
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~transport:reject_dispatch_transport
+      ~config
+      ~messages:[]
+      ()
+  with
+  | Error (Http_client.AcceptRejected { reason }) ->
+    check
+      bool
+      "rejection names the missing field"
+      true
+      (Agent_core_strings.contains_substring
+         ~needle:"needs max_concurrent_requests"
+         ~haystack:reason)
+  | Ok _ -> fail "expected AcceptRejected for a run limit without max_concurrent_requests"
+  | Error _ -> fail "expected AcceptRejected, got a different error kind"
+;;
+
 (* Wiring-level counterfactual: this goes through Complete.complete, so it
    fails if the with_admission call is ever removed from the dispatch path —
    unlike the module-level tests above, which would keep passing. *)
@@ -744,6 +776,10 @@ let () =
             "zero priority run limit rejected before dispatch"
             `Quick
             test_zero_priority_run_limit_rejected_before_dispatch
+        ; test_case
+            "a run limit without max_concurrent_requests is rejected before dispatch"
+            `Quick
+            test_run_limit_without_max_rejected_before_dispatch
         ; test_case
             "Complete.complete dispatch is admitted"
             `Quick

@@ -645,7 +645,16 @@ let validate_admission_declaration (config : Provider_config.t) =
                "admission_priority_run_limit must be >= 1 when declared, got %d"
                limit
          })
-  | (None | Some _), (None | Some _) -> Ok ()
+  | None, Some limit ->
+    Error
+      (Http_client.AcceptRejected
+         { reason =
+             Printf.sprintf
+               "admission_priority_run_limit=%d needs max_concurrent_requests: without \
+                it the endpoint has no permit queue to order"
+               limit
+         })
+  | None, None | Some _, (None | Some _) -> Ok ()
 ;;
 
 let validate_common (config : Provider_config.t) =

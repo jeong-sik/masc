@@ -118,6 +118,10 @@ let prompt_json (input : input) =
          "source_count", `Int (List.length p.sources); "next_steps", strings p.next_steps;
          "completeness", completeness_json p.completeness]) snapshot.pockets)
   in `Assoc ["sources", `List sources; "previous", previous; "unavailable", strings input.unavailable]
+(* The fields [prompt_json] shows on their own. [previous] is shown only
+   beside a source and [execution_basis] never, so a running Keeper's input
+   with nothing pending is not [empty] yet reads exactly like it. *)
+let shows_no_working_context (input : input) = input.sources = [] && input.unavailable = []
 let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ ".working-context.json")
 let decode json =
   let* fields = object_fields ["generation"; "revision"; "execution_basis"; "sources"; "pockets"] json in

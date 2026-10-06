@@ -173,7 +173,7 @@ let with_catalog ?(getenv = fun _ -> Ok None) entries f =
   | Ok snapshot -> f snapshot
 ;;
 
-let with_bound_targets ~base_url ~body_timeout_s f =
+let with_bound_targets ?admission_priority_run_limit ~base_url ~body_timeout_s f =
   let binding key =
     Provider_config.make
       ~kind:Provider_config.OpenAI_compat
@@ -183,6 +183,7 @@ let with_bound_targets ~base_url ~body_timeout_s f =
       ~api_key:key
       ~request_path:"/chat/completions"
       ~max_concurrent_requests:1
+      ?admission_priority_run_limit
       ()
   in
   let target id key : EO.declared_target =
@@ -5028,6 +5029,34 @@ let test_bound_exact_waits_for_shared_provider_permit () =
   | Error _ -> fail "bound exact generation should succeed after release"
 ;;
 
+(* The exact request carries no admission declaration of its own: the flow
+   takes the binding's permit around it. A binding that declares a priority
+   run limit is admitted the same way and its request is sent. *)
+let test_bound_exact_with_a_priority_run_limit_is_sent () =
+  let result, posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~admission_priority_run_limit:3 ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot _config ->
+    execute_ok
+      ~net
+      ~clock
+      (start_flow
+         (frozen_candidates
+            [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary" ]))
+  in
+  check int "exact generation sent once" 1 posts;
+  match result with
+  | Ok _ -> ()
+  | Error error ->
+    failf
+      "bound exact generation with a run limit should succeed: %s"
+      (EO.flow_execution_error_to_string
+         ~callback_error_to_string:(fun () -> "callback")
+         ~raw_response_to_string:EO.raw_response_sha256_to_string
+         error)
+;;
+
 let test_bound_exact_queue_expiry_advances_without_post () =
   let (result, evidence), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
@@ -5457,6 +5486,10 @@ let () =
             "bound exact queue expiry advances without a POST"
             `Quick
             test_bound_exact_queue_expiry_advances_without_post
+        ; test_case
+            "bound exact with a priority run limit is sent"
+            `Quick
+            test_bound_exact_with_a_priority_run_limit_is_sent
         ; test_case
             "bound count-tokens waits for shared provider permit"
             `Quick

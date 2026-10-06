@@ -637,6 +637,19 @@ let ollama_cloud_capabilities =
   { ollama_capabilities with
     supports_response_format_json = false
   ; supports_structured_output = false
+  ; reasoning_replay_override =
+      Force_latest_user_turn_tool_calls
+      (* One contract for both wires of this provider. The native /api/chat
+         takes each assistant message's [thinking] back with its tool calls
+         (docs.ollama.com/capabilities/tool-calling), and the /v1 wire hands an
+         assistant [reasoning] field to that same slot (ollama openai/openai.go
+         [FromChatRequest], checked 2026-10-07). Before this the /v1 base fell
+         back to no replay, so every row that did not repeat the declaration
+         lost its reasoning between tool calls: 32 of the 41 ollama_cloud rows.
+         On 2026-10-06 one of them (glm-5.3-flash) thought 13 times in the first
+         48 steps of a keeper turn and never again over the next 1,579 tool
+         calls. A row whose model needs another contract still declares its
+         own. *)
   }
 ;;
 

@@ -887,9 +887,9 @@ let test_ollama_cloud_current_catalog_resolves () =
    direct rows took this value from the ollama_cloud rows (#33593). *)
 let test_deepseek_replay_contract_differs_by_who_serves_it () =
   (* The resolved policy, not the row's override, the way the frontier table
-     below reads it. It is what the request is built from, and it also fails
-     when a row loses its declaration: without one, the [Ollama_think]
-     dialect answers [no_replay]. *)
+     below reads it. It is what the request is built from. An ollama_cloud row
+     that loses its declaration still resolves the same value, from the
+     provider base; the deepseek rows fail here if they lose theirs. *)
   let replay_policy ~provider_label ~model_id =
     match
       Capabilities.for_provider_model_id

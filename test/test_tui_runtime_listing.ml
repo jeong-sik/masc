@@ -2,6 +2,22 @@ open Masc_tui_types
 
 let expect label wanted actual = Alcotest.(check int) label wanted actual
 
+module Receipt = Masc_tui_runtime_config_receipt
+
+let committed_receipt =
+  { Receipt.source_revision = "source-7"; order = "7"; durability = Receipt.Durable;
+    lock_warnings = [];
+    application =
+      { Receipt.operation = "routing"; routing_status = Receipt.Routing_applied;
+        routing_requires_restart = false; routing_applied_at = Receipt.Applied_at_int 7;
+        keeper_status = Receipt.Keeper_not_configured; keeper_requires_restart = false;
+        keeper_applied_at = Receipt.Not_applied; keeper_configured_count = 0;
+        keeper_pending_keys = []; keeper_applied_keys = []; keeper_preempted_keys = [];
+        skills = Receipt.Skill_unchanged { input_source_revision = "source-7";
+          snapshot_revision = "snapshot-7"; catalog_revision = "catalog-7";
+          config_state = Receipt.Configured };
+        exact_output_registry = Receipt.Exact_output_registry_applied Receipt.Targets_runtime_bindings } }
+
 let runtime id : Masc.Tui_decode.runtime_option =
   { ro_id = id; ro_provider = "provider"; ro_provider_id = "provider"; ro_model = "model";
     ro_exact_slot_group = Exact_http_slots; ro_exact_body_deadline_missing = false;
@@ -158,7 +174,7 @@ let notice_text = function
   | None -> "no line"
   | Some (Lane_write_refused reason) -> "refuse: " ^ reason
   | Some Lane_write_pending -> "pending"
-  | Some Lane_write_confirmed -> "saved and reloaded"
+  | Some (Lane_write_committed _) -> "commit receipt retained"
 
 let stale_text state =
   match runtime_lane_stale_lines state with
@@ -221,7 +237,7 @@ let test_a_lane_edit_waits_for_the_previous_write () =
     expect_plan (phase ^ ": a still opens the name field") state New_lane
       "open the name field")
     [ "posting", Lane_write_posting;
-      "rereading", Lane_write_rereading (Runtime_surface_list, 3) ];
+      "rereading", Lane_write_rereading (Runtime_surface_list, 3, committed_receipt) ];
   let state = lane_state () in
   state.runtime_lane_write <- Lane_write_idle;
   expect_plan "idle: J" state down "write primary [b; a], cursor 1"
@@ -232,7 +248,7 @@ let test_a_written_list_holds_edits_until_its_reread () =
   let state = lane_state () in
   state.runtime_surface_generation <- 4;
   state.runtime_lane_write <- Lane_write_posting;
-  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
   expect_plan "the write answered" state down "pending";
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:4 (Ok ());
   expect_plan "a load that left before the answer" state down "pending";
@@ -241,7 +257,7 @@ let test_a_written_list_holds_edits_until_its_reread () =
   state.runtime_lane_notice <- Some Lane_write_pending;
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:5 (Ok ());
   expect_plan "the re-read landed" state down "write primary [b; a], cursor 1";
-  Alcotest.(check string) "success waits for the saved order reload" "saved and reloaded"
+  Alcotest.(check string) "reread retains the application receipt" "commit receipt retained"
     (notice_text state.runtime_lane_notice)
 
 (* A standalone lane's slots are read back from the standalone lanes list;
@@ -251,7 +267,7 @@ let test_a_standalone_write_waits_for_the_standalone_list () =
   state.standalone_lanes_generation <- 2;
   state.runtime_surface_generation <- 7;
   state.runtime_lane_write <- Lane_write_posting;
-  settle_runtime_lane_write state ~written:Standalone_lanes_list (Ok ());
+  settle_runtime_lane_write state ~written:Standalone_lanes_list (Ok committed_receipt);
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:8 (Ok ());
   expect_plan "the Runtime surface landed" state down "pending";
   runtime_lane_list_reread state ~list:Standalone_lanes_list ~generation:3 (Ok ());
@@ -299,7 +315,7 @@ let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
   state.runtime_lane_write <- Lane_write_posting;
-  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
     (Error "HTTP 503: down");
   expect_plan "move is refused" state down
@@ -309,8 +325,58 @@ let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
   Alcotest.(check string) "the list is said to be stale"
     "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
     (stale_text state);
-  Alcotest.(check string) "the pending line went" "no line"
+  Alcotest.(check string) "failed reread retains the commit evidence" "commit receipt retained"
     (notice_text state.runtime_lane_notice)
+
+let test_commit_application_survives_reread () =
+  List.iter (fun (application, durability, warning) ->
+    List.iter (fun reread ->
+      let state = lane_state () in
+      let receipt = { committed_receipt with
+        Receipt.durability;
+        lock_warnings = [{ Receipt.code = "lock-observation"; detail = warning }];
+        application = { committed_receipt.application with exact_output_registry = application } } in
+      state.standalone_lanes_generation <- 2;
+      state.runtime_lane_write <- Lane_write_posting;
+      settle_runtime_lane_write state ~written:Standalone_lanes_list (Ok receipt);
+      let check_receipt label =
+        match state.runtime_lane_notice with
+        | Some (Lane_write_committed actual) ->
+          Alcotest.(check bool) label true (actual = receipt);
+          Alcotest.(check bool) "application warning remains visible" true
+            (Receipt.lane_needs_attention actual)
+        | _ -> Alcotest.fail "commit evidence was replaced by a generic notice" in
+      check_receipt "receipt available before GET";
+      state.runtime_lane_notice <- Some Lane_write_pending;
+      runtime_lane_list_reread state ~list:Standalone_lanes_list ~generation:3 reread;
+      check_receipt "GET cannot upgrade or erase receipt";
+      let notice = Lane_write_committed receipt in
+      Alcotest.(check bool) "long reason wraps" true
+        (runtime_lane_notice_lines ~cols:40 (Some notice) > 1);
+      state.runtime_lane_notice <- Some notice;
+      state.runtime_mode <- Runtime_lanes;
+      Alcotest.(check bool) "narrow chrome accounts for wrapped receipt" true
+        (runtime_surface_listing_chrome ~rows:100 ~cols:40 state > runtime_surface_listing_chrome ~rows:100 ~cols:140 state))
+      [Ok (); Error "HTTP 503: read unavailable"])
+    [Receipt.Exact_output_registry_kept {reason = "catalog read failed; prior model order remains"},
+       Receipt.Durable, "configuration lock observation changed";
+     Receipt.Exact_output_registry_unpublished, Receipt.Durability_unconfirmed,
+       "file synchronization was not confirmed"]
+
+let test_dismissed_commit_stays_dismissed_after_reread () =
+  List.iter (fun reread ->
+    let state = lane_state () in
+    state.runtime_surface_generation <- 4;
+    settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
+    dismiss_runtime_lane_notice state;
+    runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:5 reread;
+    Alcotest.(check bool) "late reread cannot restore a dismissed receipt" true
+      (state.runtime_lane_notice = None);
+    Alcotest.(check bool) "late reread settles the write" true
+      (state.runtime_lane_write = Lane_write_idle);
+    Alcotest.(check bool) "failed reread still marks the independent list stale"
+      (Result.is_error reread) (runtime_lane_stale_lines state <> []))
+    [Ok (); Error "HTTP 503: read unavailable"]
 
 let stale_after_503 =
   "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
@@ -322,7 +388,7 @@ let test_a_stale_line_holds_until_its_list_loads () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
   state.runtime_lane_write <- Lane_write_posting;
-  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
     (Error "HTTP 503: down");
   dismiss_runtime_lane_notice state;
@@ -345,7 +411,7 @@ let test_a_refusal_and_a_dismissal_leave_the_stale_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
   state.runtime_lane_write <- Lane_write_posting;
-  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
     (Error "HTTP 503: down");
   (match plan_runtime_lane_edit state up with
@@ -1143,7 +1209,7 @@ let test_the_route_editor_will_not_write_from_a_stale_list () =
   let stale state =
     state.runtime_surface_generation <- 1;
     state.runtime_lane_write <- Lane_write_posting;
-    settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+    settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
     runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
       (Error "HTTP 503: down")
   in
@@ -1695,7 +1761,9 @@ let test_short_viewport_preserves_selected_list_row () =
       (runtime_selection_summary_for_viewport ~rows:100 ~cols state)) [80; 132]
 
 let () = Alcotest.run "runtime list geometry"
-  ["operator states", [ Alcotest.test_case "quota scope label preserves correlation" `Quick
+  ["operator states", [ Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
+       Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
+       Alcotest.test_case "quota scope label preserves correlation" `Quick
         test_quota_scope_label_preserves_correlation;
       Alcotest.test_case "short viewport retains selected list row" `Quick
         test_short_viewport_preserves_selected_list_row;

@@ -1,0 +1,35 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual RuntimeTomlEditor and HTTP client with intercepted synthetic responses; no backend/native/deployment proof",
+  "requests": [
+    {
+      "source_text": "[runtime]\n# initial source\n# my unsaved draft\n",
+      "expected_source_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "source_text": "[runtime]\n# initial source\n# my unsaved draft\n",
+      "expected_source_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "source_text": "[runtime]\n# initial source\n# concurrent writer C\n# keep after unknown result\n",
+      "expected_source_revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+  ],
+  "unhandled": [],
+  "assertions": [
+    "409 preserves draft and disables unresolved save",
+    "first POST uses original revision",
+    "adoption does not POST or replace draft",
+    "explicit adoption uses shown revision; a subsequent writer conflicts again",
+    "separate replace changes draft and save baseline",
+    "read-current preserves draft",
+    "unknown result keeps draft and explains file uncertainty"
+  ]
+}

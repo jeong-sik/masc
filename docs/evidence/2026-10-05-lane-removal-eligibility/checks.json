@@ -1,0 +1,35 @@
+{
+  "baseline_head": "4f50f04a29c09f7ec6b0aace326933a5be2bd652",
+  "results": {
+    "web_red_failed": 4,
+    "web_green": 34,
+    "native_green": 17,
+    "tsc": 0,
+    "eslint": 0
+  },
+  "source_sha256": {
+    "bin/masc_tui_lane_addons.ml": "036ed12342271a452999850031652882c1932bedd110792121c8ada09973b391",
+    "bin/masc_tui_lane_addons.mli": "f005c972d81736e745d71f215937c78a71ea13ac671ec00e3f6cf804671f5a5b",
+    "dashboard/src/components/lane-addons-panel.ts": "91475ca0dfd0890cf6fd76d205ae08515dff83184e9e385d9435ddff1a500237",
+    "dashboard/src/components/lane-addons-panel.test.ts": "ff33d4d4342e67befd611b8c49f577501502b2dc4b3622319b3f820f8eb0e870",
+    "test/test_tui_lane_addons.ml": "8d281d505b9c0ebd4516e35020cf24c81a20efd585fac4fb11970f42f8d9114a",
+    "changelog.d/41122.md": "41035408ac54cbfcb5be94c95b2793c0bb08b690df0407b606137597e8305850"
+  },
+  "artifact_sha256": {
+    "docs/evidence/2026-10-05-lane-removal-eligibility/native-baseline-tests.log": "65343225599a7186d55e500633a17cbff43e107c145ca3998beef243a5d2d31e",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/qualified-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/native-final-tests.log": "4bf8c974a6fa80d20e00b4029a70a833662b98e243d48b731e88d6edb20b6195",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/native-baseline-build.log": "77c4f7add4d1599d279745c068841b4231f1129eceec44db8c9be503c0cb7071",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/web-red.log": "4fecaf6f753f5b8feef9f5bd4592b56cdb005ce21fd4181bab668cc141ff6d2b",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/qualified-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/web-qualified.log": "84ce5bbd1a580726f5e3a1d1335e825cabc0c9c34e7357a7faf5f0dc22ac1b77",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/README.md": "5ea6cd590071458b3f998940b210e2bd342de7fa3a584747eef150c6af0f8efb",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/native-qualified-tests.log": "882e39725331d0d4450612e8938b3859ca5c8f9457c22e47bd9fb6a12d102afc",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/native-tests.log": "6c1cf6393eb69afdfd4a58bf44575cdf5bd4edc9eadbde225f6d6fa4609f6f99",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/native-qualified-build.log": "77c4f7add4d1599d279745c068841b4231f1129eceec44db8c9be503c0cb7071",
+    "docs/evidence/2026-10-05-lane-removal-eligibility/native-build.log": "f74ea1970b199acb9504d3ea1fd5a348c0dbbe1bff0e8e6235ce094857caea34"
+  },
+  "binary_sha256": "c42e80f17a8c324d77b448e3fcca6ec8093eab050dc4fa6ba05fdb6746ed61a8",
+  "parent_integration": "pending",
+  "issue_inherited_fixture": 41174
+}

@@ -1,0 +1,108 @@
+{
+  "compiler": "5.5.1",
+  "scope": "parser only; no native link or PTY",
+  "files": [
+    {
+      "file": "bin/masc_tui.ml",
+      "sha256": "8281ce06fad9812fbbde23e19320afebd98da26f9a33db4301775d4018b5dabb",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_async_protocol.ml",
+      "sha256": "010836c041cab05aa479639131fa4fd5dde890f8355b02e9410841239ad33488",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_async_protocol.mli",
+      "sha256": "010836c041cab05aa479639131fa4fd5dde890f8355b02e9410841239ad33488",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_http.ml",
+      "sha256": "d6ef1c7a2b6d304bea6537ebebfb96b8653c43701cf45f266b7a5cc93d831aea",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keys.ml",
+      "sha256": "3cef8d81c7f4296171a34255c2ce2fe3d8e214238d2397609b5d1c26a249b8ff",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_lane_declaration.ml",
+      "sha256": "d210bf7643f18223eaa610351e2e67409ff7f8dcbfefeba16db9a6ef20b3d9b4",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_lane_declaration.mli",
+      "sha256": "5b2d8b6144bccb05522a8211f5a1eaa7a6ef76705c6224819d2b5bd6a8563c53",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_lane_inventory.ml",
+      "sha256": "d6983152965349f1348af3b148ffafb3b453cf564dcf99e275e3f9741744d6d5",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_lane_inventory.mli",
+      "sha256": "fc68c154fca3103abf44054ec32839548a515a2007c52616597c22ef43e8d00d",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_loader.ml",
+      "sha256": "4a831ec00c3dc4509cf0d7bda9cf8c9f9d4c599106f1993f10b1a210ad85f8a1",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_press.ml",
+      "sha256": "faa7251d3ca18e88dc2221da8dffe60a5e0cda3cf98edcd49f6609f36163ebc1",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_render.ml",
+      "sha256": "e1db3fafa11bfc1e392dd8f77c50b9b716f246d6392826d0916ea47e80ce7acd",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_surface_search.ml",
+      "sha256": "cc956beaed745eecdda27a83c94fe6ab0039b5ffc7309fafff6907bc9ebc664a",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_types.ml",
+      "sha256": "ffc7123fbcf7704fab76cf7c6d41ca66124e62c4ee18ede91f828197a36d1d13",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_keys.ml",
+      "sha256": "285913ef645718b093dc0ca892a816d246046caff7569ba3aa83884395f56cc1",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_lane_inventory.ml",
+      "sha256": "0f15be314ede32f32cf25f6e1669ce5b7ae6d3d8ecfb6efadc5ff8d71ffe5b17",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_lane_declaration_path.ml",
+      "sha256": "488150794544a2e23ffb2e678ddda91dea56edfa1ebf7c4ed9d62fb856ba73e9",
+      "exit_code": 0,
+      "diagnostics": ""
+    }
+  ]
+}

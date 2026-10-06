@@ -1,0 +1,21 @@
+{
+  "captured_at": "2026-10-03T05:59:15.750821+00:00",
+  "provenance": "local candidate fixture PTY; exact browser terminal replay",
+  "base_sha": "bf08672a97f05ab9b3608093a710794281b2df6f",
+  "source_sha256": {
+    "bin/masc_tui_account_login.ml": "087a1eccb0afc7a6ac31ab84deac895e150ec6224dc2601c0512e6a452b1987c",
+    "bin/masc_tui_account_login.mli": "38153b62e381f34f6e974e833883ecb0ed23e2dc7c2bfd6264778564c72fa5ff",
+    "test/test_tui_account_login.ml": "e4148e0e02ee38f7072e377f26a826d229a12f1e8ade67cee124efe6fa2950af",
+    "test/test_tui_account_login_pty.py": "66d8abbdb5a1c72758c3cb89223cb19b9f76f30b7b565acae2aad0d75154862a"
+  },
+  "binary_sha256": "8cb3e3b8e4bc6d4e84c4ce8c3e0b6e93df030ca55b759bb8e8ebfc943f1d2e45",
+  "frames": [
+    "login-result-top",
+    "login-result-bottom"
+  ],
+  "production_verified": false,
+  "source_evidence_boundary": {
+    "applies_to_current_pr_head": false,
+    "note": "Historical candidate captures and source hashes. Login refresh-reset and subsequent integration changes are not covered by this binary, these frames or the recorded PASS results. No current-head native or PTY execution is claimed."
+  }
+}

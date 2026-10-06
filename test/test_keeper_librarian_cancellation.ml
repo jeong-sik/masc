@@ -128,7 +128,9 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
     if (stage = After_completion || stage = After_failed_completion)
        && Option.is_none !completed_before_cancellation then
       match List.find_opt (fun (run : Runs.run) ->
-        run.actor = keeper_id && match run.status with
+        run.actor = keeper_id
+        && not (String.starts_with ~prefix:"librarian-absorb-" run.run_id)
+        && match run.status with
           | Runs.Completed _ -> true
           | Runs.Running | Runs.Completion_persistence_failed _ -> false) (Runs.list_runs registry) with
       | None -> ()
@@ -188,7 +190,11 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
     commits_memory !memory_committed;
   Alcotest.(check bool) "Memory changes only after its actual commit"
     commits_memory (after_bytes <> before_bytes);
-  let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
+  (* The absorb gate registers each evaluation as its own "librarian-absorb-"
+     row under the same actor (#40709); those are not the Librarian run. *)
+  let run = match List.filter (fun (run : Runs.run) ->
+      run.actor = keeper_id
+      && not (String.starts_with ~prefix:"librarian-absorb-" run.run_id))
       (Runs.list_runs registry) with
     | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "one Librarian run must be retained" in
@@ -202,6 +208,11 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
     check_json "late cancellation preserves the complete stored run byte for byte"
       (Runs.run_to_yojson completed) (Runs.run_to_yojson replayed_run))
     !completed_before_cancellation;
+  (* The closed-pool fixture has served its purpose once the runtime returned;
+     the journal read below submits to the shared executor and must not. *)
+  (match previous_pool with
+   | None -> Domain_pool_ref.clear_for_tests ()
+   | Some pool -> Domain_pool_ref.set pool);
   let journal = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 in
   let cancellations = List.filter (function
     | Ok (Current.Journal_failed { kind = Current.Lane_cancelled; _ }) -> true
@@ -288,7 +299,9 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
        ; "Tuesday is the alpha service's deployment day." ]
        (List.sort String.compare (List.map (fun (f : Types.fact) -> f.claim) current.facts));
      let statuses = Runs.list_runs registry
-       |> List.filter (fun (r : Runs.run) -> r.actor = keeper_id)
+       |> List.filter (fun (r : Runs.run) ->
+            r.actor = keeper_id
+            && not (String.starts_with ~prefix:"librarian-absorb-" r.run_id))
        |> List.map (fun (r : Runs.run) -> Runs.status_label r.status)
        |> List.sort String.compare in
      Alcotest.(check (list string)) "both attempts have terminal evidence"

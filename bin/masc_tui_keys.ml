@@ -97,9 +97,6 @@ let config_bindings =
   ; b Act "n" "new"
       ~help:"on presets, name a preset holding the configuration as it stands",
       Some [ Config_presets ]
-  ; b Act "u" "restore"
-      ~help:"on presets, put the selected one back; press twice to confirm",
-      Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
   ; b Act "a" "fragments / voice / account"
@@ -109,6 +106,26 @@ let config_bindings =
              declare one more Claude Code, Codex or Antigravity account by \
              copying a provider the file declares",
       Some [ Config_runtime; Config_prompts; Config_voice ]
+    (* [u] and the retained-draft keys come after [a]: a cut row drops them
+       first, and while a draft is retained the runtime.toml pane names them
+       in its own heading. *)
+  ; b Act "u" "restore / adopt revision"
+      ~help:"on presets, put the selected one back; press twice to confirm; \
+             on runtime.toml, keep the draft and adopt the displayed current \
+             file revision; S saves",
+      Some [ Config_presets; Config_runtime ]
+  ; b Act "S" "save draft"
+      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
+      Some [ Config_runtime ]
+  ; b Act "C" "compare file"
+      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
+      Some [ Config_runtime ]
+  ; b Act "U" "use current text"
+      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
+      Some [ Config_runtime ]
+  ; b Act "X" "discard draft"
+      ~help:"runtime.toml: discard only the local draft and read the current file",
+      Some [ Config_runtime ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -571,11 +588,13 @@ let for_surface = function
          presses [A] and the guide's first line names it. *)
       ; b Navigate "o / A" "Lane Add-ons"
           ~help:"inspect Lane Add-on declarations, instances and observations"
-      ; b Act "Right / Enter" "runs"
-          ~help:"open this lane's exact runs"
-      ; b Act "a" "append slot"
-          ~help:"add a candidate to this lane's walk order"
-      ; b Act "s" "models"
+      ; b Navigate "d" "reading" ~help:"read the selected Lane's complete configuration and observation"
+      ; b Navigate "i" "read issues" ~help:"read inventory problems without hiding the Lane list"
+      ; b Act "Right / Enter" "open"
+          ~help:"open exact runs, the selected Browser or machine, or a package configuration/instance"
+      ; b Act "a" "exact: add slot"
+          ~help:"add a candidate to the selected exact-output lane's walk order"
+      ; b Act "s" "exact: models"
           ~help:"edit the model order: r replaces the selected model/effort, \
                  a adds a fallback, 1 makes it first within its HTTP/CLI group, \
                  x removes, J/K reorders, Enter/d opens the selected \
@@ -584,7 +603,7 @@ let for_surface = function
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
-      ; b Navigate "e" "lane config"
+      ; b Navigate "e" "exact: config"
           ~help:
             "open this lane's runtime.exact_output_lanes section in the \
              preview-checked runtime.toml editor; slots is a catalog-ref array \

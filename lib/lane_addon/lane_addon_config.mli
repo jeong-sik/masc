@@ -3,6 +3,7 @@
     Callers on a server fiber must offload these filesystem reads. *)
 type declaration = {
   id : string;
+  enabled : bool;
   run_id : string;
   manifest_path : string;
   package : Lane_addon_types.package;
@@ -22,7 +23,9 @@ type snapshot = {
 
 (** Resolve relative manifest and snapshot-file paths from the declaration's
     directory. The semantic revision excludes comments and the source filename,
-    but includes the resolved package and ordered binding values. *)
+    but includes the resolved package and ordered binding values. [enabled] is
+    desired worker activity, separate from this payload revision. During the
+    accepting deployment stage an absent key retains the current enabled behavior. *)
 val load_file : path:string -> (declaration, string) result
 
 (** Validate edited source bytes using the same contract as [load_file].

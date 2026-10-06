@@ -16,7 +16,7 @@ let turn_outcome_to_string = function
 ;;
 
 let turn_outcome_of_string raw =
-  match String.trim raw with
+  match raw with
   | "success" -> Some Success
   | "checkpoint" -> Some Checkpoint
   | "input_required" -> Some Input_required
@@ -31,7 +31,7 @@ type path =
   | Autonomous
 
 let path_of_string raw =
-  match String.trim raw with
+  match raw with
   | "direct_turn" -> Some Direct
   | "autonomous_cycle" -> Some Autonomous
   | _ -> None
@@ -41,6 +41,7 @@ module String_histogram = Map.Make (String)
 
 type accumulator =
   { tail_rows : int
+  ; malformed_lines : int
   ; turn_rows : int
   ; unrecognized_turn_rows : int
   ; direct_turns : int
@@ -68,6 +69,7 @@ type accumulator =
 
 let empty_accumulator =
   { tail_rows = 0
+  ; malformed_lines = 0
   ; turn_rows = 0
   ; unrecognized_turn_rows = 0
   ; direct_turns = 0
@@ -116,6 +118,17 @@ let sorted_histogram histogram =
     | order -> order)
 ;;
 
+(* Raw member for the closed vocabularies (execution_path, outcome,
+   turn_mode): no trim, no empty-drop. An empty or padded label reaches
+   the exact-match parser and counts as unrecognized/absent. *)
+let raw_string_member_opt key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`String s) -> Some s
+  | _ -> None
+;;
+
+(* Sanitized member for open histogram labels (terminal codes): trim and
+   drop empties. Sanitization, not parsing. *)
 let string_member_opt key json =
   match Json_util.assoc_member_opt key json with
   | Some (`String s) ->
@@ -131,11 +144,20 @@ let float_member_opt key json =
   | _ -> None
 ;;
 
-let int_member_opt key json =
+(* The writer emits counts and latencies as non-negative [Int]
+   (Keeper_unified_metrics_decision). Anything else — negatives,
+   floats, non-finite — is malformed input and reads as absent. *)
+let nonneg_int_member_opt key json =
   match Json_util.assoc_member_opt key json with
-  | Some (`Int i) -> Some i
-  | Some (`Float f) when Float.is_finite f -> Some (int_of_float f)
+  | Some (`Int i) when i >= 0 -> Some i
   | _ -> None
+;;
+
+(* Totals stay non-negative under hostile input: both addends are
+   non-negative, so a wrap shows as a negative sum. *)
+let saturating_add a b =
+  let sum = a + b in
+  if sum < 0 then max_int else sum
 ;;
 
 let string_list_member key json =
@@ -165,80 +187,82 @@ let extend_window acc ts =
   { acc with since_unix; until_unix }
 ;;
 
-let fold_turn_row acc json =
-  let acc = { acc with turn_rows = acc.turn_rows + 1 } in
-  let path = Option.bind (string_member_opt "execution_path" json) path_of_string in
-  let outcome = Option.bind (string_member_opt "outcome" json) turn_outcome_of_string in
-  match path, outcome with
-  | None, _ | _, None -> { acc with unrecognized_turn_rows = acc.unrecognized_turn_rows + 1 }
-  | Some Direct, _ -> { acc with direct_turns = acc.direct_turns + 1 }
-  | Some Autonomous, outcome ->
-    let acc = { acc with autonomous_turns = acc.autonomous_turns + 1 } in
-    let acc =
-      match outcome with
-      | Success -> { acc with outcome_success = acc.outcome_success + 1 }
-      | Checkpoint -> { acc with outcome_checkpoint = acc.outcome_checkpoint + 1 }
-      | Input_required ->
-        { acc with outcome_input_required = acc.outcome_input_required + 1 }
-      | Error -> { acc with outcome_error = acc.outcome_error + 1 }
-    in
-    let acc =
-      match
-        Option.bind (string_member_opt "turn_mode" json) Turn_mode_codec.turn_mode_of_string
-      with
-      | Some Turn_mode_codec.Tool_use -> { acc with mode_tool_use = acc.mode_tool_use + 1 }
-      | Some Turn_mode_codec.Text_response ->
-        { acc with mode_text_response = acc.mode_text_response + 1 }
-      | Some Turn_mode_codec.Skip_text -> { acc with mode_skip_text = acc.mode_skip_text + 1 }
-      | Some Turn_mode_codec.Noop -> { acc with mode_noop = acc.mode_noop + 1 }
-      | None -> { acc with mode_absent = acc.mode_absent + 1 }
-    in
-    let acc =
-      match outcome with
-      | Error ->
-        (match string_member_opt "terminal_reason_code" json with
-         | Some code -> { acc with terminal_codes = bump acc.terminal_codes code }
-         | None ->
-           { acc with terminal_code_absent_on_error = acc.terminal_code_absent_on_error + 1 })
-      | Success | Checkpoint | Input_required -> acc
-    in
-    let triggers = List.fold_left bump acc.triggers (string_list_member "trigger_signals" json) in
-    let tools = List.fold_left bump acc.tools (string_list_member "tools_used" json) in
-    let tool_calls_total =
-      match int_member_opt "tool_call_count" json with
-      | Some count -> acc.tool_calls_total + count
-      | None -> acc.tool_calls_total
-    in
-    let latency_ms_total, latency_ms_count, latency_ms_max =
-      match int_member_opt "latency_ms" json with
-      | None -> acc.latency_ms_total, acc.latency_ms_count, acc.latency_ms_max
-      | Some latency ->
-        let max =
-          match acc.latency_ms_max with
-          | None -> Some latency
-          | Some hi -> Some (max hi latency)
-        in
-        acc.latency_ms_total + latency, acc.latency_ms_count + 1, max
-    in
-    let acc =
-      { acc with
-        triggers
-      ; tools
-      ; tool_calls_total
-      ; latency_ms_total
-      ; latency_ms_count
-      ; latency_ms_max
-      }
-    in
-    (match float_member_opt "ts_unix" json with
-     | None -> acc
-     | Some ts -> extend_window acc ts)
+let fold_window_ts acc json =
+  match float_member_opt "ts_unix" json with
+  | None -> acc
+  | Some ts -> extend_window acc ts
+;;
+
+let fold_autonomous_turn acc json outcome =
+  let acc = { acc with autonomous_turns = acc.autonomous_turns + 1 } in
+  let acc =
+    match outcome with
+    | Success -> { acc with outcome_success = acc.outcome_success + 1 }
+    | Checkpoint -> { acc with outcome_checkpoint = acc.outcome_checkpoint + 1 }
+    | Input_required -> { acc with outcome_input_required = acc.outcome_input_required + 1 }
+    | Error -> { acc with outcome_error = acc.outcome_error + 1 }
+  in
+  let acc =
+    match
+      Option.bind (raw_string_member_opt "turn_mode" json) Turn_mode_codec.turn_mode_of_string
+    with
+    | Some Turn_mode_codec.Tool_use -> { acc with mode_tool_use = acc.mode_tool_use + 1 }
+    | Some Turn_mode_codec.Text_response ->
+      { acc with mode_text_response = acc.mode_text_response + 1 }
+    | Some Turn_mode_codec.Skip_text -> { acc with mode_skip_text = acc.mode_skip_text + 1 }
+    | Some Turn_mode_codec.Noop -> { acc with mode_noop = acc.mode_noop + 1 }
+    | None -> { acc with mode_absent = acc.mode_absent + 1 }
+  in
+  let acc =
+    match outcome with
+    | Error ->
+      (match string_member_opt "terminal_reason_code" json with
+       | Some code -> { acc with terminal_codes = bump acc.terminal_codes code }
+       | None ->
+         { acc with terminal_code_absent_on_error = acc.terminal_code_absent_on_error + 1 })
+    | Success | Checkpoint | Input_required -> acc
+  in
+  let triggers = List.fold_left bump acc.triggers (string_list_member "trigger_signals" json) in
+  let tools = List.fold_left bump acc.tools (string_list_member "tools_used" json) in
+  let tool_calls_total =
+    match nonneg_int_member_opt "tool_call_count" json with
+    | Some count -> saturating_add acc.tool_calls_total count
+    | None -> acc.tool_calls_total
+  in
+  let latency_ms_total, latency_ms_count, latency_ms_max =
+    match nonneg_int_member_opt "latency_ms" json with
+    | None -> acc.latency_ms_total, acc.latency_ms_count, acc.latency_ms_max
+    | Some latency ->
+      let max =
+        match acc.latency_ms_max with
+        | None -> Some latency
+        | Some hi -> Some (max hi latency)
+      in
+      saturating_add acc.latency_ms_total latency, acc.latency_ms_count + 1, max
+  in
+  { acc with triggers; tools; tool_calls_total; latency_ms_total; latency_ms_count; latency_ms_max }
 ;;
 
 let is_turn_row json =
   match Json_util.assoc_member_opt "event" json with
-  | Some (`String s) -> String.equal (String.trim s) "turn"
+  | Some (`String "turn") -> true
   | _ -> false
+;;
+
+let fold_turn_row acc json =
+  let acc = { acc with turn_rows = acc.turn_rows + 1 } in
+  let path = Option.bind (raw_string_member_opt "execution_path" json) path_of_string in
+  let outcome = Option.bind (raw_string_member_opt "outcome" json) turn_outcome_of_string in
+  match path with
+  | None -> { acc with unrecognized_turn_rows = acc.unrecognized_turn_rows + 1 }
+  | Some Direct ->
+    (* Direct outcomes never enter a bucket, so a drifted direct-outcome
+       label keeps its path count instead of turning unrecognized. *)
+    fold_window_ts { acc with direct_turns = acc.direct_turns + 1 } json
+  | Some Autonomous ->
+    (match outcome with
+     | None -> { acc with unrecognized_turn_rows = acc.unrecognized_turn_rows + 1 }
+     | Some outcome -> fold_window_ts (fold_autonomous_turn acc json outcome) json)
 ;;
 
 let summarize_rows ~keeper_name rows =
@@ -277,6 +301,7 @@ let to_json { keeper_name; acc } =
     ; ( "window"
       , `Assoc
           [ "tail_rows", `Int acc.tail_rows
+          ; "malformed_lines", `Int acc.malformed_lines
           ; "turn_rows", `Int acc.turn_rows
           ; "unrecognized_turn_rows", `Int acc.unrecognized_turn_rows
           ; "since_unix", float_opt_json acc.since_unix
@@ -323,7 +348,7 @@ let to_json { keeper_name; acc } =
     ]
 ;;
 
-let summarize_keeper config (meta : Keeper_meta_contract.keeper_meta) ?(limit = 200) () =
+let summarize_keeper ~config ~(meta : Keeper_meta_contract.keeper_meta) ?(limit = 200) () =
   let limit = k2_feed_limit limit in
   let path = Keeper_types_support.keeper_decision_log_path config meta.name in
   if not (Fs_compat.file_exists path)
@@ -336,21 +361,23 @@ let summarize_keeper config (meta : Keeper_meta_contract.keeper_meta) ?(limit = 
         ~max_bytes:500_000
         ~max_lines:limit
     in
-    let rows =
-      List.filter_map
-        (fun line ->
+    let rows, malformed_lines =
+      List.fold_left
+        (fun (rows, malformed) line ->
           match Yojson.Safe.from_string line with
-          | json -> Some json
-          | exception (Yojson.Json_error _) -> None)
+          | json -> json :: rows, malformed
+          | exception (Yojson.Json_error _) -> rows, malformed + 1)
+        ([], 0)
         lines
     in
-    summarize_rows ~keeper_name:meta.name rows)
+    let summary = summarize_rows ~keeper_name:meta.name (List.rev rows) in
+    { summary with acc = { summary.acc with malformed_lines } })
 ;;
 
-let fleet_json config keepers ?(limit = 200) () =
+let fleet_json ~config ~keepers ?(limit = 200) () =
   let now_ts = Time_compat.now () in
   let items =
-    List.map (fun meta -> to_json (summarize_keeper config meta ~limit ())) keepers
+    List.map (fun meta -> to_json (summarize_keeper ~config ~meta ~limit ())) keepers
   in
   `Assoc
     [ "keepers", `List items

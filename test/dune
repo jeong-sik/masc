@@ -8197,8 +8197,9 @@
  (libraries alcotest eio eio.mock yojson masc.dashboard unix masc.fs_compat masc))
 
 ; Keeper practice summary: autonomous turn-mode/outcome mix folded from the
-; decision-log tail. Fixture rows are written through the same append path
-; the K2 feed tests use, so the wire shape cannot be typed in by hand.
+; decision-log tail. The vocabulary-coupling case builds probe rows from
+; the writer's own path/mode label functions; outcome labels stay pinned
+; (decision_outcome_to_label is not exposed) with writer-site citations.
 (test
  (name test_dashboard_keeper_practice)
  (modules test_dashboard_keeper_practice)

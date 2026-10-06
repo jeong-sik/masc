@@ -862,7 +862,7 @@ let test_ollama_cloud_v1_reasoning_models_replay_within_the_user_turn () =
            ~request_path:"/chat/completions"
            ()
        in
-       let actual = resolved_replay_policy config in
+       let actual = (Reasoning_dialect.for_provider_config config).replay_policy in
        check_bool
          (Printf.sprintf
             "%s replays the latest user turn's tool-call reasoning (got %s)"

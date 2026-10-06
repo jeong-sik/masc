@@ -623,7 +623,7 @@ describe('SettingsSurface', () => {
       const select = container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement
       expect(select.disabled).toBe(true); expect([...select.options].some(option => option.value === 'rt-a')).toBe(false)
     })
-    pending.resolve(makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c' } }))
+    pending.resolve(makeRuntimeResolved({ default_route: 'rt-c', default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c' } }))
     await waitFor(() => expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).value).toBe('rt-c'))
     expect(apiMock.fetchRuntimeDefaults).toHaveBeenCalledTimes(2)
     expect(apiMock.fetchRuntimeProviders).toHaveBeenCalledTimes(2)
@@ -714,7 +714,7 @@ describe('SettingsSurface', () => {
     await waitFor(() => expect(remounted()?.value).toBe('rt-a'))
     expect(remounted().disabled).toBe(true) // Retained pending operation owns the write gate.
     const generation = runtimeTomlSourceGeneration.peek()
-    apiMock.fetchRuntimeResolved.mockResolvedValue(makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-b' } }))
+    apiMock.fetchRuntimeResolved.mockResolvedValue(makeRuntimeResolved({ default_route: 'rt-b', default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-b' } }))
     const file = deferred<Awaited<ReturnType<typeof apiMock.fetchRuntimeTomlConfig>>>()
     const freshFileRead = vi.fn(() => file.promise)
     apiMock.fetchRuntimeTomlConfig.mockImplementation(freshFileRead)
@@ -992,7 +992,7 @@ describe('SettingsSurface', () => {
     expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).disabled).toBe(true)
     expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).value).toBe('rt-a')
     const generation = runtimeTomlSourceGeneration.peek()
-    apiMock.fetchRuntimeResolved.mockResolvedValue(makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c' } }))
+    apiMock.fetchRuntimeResolved.mockResolvedValue(makeRuntimeResolved({ default_route: 'rt-c', default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c' } }))
     resumed.resolve({ kind: 'active', exactOutputAvailable: true })
     await waitFor(() => expect((container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement).value).toBe('rt-c'))
     expect(runtimeTomlSourceGeneration.peek()).toBe(generation)

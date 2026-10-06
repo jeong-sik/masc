@@ -11,6 +11,7 @@ import { isRecord } from './common/normalize'
 import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 import { LaneAddonReadings } from './lane-addon-readings'
 import { LaneDeclarationEditor } from './lane-declaration-editor'
+import { LanePackageInstaller } from './lane-package-installer'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
@@ -388,6 +389,9 @@ export function LaneAddonsPanel() {
     </div>` : session === null && html`<p role="status">${reading
       ? 'Reading the current workspace’s TOML configuration before opening retained drafts…'
       : 'Current workspace TOML configuration is unavailable. Refresh to retry; your retained drafts are unchanged.'}</p>`}
+    ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
+      key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
+      authority=${authority} documents=${session} snapshot=${snapshot} />`}
     ${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSaved=${() => {
       if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
     }} />`}

@@ -802,7 +802,15 @@ let handle_write ~action ~tool_name ~start_time ctx args =
               it, the same way requested_by and scheduled_by stay the
               creator's. An edit from another surface (the TUI and dashboard
               stamp no channel) must not drop or reroute it. *)
-           let* origin = plain (Schedule_payload_projection.result_delivery stored) in
+           let* origin =
+             Schedule_payload_projection.result_delivery stored
+             |> Result.map_error (fun detail ->
+               Refusal
+                 (Printf.sprintf
+                    "stored schedule %s has a result_delivery this server cannot \
+                     read (%s); cancel it and create it again"
+                    schedule_id detail))
+           in
            let* payload =
              plain
                (Schedule_payload_projection.set_keeper_wake_result_delivery

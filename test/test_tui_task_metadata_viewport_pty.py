@@ -24,6 +24,8 @@ REASON = "REASONHEAD\n\n" + "cancelled because source changed " * 8 + "\nREASONE
 HISTORY = "HISTORYHEAD " + "handoff observation " * 9 + "HISTORYEND"
 STAMP = "2026-09-30T01:02:03Z"
 WINDOW = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
+PANE_BORDER = "\u2502".encode()
+SIDE_LIST_TITLE = b"Tasks ("
 
 
 def screen(output):
@@ -34,6 +36,20 @@ def screen(output):
 
 def compact(text):
     return b"".join(h.unwrapped(text).split())
+
+
+def detail_text(text):
+    """The Task detail pane's rows. Wide enough, the Task list stands in its
+    own box at the left of every body row, and its rows would otherwise land
+    between the rows of a value the detail wraps."""
+    rows = text.split(b"\n")
+    split = any(row.startswith(PANE_BORDER) and SIDE_LIST_TITLE in row.split(PANE_BORDER, 2)[1]
+                for row in rows if row.count(PANE_BORDER) >= 2)
+    if not split:
+        return text
+    return b"\n".join(row.split(PANE_BORDER, 2)[2]
+                      if row.startswith(PANE_BORDER) and row.count(PANE_BORDER) >= 2 else row
+                      for row in rows)
 
 
 def window(output):
@@ -106,8 +122,13 @@ def run(executable):
             # x on a Task owns its existing cancel editor, rather than the
             # Goal lifecycle handler. An empty reason must leave it untouched.
             original = (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes()
+            # The TUI writes nothing while $EDITOR holds the terminal, so a
+            # quiet terminal does not mean the editor has returned. The status
+            # it reports for the empty reason is drawn only after it has.
+            pressed = len(output)
             os.write(fd, b"x")
-            h.drain_until_quiet(process, fd, output)
+            h.wait_for_output(process, fd, output, b"cancel cancelled (empty reason)",
+                              start=pressed, timeout=10)
             assert marker.exists(), "Task cancel key never opened its own reason editor"
             assert not any(b"masc_transition" in body for _, body in requests), requests
             assert (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes() == original
@@ -127,7 +148,7 @@ def run(executable):
                                       needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
                     h.wait_for_output(process, fd, output, b"HISTORYEND", start=0, timeout=10)
                     h.drain_until_quiet(process, fd, output)
-                    all_text = compact(screen(output))
+                    all_text = compact(detail_text(screen(output)))
                     for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY,
                                   "reclaim policy: block_reclaim",
                                   ("handoff reclaim policy allow_reclaim" if width == 30
@@ -163,7 +184,9 @@ def run(executable):
             h.send_and_wait(process, fd, output, b"\x1b[F", b"HISTORYEND")
             h.drain_until_quiet(process, fd, output)
             assert window(output)[0] > 1, window(output)
-            h.palette_go(process, fd, output, b"go Harness", b"FOLLOWEDHEAD")
+            # The verdict list names a Task by its ID; the count on its tab says
+            # the verdict row is loaded and can be followed.
+            h.palette_go(process, fd, output, b"go Task Verdicts", b"Task Verdicts (1)")
             h.send_and_wait(process, fd, output, b"\x1d", b"FOLLOWEDHEAD")
             h.drain_until_quiet(process, fd, output)
             assert b"MASC Task" in screen(output), screen(output)
@@ -184,8 +207,12 @@ def run(executable):
             assert b"MASC Work" in screen(output) and b"MASC Task" not in screen(output), screen(output)
             # Choose the first visible row, then move down while the removed
             # detail ID is still present. Enter must open the selected row.
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"MASC Work")
-            h.send_and_wait(process, fd, output, b"j", b"MASC Work")
+            # A move rewrites only the rows it moves between, and a key that
+            # moves nothing writes no frame, so each is judged by the row it
+            # lands on or by the TUI going quiet.
+            os.write(fd, b"\x1b[H")
+            h.drain_until_quiet(process, fd, output)
+            h.send_and_wait(process, fd, output, b"j", b"Remaining task 2")
             h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
             assert b"task-remaining-2" in compact(screen(output)), screen(output)
             # Remove this detail too, retaining two rows to exercise k on
@@ -193,8 +220,9 @@ def run(executable):
             remaining[1]["id"] = "task-remaining-3"
             backlog.write_text(json.dumps({"tasks": remaining, "last_updated": STAMP, "version": 1}), encoding="utf-8")
             h.send_and_wait(process, fd, output, b"r", b"MASC Work")
-            h.send_and_wait(process, fd, output, b"\x1b[F", b"MASC Work")
-            h.send_and_wait(process, fd, output, b"k", b"MASC Work")
+            os.write(fd, b"\x1b[F")
+            h.drain_until_quiet(process, fd, output)
+            h.send_and_wait(process, fd, output, b"k", b"Remaining task 1")
             h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
             assert b"task-remaining-1" in compact(screen(output)), screen(output)
             os.write(fd, b"q")

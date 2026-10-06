@@ -2035,7 +2035,8 @@ describe('SettingsSurface', () => {
       const committed = config.source_text + '# committed\n'
       await act(async () => { await editor.write(authority, async () => committedRuntimeTomlConfigFixture({ ...config, source_text: committed }), committed) })
       await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(2))
-      const fresh = makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c', model: 'workspace-B-runtime' },
+      const fresh = makeRuntimeResolved({ default_route: 'rt-c',
+        default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c', model: 'workspace-B-runtime' },
         lanes: [{ id: 'only_b', declared: true, runtime_ids: ['rt-c'] }] })
       apiMock.fetchRuntimeDefaults.mockResolvedValue(makeRuntimeDefaults({ default_runtime_id: 'rt-c' }))
       apiMock.fetchRuntimeResolved.mockResolvedValue(fresh)

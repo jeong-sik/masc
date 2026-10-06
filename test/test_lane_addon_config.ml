@@ -121,7 +121,7 @@ let reject_invalid_values () = with_directory (fun _root packages directory ->
   ignore (install_package packages);
   let path = Filename.concat directory "frames.toml" in
   List.iter (fun (label, bytes) -> write path bytes; check_error label path)
-    ["unknown top-level field", declaration ~extra:"enabled = true" msx_binding;
+    ["unknown top-level field", declaration ~extra:"unknown_field = true" msx_binding;
      "duplicate declaration identity key", "id = \"duplicate\"\n" ^ declaration msx_binding;
      "duplicate declaration binding key", declaration (msx_binding ^ "sources=[]\n");
      "missing binding", declaration "";
@@ -141,7 +141,12 @@ sources = [{source_id = "machine", kind = "msx_capture"}, {source_id = "machine"
     ["nan"; "inf"; "-inf"; "2026-09-12"; "12:30:00"; "2026-09-12T12:30:00";
      "2026-09-12T12:30:00Z"];
   write path (declaration (msx_binding ^ "setting = \"2026-09-12\"\n"));
-  check bool "an explicit date string remains package data" true (Result.is_ok (Config.load_file ~path)))
+  check bool "an explicit date string remains package data" true (Result.is_ok (Config.load_file ~path));
+  (* #41135 introduced the enabled deployment flag: a valid boolean must be
+     accepted, not rejected by the unknown-field guard. *)
+  write path (declaration ~extra:"enabled = false" msx_binding);
+  let disabled = unwrap (Config.load_file ~path) in
+  check bool "enabled flag is accepted" false disabled.enabled)
 
 let invalid_files_remain_visible () = with_directory (fun _root packages directory ->
   ignore (install_package packages);

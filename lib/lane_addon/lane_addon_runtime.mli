@@ -64,6 +64,26 @@ val register_skill_export_handler :
 val reconcile_configuration : config:Workspace.config -> directory:string ->
   (Yojson.Safe.t, string) result
 val configuration_directory : Workspace.config -> string
+type configuration_owner = { id : string; source_path : string; revision : string }
+type inventory_presence = Live | Retained
+type inventory_instance = {
+  instance_id : string; incarnation : string; run_id : string;
+  package_id : string; title : string; package_revision : string;
+  configuration : configuration_owner option;
+  presence : inventory_presence; phase : Lane_addon_types.phase;
+}
+type inventory = {
+  owner_present : bool;
+  instances : inventory_instance list;
+  issues : (string * string) list;
+  complete : bool;
+}
+val inventory : config:Workspace.config -> inventory
+(** Operator-only metadata source; the HTTP caller must enforce CanAdmin.
+    Runs live reads on the existing owner domain and offloads retained file reads.
+    Does not create a manager/store, start workers, reconcile or clean resources.
+    [owner_present=false] means no manager has been observed in this process,
+    not that there are no retained bindings or declarations. *)
 val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->

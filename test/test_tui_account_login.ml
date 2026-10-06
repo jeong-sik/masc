@@ -430,7 +430,7 @@ let uncertain_durability_save () =
   check bool "visible save retains uncertain durability" true
     (saved=Login.Saved_durability_unconfirmed Login.Saved_verified);
   check bool "warning is visible" true (contains t.notice "내구성을 확인하지 못했습니다");
-  check bool "saved configuration activates before inventory refresh" true
+  check bool "activation completes before the inventory refresh" true
     (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
       "exact_output_authority_available", `Bool true;
       "model_setup", `Assoc ["status", `String "available"]])));
@@ -449,7 +449,7 @@ let uncertain_lock_release_save () =
   let saved=match Login.saved t (receipt (`List [warning])) with Ok saved -> saved | Error detail -> fail detail in
   check bool "both storage and lock uncertainty are retained" true
     (saved=Login.Saved_durability_unconfirmed (Login.Saved_lock_release_unconfirmed Login.Saved_verified));
-  check bool "saved configuration activates before inventory refresh" true
+  check bool "activation completes before the inventory refresh" true
     (Login.activated t saved (Ok (`Assoc ["runtime_ready", `Bool true;
       "exact_output_authority_available", `Bool true;
       "model_setup", `Assoc ["status", `String "available"]])));

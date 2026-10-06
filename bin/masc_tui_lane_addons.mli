@@ -6,12 +6,12 @@ type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
-  installation_id : string option; source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
+  installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; desired : string option;
+  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
 }
@@ -119,6 +119,7 @@ val pending_action : t -> action_request option
 val paste_action : text:string -> t -> t
 val edit_action : key:string -> t -> (t * action_request option, string) result
 val can_observe : instance -> bool
+val removal_block_reason : t -> instance -> string option
 val overview_hints : t -> string
 val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
 val move_observation : t -> int -> t

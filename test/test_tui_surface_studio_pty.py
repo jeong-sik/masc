@@ -14,20 +14,19 @@ import tui_keyboard_repositories as _keyboard_repositories
 
 def run(executable, no_color=False):
     fixtures = _keyboard_harness.planning_selection_http_fixtures()
-    planning_response = fixtures[_keyboard_harness.PLANNING_PATH]
-    assert isinstance(planning_response, tuple)
-    planning = planning_response[1]
-    assert isinstance(planning, dict)
+    planning = _keyboard_harness.json_payload_fixture(
+        fixtures, _keyboard_harness.PLANNING_PATH)
     planning["task_backlog"] = {"todo": 11, "claimed": 12, "in_progress": 13,
         "awaiting_verification": 14, "done": 15, "cancelled": 16}
     _, repositories = _keyboard_repositories.repositories_fixture()
-    repository_rows = repositories["repositories"]
-    assert isinstance(repository_rows, list)
-    repository_rows[0]["status"] = "wire\n\x1b[9D"
-    repository_rows.append({**repository_rows[0],
+    repo_rows = repositories["repositories"]
+    assert isinstance(repo_rows, list) and isinstance(repo_rows[0], dict)
+    repositories["repositories"] = repo_rows
+    repo_rows[0]["status"] = "wire\n\x1b[9D"
+    repo_rows.append({**repositories["repositories"][0],
         "id":"next-repo", "name":"next-repo", "local_path":"workspace/next-repo",
         "resolved_local_path":"/srv/masc/workspace/next-repo"})
-    repository_rows.append({**repository_rows[0],
+    repo_rows.append({**repositories["repositories"][0],
         "id":"failed-repo", "name":"failed-repo", "status":"error",
         "error_message":"checkout unavailable: refresh credentials",
         "local_path":"workspace/failed-repo",
@@ -35,10 +34,10 @@ def run(executable, no_color=False):
     repositories["total"] = 3
     page_names = [f"page-{index:02d}" for index in range(25)]
     for name in page_names:
-        repository_rows.append({**repository_rows[0],
+        repo_rows.append({**repositories["repositories"][0],
             "id": name, "name": name, "local_path": "workspace/" + name,
             "resolved_local_path": "/srv/masc/workspace/" + name})
-    repositories["total"] = len(repository_rows)
+    repositories["total"] = len(repo_rows)
     refresh_failed = False
     refresh_error = ("Workspace repository refresh unavailable while reading the registered checkout "
         "and its remote identity; the previous repositories remain available for selection. "
@@ -210,13 +209,10 @@ def run(executable, no_color=False):
         key(b"\x1b",b"studio.enabled")
         key(b"j",b"studio.mode")
         capture("system-long-comparison",30,80,b"studio.mode")
-        parameter_response = fixtures["/api/v1/runtime/params"]
-        assert isinstance(parameter_response, tuple)
-        parameter_payload = parameter_response[1]
-        assert isinstance(parameter_payload, dict)
-        parameters = parameter_payload["parameters"]
-        assert isinstance(parameters, list) and isinstance(parameters[1], dict)
-        current = parameters[1]["current"]
+        params = _keyboard_harness.json_payload_fixture(
+            fixtures, "/api/v1/runtime/params")["parameters"]
+        assert isinstance(params, list) and isinstance(params[1], dict)
+        current = params[1]["current"]
         read_selected((b"Current" + json.dumps(current).encode(),
                        b'Default"mention_or_thread"', b"override"))
         key(b":go Dashboard\r",b"MASC Dashboard")

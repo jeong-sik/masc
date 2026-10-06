@@ -130,7 +130,26 @@ let test_optional_document_preserves_existing_work () = with_clients (fun sw con
    | _ -> fail "idle optional document did not complete");
   check int "optional waiter was released" 0 (Hashtbl.length client.waiters))
 
+let test_inventory_does_not_prune () = with_clients (fun sw connect ->
+  let info = connect Lane.Firefox in
+  let selected = target info.client_id in
+  let client = match selected with Lane.Live_client client -> client
+    | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+  let pending = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_for ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+  ignore (take info);
+  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  check bool "expired client is not counted" true
+    (Lane.inventory_observation Lane.Lane_name.Live = Lane.Live_clients 0);
+  check bool "inventory did not retire client" false client.closed;
+  check int "inventory did not finish waiting request" 1 (Hashtbl.length client.waiters);
+  ignore (Lane.disconnect_client ~client_id:info.client_id);
+  match Eio.Promise.await pending with
+  | Ok (Ok (Lane.Answered _)) -> ()
+  | _ -> fail "explicit disconnect must still settle the request")
+
 let () = run "browser client routing" ["ownership", [
+  test_case "inventory observes without pruning a pending client" `Quick test_inventory_does_not_prune;
   test_case "optional document preserves existing work" `Quick test_optional_document_preserves_existing_work;
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;
   test_case "single selection and stale identity" `Quick test_single_and_stale_selection;

@@ -1,0 +1,53 @@
+{
+  "ocaml_version": "5.5.1",
+  "ocaml_parser_files": [
+    "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
+    "bin/masc_tui_http.ml",
+    "bin/masc_tui_keys.ml",
+    "bin/masc_tui_loader.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_types.ml",
+    "lib/runtime/runtime.ml",
+    "lib/runtime/runtime.mli",
+    "lib/server/server_routes_http_routes_dashboard.ml",
+    "lib/server/server_routes_http_routes_dashboard.mli",
+    "test/test_dashboard_http_core.ml",
+    "test/test_runtime_config_validity.ml",
+    "bin/masc_tui_runtime_config_edit.ml",
+    "bin/masc_tui_runtime_config_edit.mli",
+    "test/test_tui_runtime_config_edit.ml"
+  ],
+  "python_ast_files": [
+    "test/test_tui_remote_workspace_history_pty.py",
+    "test/test_tui_runtime_account_form_pty.py",
+    "test/test_tui_runtime_config_draft_pty.py"
+  ],
+  "isolated_edit_tests": 3,
+  "native_tui": "not run",
+  "backend_tests": "not run",
+  "pty_tests": "not run",
+  "source_sha256": {
+    "bin/masc_tui.ml": "a61cffa07383a7c24ececee72023e49e9535388328bc6c53a864eb0fd1f7cb10",
+    "bin/masc_tui_async_protocol.ml": "d8af19a5082436da288c9dfe63d7584e14430fd5b05874a285c9c5e04c2d76d1",
+    "bin/masc_tui_async_protocol.mli": "d8af19a5082436da288c9dfe63d7584e14430fd5b05874a285c9c5e04c2d76d1",
+    "bin/masc_tui_http.ml": "1e59cee4b76d5adffbc3b8ea8ac2622ec8a4d6f2899ae7841fc21aff2b0db314",
+    "bin/masc_tui_keys.ml": "b052f1213791a7f30fc3b1eee9546eea42f76c430b135edac550dff3fd5be3ef",
+    "bin/masc_tui_loader.ml": "0d72f03a5ad684dca3c9ed8a39659c150ab291900c7c56936d38b32743960191",
+    "bin/masc_tui_render.ml": "7c1dc83b684350180e6444e26368b95de381f8a35655cc3db05d171e5057e465",
+    "bin/masc_tui_types.ml": "7590904d5a0ca53be03e907a7ff993c3355ec850306a17b7542d32b3a543d26a",
+    "lib/runtime/runtime.ml": "7322312a61737659b0703927b1ca81f81483922ad653c08deb9e9072a1155944",
+    "lib/runtime/runtime.mli": "67962caefaa93624c46cb11264efd37dc4e96bc4a0b0e6546466114bc25d9aa8",
+    "lib/server/server_routes_http_routes_dashboard.ml": "9dbafec836985c66fd92c19788c1d975bbf32e80b8eadae5c6c840acc142484f",
+    "lib/server/server_routes_http_routes_dashboard.mli": "87ae1631362cf6d3104a1cbed23d71fa45da350a0476b1f27e62a6f141bd9c47",
+    "test/test_dashboard_http_core.ml": "b32b394e24d5f5ffd546b6b98302cf0d0b85ea2adcbbf4380b8cb9f69f0e0e8b",
+    "test/test_runtime_config_validity.ml": "bdf24716bf993e08e5f941d2993b84b785deab1c0e784209320a08cdd7657844",
+    "bin/masc_tui_runtime_config_edit.ml": "ad8a30519fd0be019c333766b76cb91181b1322c90cc8b7c05a4dd5514192c39",
+    "bin/masc_tui_runtime_config_edit.mli": "ab52c36136370980930c5b0746f896b64c8c3aef9e77d962258fe6bcb4a8bf96",
+    "test/test_tui_runtime_config_edit.ml": "89d67d9d78406b1f7ef4edb4a09e61d078321e93846e2109a6f5ec519a79edfd",
+    "test/test_tui_remote_workspace_history_pty.py": "326caa7406957b0ca26afdbf008bfe49d91ccaa0253d54de1f914e6a0901514a",
+    "test/test_tui_runtime_account_form_pty.py": "1cabef1dc9803300bb79a161bbcd0144d0b54f21d775a4b1e7e5a5c8c1716c50",
+    "test/test_tui_runtime_config_draft_pty.py": "0ab46c99cc99adac8195bf369891252c13b84ae5690a81ddc5925b4ba4b65c0d"
+  }
+}

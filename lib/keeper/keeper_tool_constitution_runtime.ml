@@ -1,9 +1,11 @@
 open Keeper_meta_contract
 
-(* The articles ride every turn of every keeper in the world. 4 KiB is roughly
-   forty one-line norms, which is more than any world has written by hand, and
-   it is a tenth of the smallest context this fleet runs. *)
-let render_byte_ceiling = 4096
+(* The articles ride every turn of every keeper in the world. 8 KiB is roughly
+   eighty one-line norms, which is more than any world has written by hand, and
+   it stays well inside the smallest context this fleet runs. The operator
+   raised this from 4 KiB (2026-10-05) so a new cadence article could be
+   recorded without first deleting a norm. *)
+let render_byte_ceiling = 8192
 
 (* One norm is one sentence. Without a per-article cap a single write can be
    larger than the whole ceiling, and the ceiling message would then tell a

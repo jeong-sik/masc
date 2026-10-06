@@ -33,11 +33,11 @@ let resolve_repeated_keys data =
   fst (Llm_provider.Json_object_keys.deduplicate data)
 ;;
 
-let success raw_output =
+let success ?(metadata = None) raw_output =
   { retained_artifacts = []
   ; raw_output
   ; data = None
-  ; metadata = None
+  ; metadata
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Completed ()
   ; deferred_kind = None

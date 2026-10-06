@@ -330,6 +330,62 @@ let repeated_tool_call_input ~threshold tool_calls =
     else None
 ;;
 
+(* Constitution exception (named bound + rationale): a repetition count like
+   the three axes above, on the one key none of them can use.
+
+   [repeated_exact_tool_call] needs the output fingerprint to stand still,
+   and [repeated_tool_call_input] needs the input fingerprint to repeat.
+   A keeper rewriting already-current memory facts with a different title
+   each time moves both: every receipt carries a new memory_id and every
+   input a new claim, so neither axis fires while nothing advances
+   (masc #41377). The handler's own typed word is the only proof left:
+   each call in this streak declared [No_progress], the world provably
+   unmoved, not inferred from bytes.
+
+   So this axis drops both fingerprints and keeps adjacency instead, on
+   one tool at a time: consecutive calls to the same tool, every one of
+   them typed non-progress. A call that declares [Progress] or nothing
+   ends the streak -- reads declare nothing, so ordinary re-reads never
+   count. Cross-tool streaks do not count either: a claim that found no
+   work followed by an unrelated no-op write is two true statements, not
+   a loop.
+
+   3 = the first call plus two provably stalled repeats: the evidence per
+   call is stronger than the input axis's (a typed declaration, not a
+   fingerprint match), so the count matches the exact axis rather than
+   the input axis's 5. A yield here persists a checkpoint and resumes, so
+   a run that reaches it costs one resume. *)
+let repeated_no_progress_tool_call_yield_threshold = 3
+
+let same_tool_call_name
+      (left : Keeper_agent_result.tool_call_detail)
+      (right : Keeper_agent_result.tool_call_detail)
+  =
+  String.equal left.tool_name right.tool_name
+;;
+
+(* Newest-first, so the head is the latest call and the streak runs back from
+   it. Unlike [repeated_exact_tool_call] the repeats must be adjacent and
+   share only the tool name: the typed outcome is the no-progress proof, so
+   neither fingerprint is asked to stand still. *)
+let repeated_no_progress_tool_call ~threshold tool_calls =
+  match tool_calls with
+  | [] -> None
+  | latest :: _ when not (Keeper_tool_outcome.is_nonprogress latest.typed_outcome) -> None
+  | latest :: previous ->
+    let rec streak count = function
+      | call :: rest
+        when same_tool_call_name latest call
+             && Keeper_tool_outcome.is_nonprogress call.typed_outcome ->
+        streak (count + 1) rest
+      | _ -> count
+    in
+    let repeated_count = streak 1 previous in
+    if threshold > 1 && repeated_count >= threshold
+    then Some (latest.tool_name, repeated_count)
+    else None
+;;
+
 (* The official-client host calls this after every settled dynamic tool call,
    on Direct and Autonomous turns alike, and skips its own exact-adjacent
    counter while it is installed. The observations come from the turn
@@ -350,8 +406,12 @@ let official_client_tool_boundary
                 ~threshold:repeated_tool_call_yield_threshold tool_calls with
         | Some _ as repeated -> repeated
         | None ->
-          repeated_tool_call_input
-            ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+          (match repeated_tool_call_input
+                   ~threshold:repeated_tool_call_input_yield_threshold tool_calls with
+           | Some _ as repeated -> repeated
+           | None ->
+             repeated_no_progress_tool_call
+               ~threshold:repeated_no_progress_tool_call_yield_threshold tool_calls)
       in
       Ok (Option.map (fun (tool_name, repeated_count) ->
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
@@ -763,6 +823,7 @@ module For_testing = struct
   let runtime_yield_reason = runtime_yield_reason
   let repeated_exact_tool_call = repeated_exact_tool_call
   let repeated_tool_call_input = repeated_tool_call_input
+  let repeated_no_progress_tool_call = repeated_no_progress_tool_call
   let repeated_assistant_text = repeated_assistant_text
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission

@@ -3310,6 +3310,59 @@ let test_retract_records_a_retraction () =
    | _ -> Alcotest.fail "expected only the re-added fact")
 ;;
 
+(* An echo committed nothing, and the receipt text alone cannot say that to
+   the repeat guards: their evidence is the handler's typed declaration beside
+   the opaque body. The first write declares nothing; the identical second
+   write declares [No_progress], which the keeper reads as a typed
+   [Nothing_changed] outcome for the no-progress yield axis. *)
+let test_already_current_declares_no_progress () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "echo-declares-no-progress" in
+  let write () =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:(make_args ~title:"" ~content:"the deploy needs assets")
+  in
+  let json_opt = Alcotest.(option (testable Yojson.Safe.pp Yojson.Safe.equal)) in
+  let first = write () in
+  Alcotest.(check json_opt)
+    "the first write declares nothing"
+    None
+    first.Masc.Keeper_tool_execution.metadata;
+  let echo = write () in
+  let echo_json = Yojson.Safe.from_string echo.Masc.Keeper_tool_execution.raw_output in
+  Alcotest.(check string) "the echo reports already-current" "already_current"
+    (string_field "identity_disposition" echo_json);
+  Alcotest.(check json_opt)
+    "the echo declares no-progress on the metadata channel"
+    (Some (`Assoc [ "masc.tool_outcome", `String "no_progress" ]))
+    echo.Masc.Keeper_tool_execution.metadata;
+  (match
+     Masc.Keeper_tool_outcome_metadata.declared echo.Masc.Keeper_tool_execution.metadata
+   with
+   | Some (Keeper_tool_outcome.No_progress { reason = Keeper_tool_outcome.Nothing_changed }) ->
+     ()
+   | Some _ | None -> Alcotest.fail "the echo declaration did not read as Nothing_changed");
+  Alcotest.(check bool) "the declared outcome is non-progress for the yield axis" true
+    (Keeper_tool_outcome.is_nonprogress
+       (Masc.Keeper_tool_outcome_metadata.declared echo.Masc.Keeper_tool_execution.metadata));
+  (* The new reason survives the telemetry codec both ways. *)
+  let round_tripped =
+    Keeper_tool_outcome.of_json
+      (Keeper_tool_outcome.to_json
+         (Keeper_tool_outcome.No_progress
+            { reason = Keeper_tool_outcome.Nothing_changed }))
+  in
+  Alcotest.(check bool) "Nothing_changed round-trips through the outcome codec" true
+    (round_tripped
+     = Some
+         (Keeper_tool_outcome.No_progress
+            { reason = Keeper_tool_outcome.Nothing_changed }))
+;;
+
 let test_source_snapshot_commit_notifications () =
   let module Source = Masc.Keeper_memory_source_current in
   let module Notifications = Masc.Keeper_memory_commit_notifications in
@@ -3674,6 +3727,10 @@ let () =
             "retract records removal and survives re-adding the claim"
             `Quick
             test_retract_records_a_retraction
+        ; Alcotest.test_case
+            "already-current echo declares no-progress"
+            `Quick
+            test_already_current_declares_no_progress
         ; Alcotest.test_case
             "source parser accepts every supported value"
             `Quick

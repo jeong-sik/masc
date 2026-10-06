@@ -180,6 +180,23 @@ module For_testing : sig
     -> tool_call_detail list
     -> (string * int) option
 
+  (** Newest-first tool calls; [Some (tool, streak)] when the last [threshold]+
+      adjacent calls share a tool name and every one of them carries a typed
+      non-progress outcome ([Keeper_tool_outcome.is_nonprogress]), whatever
+      their input and output fingerprints did.
+
+      The two axes above cannot answer for a call whose input and output both
+      move on every call while nothing advances — a keeper rewriting
+      already-current memory facts with a different title each time, for one
+      (masc #41377). This one drops both fingerprints and requires the repeats
+      to be adjacent to the same tool instead. A call that declares [Progress]
+      or nothing ends the streak and is never the latest of one; streaks never
+      cross tool names. *)
+  val repeated_no_progress_tool_call
+    :  threshold:int
+    -> tool_call_detail list
+    -> (string * int) option
+
   (** Newest-first per-turn assistant texts; [Some streak] when the last
       [threshold]+ consecutive turns carry the same non-blank text. *)
   val repeated_assistant_text

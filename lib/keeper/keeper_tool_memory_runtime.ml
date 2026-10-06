@@ -1780,14 +1780,14 @@ let keeper_memory_write_with_outcome
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
   =
-  let respond ~ok ~error_kind extras =
+  let respond ?(metadata = None) ~ok ~error_kind extras =
     let head =
       [ "ok", `Bool ok
       ; "error_kind", `String (memory_write_error_kind_to_string error_kind)
       ]
     in
     if ok
-    then Keeper_tool_execution.success (Yojson.Safe.to_string (`Assoc (head @ extras)))
+    then Keeper_tool_execution.success ~metadata (Yojson.Safe.to_string (`Assoc (head @ extras)))
     else (
       let effect_disposition, what_committed = memory_write_failure_effect error_kind in
       let payload =
@@ -1920,11 +1920,25 @@ let keeper_memory_write_with_outcome
                  (Keeper_memory_os_events.Revised { superseded_by = written_memory_id })
                [ superseded_memory_id ]
            | No_supersedes | Target_already_dropped _ -> ());
+          let disposition =
+            memory_write_identity_disposition ~commit:commit_effect ~snapshot ~fact:written_fact
+          in
+          (* An echo committed nothing, and the receipt alone cannot say that
+             to the repeat guards: their evidence is the handler's typed
+             declaration beside the opaque body. Without it the no-progress
+             axis cannot tell an echo from a re-observation that refreshed
+             support. *)
+          let metadata =
+            match disposition with
+            | Already_current ->
+              Some (Tool_outcome_declaration.to_metadata Tool_outcome_declaration.No_progress)
+            | Inserted | Reobserved -> None
+          in
           respond
+            ~metadata
             ~ok:true
             ~error_kind:No_memory_write_error
-            (memory_write_identity_receipt
-               (memory_write_identity_disposition ~commit:commit_effect ~snapshot ~fact:written_fact)
+            (memory_write_identity_receipt disposition
              @ [ "rows_written", `Int (match commit_effect with
                | Keeper_memory_os_current.Unchanged -> 0
                | Keeper_memory_os_current.Rewritten -> 1)

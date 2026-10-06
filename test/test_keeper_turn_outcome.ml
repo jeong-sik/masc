@@ -564,6 +564,101 @@ let test_repeated_tool_call_input_boundary () =
             "keeper_tasks_list")))
 ;;
 
+(* The typed no-progress axis. Both fingerprint axes need something to stand
+   still -- the exact axis the output, the input axis the input -- and a keeper
+   rewriting already-current memory facts with a different title each time
+   moves both: every receipt carries a new memory_id, every input a new claim
+   (masc #41377). The handler's own [No_progress] declaration is the only
+   proof left, so this axis drops both fingerprints and counts adjacent
+   same-tool calls that each declared no progress. *)
+let test_repeated_no_progress_tool_call_boundary () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_no_progress_tool_call ~threshold:3
+  in
+  let no_progress =
+    Keeper_tool_outcome.No_progress { reason = Keeper_tool_outcome.Nothing_changed }
+  in
+  (* Newest-first: three echoes, each with its own input and output. *)
+  let echoes =
+    List.init 3 (fun i ->
+      tool_call
+        ~input:(Some (Printf.sprintf "claim %d" i))
+        ~output:(Some (Printf.sprintf "memory-%d" i))
+        ~typed_outcome:no_progress
+        "keeper_memory_write")
+  in
+  check
+    (option (pair string int))
+    "three typed no-progress echoes yield"
+    (Some ("keeper_memory_write", 3))
+    (detect echoes);
+  check
+    (option (pair string int))
+    "the exact axis cannot see the moving fingerprints"
+    None
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3 echoes);
+  check
+    (option (pair string int))
+    "the input axis cannot see the moving inputs"
+    None
+    (Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:3 echoes);
+  check
+    (option (pair string int))
+    "two echoes are still ordinary work"
+    None
+    (detect (List.filteri (fun i _ -> i < 2) echoes));
+  check
+    (option (pair string int))
+    "a declared progress inside the streak ends it"
+    None
+    (detect
+       [ tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call ~typed_outcome:Keeper_tool_outcome.Progress "keeper_memory_write"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ]);
+  check
+    (option (pair string int))
+    "an undeclared call inside the streak ends it"
+    None
+    (detect
+       [ tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call "keeper_memory_write"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ]);
+  check
+    (option (pair string int))
+    "streaks never cross tool names"
+    None
+    (detect
+       [ tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call ~typed_outcome:no_progress "keeper_tasks_claim"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ]);
+  check
+    (option (pair string int))
+    "interleaved echoes are re-reads, not a loop"
+    None
+    (detect
+       [ tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call "keeper_memory_search"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ; tool_call "keeper_memory_search"
+       ; tool_call ~typed_outcome:no_progress "keeper_memory_write"
+       ]);
+  check
+    (option (pair string int))
+    "a typed error counts as non-progress"
+    (Some ("keeper_memory_write", 3))
+    (detect
+       (List.init 3 (fun _ ->
+          tool_call
+            ~typed_outcome:(Keeper_tool_outcome.Error { reason = "store unavailable" })
+            "keeper_memory_write")))
+;;
+
 let test_repeated_exact_tool_call_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
@@ -1873,6 +1968,8 @@ let () =
             test_tool_io_digest_survives_eviction;
           test_case "repeated tool input boundary" `Quick
             test_repeated_tool_call_input_boundary;
+          test_case "repeated no-progress tool call boundary" `Quick
+            test_repeated_no_progress_tool_call_boundary;
           test_case "the seed stops where a yield already judged" `Quick
             test_seed_stops_where_a_yield_already_judged;
           test_case "a yield records the pairs it judged" `Quick

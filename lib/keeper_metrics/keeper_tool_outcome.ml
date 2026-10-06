@@ -7,6 +7,7 @@ and no_progress_reason =
   | No_eligible_tasks of claim_scope_exclusions
   | Resource_conflict of { resource : string }
   | No_work_available
+  | Nothing_changed
 
 and claim_scope_exclusions = {
   scope_excluded_count : int;
@@ -31,6 +32,7 @@ let to_json (outcome : t) : Yojson.Safe.t =
       | Resource_conflict { resource } ->
         `Assoc [ "kind", `String "Resource_conflict"; "resource", `String resource ]
       | No_work_available -> `Assoc [ "kind", `String "No_work_available" ]
+      | Nothing_changed -> `Assoc [ "kind", `String "Nothing_changed" ]
     in
     `Assoc [ "kind", `String "No_progress"; "reason", reason_json ]
   | Error { reason } ->
@@ -72,6 +74,8 @@ let of_json (json : Yojson.Safe.t) : t option =
               | _ -> None)
            | Some (`String "No_work_available") ->
              Some (No_progress { reason = No_work_available })
+           | Some (`String "Nothing_changed") ->
+             Some (No_progress { reason = Nothing_changed })
            | _ -> None)
         | _ -> None)
      | Some (`String "Error") ->

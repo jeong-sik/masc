@@ -9,7 +9,9 @@
     keeper maps it onto its own outcome type. A tool that says nothing is read
     as having said nothing, never as the opposite. *)
 
-type t = Progress  (** The call advanced the world it acts on. *)
+type t =
+  | Progress  (** The call advanced the world it acts on. *)
+  | No_progress  (** The call provably moved nothing it acts on. *)
 
 val key : string
 (** ["masc.tool_outcome"]. *)

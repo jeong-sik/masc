@@ -36,7 +36,10 @@ type t = private
           This is independent of the opaque [raw_output] projection. *)
   }
 
-val success : string -> t
+val success : ?metadata:Yojson.Safe.t option -> string -> t
+(** Untyped completion. [metadata], when supplied, rides the one-way
+    AGENT_CORE projection beside the opaque [raw_output], the same channel
+    [success_data] uses — e.g. a handler's [Tool_outcome_declaration]. *)
 
 (** Typed completion. [raw_output] is the deterministic JSON rendering used by
     text-only consumers; typed consumers use [data] directly. *)

@@ -15,6 +15,9 @@ and no_progress_reason =
   | No_eligible_tasks of claim_scope_exclusions
   | Resource_conflict of { resource : string }
   | No_work_available
+  | Nothing_changed
+  (** The handler proved its call committed nothing: an idempotent no-op
+      re-observation, not a failure. *)
 
 and claim_scope_exclusions = {
   scope_excluded_count : int;

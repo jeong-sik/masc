@@ -343,7 +343,10 @@ let test_moving_calls_declare_progress () =
     testable
       (fun fmt o ->
         Format.pp_print_string fmt
-          (match o with Some Tool_outcome_declaration.Progress -> "Progress" | None -> "None"))
+          (match o with
+           | Some Tool_outcome_declaration.Progress -> "Progress"
+           | Some Tool_outcome_declaration.No_progress -> "No_progress"
+           | None -> "None"))
       ( = )
   in
   let step = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 300) ] in

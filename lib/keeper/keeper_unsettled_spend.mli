@@ -11,14 +11,14 @@
     every raw row the Keeper wrote after its newest resolved row belongs to an
     execution that ended without committing: a commit writes a resolved row
     for every reading its attempts read, after the raw rows they came from.
-    Those rows are observed again through {!Keeper_turn_spend}, attempt by
-    attempt and in the order they were written, resolved, and written as
-    attempt readings of their own turn.
+    Each raw row carries the {!Keeper_spend_observation} its execution handed
+    {!Keeper_turn_spend}. Those observations are handed to it again, attempt
+    by attempt and in the order they were written, resolved, and written as
+    attempt readings of their own turn. A row without one is not settled.
 
-    Only counts that carry nothing forward are settled: per-request and
-    client-turn counts. A conversation-cumulative count is read against the
+    A conversation-cumulative report is not settled: it is read against the
     Keeper's committed cursor, so the next count of the same conversation
-    already covers it; settling it here as well would count it twice. *)
+    already covers it, and settling it here as well would count it twice. *)
 
 type outcome =
   { scanned_rows : int
@@ -26,8 +26,12 @@ type outcome =
   ; settled_turns : int
   ; settled_readings : int
   ; unplaced_rows : int
-        (** Raw rows after the newest resolved row that name no attempt or no
-            usage, and so cannot be observed as a reading. *)
+        (** Raw rows after the newest resolved row that name no attempt or
+            carry no observation to settle. *)
+  ; undecodable : string list
+        (** Why each raw row after the newest resolved row that does not
+            decode -- as a cost row or as its observation -- was not settled,
+            oldest first. *)
   }
 
 (** The Keeper's raw rows after its newest resolved row, oldest first, from
@@ -53,5 +57,6 @@ val settle
 
 (** {!settle} before an execution starts. Failures are logged and the
     execution goes on: what could not be settled stays in the ledger as raw
-    rows and is settled before a later execution. *)
+    rows and is settled before a later execution. Rows that do not decode
+    are logged as a warning with the oldest one's reason. *)
 val settle_before_execution : masc_root:string -> agent_name:string -> unit

@@ -371,7 +371,7 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
           let index = !next_tool_index in
           incr next_tool_index;
           Option.iter
-            (fun receipts -> Keeper_codex_tool_receipts.start receipts ~call_id ~block_index:index)
+            (fun receipts -> Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
             receipts;
           Hashtbl.replace tool_indexes call_id index;
           emit
@@ -389,7 +389,7 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
                      (Yojson.Safe.to_string arguments)
                })
         | Runtime_codex_app_server.Dynamic_tool_finished { call_id } ->
-          Option.iter (fun receipts -> Keeper_codex_tool_receipts.finish receipts ~call_id) receipts;
+          Option.iter (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id) receipts;
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
@@ -761,12 +761,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
     let receipts =
-      Option.map (fun notify -> Keeper_codex_tool_receipts.create ~notify) on_tool_execution
+      Option.map (fun notify -> Keeper_official_client_tool_receipts.create ~delivery:Keeper_official_client_tool_receipts.Immediate ~notify) on_tool_execution
     in
     let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
     let hooks =
       match receipts with
-      | Some receipts -> Keeper_codex_tool_receipts.hooks receipts hooks
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
       | None -> hooks
     in
     let owner_epoch = Keeper_official_client_session_store.process_epoch () in

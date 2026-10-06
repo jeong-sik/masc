@@ -2243,6 +2243,7 @@ def run_terminal_scenario(
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
     launch_count: int = 1,
+    startup_frame_marker: bytes | None = None,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -2402,15 +2403,20 @@ def run_terminal_scenario(
                     timeout=30.0,
                 )
                 if not starts_in_chat:
+                    # A narrow viewport can clip the workspace label. Such a
+                    # scenario names a visible surface marker and still waits
+                    # for its complete frame; terminal-control checks below
+                    # and after exit remain independent of label width.
+                    frame_marker = workspace_rendered if startup_frame_marker is None else startup_frame_marker
                     wait_for_output(
                         process,
                         master_fd,
                         output,
-                        workspace_rendered,
+                        frame_marker,
                         start=0,
                         timeout=3.0,
                     )
-                    frame_offset = output.find(workspace_rendered) + len(workspace_rendered)
+                    frame_offset = output.find(frame_marker) + len(frame_marker)
                 else:
                     frame_offset = output.find(startup_needle) + len(startup_needle)
                 wait_for_output(

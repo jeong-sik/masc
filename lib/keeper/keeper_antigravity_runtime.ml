@@ -313,7 +313,7 @@ type mcp_blocks =
   | Streaming
 
 let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
-    ~position on_event =
+    ~position ~receipts on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
@@ -337,7 +337,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
        a pass finds nothing held. *)
     let rec release_mcp_blocks () =
       match !mcp_blocks with
-      | Streaming | Held [] -> mcp_blocks := Streaming
+      | Streaming | Held [] ->
+        mcp_blocks := Streaming;
+        Option.iter Keeper_official_client_tool_receipts.release receipts
       | Held held ->
         mcp_blocks := Held [];
         List.iter emit (List.rev held);
@@ -434,6 +436,10 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
+          Option.iter
+            (fun receipts ->
+               Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
+            receipts;
           Hashtbl.replace tool_indexes call_id index;
           emit_mcp_block
             (Agent_core.Types.ContentBlockStart
@@ -451,6 +457,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                }))
     ; on_tool_finished =
         (fun ~call_id ->
+          Option.iter
+            (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id)
+            receipts;
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
@@ -471,7 +480,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~on_usage_report ~(config : Runtime_execution.antigravity_cli) =
+    ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -485,6 +494,21 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          "Antigravity runtime requires the initialized Eio clock")
   | Some env, Some clock ->
     let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+    (* The MCP server can answer a call before init opens the message; its
+       receipt waits with its held block. *)
+    let receipts =
+      Option.map
+        (fun notify ->
+           Keeper_official_client_tool_receipts.create
+             ~delivery:Keeper_official_client_tool_receipts.Held_until_released
+             ~notify)
+        on_tool_execution
+    in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
       Session_store.load ~base_path ~keeper_name
@@ -979,6 +1003,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       let stream =
         stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
+          ~receipts
           ~position:
             (match conversation_mode with
              | Runtime_antigravity.Start -> Keeper_usage_resolution.Fresh
@@ -1360,6 +1385,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ?on_usage_report
+    ?on_tool_execution
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
@@ -1396,6 +1422,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~terminal_effect_state
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
         ~on_usage_report
+        ~on_tool_execution
         ~event_bus
         ~raw_trace
         ~on_event
@@ -1417,6 +1444,7 @@ module For_testing = struct
        ~on_native_action:None
        ~on_usage_report:(Some report)
        ~position
+       ~receipts:None
        None).on_runtime_event
       event
   ;;
@@ -1431,6 +1459,7 @@ module For_testing = struct
         ~on_native_action:None
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
+        ~receipts:None
         (Some (fun event -> emitted := event :: !emitted))
     in
     List.iter projection.on_runtime_event events;
@@ -1457,6 +1486,7 @@ module For_testing = struct
         ~on_native_action:None
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
+        ~receipts:None
         (Some
            (fun event ->
               emitted := event :: !emitted;

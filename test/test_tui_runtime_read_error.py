@@ -30,12 +30,23 @@ def run(executable: str) -> None:
         screen = _keyboard_harness.screen_text(bytes(output))
         if screen.count(ERROR) != 1 or screen.count(b"load failed") != 1:
             raise AssertionError(f"Runtime repeated or lost the cause: {screen!r}")
-        for action in (b"f replaces it", b"m edits it"):
-            rows = [row for row in screen.splitlines() if action in row]
-            if len(rows) != 1 or b"\xe2\x80\x94" not in rows[0]:
-                raise AssertionError(
-                    f"Runtime did not mark {action!r} unavailable: {screen!r}"
-                )
+        # #40824 moved the default-route row to runtime_default_route_lines
+        # (bin/masc_tui_types.ml:11523): it draws the route with an "f replaces"
+        # hint when a route is observed, and "not observed" when the read
+        # failed. So the f hint is absent here, and the row itself is the
+        # unavailable marker.
+        default_rows = [row for row in screen.splitlines() if b"[runtime].default" in row]
+        if len(default_rows) != 1 or b"not observed" not in default_rows[0]:
+            raise AssertionError(
+                f"Runtime did not mark the default route unavailable: {screen!r}"
+            )
+        if b"f replaces" in screen:
+            raise AssertionError(f"Runtime drew the f hint without a route: {screen!r}")
+        media_rows = [row for row in screen.splitlines() if b"m edits it" in row]
+        if len(media_rows) != 1 or b"\xe2\x80\x94" not in media_rows[0]:
+            raise AssertionError(
+                f"Runtime did not mark b'm edits it' unavailable: {screen!r}"
+            )
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(

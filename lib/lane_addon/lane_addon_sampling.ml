@@ -97,21 +97,6 @@ let response_with_references (answer : S.create_message_result) references =
   let answer = package_response answer in
   {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])}
 
-let bound_refusal ~max_bytes message =
-  let json_len s = String.length (Yojson.Safe.to_string (`String s)) in
-  (* MCP serializes every refusal as a JSON string, including a structured
-     receipt carried inside that string. Its quotes must fit too. *)
-  if String.length message <= max_bytes && json_len message <= max_bytes then message
-  else
-    let refusal = "sampling failed; outcome retained" in
-    if json_len refusal <= max_bytes then refusal
-    else
-      let compact = "refused" in
-      if json_len compact <= max_bytes then compact
-      else
-        let max_content = max 0 (max_bytes - 2) in
-        String.sub compact 0 (min (String.length compact) max_content)
-
 let validate_response ~max_bytes answer =
   let* bytes = encode_bounded ~max_bytes (S.create_message_result_to_yojson answer) in
   try S.create_message_result_of_yojson (Yojson.Safe.from_string bytes) with
@@ -131,12 +116,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     Store.write_blob store bytes)
     |> Result.map_error (fun _ -> "sampling request could not be retained") in
   let observation = ref Outside_observation in
-  let handler ?error_bytes (params : S.create_message_params) =
-    (* An error message must fit the whole JSON-RPC envelope, which the
-       transport measures with the request id; [error_bytes] carries that. *)
-    let refusal_bytes = match error_bytes with
-      | None -> package.resources.max_reply_bytes
-      | Some bytes -> min bytes package.resources.max_reply_bytes in
+  let handler (params : S.create_message_params) =
     let run () =
     let* observation_inputs = match !observation with
       | Outside_observation -> Error "host sampling requires an active observation"
@@ -258,11 +238,10 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Invocation_exception _ -> "outcome_unknown" | Answer _ -> "answered" in
         let reply = `Assoc ["status",`String status;"evidence",references] in
         (match Eio_unix.run_in_systhread (fun () ->
-           encode_bounded ~max_bytes:refusal_bytes reply) with
+           encode_bounded ~max_bytes:package.resources.max_reply_bytes reply) with
          | Ok bytes -> Error bytes
-         | Error _ -> Error (bound_refusal ~max_bytes:refusal_bytes
-                               "sampling failed; outcome retained")) in
-    run () |> Result.map_error (bound_refusal ~max_bytes:refusal_bytes) in
+         | Error _ -> Error "sampling failed; outcome retained") in
+    run () in
   Ok {package; instance_id; store; observation; handler}
 
 let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =

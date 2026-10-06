@@ -29,6 +29,33 @@ let managed_auth home = Filename.concat (Home.config_home home) "muse/auth.json"
 let synthetic_auth marker = Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1;
   "providers", `Assoc [ "meta", `Assoc [ "api_key", `String marker ] ] ])
 
+let managed_settings home = Filename.concat (Home.config_home home) "muse/settings.json"
+
+(* The capability ids the Muse host (1.4.3) names for its bundled observer
+   agents; each one makes model calls on the account when enabled. *)
+let observer_capability_ids =
+  [ "plugin:tbh-reminders:reminder:memory"
+  ; "plugin:tbh-reminders:reminder:skill-reminder"
+  ; "plugin:tbh-reminders:reminder:verify-reminder"
+  ; "plugin:tbh-reminders:reminder:goal-reminder"
+  ; "plugin:tbh-reminders:reminder:todo-reminder"
+  ; "plugin:tbh-reminders:reminder:scope-reminder" ]
+
+let check_observers_off label config_home =
+  let open Yojson.Safe.Util in
+  let settings =
+    Fs_compat.load_file (Filename.concat config_home "muse/settings.json")
+    |> Yojson.Safe.from_string in
+  check string (label ^ ": safe profile") ":ask-me"
+    (settings |> member "permissions" |> member "default_profile" |> to_string);
+  let capabilities = settings |> member "runtime_capabilities" |> to_assoc in
+  check (list string) (label ^ ": exactly the bundled observers are named")
+    (List.sort String.compare observer_capability_ids)
+    (List.sort String.compare (List.map fst capabilities));
+  List.iter (fun (id, value) ->
+      check bool (label ^ ": " ^ id ^ " disabled") false (value |> member "enabled" |> to_bool))
+    capabilities
+
 let test_refresh_survives_and_source_relogin_gets_a_new_identity () = with_fixture (fun root ->
   let selected = account root "selected" in
   let original = synthetic_auth "synthetic-source-one" in
@@ -62,25 +89,61 @@ let test_accounts_settings_and_native_workspaces_are_separate () = with_fixture 
   let settings = Fs_compat.load_file (Filename.concat (Home.config_home first) "muse/settings.json") |> Yojson.Safe.from_string in
   check string "safe profile generated" ":ask-me" Yojson.Safe.Util.(settings |> member "permissions" |> member "default_profile" |> to_string);
   check bool "source hooks not imported" true (Yojson.Safe.Util.member "hooks" settings = `Null);
+  check_observers_off "generated settings" (Home.config_home first);
   let workspace = ok (Home.prepare_native_workspace ~runtime_root:root ~keeper_name:"keeper/a" ~account_home:one) in
   let other = ok (Home.prepare_native_workspace ~runtime_root:root ~keeper_name:"keeper/a" ~account_home:two) in
   check bool "workspace follows account" true (workspace <> other);
   check bool "workspace independent of settings" true (workspace <> Home.config_home first);
   check int "workspace private" 0 ((Unix.stat workspace).Unix.st_perm land 0o077))
 
-let test_missing_signin_and_changed_managed_policy_refuse () = with_fixture (fun root ->
+let test_missing_signin_refuses () = with_fixture (fun root ->
   let selected = account root "missing" in
-  (match Home.prepare ~account_home:selected with
-   | Error (Home.Sign_in_required Home.No_file_sign_in) -> ()
-   | Error error -> fail (Home.error_to_string error)
-   | Ok _ -> fail "missing selected account fell back to ambient credentials");
-  write (auth selected) (synthetic_auth "synthetic-source");
-  let prepared = ok (Home.prepare ~account_home:selected) in
-  write (Filename.concat (Home.config_home prepared) "muse/settings.json") "{}";
   match Home.prepare ~account_home:selected with
-  | Error (Home.State_unavailable _) -> ()
+  | Error (Home.Sign_in_required Home.No_file_sign_in) -> ()
   | Error error -> fail (Home.error_to_string error)
-  | Ok _ -> fail "changed managed permission settings admitted")
+  | Ok _ -> fail "missing selected account fell back to ambient credentials")
+
+(* Settings that name the safe profile but leave the host's observers on. *)
+let observers_left_on_settings =
+  {|{"schema_version":1,"permissions":{"schema_version":1,"default_profile":":ask-me"}}|}
+
+let test_other_settings_are_replaced_by_a_generation_carrying_the_sign_in () = with_fixture (fun root ->
+  let selected = account root "policy-change" in
+  let source = synthetic_auth "synthetic-source" in
+  write (auth selected) source;
+  let first = ok (Home.prepare ~account_home:selected) in
+  let refreshed = synthetic_auth "synthetic-vendor-refreshed" in
+  write (managed_auth first) refreshed;
+  write (managed_settings first) observers_left_on_settings;
+  let second = ok (Home.prepare ~account_home:selected) in
+  check bool "settings with observers on are not admitted again" true
+    (Home.account_revision first <> Home.account_revision second);
+  check_observers_off "replacement generation" (Home.config_home second);
+  check string "replacement keeps the vendor refresh, not the source copy" refreshed
+    (Fs_compat.load_file (managed_auth second));
+  check string "source credentials are untouched" source (Fs_compat.load_file (auth selected));
+  check string "a running replaced generation is left as it was" observers_left_on_settings
+    (Fs_compat.load_file (managed_settings first));
+  let third = ok (Home.prepare ~account_home:selected) in
+  check string "the replacement is reused while its settings stand"
+    (Home.account_revision second) (Home.account_revision third);
+  write (managed_settings third) "{}";
+  let edited = ok (Home.prepare ~account_home:selected) in
+  check bool "edited settings are replaced too" true
+    (Home.account_revision third <> Home.account_revision edited);
+  check_observers_off "after an edit" (Home.config_home edited);
+  Sys.remove (managed_settings edited);
+  let missing = ok (Home.prepare ~account_home:selected) in
+  check bool "missing settings are replaced" true
+    (Home.account_revision edited <> Home.account_revision missing);
+  check string "every replacement carries the same sign-in" refreshed
+    (Fs_compat.load_file (managed_auth missing));
+  write (managed_settings missing) observers_left_on_settings;
+  Sys.remove (managed_auth missing);
+  match Home.prepare ~account_home:selected with
+  | Error (Home.Sign_in_required Home.No_file_sign_in) -> ()
+  | Error error -> fail (Home.error_to_string error)
+  | Ok _ -> fail "a generation without its sign-in was replaced from the source copy")
 
 let auth_with_storage storage = Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1;
   "providers", `Assoc [ "meta", `Assoc [ "mechanism", `String "oauth"; "storage", storage ] ] ])
@@ -278,7 +341,8 @@ let () = run "Muse managed account home"
       test_case "every accepted directory syncs its parent" `Quick test_directory_creation_syncs_each_parent;
       test_case "vendor refresh and external re-login" `Quick test_refresh_survives_and_source_relogin_gets_a_new_identity;
       test_case "accounts, settings and workspaces" `Quick test_accounts_settings_and_native_workspaces_are_separate;
-      test_case "missing auth and changed policy refuse" `Quick test_missing_signin_and_changed_managed_policy_refuse;
+      test_case "missing auth refuses" `Quick test_missing_signin_refuses;
+      test_case "other settings get a generation carrying the sign-in" `Quick test_other_settings_are_replaced_by_a_generation_carrying_the_sign_in;
       test_case "only a sign-in held in auth.json is admitted" `Quick test_only_a_sign_in_held_in_auth_json_is_admitted;
       test_case "corrupt auth and missing generation refuse" `Quick test_corrupt_auth_and_missing_generation_do_not_reimport;
       test_case "symlink HOME retains identity and descendant protection" `Quick test_symlink_home_preserves_identity_and_owned_descendant_checks;

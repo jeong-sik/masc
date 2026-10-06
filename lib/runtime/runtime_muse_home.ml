@@ -91,11 +91,38 @@ let write_private path body =
   Fun.protect ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel body; flush channel; Unix.fsync (Unix.descr_of_out_channel channel))
 
+(* Muse Code runs observer agents beside the main session, and "each enabled
+   observer makes its own model calls" on the same subscription
+   (dev.meta.ai/docs/muse-code/extending). A Keeper keeps its own goals,
+   verification and memory, so every observer the host bundles is turned off
+   through [runtime_capabilities]. The ids are the host's capability names for
+   its bundled reminder plugin (muse 1.4.3). *)
+type observer =
+  | Memory
+  | Skill_reminder
+  | Verify_reminder
+  | Goal_reminder
+  | Todo_reminder
+  | Scope_reminder
+[@@deriving enumerate]
+
+let observer_capability_id = function
+  | Memory -> "plugin:tbh-reminders:reminder:memory"
+  | Skill_reminder -> "plugin:tbh-reminders:reminder:skill-reminder"
+  | Verify_reminder -> "plugin:tbh-reminders:reminder:verify-reminder"
+  | Goal_reminder -> "plugin:tbh-reminders:reminder:goal-reminder"
+  | Todo_reminder -> "plugin:tbh-reminders:reminder:todo-reminder"
+  | Scope_reminder -> "plugin:tbh-reminders:reminder:scope-reminder"
+
 let settings =
   Yojson.Safe.to_string
     (`Assoc [ "schema_version", `Int 1
             ; "permissions", `Assoc [ "schema_version", `Int 1
-                                    ; "default_profile", `String ":ask-me" ] ])
+                                    ; "default_profile", `String ":ask-me" ]
+            ; "runtime_capabilities",
+              `Assoc (List.map (fun observer ->
+                  observer_capability_id observer, `Assoc [ "enabled", `Bool false ])
+                  all_of_observer) ])
 
 let parse_record body =
   try
@@ -157,38 +184,48 @@ let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~sour
     let* previous = match previous with
       | None -> Ok None
       | Some body -> Result.map Option.some (parse_record body) in
+    let publish auth_bytes =
+      let revision = Random_id.uuid_v7 () in
+      let* directory = directories store [ revision, true; "muse", true ] in
+      write_private (Filename.concat directory "settings.json") settings;
+      write_private (Filename.concat directory "auth.json") auth_bytes;
+      sync_directory directory;
+      let generation = Filename.dirname directory in
+      let* _ = directories generation [ "tmp", true ] in
+      sync_directory generation;
+      let record = Yojson.Safe.to_string (`Assoc [ "source_sha256", `String source_sha256
+                                               ; "revision", `String revision ]) in
+      (* The strict atomic writer creates its tempfile with mode 0600 and
+         fsyncs both it and the parent directory; no post-publication chmod. *)
+      let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
+      Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home }
+    in
     (match previous with
      | Some (previous_sha256, revision) when String.equal source_sha256 previous_sha256 ->
        let generation = Filename.concat store revision in
        let* () = check_directory ~private_:true (Filename.concat generation "tmp") in
        let* auth = read_optional ~ownership_root:store (Filename.concat generation "muse/auth.json") in
        let* current_settings = read_optional ~ownership_root:store (Filename.concat generation "muse/settings.json") in
-       let* () = match current_settings with
-         | Some body when String.equal body settings -> Ok ()
-         | None | Some _ -> unavailable "managed permission settings changed or are missing" in
        (match auth with
         | None -> Error (Sign_in_required No_file_sign_in)
         | Some body ->
           let* () = validate_auth body in
-          (* A previous current.json rename may have become visible even when
-             its parent fsync failed. Reconfirm that pointer before admission. *)
-          sync_store store;
-          Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
-     | None | Some _ ->
-       let revision = Random_id.uuid_v7 () in
-       let* directory = directories store [ revision, true; "muse", true ] in
-       write_private (Filename.concat directory "settings.json") settings;
-       write_private (Filename.concat directory "auth.json") source_bytes;
-       sync_directory directory;
-       let generation = Filename.dirname directory in
-       let* _ = directories generation [ "tmp", true ] in
-       sync_directory generation;
-       let record = Yojson.Safe.to_string (`Assoc [ "source_sha256", `String source_sha256
-                                                ; "revision", `String revision ]) in
-       (* The strict atomic writer creates its tempfile with mode 0600 and
-          fsyncs both it and the parent directory; no post-publication chmod. *)
-       let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
-       Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
+          (match current_settings with
+           | Some current when String.equal current settings ->
+             (* A previous current.json rename may have become visible even when
+                its parent fsync failed. Reconfirm that pointer before admission. *)
+             sync_store store;
+             Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home }
+           | None | Some _ ->
+             (* The generation runs settings other than the current managed
+                ones: an earlier masc wrote another policy, or the file was
+                edited. It is never admitted again. A new generation with the
+                current settings carries its credentials, vendor refreshes
+                included, and its new revision starts Keeper sessions afresh,
+                since the host commits a session's permission profile when the
+                session starts. *)
+             publish body))
+     | None | Some _ -> publish source_bytes)
 
 (* The vendor launcher (v3) keeps its sign-in at [muse/auth.json] under
    XDG_CONFIG_HOME, and under [HOME/.config] when that is unset. *)

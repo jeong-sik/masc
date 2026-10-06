@@ -27,7 +27,11 @@ val error_to_string : error -> string
 val prepare : account_home:string -> (t, error) result
 (** Import the selected account's [.config/muse/auth.json] on first use or
     when its exact source bytes change. Reuse an unchanged source's generation
-    without replacing credentials the vendor refreshed there. The Meta slot
+    without replacing credentials the vendor refreshed there, while its
+    [settings.json] is the current managed settings: the [:ask-me] profile
+    with every bundled observer agent turned off. A generation with other
+    settings is replaced by a new one that carries its credentials, so a
+    policy change reaches signed-in accounts without a new sign-in. The Meta slot
     must be non-empty, and its [storage] marker must be absent or ["file"]:
     ["keychain"] is [Sign_in_required Keychain_sign_in] and any other value is
     [Unsupported_credential_storage]. Whether the slot actually holds a secret

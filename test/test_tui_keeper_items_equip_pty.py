@@ -44,7 +44,7 @@ def account_fixture() -> tuple[int, dict]:
     )
 
 
-def run(executable: str) -> None:
+def run(executable: str, no_color: bool = False) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
@@ -59,6 +59,11 @@ def run(executable: str) -> None:
         def screen():
             return h.screen_rows(
                 bytes(output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
+
+        def screen_styled():
+            return h.screen_rows(
+                bytes(output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)]),
+                preserve_styles=True)
 
         def screen_text(rows) -> bytes:
             return b"\n".join(text for _, text in sorted(rows.items()))
@@ -84,6 +89,31 @@ def run(executable: str) -> None:
         if b"owned" not in shades or b"equipped" in shades:
             raise AssertionError(
                 f"unworn owned row must read owned, not equipped: {shades!r}")
+        # The worn marker is bold; the owned state word is not. The words
+        # stay the distinguisher (NO_COLOR drops the weight), so this
+        # asserts emphasis only, beside the word assertions above.
+        styled = screen_styled()
+        styled_glasses = find_row(styled, b"glasses")
+        if no_color:
+            if b"\x1b[1m" in styled_glasses:
+                raise AssertionError(
+                    "NO_COLOR must drop the worn weight: "
+                    f"{styled_glasses!r}")
+        elif b"\x1b[1mequipped" not in styled_glasses:
+            raise AssertionError(
+                f"worn row must bold equipped: {styled_glasses!r}")
+        styled_shades = find_row(styled, b"shades")
+        if b"\x1b[1m" in styled_shades:
+            raise AssertionError(
+                f"owned row must carry no bold: {styled_shades!r}")
+        selected_rows = [
+            row for _, row in sorted(styled.items()) if b"Selected:" in row]
+        if no_color:
+            if any(b"\x1b[1m" in row for row in selected_rows):
+                raise AssertionError(
+                    "NO_COLOR must drop the Selected weight")
+        elif b"Selected: 0.200  \x1b[1mequipped" not in screen_text(styled):
+            raise AssertionError("Selected line must bold the worn marker")
         # Cursor starts at item 0 (glasses): the Selected line pins the
         # same exclusive words outside the row list.
         if b"Selected: 0.200  equipped" not in screen_text(rows):
@@ -104,6 +134,16 @@ def run(executable: str) -> None:
         if b"equipped" not in narrow_glasses or b"owned" in narrow_glasses:
             raise AssertionError(
                 f"narrow worn row must keep equipped only: {narrow_glasses!r}")
+        narrow_styled_glasses = find_row(screen_styled(), b"glasses")
+        if no_color:
+            if b"\x1b[1m" in narrow_styled_glasses:
+                raise AssertionError(
+                    "narrow NO_COLOR must drop the worn weight: "
+                    f"{narrow_styled_glasses!r}")
+        elif b"\x1b[1mequipped" not in narrow_styled_glasses:
+            raise AssertionError(
+                "narrow worn row must keep bold equipped: "
+                f"{narrow_styled_glasses!r}")
         os.write(master_fd, b"q")
 
     fixtures = h.keeper_runtime_http_fixtures()
@@ -128,14 +168,17 @@ def run(executable: str) -> None:
     fixtures["/api/v1/keepers/alpha/items"] = account_fixture()
     h.run_terminal_scenario(
         executable,
-        description="Keeper Items tab marks equipped and owned exclusively",
+        description="Keeper Items tab marks equipped and owned exclusively"
+        + (" without color" if no_color else ""),
         interact=interact,
         http_fixtures=fixtures,
         terminal_cols=140,
         terminal_rows=32,
+        extra_env={"NO_COLOR": "1"} if no_color else None,
     )
 
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
+    run(os.path.abspath(sys.argv[1]), no_color=True)
     print("keeper items equip words: PASS")

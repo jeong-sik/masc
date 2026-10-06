@@ -243,8 +243,9 @@ let test_a_wake_makes_the_worker_look_again () =
   enable_candle config;
   Eio.Switch.run (fun sw ->
     Candle_payout_worker.start ~appraise ~sw ~config ();
-    (* The start-up pass finds nothing waiting. *)
-    Eio.Time.sleep (Eio.Stdenv.clock env) 0.2;
+    (* The start-up pass finds nothing waiting. Seeding before it ran would let
+       that pass settle the payout and leave the wake unproven. *)
+    await_within env "the start-up pass" Candle_payout_worker.For_testing.idle;
     seed_payout config ~goal_id:"goal-2";
     Candle_payout_worker.wake ();
     await_within env "the payout being settled" (fun () -> settled config));
@@ -262,7 +263,7 @@ let test_the_worker_does_nothing_while_candle_is_off () =
   Eio.Switch.run (fun sw ->
     Candle_payout_worker.start ~appraise ~sw ~config ();
     Candle_payout_worker.wake ();
-    Eio.Time.sleep (Eio.Stdenv.clock env) 0.3);
+    await_within env "the woken pass" Candle_payout_worker.For_testing.idle);
   check (list string) "nothing was added" [ "snapshot"; "payout_owed" ] (kinds config)
 ;;
 
@@ -332,7 +333,7 @@ let test_a_start_while_a_worker_runs_is_refused () =
     Candle_payout_worker.start ~appraise ~sw ~config:other ();
     await_within env "the first base path's payout" (fun () -> settled config);
     Candle_payout_worker.wake ();
-    Eio.Time.sleep (Eio.Stdenv.clock env) 0.3);
+    await_within env "the woken pass" Candle_payout_worker.For_testing.idle);
   check (list string) "the other base path was not served" [ "snapshot"; "payout_owed" ] (kinds other)
 ;;
 

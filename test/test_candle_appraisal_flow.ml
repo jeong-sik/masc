@@ -397,6 +397,31 @@ let test_unrelated_and_external_only_work_mint_nothing () =
   (match Candle_payout.state ~goal_id:"external-only" (events config) with
    | Candle_payout.Settled -> () | _ -> fail "external-only contribution stayed open")
 
+(* Only the external operator's Task is related. Related work exists, but no
+   Keeper did it, so the payout closes as no_related_keepers rather than
+   all_unrelated, with no weights call and no Paid row. *)
+let test_related_work_done_by_no_keeper_closes_as_no_related_keepers () =
+  with_workspace @@ fun _env config ->
+  ignore (prepared config "external-related");
+  let calls = ref [] in
+  let relation title = if title = "Operator's contribution" then A.Related else A.Unrelated in
+  ignore (drain config (make_runner ~relation calls));
+  check (list string) "grade, then one relation per candidate, and no weights"
+    ["grade";"relation";"relation";"relation"]
+    (List.map (fun (_, request) -> A.stage request) !calls);
+  check int "related work without a Keeper receives no payment" 0
+    (List.length (paid config "external-related"));
+  (match List.rev (events config) with
+   | {E.body=E.Unattributed {goal_id;reason=E.No_related_keepers attribution;_};_} :: _ ->
+     check string "the confirmed Goal closes" "external-related" goal_id;
+     check (list (pair string bool)) "every relation decision is kept"
+       ["task-a", false; "task-b", false; "external", true]
+       (List.map (fun (r : A.task_relation) -> r.task_id, r.relation = A.Related)
+          attribution.relations)
+   | _ -> fail "related work without a Keeper did not close as no_related_keepers");
+  (match Candle_payout.state ~goal_id:"external-related" (events config) with
+   | Candle_payout.Settled -> () | _ -> fail "related work without a Keeper stayed open")
+
 let test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it () =
   with_workspace @@ fun _env config ->
   let failed = prepared ~due_date:(Some "2026-9-26") config "due-repair" in
@@ -1010,6 +1035,7 @@ let () =
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
       ;test_case "execution refusal holds through pulses and resumes on event" `Quick test_execution_rejection_waits_for_event_and_preserves_preceding_work
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing
+      ;test_case "related work done by no Keeper closes as no_related_keepers" `Quick test_related_work_done_by_no_keeper_closes_as_no_related_keepers
       ;test_case "failed due date waits for a new corrected pass" `Quick test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it
       ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates
       ;test_case "valid arithmetic cannot authorize an outsider" `Quick test_arithmetic_alone_cannot_authorize_an_outsider

@@ -4,6 +4,10 @@
 
 ## [0.50.0] - 2026-10-06
 
+### Upgrade notes
+
+- Each Muse account's managed configuration is replaced once on first use after the upgrade, carrying its sign-in, so no new sign-in is needed; Muse Keepers start one fresh host session because the account revision changes, and a Gate a Muse Keeper left open across the upgrade is not resumed, as with any release that changes the tool surface (#41349).
+
 ### Added
 
 - Keeper chats show the conversation partner's portrait below the left Keeper list, without taking rows from the conversation or composer. The portrait follows the chat target, stays put while browsing the list, and yields on small or colourless terminals. Chats show the roster by default; an explicit Ctrl-B choice is retained. (#39883).
@@ -46,6 +50,68 @@
 - Update glossary entries on MCP Sampling deprecation status and the boundary between assembled Fusion computation and Board-backed Fusion. (#41071)
 - Define Memory Category as open-ended content metadata in the glossary, separate from retention and mutation authority. (#41076)
 - Add opt-in per-Keeper date-sharded metric retention through `metrics.store_max_bytes`, with shared turn/heartbeat writes and unlimited retention by default (#41111).
+- Add a read-only paired Librarian run reporter that requires identical frozen inputs, retains terminal failures, and separates recorded generation skips/timings from unmeasured provider counts, semantic quality and TUI agreement. (#40769)
+- Add an explicit synthetic Librarian preflight evaluation command and bilingual attack corpus. It detects false no-change decisions on corrections, constraints and unfinished obligations without mutating Memory or consuming ranges. (#40794)
+- TUI Usage now shows reported headroom, account summaries and exact-window mini trends in Plan, with dated 0–100% daily quota charts, explicit zero and missing reports, and responsive chart cards in Trend (#40906).
+- Keeper Usage compares reported token and cost totals with separate relative bars and aggregate UTC time, retaining missing and partial coverage; unreported metrics remain distinct from zero. (#40936)
+- Show mean, maximum, minimum and last whole-request input for the selected Keeper in Memory, using its recent 50 recorded turns and showing measurement coverage. Missing latest inputs remain unreported. ([#41023](https://github.com/jeong-sik/masc/pull/41023))
+- Added a read-only operator inventory joining exact-output, Browser, machine and package Lane observations with typed management targets and visible partial-read diagnostics. (#41130)
+- Serve the common Lane inventory through H2 with the same operator permission and projection as H1. (#41130)
+- Unified the TUI Lane inventory with searchable, scrollable typed destinations, complete observation/diagnostic readers, retained-worker history, full-path draft protection and an asynchronous initial MSX spectator read. (#41131)
+- Configuration-preserving on/off for declared package Lanes, staged with Space and saved explicitly in the TUI. Dashboard and TUI show off requests separately from worker cleanup and retained evidence. (#41135)
+- Added a searchable All Lanes Dashboard inventory with focused owner details, workspace-bound reads, explicit stale/partial readings and responsive cards. Existing Lane Queue and owner management screens remain accessible. (#41145)
+- Goal Pause/Resume and Block/Unblock preserve the prior live state across storage, API, dashboard and TUI. Already bound verifier results wait in the proof ledger until restoration; linked Tasks remain independent (#41151).
+- Accept `enabled = false` on optional Exact Lane declarations while preserving candidate settings and already acquired work. Required Board Attention and HITL lanes remain enabled. Show off and retained running work in TUI/Web readings; acquire Librarian admission before JEV preflight so off cannot consume new input. Upgrade the binary before adding the new key to live TOML. Dedicated activity controls remain follow-up work. (#41162)
+- Preserve Exact activity through presets and autosaves, retain acquired Verifier candidate kinds, and allow dormant candidate settings without live admission. Presets saved before lanes carried activity still load, with every lane enabled. (#41162)
+- TUI Exact Lane activity drafts: Space opens activity settings, Space changes
+  on/off, and s explicitly previews and saves. Candidate settings survive off,
+  drafts survive navigation, and conflict recovery reapplies only the activity
+  change over the current file. Stored configuration and live application are
+  shown separately. (#41166)
+- Web Exact Lane activity drafts in All Lanes and Runtime Lane candidates.
+  Explicit preview/CAS saves retain candidate settings and independent raw
+  TOML drafts. Conflict recovery reapplies only activity over the current file.
+  Navigation preserves the open panel and receipt, and both screens refresh
+  observations after setup resume even when remounted during the save. (#41172)
+- Browser live, automation and stagehand can independently stop new requests while retaining configuration, connections, sessions and accepted work. Validated Runtime saves publish activity; server status/close remain available while off. TUI/Web inventory shows activity separately from backend observations. Executable/profile changes still require restart; dedicated activity editors follow separately. (#41185)
+- TUI All Lanes opens Browser activity with Space. Per-workspace/backend drafts use explicit preview/CAS save, retain intent across navigation and conflicts, and qualify accepted flat automation paths in their canonical namespace while preserving path values and operator comments. (#41187)
+- Give the terminal-too-small overlay ownership of quit keys while Browser or Exact activity drafts remain hidden. (#41187)
+- Require the observed configuration path together with its revision under the raw-save write lock, and distinguish Live client ownership from server session controls. (#41187)
+- Document the observed source path in administrative raw-save payloads. (#41187)
+- Keep the trailing comment on a boolean that the line editor rewrites, so toggling Browser activity keeps a note such as `enabled = true # temporary during rollout`. (#41187)
+- Say that nothing is left to save when Browser reapply finds the desired activity already in the file, and clear the previous write receipt when another Browser activity save starts. (#41187)
+- Document that only an Automation activity save moves flat `[browser] geckodriver/binary` paths into `[browser.automation]`. (#41187)
+- Web All Lanes Browser details now retain per-backend activity drafts, preview and save with source-revision checks, preserve independent Runtime drafts, and refresh activity observations after save. (#41191)
+- Preserve Browser activity draft retryability on typed pre-write rejection without restoring a source invalidated by another write. (#41191)
+- Preserve known revision conflicts across file-path changes and prevent late failed previews from restoring invalidated activity save bases. (#41191)
+- Assert the verified Browser receipt follow-up phase in the introducing Settings tests. (#41191)
+- Mark an interrupted Browser activity save uncertain only after its save request was sent, so a workspace switch during preview no longer leaves an unsent write uncertain. (#41191)
+- Run Browser activity saves through the shared Lane activity session that Exact lanes use. A read no longer clears an uncertain save by itself: it shows what the file holds, and the doubt stays until the activity value is reapplied or the draft is discarded. (#41191)
+- Show the Browser activity-only reapply action while a save is in doubt, so a read that still shows the old revision no longer leaves discard as the only way out. (#41191)
+- MSX and DOS activity settings refuse new execution while retaining machine state and checkpoints. TUI and Web inventory show activity separately from screen publication; configuration uses the Runtime source editor. (#41199)
+- All Lanes opens MSX/DOS activity settings with Space. Retained drafts use preview and revision-checked saves, and the current file and server activity are read back separately. ([#41201](https://github.com/jeong-sik/masc/pull/41201))
+- Web All Lanes now edits MSX/DOS activity through retained drafts, explicit preview/revision-checked saves, and separate file/server readback. Conflicts and uncertain writes preserve operator intent; standard, dotted and inline machine settings retain comments. ([#41203](https://github.com/jeong-sik/masc/pull/41203))
+- TUI Add-ons `i` now browses local workspace folders and actual package manifests before the existing preview, schema form, TOML draft and explicit save. Invalid entries remain visible, selection survives refresh, `p` retains manual manifest entry, and metadata scrolling stays within the visible pane. (#41205)
+- Serve package catalog and preview reads over HTTP/2 with the same read authentication as HTTP/1, and discover/preview manifests inside the connected Git worktree. (#41205)
+- Browse local Lane packages in the Web Add-ons panel and configure schema fields, nested inputs and observed output sources before preparing a separate TOML draft. Retain inputs across panel and workspace changes; save only through the existing explicit Save TOML action. (#41206)
+- Rechecking a package through a path that no preview has named yet holds every retained package input until the server says which manifest the path is. If that recheck fails, the inputs stay retained but need a fresh preview before a TOML draft can be prepared. (#41206)
+- Web Lane declarations now have dedicated On / off drafts and explicit revision-checked saves. Preserve raw TOML drafts, bindings, comments and observations; reapply only activity after conflicts. (#41208)
+- A read never settles an uncertain package activity save, because the server may still apply that save after the read. Save stays disabled until the operator reapplies only the activity value onto the file just read or discards the draft, and the next save is checked against the revision adopted then. (#41208)
+- Web All Lanes links preserve the selected workspace, Lane, declaration or worker and focus its existing controls. Retain drafts, retry failed target reads, reject replaced identities and release the old target when the operator selects another item. Keep narrow Runtime navigation labels on one line. (#41209)
+- A selected Lane's diagnostics read that Lane's own runs: exact Lanes ask the server to filter before it pages, the Verifier lists its Goal reviews beside its task reviews, and Stagehand says it keeps no run history instead of reporting the exact-run endpoint's failure. (#41209)
+- A linked declaration file opens only after its installation ID matches the link. A file that now belongs to another installation is never kept in the editor, so leaving the link cannot reveal it as an editable draft. (#41209)
+- Operator Lane declaration metadata now reports exact reconciled source identity and typed worker application/cleanup state, ready for TUI/Web consumers. (#41211)
+- Goal detail keys `c x o p r b u` now arm only the actions the goal's phase can take (`Goal_phase.moves_goal`, the same predicate that paints the Actions row dim). A dim action's key stays with the global layer, so `r` still refreshes while a `[executing]` goal's detail is open instead of arming an unavailable Resume (#41258).
+- New read-only dashboard endpoint `GET /api/v1/dashboard/keeper-practice`
+  folding each keeper's decision-log tail into autonomous practice counts:
+  turn-mode mix, outcome mix, terminal-code / trigger / tool histograms
+  (`keeper.practice.v1`). Unknown labels count as unrecognized, never
+  defaulted. (#41292)
+- An endpoint that declares `admission_priority_run_limit` grants a freed admission permit to the oldest `Priority` request first, and to a waiting `Standard` request after that many `Priority` grants in a row. Only grants made while a `Standard` request waits count toward that run. Endpoints without the declaration keep one arrival-order queue. A run limit declared without `max_concurrent_requests` is rejected before dispatch (#41316).
+- Verifier, HITL auto judge and board attention requests take a freed admission permit ahead of other requests on a provider that declares `admission-priority-run-limit` in `runtime.toml`. The limit applies to the provider's bindings that declare `max-concurrent`; a provider where no binding declares it, or an official-client provider, is refused at load. The seed sets 3 on `glm-coding`; a live config without the key keeps one arrival-order queue (#41332).
+- Operator Candle gifts: new `Granted` ledger rows, `Candle_grant.grant`, and
+  the `masc-candle-grant` CLI. No keeper wake; no keeper tool grants (#41371).
+- Every Keeper turn's shared workspace memory briefing now carries a bounded digest of the ledger's claims — one opening line per claim in id order under a byte cap — so shared claims reach context without a `keeper_workspace_memory_read` call (#41389).
 
 ### Changed
 
@@ -83,10 +149,21 @@
 - Share the Task status vocabulary across JSON and published schemas, require explicit raw-trace dispatch, and verify portrait placement, installer credential transport and dashboard operator signals through behavior tests (#41032).
 - Remove checker, CI, build-verification and benchmark-harness self-tests, source-shape gates, and obsolete compatibility cases; retain feature behavior tests and direct build, installation, credential and runtime checks (#41034).
 - Consolidate boot-consumer, environment-priority and provider-field regression coverage on the canonical configuration implementation. (#41129)
+- Give Memory facts the full width by default and let d toggle the wide Category rail. Librarian preflight details prioritize the recorded generation path and snapshot result; d expands model/probabilities and original evidence. (#40795)
+- Default Memory's stored knowledge size to estimated tokens and add the `u` key to switch between tokens and byte units. Keep stored estimates, reported request tokens and observed request bytes distinct. ([#41023](https://github.com/jeong-sik/masc/pull/41023))
+- Remove redundant SQLite database and statement lifetime workarounds now covered by the required sqlite3 5.4.2 bindings (#41061).
+- TUI Lane declaration views follow the accepted file through startup, worker cleanup, applied, off and failure states while retaining editable drafts and save results. Background observation has separate request ownership; late pre-save or prior-workspace replies cannot replace the current reading. (#41212)
+- `max-prompt-bytes` is removed from runtime.toml, the dashboard and the schema. Claude Code and Codex start with no byte ceiling and narrow on the provider overflow; Antigravity and Muse Code derive theirs from `max-context` (#41224).
+- The default Keeper prompt is the operator's concise version that the live server already ran as an override: the `<portrait>` block and the sentences naming `keeper_memory_search`, `keeper_artifact_read` and `masc_keeper_delegate_status` are gone, a `<board>` block is added, and the default worldview is an empty `<world>` block. (#41306)
+- Run `dune build @check` on every `main` push and pull request, so a broken type-check is attributed to the change that caused it instead of surfacing at the next release (#41309).
+- Replacing a Muse account's managed configuration because its settings differ from the current managed settings is now logged with both revisions, since it used to be a visible refusal (#41355).
+- `masc_goal_transition` refuses `drop` unless `note` is non-blank after trimming. The note becomes the Goal's review note and the reason each cancelled Task's author is told. The TUI's `x` on a Goal detail opens a reason field (Enter drops, Esc cancels) and the dashboard's Drop button opens a reason form; neither sends a drop without a reason (#41357).
 
 ### Removed
 
 - `/play qr` is gone. The QR code of an issued invite link is drawn only on the invite card that `/play invite` opens and `/play link` reopens, so the one-time link no longer appears in a chat row, the footer or the event log. The card draws its QR only on a terminal with 256 colours or more, so with `NO_COLOR` or on a 16-colour terminal it shows the link text alone (#39877).
+- Removed the hourly `Issue Taxonomy` label reconciliation workflow. Labels are still applied from the `masc-triage` block at issue creation, and `scripts/sync-issue-labels.sh` still reports and repairs drift on demand. (#41275)
+- Remove the unused sampling recovery iterator from the Lane add-on store. (#41293)
 
 ### Fixed
 
@@ -591,6 +668,178 @@
 - Retain the selected saved Antigravity account and its custom timeout while cleaning discovery credential copies on save or cancellation. (#41148)
 - Preserve each account's previously resolved installation default when adding models, including inline, dotted and model-set binding declarations. (#41149)
 - Retire the Memory facts browser and its detail navigation when workspace authority changes, then require a fresh scoped health row before reopening facts. The regression waits for applied workspace identity and verifies late A replies stay absent while fresh B facts reach the browser. (#41179)
+- Reject unresolved prompts, contradictory historical Task fields, mismatched rendered Goal or historical Task context and misattributed HTTP refusals in paired Librarian reports. (#40769)
+- Refuse incomplete or ambiguous Librarian measurement exports, retain failed-arm diagnostics, and preserve recorded wall-clock intervals without an invented duration bound. (#40769)
+- Bind each run to its frozen Keeper, require null disabled-baseline rejection, and reject evaluated pairs with nonempty recorded continuity or working context. (#40769)
+- Keep working-context and continuity write failures visible in compact Memory run summaries, and declare the Memory explorer test dependency (#40795).
+- Reject contradictory context-only Memory snapshots and incomplete committed Context/Continuity receipts. (#40795)
+- Runtime editors show the configured `[runtime].default` route separately from its entry runtime and offer declared lanes in the default picker, so choosing a failover lane keeps its full candidate order (#40824).
+- Reject mismatched Keeper actors, disabled candidate preflight and contradictory generation routes in paired Librarian evidence reports. (#40877)
+- Preserve owner attribution and initialize replacement model catalogues before Librarian preflight evaluation. (#40878)
+- Cover frozen default-route snapshots and refreshed TUI route choices, including lane/runtime identifier collisions. (#40884)
+- Retry rejected Candle payouts after an appraisal prompt override is successfully saved or cleared, without waiting for an unrelated new payout. (#40899)
+- Wake pending Workspace Curator work after a relevant successful runtime configuration publication, preserving committed results even if a notification subscriber fails. (#40902)
+- Keep nonfinite quota reports unknown, retain out-of-range history arrows in Plan, and explain empty-report and uncapped-USD mini-trend symbols. (#40906)
+- Explain below-zero and above-limit arrows in both wide and compact Trend views. (#40906)
+- The continuity Librarian prompt now keeps active constraints, decisions and unresolved work in its summary while explaining that stored memory bodies require retrieval in later Keeper turns. It no longer assumes all memory accompanies the summary. (#40911)
+- Keep dashboard execution fixtures isolated from live lifecycle and cache updates, and route explicit fixture overrides through their own response preparation. (#40917)
+- Login results start at the summary and allow scrolling through every saved runtime or failure diagnostic on short terminals. Long result text wraps, and the visible result range is shown (#40924).
+- Keeper Usage distinguishes absent metrics from unavailable comparisons when only partial windows report values, and rejects timestamps outside the supported calendar range before drawing. (#40936)
+- Reject nonfinite numbers in retained sampling request and response evidence before accepting the observation. (#40943)
+- Advance the Fusion results worker package identity so reconciliation can replace workers predating canonical judge evidence (#40945).
+- Reject retained Fusion evidence whose canonical Judge failure contradicts the failed run, while accepting matching failure details (#40949).
+- Keeper Usage preserves unread turn-row counts alongside malformed rows and marks either source gap as partial coverage with reported totals shown as lower bounds (#40950).
+- Preserve regression coverage that Goal proof broadcasts carry their committed phase and distinguish proven evidence awaiting human confirmation from Goal completion. (#40958)
+- Preserve indexed sampling outcomes and request evidence when canonical blob publication fails; resolve independently published recovery blobs through common evidence readers. (#40960)
+- Report canonical evidence corruption and read failures instead of hiding them behind a recovery copy. (#40960)
+- Refuse sampling recovery publication behind an unreadable canonical parent and reject linked or replaced retained evidence in public blob readers. (#40960)
+- Refuse symlinked retained-store directory boundaries before publication and fallback, without writing outcome bytes outside the store. (#40960)
+- Resolve relative store roots at creation and share canonical-parent validation across sampling publication, public reads and journal recovery. (#40960)
+- Tell the sampling handler how many bytes an error message may encode for the request it serves, so a retention receipt that fits the reply bound but not the full JSON-RPC error with its request id is replaced by a bounded refusal instead of by the transport. (#40960)
+- Narrow Work screens wrap complete goal, task-backlog and net-change summaries while preserving status styles and selected-goal space; current counts take priority over optional trend rows. (#40965)
+- Retain failed provider diagnostics separately so a large HTTP refusal does not exhaust the reply envelope of a small valid sampling answer. (#40966)
+- Continue host sampling to the next declared provider when retaining a failed-attempt diagnostic fails, while recording that persistence error in the retained outcome. (#40966)
+- Wake rejected Candle payouts only for effective appraisal prompt changes, including preset repairs and changes applied before cancellation. (#40968)
+- Work shows baseline and current server snapshot timestamps separately, with change from baseline, instead of labeling old server data as time since the TUI first read. (#40972)
+- Clarify that Keeper-published Skills must preserve their evidence scope, relevant approval authority, and explicit reopening or later instructions instead of turning case-specific guidance into universal rules (#40982).
+- Reject extra fields inside Fusion model request and outcome references before evidence normalization or judge sampling. (#40986)
+- Reject successful full-lane Librarian measurement records without a nonblank selected slot, preserving null slots for preselection failures and JEV no-change. (#40988)
+- Dashboard approval notes lead with aggregate unread status once and compact source names, keeping the status visible before narrow-screen truncation while retaining current requests and hidden-filter notices. (#40996)
+- Return refreshed login results and new failure diagnostics to the top of the result view (#40998).
+- Wake Workspace Curator after a successful publication changes a materialized runtime slot credential, so existing pending facts can resume without another Memory write (#41000).
+- Match Play pad names to the DOS inventory boundary so standalone programs such as hello.com use keyboard fallback or their configured pad without a false layout error (#41001).
+- Keep the selected Memory Keeper stable when refreshed rankings change. Preserve corrupt physical turn records and storage failures so older input cannot appear as the latest observation; identify recorded token values that may include runtime estimates. ([#41023](https://github.com/jeong-sik/masc/pull/41023))
+- Fusion Judge rejects blank successful conclusions and keeps its output schema aligned with the decision decoder (#41056).
+- Reject Unicode-whitespace-only conclusions and update the Keeper schema consumer together with the decoder (#41056).
+- Update Keeper's Fusion schema consumer test to validate each decision-specific synthesis branch, including nonblank conclusions and the insufficient-evidence exception (#41065).
+- Allow uppercase Q to leave an active Keeper turn only when the visible draft has no text, attachments or references. In a transcript-only viewport, Q leaves without editing the hidden draft. Idle Q remains text; Ctrl-Q always leaves without interrupting. (#41072)
+- TUI Lane 설정 편집에서 파일 저장과 실제 적용 결과를 구분합니다. 적용 보류 이유·재시작 요구·저장 확실성을 목록 재조회 뒤에도 유지하고 긴 안내를 터미널 폭에 맞춰 표시합니다. (#41102)
+- Guard full runtime.toml saves with the revision read by the editor. Concurrent changes return the current source for comparison without overwriting configuration. (#41114)
+- Retain TUI raw-editor drafts after preview, save or uncertain-result failures; compare current text, explicitly adopt a revision, retry or discard from the System pane. Web raw edits use the same conflict contract. (#41114)
+- Raw runtime.toml POST now requires `expected_source_revision` and `expected_source_path`; direct clients must read both with the source before saving. A different file at the configured path is a conflict even with identical bytes. (#41114)
+- Display package-authored Lane reading labels, order, units and formats in the Dashboard. Missing or wrongly typed readings remain unavailable; original fields and evidence stay accessible. (#41121)
+- Validate deeply nested JSON readings without recursive stack exhaustion; keep the Lane panel and evidence usable when its native raw-fields formatter exceeds its nesting capacity. (#41121)
+- Explain that removing a TOML-managed Lane deletes its matching declaration and cleans up its worker, while manual attachments remove the worker. Align TUI command and Tab guidance with the actual controls. (#41122)
+- Block removal when the current declaration inventory is incomplete, the owned declaration is invalid or ambiguous, or its revision differs from the worker’s recorded owner; retain manual and missing-file cleanup without changing backend deletion checks. (#41122)
+- Dashboard Lane TOML drafts survive Status navigation and workspace changes in the current browser tab. Late file creation preserves newer edits; changed workspace authority requires a fresh comparison before saving again. (#41124)
+- Require a fresh file comparison after returning to a workspace and explicit revision adoption before saving a compared Lane draft. (#41124)
+- Keep unload warnings tied to unsaved content, explain invalid declaration filenames, and withdraw sliced evidence and selections when workspace authority changes. (#41124)
+- Preserve invalid configuration-root diagnostics, reject mismatched retained worker identities, and keep loader-supported `.toml` declarations editable in native and Web controls. (#41130)
+- Dashboard Lane Add-ons now isolates observations, worker controls and results by the confirmed workspace. Pending package actions keep their original request IDs during workspace switches, status checks can resume on return, and failed reads no longer display another workspace's data. (#41153)
+- Preserve Dashboard runtime.toml drafts, revisions and comparisons across navigation. Keep newer edits after a pending raw save, isolate workspace sessions and stale request dispatch, and refresh Lane candidates after file changes and setup resume. Typed configuration patches lock raw editing until completion to prevent reverting their results; fence superseded reads, uncertain writes, and refresh mounted Settings after late saves. (#41160)
+- Bind shared Dashboard runtime catalog and resolved candidates to the current workspace. Hide old workspace data immediately, cancel superseded reads, recover requested readings after workspace changes, and show Fleet candidate read failures explicitly. (#41161)
+- Reject malformed target references in disabled Exact lanes while preserving dormant valid candidates; allow account removal to empty disabled optional lanes without weakening enabled-lane safeguards. (#41162)
+- Preserve Exact activity drafts when help receives keys in a terminal too small to show the modal. (#41166)
+- Keep the trailing comment on a boolean that the line editor rewrites, so toggling Exact activity keeps a note such as `enabled = true # temporary during rollout`. (#41166)
+- Say that nothing is left to save when Exact reapply finds the desired activity already in the file, and clear the previous write receipt when another Exact activity save starts. (#41166)
+- Restore Lane editor behavior fixtures on main with current model labels, PTY-aware request waits and explicit form-close checks, preserving all fourteen existing scenarios. (#41167)
+- Keep Connector attention lookup caches within each source turn and recheck newly queued event IDs without acknowledging missing sources. (#41169)
+- Refresh Exact Lane observations after a manual setup retry, and refresh mounted Settings after a verified activity file commit even when setup resume fails. (#41172)
+- Notify retained activity drafts after owned raw or structured Runtime commits, and keep known pre-write rejections retryable without restoring invalidated source readings. (#41172)
+- Preserve known revision conflicts across file-path changes and prevent late failed previews from restoring invalidated activity save bases. (#41172)
+- Keep Exact follow-up unload protection, refresh clean superseded Runtime bases after saves, and preserve known raw authorization refusals. (#41172)
+- Clear retained Exact setup-resume failures after an owned successful manual retry while preserving independent refresh errors. (#41172)
+- Settle retained Exact setup errors after successful onboarding retries, with workspace authority fencing and unrelated refresh errors preserved. (#41172)
+- Exact Lane activity saves become uncertain only after the raw POST is
+  dispatched, so an authority change during preview no longer leaves a write
+  in doubt. Lane activity drafts now share one session: a late no-write answer
+  settles its own save, and an unanswered or unconfirmed write stays in doubt
+  until the operator reapplies the activity value or discards the draft. A
+  read only says what the file shows, because the server reads the file
+  without the lock its writes take. (#41172)
+- Discarding a draft before reading no longer leaves an uncertain save stuck
+  for the rest of the page; the next read rebuilds the draft so reapply stays
+  reachable. A failure after a durable commit is reported as a follow-up
+  error, and the panel no longer names its own unanswered write as another
+  screen's change. A retained setup-resume failure clears when the latest
+  resume from any screen succeeds under the same workspace authority. (#41172)
+- Show the activity-only reapply action while a save is in doubt, so a read
+  that still shows the old revision no longer leaves discard as the only way
+  out. An owned Runtime save also tells a mounted All Lanes panel to reread
+  after setup resume. (#41172)
+- Keep a setup-resume warning from an earlier commit until a new commit
+  resumes or a later resume succeeds, so a save refused before writing no
+  longer hides it, and warn when a workspace change cuts a committed save's
+  resume short. (#41172)
+- Wake retained Workspace Curator work when an enabled Exact registry is
+  published. Work deferred during a configuration replacement also resumes
+  after its fence closes, including failed and retained writes. Off still
+  refuses new work while already accepted curation can finish. (#41178)
+- TUI Exact activity read and reopen now follow the current file when the
+  activity draft is unchanged, preventing stale flags and unnecessary revision
+  conflicts. Unsaved changes, uncertain writes and different file paths retain
+  their original basis for explicit recovery. (#41180)
+- Dashboard runtime metrics, provider usage and reachability now discard prior
+  workspace observations and late responses when the workspace changes. Manual
+  login results stay with their account and workspace, and an immediate first
+  login click no longer remains pending after the account mounts. (#41182)
+- Browser admission also follows configured activity in stdio; off-lane effects retain proven pre-effect disposition, and standalone fake-backend fixtures explicitly own activity observation. (#41185)
+- Capture Browser backend paths before asynchronous startup cleanup and preserve admission throughout compound Browser reads, while refusing each new request after activity is off. (#41185)
+- Capture one Browser activity configuration per inventory response while preserving fresh request admission. (#41185)
+- Start the WebDriver and Stagehand lanes from one Browser configuration snapshot taken before the server accepts config saves, so a save that lands between readiness and Browser startup applies at the next restart. (#41185)
+- Wait for the applied Gate diagnostic before Keeper metadata wrapping checks. (#41190)
+- Wait for applied Home startup state and independently overlap Operator and Gate replies when checking workspace scope changes. (#41192)
+- Seed durable Goal timestamps and use actual Home navigation and visible identity frames in the workspace-withdrawal acceptance fixture. (#41193)
+- Settings Runtime values and typed writes now follow the verified workspace, reject stale token/read completions, retain pending/uncertain saves across navigation, cancel unsent actions on departure, and refresh re-entered screens after same-workspace save/resume. (#41194)
+- Type the Gate metadata fixture response and initialize its screen scanner without weakening wrapping or applied-response checks. (#41195)
+- Expose closed Agent Core schedule and tool-gate signatures so public consumers compile in a clean copy sandbox without private implementation interfaces. (#41196)
+- MSX spectators observe the retained screen while activity is off and resume after observing On. Input refusals remain visible, and workspace changes preserve unknown tick outcomes until an explicit observation. (#41199)
+- The MSX press and tick routes answer an activity-off rejection the same way: HTTP 409 with the `activity_disabled`/`activity_unobserved` code, so a client built against one route reads the other's refusal as a retryable state conflict rather than a malformed request. (#41199)
+- Install configured MSX/DOS activity admission during shared HTTP and stdio owner activation. (#41199, #41207)
+- Expose the existing TUI account-group decoder to its regression test and exercise saved-result refresh retries after their required activation receipt. (#41200)
+- TOML boolean updates preserve trailing comments in tables and array entries, including quoted keys and CRLF lines. ([#41201](https://github.com/jeong-sik/masc/pull/41201))
+- Keep hidden Machine activity drafts intact while the terminal-too-small overlay handles quit. (#41201)
+- Read Machine server activity independently of file availability and retain its last reading after a known save refusal. (#41201)
+- Machine activity reads recheck workspace identity between the configuration and inventory requests and before accepting their combined result. (#41201)
+- Machine activity retains its draft and save basis after a known pre-write refusal, allowing explicit retry without claiming an uncertain write. ([#41203](https://github.com/jeong-sik/masc/pull/41203))
+- Preserve known revision conflicts across file-path changes and prevent late failed previews from restoring invalidated activity save bases. (#41203)
+- Machine activity becomes editable as soon as the file read settles, marks a save uncertain after a workspace switch only when its write was sent, and accepts a late refusal or revision conflict for that save as a known no-write. ([#41203](https://github.com/jeong-sik/masc/pull/41203))
+- Run Machine activity saves through the shared Lane activity session that Exact and Browser lanes use. After an unanswered write the panel no longer rereads on its own; an explicit read shows what the file holds, and the doubt stays until the activity value is reapplied or the draft is discarded. Machine commits now also reach the Settings raw editor. ([#41203](https://github.com/jeong-sik/masc/pull/41203))
+- Browser activity settings now read TOML paths without modifying JavaScript prototypes. Special provider names remain data, and malformed Browser settings are reported before editing while existing preview/CAS saves and flat-path migration remain available. ([#41204](https://github.com/jeong-sik/masc/pull/41204))
+- In the TUI package browser, `n` opens the raw TOML declaration editor that a package without a binding schema needs, and the refusal after a typed manifest path names Esc back to the Add-ons list first. When the remembered folder can no longer be read, Left opens the workspace root instead of doing nothing. (#41205)
+- Keep Lane Add-ons inventory refreshes and Slice queries independent, including refreshes after activity saves. Clear slice no longer cancels inventory reads, and unrelated successful reads no longer erase errors. Empty initial reads report that no observations are loaded. (#41210)
+- Keep historical cleanup ownership while terminal persistence is pending or failed. Retry publication without repeating confirmed cleanup, preserve cancellation obligations, and sync binding deletion and cold reads before claiming completion. (#41211)
+- The lane application syntax evidence now records the Store sources as committed, parsed with OCaml 5.5.1 by a rerunnable check script. (#41211)
+- The TUI shows a declaration's reported application failure, such as a worker or image reconciliation error, as a failure instead of "Application unknown". Raw configuration issues answer only for a file the server could not parse. A file first read while the inventory was incomplete is tracked once a complete refresh arrives. (#41212)
+- The narrow Models pane decides table versus stacked layout from the column
+  widths it actually draws, and a stacked binding can be scrolled through to its
+  effort, temperature and max-tokens lines on a short terminal (#41213).
+- The TUI lane picker no longer offers an HTTP model to an exact lane when its provider declares no `exact-body-timeout-s`. The row is marked `no exact-body-timeout-s`, and Enter names the `[providers.<id>]` table to fix instead of sending a write the server refuses. `/runtime/resolved` now reports `exact_body_deadline_missing` per runtime from the same rule the save uses. (#41217)
+- The runtime lane editor draws every line of a multi-line server refusal instead of folding it into one row, and the lanes overview and exact picker count the rows the wrap draws -- not the server's line breaks -- against their row budget, so a refusal longer than the frame no longer pushes the footer off it (#41227).
+- The exact-slot save refusal names the value to declare, not only the key: `add exact-body-timeout-s = 1200.0 to [providers.<id>]`, so the operator can act on the message without guessing a deadline (#41227).
+- Format a model temperature with `%.15g` instead of `%g`, so `0.7` renders as `0.7` (not `0.69999999999999996`) while the edit form still round-trips the exact value it was given. (#41230)
+- Goal notifications and lane fleet Broadcast rows reach Keeper transcripts again;
+  each append had raised `Non_eio_mutex_context` on a system thread and stayed in
+  its outbox (#41237).
+- Repin the Memory facts footer projection in `test_tui_keys` to the `d:Category pane` binding added by #40795, clearing the main red (#41245).
+- The Keeper Automation tab measures its RECURRENCE column from the recurrences on the page instead of drawing it at a fixed twelve cells, so `every 30 minutes` reads whole rather than as `eve… minutes` on a frame with room to spare; a narrow pane still gives the column up whole through the existing drop order (#41250).
+- A failed host sampling call no longer measures the JSON-RPC error envelope to choose which refusal string fits. The refusal is the receipt JSON the add-on validator requires, bounded by `max_reply_bytes`; an oversized frame is still replaced by the transport, and the outcome stays journaled (#41259).
+- A Lane Add-on observation is measured once against its declared envelope instead of twice, and an action's schema is validated once per dispatch instead of up to four times; accept and reject outcomes are unchanged (#41269).
+- Remove real Dune `_build` directories from an Apple Keeper work volume before each guest boot, so build output made before its build-volume link no longer stays on the work volume for good; a checkout holding `.masc-keep-build` keeps it. (#41271)
+- Treat an empty or whitespace-only env value as unset in get_string, matching the other typed getters. (#41272)
+- Docker inspect and create output is no longer bounded by a package's `max_reply_bytes`, so a small declared reply bound cannot make container creation fail; the output uses the host-wide subprocess capture cap instead, and `recover_stop` no longer takes the package bound (#41279).
+- Two size checks that could not change an outcome are removed: the artifact packet re-measure after the transport had already bounded the reply, and the sampling receipt running total that the caller's combined bundle check already covers (#41281).
+- A Lane Add-on action input is no longer rejected for exceeding the package's reply bound; the HTTP body limit, the declared action schema and the worker's memory limit already bound it (#41287).
+- A Lane Add-on resource declaration is now checked by one function when the manifest or a retained binding is read, so a CPU count Docker cannot represent is refused at load rather than at install; the README lists what `max_reply_bytes` bounds today (#41288).
+- The model request and outcome blobs the host stores for host sampling are no longer measured against the package's reply bound, so an answer whose reply fits is no longer refused because the larger stored record carried identity fields; the reply the worker receives is still measured (#41290).
+- The Librarian JEV no-change preflight admits a Memory pass whose prompt shows no working context. It compared the whole record with the empty input, and a Keeper's prior working-context snapshot (usually with its execution basis) made every live pass ineligible. A no-change judgment now also writes the empty working-context organization, matching the generated route (#41297).
+- The internal agents monitor's Verification filter and inventory count Goal reviews beside task reviews, matching the Lane matrix, and show no count until both have been read; Goal reviews add no Keeper owner. (#41308)
+- A completion review on an AGENT_CORE runtime is watched one model turn at a time. It held the provider lease through its tools, so a review still doing lookups was cut at the provider-call deadline and re-judged from scratch on the next slot. masc's walk entry points no longer take `yield_on_tool`; every AGENT_CORE walk releases the lease around its tools (#41312).
+- The dashboard's runtime.toml write functions now announce a committed receipt themselves, so other screens reread after a save that answers once the operator has switched workspaces and back, and after Fusion edits, model connection saves and API key saves, which never announced before; the raw editor keeps its own receipt without invalidating itself. (#41319)
+- The model-facing externalization error keeps the typed cause instead of a bare label: a storage failure now reads `tool output artifact storage failed: <detail>` and an inline-budget refusal names the limit and byte counts, so the model and the operator can tell the two apart (#41337).
+- The librarian preflight suite expects no working context while the librarian lane is off, so its off-lane case passes on main again (#41340).
+- Dropping a Goal now cancels its linked Tasks that nobody has claimed, unless another Goal that is not dropped also links them; claimed Tasks keep running and the drop notice names their holders. Before, a dropped Goal's Tasks stayed todo indefinitely. (#41342)
+- masc's managed Muse settings now turn off the host's six observer agents (memory, skill, verify, goal, todo and scope reminders) through `runtime_capabilities`; each one made its own model calls on the subscription beside every Keeper call, and masc's cost ledger recorded none of them. A managed configuration whose settings differ from the current ones is replaced by a new one that carries its credentials, where it used to be refused until a new sign-in (#41349).
+- Keeper Usage sanitizes a Tasks read error before drawing it, in both the no-snapshot line and the snapshot warning, so a control byte in the error can no longer reach the terminal from that pane alone. (#41356)
+- A runtime config save or `masc runtime-resume` that would give an account the running server already admits a different `max-concurrent` or `admission-priority-run-limit` is refused with the runtimes and both values named. Before, the change applied and every request on that account failed until the server restarted. A disagreement the running config already had does not block other saves (#41359).
+- Muse Code subscription usage now reaches the Overview and the provider usage history: the rolling and weekly windows the host states in `usage/changed` and `usage/read` are recorded as `muse.subscription_usage`, where masc used to check them only for a spent window and drop them. The Keeper turn, Fusion panelist, setup verification and the read after a failed turn now share one path for recording and resting a spent account (#41360).
+- Muse Code's `usage/changed` and `usage/read` now record under one source, so a read that states a new rolling window length no longer leaves the earlier window on the Overview, and a spent Muse account rests before its usage is recorded (#41362).
+- Work in the TUI opens on its Goals every time it is entered. A task focus taken with `t` or by jumping to one task no longer survives leaving Work, so a later Tab, Shift-Tab or palette `go Work` no longer shows only Tasks; a jump to one task still lands on it (#41368).
+- A Keeper execution cancelled before its turn committed (a server stop, a Keeper stopped mid-turn) no longer drops its spend from the resolved cost rows. Before each execution, the raw rows the Keeper wrote after its newest resolved row are observed again through `Keeper_turn_spend` and written as attempt readings of their own turn; conversation-cumulative counts are left to the next count of their conversation. Attempt readings now carry `routing_run_id` in their inference key, so two runs of one turn no longer share a key that the metrics reader would drop (#41383).
+- Settling a cancelled execution's spend no longer guesses from a raw cost row's counts what its execution observed. Each raw row now records, under `spend_observation`, the observation its execution handed `Keeper_turn_spend` (an Agent Core response or an official client's usage report), and settlement hands that same observation back. A reported cost of zero stays apart from no reported cost, and a client report that replaced its count is settled as replaced. Raw rows without an observation, including every row written before this change, are not settled (#41387).
+- The DOS core pin moves to ocaml-dos a7b1ad6. INT 33h AX=0x0C now registers the guest's mouse event handler instead of dropping it, so a game that takes its mouse path gets its callback via far call; checkpoints move to snapshot format 4 and refuse format 3, so the lane reboots affected games through their own save files (#41397).
+- Settling a cancelled execution's spend now names the raw cost rows it cannot decode, as a cost row or as their recorded observation, instead of counting them with rows that carry nothing to settle. The settle outcome lists each reason oldest first, and the pre-execution settle logs a warning with their count and the oldest reason (#41400).
+- Keeper chat now marks MASC tool calls of Muse, Claude Code and Antigravity Keepers as received when their result is committed. Only Codex reported these receipts (#40547), so the other three left every finished call at `waiting` and later `not seen · no execution id`. Receipts are keyed by call id for concurrent MCP calls, and Muse and Antigravity deliver a receipt only after its held tool block reaches the stream (#41407).
 
 ### Performance
 
@@ -614,6 +863,8 @@
 - Align the glossary with deferred Memory commits after failed absorption judgment and current TUI portrait placement and sizes. (#40901)
 - Register glossary entries for exact-output lane slot replacement and move and for official-client failure observation after a reported prompt transmission. #41009
 - Verification instructions now match leader-selected CI and RC publication; Core no longer treats the two-minute scale example as a hard timeout. (#41049)
+- Use the release PR and candidate ledger as the source of truth for selected source, admitted repairs and verification results. (#41127)
+- Correct the standalone verifier evidence: Task/Goal verifiers do not receive keeper_skill. (#41266)
 
 ### Internal
 
@@ -693,6 +944,26 @@
 - Removed TUI tests that fixed source layout and call counts, and allowed failed workspace-identity probes to stop before reading approval data. (#41028)
 - Include a global process snapshot in CI failure diagnostics so processes outside the active command tree remain visible (#41036).
 - Align the execution cache scope test with the resolved fixture semantics: only an enabled `execution_smoke` fixture bypasses the default bytes. (#41215)
+- Document the runtime-error audit with frozen log aggregates, improvement priorities and verification boundaries, without publishing raw logs or personal runtime paths. (#40904)
+- Verify fresh private Item account responses reach the screen when public revision fields are absent or malformed. (#41152)
+- Align workspace authority, retained input and interrupt fixtures with current TUI protocols while preserving exact payload and mutation-boundary checks. (#41155)
+- Attribute Ask answers at POST ingress and verify workspace cancellation while the response remains held, before the HTTP timeout. (#41155)
+- Add an explicit essential behavior check (`release-behavior.yml`, `scripts/run-release-behavior.sh`) that runs the same reviewed suite list locally and in CI before a release candidate. Release candidates still run the full regression suite. (#41156)
+- Preserve foreign-workspace roster refusal and add matching-local-workspace successor coverage while rejecting late responses from the previous workspace. (#41198)
+- Declare the direct libraries nine test stanzas already depend on and fix two stale test references, so the release candidate compile job builds them. (#41228)
+- Stop `test_dashboard_http_core` from false-positiving when its binary is run directly: pin the sandbox preflight off and resolve the shared fixture against the checkout root, so a direct run reports 144/144 like the dune run. (#41240)
+- Run the changelog fragment check on pull requests that touch `changelog.d`, so a malformed fragment fails before merge instead of at release assembly. (#41249)
+- Apply the Ruff format baseline to the memory fact detail PTY fixture and the librarian preflight reporter files. (#41263)
+- Apply the Ruff format baseline to the keyboard PTY fixture. (#41264)
+- Rewrite assigned lambdas as named defs in the runtime installer fixture. (#41265)
+- Fix Item workspace-authority fixture typing and apply the Ruff format baseline. (#41273)
+- Candle drops three entry points that only tests called
+  (`Candle_appraise.drain_once`, `Candle_shop.observed_account`,
+  `Candle_equipment.current`); tests use the production paths (#41325).
+- Candle tests cover the no_related_keepers settlement, the purchase balance
+  boundary and the typed equip refusal reasons, and the payout worker tests
+  wait on the worker going idle instead of fixed sleeps (#41326).
+- The Fusion blank-Judge fixture no longer declares the retired `max-prompt-bytes` key, which made that case fail to load its runtime.toml after #41224 (#41358).
 
 ## [0.49.0] - 2026-10-04
 

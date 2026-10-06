@@ -3,8 +3,6 @@ let ( let* ) = Result.bind
 let reader ~now ~base_path () =
   Candle_observe.equipment (Candle_observe.read ~now ~base_path)
 
-let current ~now ~base_path ~keeper = reader ~now ~base_path () ~keeper
-
 (* Portrait browsing needs recorded ownership, not payout availability or a
    newly appended policy fact. Replay only the immutable ledger read. *)
 let read_persisted ~now ~base_path ~keeper =

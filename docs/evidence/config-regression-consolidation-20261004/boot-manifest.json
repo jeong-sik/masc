@@ -1,0 +1,26 @@
+{
+  "mode": "boot",
+  "scope": "complete registered suites; provider mode compiles candidate Runtime_toml against its unchanged cached public interface; boot mode verifies 16 source/interface files and compiles all eight candidate owners/consumers; other dependencies remain cached; no full server or production",
+  "cache": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004",
+  "verified_cache_source_sha256": {
+    "lib/config/env_config_keeper_supervisor.ml": "6d23921b11685737fd5c6041796be69d68fe74048ac299875beb656be6e4bec0",
+    "lib/config/env_config_keeper_supervisor.mli": "4415222e30b956ac3c9fba8780edf69132286f5984fe480f1a8dd001f2e58e67",
+    "lib/config/env_config_keeper.ml": "2ec9fedc428a929adb43c48479a1667f04b8b45d28974f29faaeda18ea651743",
+    "lib/config/env_config_keeper.mli": "c026c636f4df30991e2d20a74476648008e5ba2b4fe07a36cd1efc1a4212e98d",
+    "lib/config/keeper_runtime_setting_registry.ml": "9d5c9cd8634504943a41a962b06e2577df04090942799cbacbb6947a32f44ea6",
+    "lib/config/keeper_runtime_setting_registry.mli": "89bde3778f692bb6525d53d3c2e56ec595218ee7494dd7678e2d48f4a762807b",
+    "lib/keeper_runtime/keeper_runtime_config.ml": "4e3e7cfc36509ed536979eb80071d3344cdcce2e1a9d08a1c9e22fa72807b36a",
+    "lib/keeper_runtime/keeper_runtime_config.mli": "52ece5895fe6866c1948d76219db31e45ccd2b3c94a6c0e358a9bdcaad0fc587",
+    "lib/runtime_settings.ml": "fb2317c5d2bd26714525cdf29a6e90cb374a1761fe0bb50512e1c2b6700408f3",
+    "lib/runtime_settings.mli": "d4e03138b82163a679aeaa30ec522a0ff17b535ef85e2166434882fd5df1abc3",
+    "lib/keeper/keeper_runtime_resolved.ml": "063ff191853a9bcd9bf8dff228583f08daeae9312425a6339ac8f8f894bb1677",
+    "lib/keeper/keeper_runtime_resolved.mli": "80fe8afc749e3c82fe0a19781747215e59c9147b335f48354b39562f4e87b3a8",
+    "lib/keeper/keeper_types_support.ml": "26c60e2b42d714940e144f92bfef76369dac0c2bf7630310116ed8b86922eb7e",
+    "lib/keeper/keeper_types_support.mli": "e862ef2f74306712a5120dfd3bd3cd3dd7fa952a357dc888e65e93f307f21e91",
+    "lib/keeper/keeper_heartbeat_snapshot.ml": "fda9c437217cef08cb0b9096d234faea8b9bb8ff6774d2e3e4a9d1e2d42b186c",
+    "lib/keeper/keeper_heartbeat_snapshot.mli": "64317d14043aa0cbd752011866414d3b6aa6d531a8835cb9fe75d009d3556d08"
+  },
+  "sources": {
+    "test/test_runtime_toml_overrides.ml": "c043e5a3d901a19e01c1f62dc4850f56021a783b16137b68d47dd63bc86d47c7"
+  }
+}

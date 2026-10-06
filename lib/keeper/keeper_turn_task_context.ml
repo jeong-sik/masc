@@ -47,7 +47,7 @@ let to_json = function
     let goals = match goals with
       | Error error -> `Assoc ["kind", `String "unavailable"; "error", source_error_to_json error]
       | Ok goals -> `Assoc ["kind", `String "observed"; "goals", `List (List.map (fun goal ->
-          `Assoc ["goal_id", `String goal.goal_id; "phase", `String (Goal_phase.to_string goal.phase);
+          `Assoc ["goal_id", `String goal.goal_id; "phase", Goal_phase.to_yojson goal.phase;
             "criterion", Goal_store.criterion_to_yojson goal.criterion]) goals)] in
     `Assoc ["kind", `String "task"; "task_id", `String (Keeper_id.Task_id.to_string task_id); "goals", goals]
 
@@ -87,9 +87,8 @@ let goal_of_json json =
   let* f = fields json in
   let* () = exact ["goal_id";"phase";"criterion"] f in
   let* goal_id = nonblank "goal_id" f in
-  let* raw_phase = text "phase" f in
-  let* phase = match Goal_phase.of_string raw_phase with
-    | Some phase -> Ok phase | None -> W.wire_fail [W.Wire_field "phase"] (W.Unknown_token raw_phase) in
+  let* phase_json = value "phase" f in
+  let* phase = parsed (Goal_phase.of_yojson phase_json) in
   let* criterion = value "criterion" f in
   let* criterion = parsed (Goal_store.criterion_of_yojson criterion) in
   Ok {goal_id;phase;criterion}

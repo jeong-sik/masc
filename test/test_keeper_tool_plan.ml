@@ -1015,7 +1015,7 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
              ; "verifying_count", `Int 0
              ; "awaiting_confirmation_count", `Int 0
              ; "done_count", `Int 0
-             ; "dropped_count", `Int 0
+             ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 0
              ] )
        ]);
   accepts

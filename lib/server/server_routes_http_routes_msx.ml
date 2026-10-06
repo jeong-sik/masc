@@ -74,6 +74,16 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
         ])
 ;;
 
+(* The activity gate rejects a request because the machine's activity is off,
+   not because the request is malformed: the same request succeeds once the
+   operator turns activity on, so the client should retry rather than fix its
+   body. Every route that can hit the gate answers it the same way — 409 with
+   the code the client keys on — so a client built against one route reads the
+   other's rejection the same way. *)
+let activity_rejection_json code =
+  `Assoc [ ("ok", `Bool false); ("code", `String code) ]
+;;
+
 (* A human change to the machine wakes the Lane instances bound to it with the
    typed activity a Keeper's finished MSX tool produces through the event
    bridge (RFC machine-spectating-goes-through-lanes §2.2). These routes call
@@ -133,7 +143,11 @@ let press_response ~config ~who ~body =
       | Ok obs ->
         machine_changed ~config;
         `OK, press_result_json ~ok:true (Some obs)
-      | Error ((Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
+      | Error Msx_lane.Activity_disabled ->
+        `Conflict, activity_rejection_json "activity_disabled"
+      | Error Msx_lane.Activity_unobserved ->
+        `Conflict, activity_rejection_json "activity_unobserved"
+      | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
         error `Internal_server_error (Msx_lane.error_to_string e)))
@@ -348,9 +362,9 @@ let tick_response ~body =
         `OK, tick_frame_json pixel_response frame entries mark
       | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
       | Error Msx_lane.Activity_disabled ->
-        `Conflict, `Assoc ["ok",`Bool false;"code",`String "activity_disabled"]
+        `Conflict, activity_rejection_json "activity_disabled"
       | Error Msx_lane.Activity_unobserved ->
-        `Conflict, `Assoc ["ok",`Bool false;"code",`String "activity_unobserved"]
+        `Conflict, activity_rejection_json "activity_unobserved"
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->

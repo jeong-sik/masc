@@ -148,5 +148,102 @@ let () =
      assert (mentions "command substitution")
    | Ok _ -> assert false)
 
+(* Duplicate [shell_command] declarations are refused when the table
+   builds, not discovered at lookup time: the refusal is a typed error
+   naming the path and both tools, and distinct paths — including a prefix
+   relationship, which the split orders by longest match — all stand.  The
+   refusal is a value rather than an exception so a bad tool file cannot
+   poison the table's [lazy] and take the whole shell surface down. *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  (match
+     K.reject_duplicate_paths
+       [ ([ "board"; "list" ], "masc_board_list")
+       ; ([ "board"; "list" ], "masc_board_list_renamed")
+       ]
+   with
+   | Error message -> assert (String.length message > 0)
+   | Ok () -> assert false);
+  (* The same refusal whichever declaration comes first. *)
+  (match
+     K.reject_duplicate_paths
+       [ ([ "lane"; "status" ], "keeper_lane_status")
+       ; ([ "lane"; "status" ], "masc_lane_status")
+       ]
+   with
+   | Error _ -> ()
+   | Ok () -> assert false);
+  (* Distinct paths stand, even when one is a prefix of another. *)
+  (match
+     K.reject_duplicate_paths
+       [ ([ "board"; "list" ], "masc_board_list")
+       ; ([ "board"; "post"; "get" ], "masc_board_post_get")
+       ; ([ "lane" ], "a_lane_tool")
+       ]
+   with
+   | Ok () -> ()
+   | Error _ -> assert false);
+  (* The real crunched tree declares no duplicate, so the shell surface
+     answers normally: the typed refusal is absent. *)
+  assert (Lazy.force K.declaration_error = None)
+
+(* The duplicate is caught on the real load path, not only on a hand-built
+   list: two actual [tools/*.toml] definitions that declare the same
+   [shell_command] path are parsed by the same loader the embedded tree
+   uses, and the refusal names the path and both tools.  [declarations_of]
+   takes [read]/[files] so the test drives the load path with its own TOML
+   bytes — the embedded tree is not injectable. *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  let toml ~name ~shell =
+    Printf.sprintf
+      "name = %S\ndescription = \"A tool with a shell form.\"\n\
+       additional_properties = false\nshell_command = %S\n"
+      name shell
+  in
+  let contains haystack needle =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length haystack
+      && (String.sub haystack i n = needle || scan (i + 1))
+    in
+    n = 0 || scan 0
+  in
+  let files =
+    [ "tools/masc_board_list.toml"; "tools/masc_board_list_renamed.toml" ]
+  in
+  let read = function
+    | "tools/masc_board_list.toml" ->
+      Some (toml ~name:"masc_board_list" ~shell:"board list")
+    | "tools/masc_board_list_renamed.toml" ->
+      Some (toml ~name:"masc_board_list_renamed" ~shell:"board list")
+    | _ -> None
+  in
+  let declared = K.declarations_of ~read ~files in
+  assert (
+    declared
+    = [ ([ "board"; "list" ], "masc_board_list")
+      ; ([ "board"; "list" ], "masc_board_list_renamed")
+      ]);
+  (match K.reject_duplicate_paths declared with
+   | Error message ->
+     assert (contains message "board list");
+     assert (contains message "masc_board_list");
+     assert (contains message "masc_board_list_renamed")
+   | Ok () -> assert false);
+  (* Two real TOML files with distinct paths pass the same load path. *)
+  let distinct_read = function
+    | "tools/masc_board_list.toml" ->
+      Some (toml ~name:"masc_board_list" ~shell:"board list")
+    | "tools/masc_board_list_renamed.toml" ->
+      Some (toml ~name:"masc_board_list_renamed" ~shell:"board post get")
+    | _ -> None
+  in
+  (match
+     K.reject_duplicate_paths (K.declarations_of ~read:distinct_read ~files)
+   with
+   | Ok () -> ()
+   | Error _ -> assert false)
+
 let () =
   print_endline "[test_keeper_shell_tool_command] all tests passed"

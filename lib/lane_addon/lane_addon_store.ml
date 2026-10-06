@@ -4,6 +4,7 @@ type jsonl_snapshot = { entry_count : int; reference : evidence }
 type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }
 let create ~root =
+  let root = if Filename.is_relative root then Filename.concat (Sys.getcwd ()) root else root in
   let rec trim_separator root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
@@ -32,7 +33,7 @@ let rec durable_directory t ~sync_parent directory =
   if directory = t.root then (
     (try Unix.mkdir directory 0o700; t.root_parent_pending <- true with
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+         if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
            raise (Sys_error "retained evidence root is not a directory"));
     (* Flush only the new root entry, never walk preexisting ancestors.
        Keep the obligation on failure so a retry in this store cannot skip it. *)
@@ -41,7 +42,7 @@ let rec durable_directory t ~sync_parent directory =
     durable_directory t ~sync_parent parent;
     (try Unix.mkdir directory 0o700 with
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+         if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
            raise (Sys_error "retained evidence parent is not a directory"));
     sync_parent parent)
 let write_with ~sync_parent t relative bytes = protect (fun () ->
@@ -50,6 +51,11 @@ let write_with ~sync_parent t relative bytes = protect (fun () ->
   Fs_compat.save_file_atomic_strict path bytes)
 let write = write_with ~sync_parent:sync_parent_directory
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
+let canonical_blob_kind t hash = protect (fun () ->
+  let* _ = Fs_compat.inspect_owned_directory_chain
+      ~ownership_root:t.root (Filename.concat t.root "evidence")
+    |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string in
+  Ok (Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root (blob_path hash))))
 let blob_reference bytes =
   let hash = digest bytes in
   { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
@@ -57,6 +63,22 @@ let write_blob t bytes =
   let hash = digest bytes in
   let* () = write t (blob_path hash) bytes in
   Ok (blob_reference bytes)
+let recovery_blob_path hash = Filename.concat "sampling-evidence" (hash ^ ".json")
+let write_sampling_blob t bytes =
+  match write_blob t bytes with
+  | Ok reference -> Ok reference
+  | Error detail -> protect (fun () ->
+      (* A missing leaf under a symlinked parent is not an owned missing
+         canonical blob and cannot authorize fallback publication. *)
+      let* kind = canonical_blob_kind t (digest bytes)
+        |> Result.map_error (fun _ -> detail) in
+      (* The immutable address is readable from recovery only for these
+         canonical states. Do not advertise a blob behind an unreadable parent. *)
+      match kind with
+      | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR ->
+          let* () = write t (recovery_blob_path (digest bytes)) bytes in
+          Ok (blob_reference bytes)
+      | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown -> Error detail)
 type retained_kind = Blob | Sequence
 let retained_address (reference : evidence) =
   match reference.sha256 with
@@ -73,31 +95,54 @@ let read_budget ~max_bytes = { remaining = max 0 max_bytes }
 let bounded_protect f =
   match protect (fun () -> Ok (f ())) with
   | Ok result -> result | Error detail -> Error (Read_failed detail)
-let read_file_bounded ~budget path = bounded_protect (fun () ->
-  let channel = open_in_bin path in
-  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-    let size = in_channel_length channel in
-    if size > budget.remaining then Error Read_limit_exceeded
-    else begin
-      budget.remaining <- budget.remaining - size;
-      try Ok (really_input_string channel size)
-      with End_of_file -> Error (Read_failed "retained file changed during read")
-    end))
+let read_file_bounded ~budget ~ownership_root path = bounded_protect (fun () ->
+  let before = Unix.lstat path in
+  let size = before.Unix.st_size in
+  if before.Unix.st_kind <> Unix.S_REG || before.Unix.st_nlink <> 1 then
+    Error (Read_failed "retained evidence is not a unique regular file")
+  else if size > budget.remaining then Error Read_limit_exceeded
+  else begin
+    budget.remaining <- budget.remaining - size;
+    let* contents = Fs_compat.load_owned_regular_file_range
+      ~ownership_root ~offset:0 ~max_bytes:size path
+      |> Result.map_error (fun error -> Read_failed
+        (Fs_compat.owned_regular_file_read_error_to_string error)) in
+    match contents with
+    | None -> Error (Read_failed "retained file disappeared during read")
+    | Some contents ->
+        let after = Unix.lstat path in
+        let snapshot = contents.snapshot in
+        if snapshot.device <> before.st_dev || snapshot.inode <> before.st_ino
+          || snapshot.file_size <> size || snapshot.modified_at <> before.st_mtime
+          || snapshot.changed_at <> before.st_ctime
+          || after.st_kind <> Unix.S_REG || after.st_nlink <> 1
+          || after.st_dev <> snapshot.device || after.st_ino <> snapshot.inode
+          || after.st_size <> snapshot.file_size || after.st_mtime <> snapshot.modified_at
+          || after.st_ctime <> snapshot.changed_at then
+          Error (Read_failed "retained file changed during read")
+        else Ok contents.content
+  end)
 let read_blob_bounded ~budget t reference =
   let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
-  let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
-  let* bytes = read_file_bounded ~budget (Filename.concat t.root relative) in
-  if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch")
-let read_blob ?(max_bytes=max_int) t reference = protect (fun () ->
-  let* kind, hash = retained_address reference in
-  let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
-  let channel = open_in_bin (Filename.concat t.root relative) in
-  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-    let size = in_channel_length channel in
-    if size > max_bytes then Error "retained evidence exceeds the source envelope"
-    else
-      let bytes = really_input_string channel size in
-      if digest bytes = hash then Ok bytes else Error "evidence digest mismatch"))
+  let read relative =
+    let* bytes = read_file_bounded ~budget ~ownership_root:t.root (Filename.concat t.root relative) in
+    if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch") in
+  match kind with
+  | Sequence -> read (sequence_path hash)
+  | Blob ->
+      let canonical = blob_path hash in
+      let* kind = canonical_blob_kind t hash
+        |> Result.map_error (fun detail -> Read_failed detail) in
+      (match kind with
+       | Fs_compat.Exact_kind Unix.S_REG -> read canonical
+       | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR -> read (recovery_blob_path hash)
+       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+           Error (Read_failed "retained evidence is not a regular file"))
+let read_blob ?(max_bytes=max_int) t reference =
+  read_blob_bounded ~budget:(read_budget ~max_bytes) t reference
+  |> Result.map_error (function
+    | Read_limit_exceeded -> "retained evidence exceeds the source envelope"
+    | Read_failed detail -> detail)
 
 type sequence_node = Empty | Record of { count : int; previous : evidence; bytes : string }
 let sequence_schema = "masc.lane-jsonl-sequence.v1"
@@ -401,14 +446,30 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
                               | None -> Error "sampling outcome reference is missing" in
                             if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
                             else
-                              (match Fs_compat.exact_path_kind ~follow:false
-                                       (Filename.concat t.root (blob_path (digest bytes))) with
-                               | Fs_compat.Exact_missing -> write_blob t bytes |> Result.map (fun _ -> ())
-                               | Fs_compat.Exact_kind Unix.S_REG ->
-                                   verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected
-                                     (Filename.concat t.root (blob_path (digest bytes)))
-                               | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-                                   Error "sampling outcome blob is not a regular file")
+                              let retain relative =
+                                let path = Filename.concat t.root relative in
+                                match Fs_compat.exact_path_kind ~follow:false path with
+                                | Fs_compat.Exact_missing -> write t relative bytes
+                                | Fs_compat.Exact_kind Unix.S_REG ->
+                                    verify_sampling_blob ~sync_file ~sync_parent t
+                                      ~max_bytes ~expected path
+                                | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                                    Error "sampling outcome blob is not a regular file" in
+                              let canonical = blob_path (digest bytes) in
+                              let* kind = canonical_blob_kind t (digest bytes) in
+                              (match kind with
+                              | Fs_compat.Exact_kind Unix.S_REG -> retain canonical
+                              | Fs_compat.Exact_missing ->
+                                  (match Fs_compat.exact_path_kind ~follow:false
+                                           (Filename.concat t.root (recovery_blob_path (digest bytes))) with
+                                   | Fs_compat.Exact_kind Unix.S_REG ->
+                                       retain (recovery_blob_path (digest bytes))
+                                   | Fs_compat.Exact_missing | Fs_compat.Exact_kind _
+                                   | Fs_compat.Exact_unknown -> retain canonical)
+                              | Fs_compat.Exact_kind Unix.S_DIR ->
+                                  retain (recovery_blob_path (digest bytes))
+                              | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                                  Error "sampling outcome blob is not a regular file")
                         | _ -> Ok ())
                     | _ -> Ok () in
                   (* The independent outcome journal remains authoritative

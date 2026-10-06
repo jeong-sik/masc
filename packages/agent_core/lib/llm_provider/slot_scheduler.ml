@@ -1,7 +1,10 @@
 (** Slot scheduler for LLM requests.
 
-    Uses Eio.Mutex for state protection and Eio.Promise for per-waiter
-    signaling. Queued requests are granted slots in arrival order within
+    A [Stdlib.Mutex] guards the counts and queues: every critical section
+    only moves them and never blocks or switches fibers, so it also runs
+    outside an Eio fiber ({!reconfigure} from a config load). Each waiter
+    is woken through its own [Eio.Promise], resolved after the mutex is
+    released. Queued requests are granted slots in arrival order within
     their class; see {!Slot_scheduler.create} for how the two classes share
     a freed slot.
 
@@ -51,36 +54,41 @@ let remove_waiter target queue =
 ;;
 
 type t =
-  { max_slots : int
-  ; priority_run_limit : int option
+  { mutable max_slots : int
+  ; mutable priority_run_limit : int option
   ; mutable active : int
   ; mutable priority : waiter_queue
   ; mutable standard : waiter_queue
   ; mutable priority_run : int
         (** Slots handed to [Priority] in a row while a [Standard] waiter
             was queued. Back to 0 whenever no [Standard] waiter is queued. *)
-  ; mutex : Eio.Mutex.t
+  ; mutex : Stdlib.Mutex.t
   }
 
-let create ~max_slots ~priority_run_limit =
+let check_allowance ~caller ~max_slots ~priority_run_limit =
   if max_slots < 1
   then
     invalid_arg
-      (Printf.sprintf "Slot_scheduler.create: max_slots must be >= 1, got %d" max_slots);
-  (match priority_run_limit with
-   | Some limit when limit < 1 ->
-     invalid_arg
-       (Printf.sprintf
-          "Slot_scheduler.create: priority_run_limit must be >= 1, got %d"
-          limit)
-   | Some _ | None -> ());
+      (Printf.sprintf "Slot_scheduler.%s: max_slots must be >= 1, got %d" caller max_slots);
+  match priority_run_limit with
+  | Some limit when limit < 1 ->
+    invalid_arg
+      (Printf.sprintf
+         "Slot_scheduler.%s: priority_run_limit must be >= 1, got %d"
+         caller
+         limit)
+  | Some _ | None -> ()
+;;
+
+let create ~max_slots ~priority_run_limit =
+  check_allowance ~caller:"create" ~max_slots ~priority_run_limit;
   { max_slots
   ; priority_run_limit
   ; active = 0
   ; priority = empty_queue
   ; standard = empty_queue
   ; priority_run = 0
-  ; mutex = Eio.Mutex.create ()
+  ; mutex = Stdlib.Mutex.create ()
   }
 ;;
 
@@ -98,7 +106,7 @@ let queue_of t admission_class =
    count and the queues move together. A free slot is taken at once only
    when nobody is queued, so a newcomer never passes a waiter. *)
 let request_slot t ~admission_class =
-  Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+  Stdlib.Mutex.protect t.mutex (fun () ->
     if t.active < t.max_slots && queued t = 0
     then (
       t.active <- t.active + 1;
@@ -132,59 +140,99 @@ let rec take_waiting queue =
 (* Which queue a freed slot goes to. [Priority] goes first, except that once
    it has taken [limit] slots in a row while a [Standard] waiter was queued,
    the next slot goes to [Standard]. A scheduler without a limit queues
-   everyone as [Standard]. *)
+   newcomers as [Standard]; waiters a removed limit left in the [Priority]
+   queue still go first. *)
 let next_queue t =
-  match t.priority_run_limit with
-  | None -> Admission_class.Standard
-  | Some limit ->
-    if t.priority.length = 0
-    then Admission_class.Standard
-    else if t.standard.length = 0 || t.priority_run < limit
-    then Admission_class.Priority
-    else Admission_class.Standard
+  if t.priority.length = 0
+  then Admission_class.Standard
+  else if t.standard.length = 0
+  then Admission_class.Priority
+  else (
+    match t.priority_run_limit with
+    | None -> Admission_class.Priority
+    | Some limit ->
+      if t.priority_run < limit then Admission_class.Priority else Admission_class.Standard)
+;;
+
+(* Hands one slot to the next live waiter, under the mutex, and returns its
+   resolver; [None] when nobody live is queued. Cancelled waiters met on the
+   way are dropped. *)
+let rec take_next t =
+  if queued t = 0
+  then None
+  else (
+    match next_queue t with
+    | Priority ->
+      let standard_waiting = t.standard.length > 0 in
+      (match take_waiting t.priority with
+       | Some waiter, rest ->
+         t.priority <- rest;
+         t.priority_run <- (if standard_waiting then t.priority_run + 1 else 0);
+         Some waiter.resolver
+       | None, rest ->
+         t.priority <- rest;
+         take_next t)
+    | Standard ->
+      (match take_waiting t.standard with
+       | Some waiter, rest ->
+         t.standard <- rest;
+         t.priority_run <- 0;
+         Some waiter.resolver
+       | None, rest ->
+         t.standard <- rest;
+         t.priority_run <- 0;
+         take_next t))
 ;;
 
 let release_slot t =
   let to_wake =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    Stdlib.Mutex.protect t.mutex (fun () ->
       let release_active_slot () =
         if t.active <= 0
         then invalid_arg "Slot_scheduler.release_slot: active count underflow"
         else t.active <- t.active - 1
       in
-      let rec hand_over () =
-        if queued t = 0
-        then (
+      (* Above a lowered [max_slots], a returned slot is not handed on:
+         the count comes down to the new allowance first. *)
+      if t.active > t.max_slots
+      then (
+        release_active_slot ();
+        None)
+      else (
+        match take_next t with
+        | Some resolver -> Some resolver
+        | None ->
           release_active_slot ();
-          None)
-        else (
-          match next_queue t with
-          | Priority ->
-            let standard_waiting = t.standard.length > 0 in
-            (match take_waiting t.priority with
-             | Some waiter, rest ->
-               t.priority <- rest;
-               t.priority_run <- (if standard_waiting then t.priority_run + 1 else 0);
-               Some waiter.resolver
-             | None, rest ->
-               t.priority <- rest;
-               hand_over ())
-          | Standard ->
-            (match take_waiting t.standard with
-             | Some waiter, rest ->
-               t.standard <- rest;
-               t.priority_run <- 0;
-               Some waiter.resolver
-             | None, rest ->
-               t.standard <- rest;
-               t.priority_run <- 0;
-               hand_over ()))
-      in
-      hand_over ())
+          None))
   in
   match to_wake with
   | Some resolver -> Eio.Promise.resolve resolver ()
   | None -> ()
+;;
+
+(* A raised [max_slots] hands the new slots to waiters at once; a lowered
+   one takes effect as holders return slots ([release_slot]). Waiters keep
+   their queue: a request queued before a run limit changed stays in the
+   queue it joined. *)
+let reconfigure t ~max_slots ~priority_run_limit =
+  check_allowance ~caller:"reconfigure" ~max_slots ~priority_run_limit;
+  let to_wake =
+    Stdlib.Mutex.protect t.mutex (fun () ->
+      t.max_slots <- max_slots;
+      t.priority_run_limit <- priority_run_limit;
+      let rec fill woken =
+        if t.active >= t.max_slots
+        then woken
+        else (
+          match take_next t with
+          | None -> woken
+          | Some resolver ->
+            t.active <- t.active + 1;
+            fill (resolver :: woken))
+      in
+      List.rev (fill []))
+  in
+  List.iter (fun resolver -> Eio.Promise.resolve resolver ()) to_wake
 ;;
 
 (* Whether a waiter whose wait has ended owns a slot is decided by its state
@@ -198,13 +246,12 @@ let release_slot t =
 let leave_or_own t waiter =
   if Atomic.compare_and_set waiter.state Waiting Cancelled
   then (
-    Eio.Cancel.protect (fun () ->
-      Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-        match waiter.queue with
-        | Priority -> t.priority <- remove_waiter waiter t.priority
-        | Standard ->
-          t.standard <- remove_waiter waiter t.standard;
-          if t.standard.length = 0 then t.priority_run <- 0));
+    Stdlib.Mutex.protect t.mutex (fun () ->
+      match waiter.queue with
+      | Priority -> t.priority <- remove_waiter waiter t.priority
+      | Standard ->
+        t.standard <- remove_waiter waiter t.standard;
+        if t.standard.length = 0 then t.priority_run <- 0);
     `Left_queue)
   else (
     match Atomic.get waiter.state with
@@ -224,7 +271,7 @@ let acquire t ~admission_class =
         | `Owns_slot ->
           (* The slot was transferred to this waiter before the exception.
              Return it to the next waiter. *)
-          Eio.Cancel.protect (fun () -> release_slot t));
+          release_slot t);
        raise exn)
 ;;
 
@@ -266,20 +313,16 @@ let acquire_until ?wait ~clock ~deadline_at ~admission_class t =
            | exception exn ->
              (match leave_or_own t waiter with
               | `Left_queue -> ()
-              | `Owns_slot -> Eio.Cancel.protect (fun () -> release_slot t));
+              | `Owns_slot -> release_slot t);
              raise exn))
 ;;
 
-(* The slot goes back whether [f] returned, raised or was cancelled. Under
-   cancellation the release must not itself be cancellable: [release_slot]
-   takes the scheduler's mutex, and a fiber whose cancellation is already
-   requested would raise out of that wait if another domain held the mutex
-   at that instant, leaving the slot counted as active with nobody to return
-   it. The protected release is the same one [acquire_until] makes on its
-   exception arm. *)
-let release_after t f =
-  Fun.protect f ~finally:(fun () -> Eio.Cancel.protect (fun () -> release_slot t))
-;;
+(* The slot goes back whether [f] returned, raised or was cancelled:
+   [release_slot] takes only the scheduler's [Stdlib.Mutex] and performs no
+   effect, so a fiber whose cancellation is already requested still returns
+   the slot in full. *)
+let release_after t f = Fun.protect f ~finally:(fun () -> release_slot t)
+
 
 let with_permit ~admission_class t f =
   acquire t ~admission_class;
@@ -292,7 +335,7 @@ let with_permit_until ?wait ~clock ~deadline_at ~admission_class t f =
   | Ok () -> Ok (release_after t f)
 ;;
 
-let queue_length t = Eio.Mutex.use_ro t.mutex (fun () -> queued t)
+let queue_length t = Stdlib.Mutex.protect t.mutex (fun () -> queued t)
 
 (* ── Capacity Query ───────────────────────────── *)
 
@@ -304,10 +347,10 @@ type snapshot =
   }
 
 let snapshot t =
-  Eio.Mutex.use_ro t.mutex (fun () ->
+  Stdlib.Mutex.protect t.mutex (fun () ->
     { max_slots = t.max_slots
     ; active = t.active
-    ; available = t.max_slots - t.active
+    ; available = Int.max 0 (t.max_slots - t.active)
     ; queue_length = queued t
     })
 ;;

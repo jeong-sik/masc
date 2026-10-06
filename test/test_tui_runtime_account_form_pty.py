@@ -11,6 +11,7 @@ the form stays on the sign-in command: [y] sends it whole through OSC 52, and
 Enter closes the form, so the runner's [q] quits again.
 """
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -57,14 +58,14 @@ MEANWHILE = "# added while the form was open\n"
 SIGN_IN = b"(export CODEX_HOME='/tmp/codex-second' && codex login)"
 
 
-def commit_receipt() -> dict[str, object]:
+def commit_receipt(source_text: str) -> dict[str, object]:
     """The shape Masc_tui_runtime_config_receipt.decode reads; the same one
     test_tui_runtime_lane_editor.py serves."""
     return {
         "ok": True,
         "state": "committed",
         "commit": {
-            "source_revision": "source-8",
+            "source_revision": hashlib.sha256(b"runtime_config_source\x00" + source_text.encode()).hexdigest(),
             "order": "8",
             "durability": "durable",
             "warnings": [],
@@ -87,7 +88,7 @@ def commit_receipt() -> dict[str, object]:
             },
             "skills": {
                 "state": "unchanged",
-                "input_source_revision": "source-8",
+                "input_source_revision": hashlib.sha256(b"runtime_config_source\x00" + source_text.encode()).hexdigest(),
                 "snapshot_revision": "snapshot-8",
                 "catalog_revision": "catalog-8",
                 "config_state": "configured",
@@ -115,11 +116,18 @@ class ServerCopy:
 
     def raw(self, body: bytes):
         with self.lock:
+            revision = hashlib.sha256(b"runtime_config_source\x00" + self.text.encode()).hexdigest()
             if body:
-                self.text = json.loads(body)["source_text"]
-                return 200, commit_receipt()
+                request = json.loads(body)
+                if request.get("expected_source_revision") != revision:
+                    return 409, {"error": "file changed", "code": "revision_conflict",
+                                 "current": {"source_path": "/workspace/config/runtime.toml",
+                                             "source_text": self.text, "source_revision": revision}}
+                self.text = request["source_text"]
+                return 200, commit_receipt(self.text)
             return 200, {
                 **_keyboard_runtime.runtime_config_read_metadata(),
+                "source_revision": revision,
                 "path": "/workspace/config/runtime.toml",
                 "source_text": self.text,
             }
@@ -166,6 +174,10 @@ def run(executable: str) -> None:
         if len(saves) != 1 or previews != saves:
             raise AssertionError(f"one previewed save expected: saves={saves!r} previews={previews!r}")
         saved = saves[0]
+        request = next(json.loads(body) for path, body in requests if path == RAW_PATH)
+        expected_revision = hashlib.sha256(b"runtime_config_source\x00" + (SOURCE + MEANWHILE).encode()).hexdigest()
+        if request.get("expected_source_revision") != expected_revision:
+            raise AssertionError("the save did not use the revision read at submit")
         if not saved.startswith(SOURCE + MEANWHILE):
             raise AssertionError(f"the save did not keep the line written meanwhile: {saved!r}")
         for needle in (

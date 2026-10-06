@@ -24,6 +24,7 @@ type press_target =
   | Press_standalone_lanes
   | Press_context_tab of Masc_tui_context_inspector.tab
   | Press_keeper_row of string
+  | Press_lane_row of string
 
 (* An overlay keeps the surface's strip on its first row, and a press there
    would change the surface under a modal no key can leave that way. The
@@ -32,7 +33,7 @@ let press_changes_the_surface = function
   | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _
   | Press_config_pane _ | Press_metrics_section _ | Press_tools_pane _
   | Press_memory_category _ | Press_theme_filter _ | Press_runtime_mode _
-  | Press_standalone_lanes | Press_keeper_row _ ->
+  | Press_standalone_lanes | Press_keeper_row _ | Press_lane_row _ ->
       true
   | Press_context_tab _ -> false
 

@@ -654,12 +654,11 @@ def runtime_surface_interaction(
             # catalog, then the standalone Lanes surface ("off the ring"),
             # and [p] there returns to the lanes tab. The old two-stop step
             # waited for the tab header right after leaving the catalog and
-            # starved on the standalone surface instead, whose header stays
-            # "(not loaded)" because this fixture serves no
-            # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
+            # starved on the standalone surface instead, which stays
+            # unread because this fixture serves no /api/v1/lanes body. Walk the full circuit
             # so the return leg is what gets asserted.
             send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
-            send_and_wait(process, master_fd, output, b"p", b"Runtime lanes (3 lanes, 5 slots)")
+            send_and_wait(process, master_fd, output, b"p", b"Candidate orders (3 lanes, 5 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the

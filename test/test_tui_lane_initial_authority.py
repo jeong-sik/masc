@@ -11,7 +11,7 @@ SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_types.ml")
 
 def run(executable):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     health = _keyboard_harness.GatedHttpResponse(
         (200, {}), subsequent_response=(200, {}), hold_seconds=20.0
     )

@@ -1,0 +1,9 @@
+{
+  "README.md": "305f1325d0e1a5ddcbb79c08062a8617a711b2c00d70cf95434d044e78eb966a",
+  "checks.json": "480a0cd2c75921171b72681339d1fbc5f619c9a192110c12e3a723c31ce37d44",
+  "gate-green.log": "36b7f8909a88e2a907ad63cee4d180d8fa1d12197f4b98d4d091656247db11e7",
+  "public-consumers-green-build.log": "250e8685df47727439a29e84cf42a83a0904facdbb8f46e1efc96e452e741c42",
+  "public-consumers-red-build.log": "3a0e0df1663ac78b8e9fa17ac59254e8c4dc10d1b1743891bbf7e62a8215b22a",
+  "schedule-green.log": "c4196dd729cb6ff009283ac0c7e87a7b4ef129aa16df98b0337edd53f334ab22",
+  "test-stanza-setup-failure.log": "a23fa99b79ab75fdc7b954efb37abf59f1891940fa6aa40798987f2ec3802b8d"
+}

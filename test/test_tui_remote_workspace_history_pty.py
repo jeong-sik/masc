@@ -940,6 +940,7 @@ def runtime_config_editor_workspace_change(binary: str) -> None:
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (200, {
         **_keyboard_runtime.runtime_config_read_metadata(),
         "path": "/workspace/config/runtime.toml", "source_text": _keyboard_runtime.config_navigation_source(),
+        "source_revision": hashlib.sha256(b"runtime_config_source\x00" + _keyboard_runtime.config_navigation_source().encode()).hexdigest(),
     })
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health})

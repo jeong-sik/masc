@@ -1,0 +1,15 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-package-lane-enabled-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-package-lane-enabled-20261004/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  51 passed (51)
+   Start at  17:02:07
+   Duration  4.30s (import 32%, tests 30%, transform 16%, environment 12%, setup 9%)
+
+    Isolate  2 workers spawned · ~364ms startup each (spawn + environment, per file)
+             at least ~364ms faster with isolate: false — reuses workers across files instead of one per file

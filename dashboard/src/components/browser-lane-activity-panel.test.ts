@@ -19,7 +19,12 @@ const projectionApi = vi.hoisted(() => ({ fetchStandaloneLanes: vi.fn() }))
 const followup = vi.hoisted(() => ({ resumeSavedModelSetup: vi.fn(), refreshRuntimeConfigConsumers: vi.fn() }))
 const inventoryApi = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
 vi.mock('../api/lane-inventory', async original => ({ ...await original<typeof import('../api/lane-inventory')>(), ...inventoryApi }))
-vi.mock('../api/dashboard-runtime', async original => ({ ...await original<typeof import('../api/dashboard-runtime')>(), ...api }))
+vi.mock('../api/dashboard-runtime', async original => {
+  const actual = await original<typeof import('../api/dashboard-runtime')>()
+  // The stand-in save announces its receipt the way the real request does.
+  return { ...actual, ...api, saveRuntimeTomlConfig: async (...args: Parameters<typeof actual.saveRuntimeTomlConfig>) =>
+    actual.announceRuntimeTomlCommit(await api.saveRuntimeTomlConfig(...args), args[2]) }
+})
 vi.mock('../api/dashboard-standalone-lanes', async original => ({ ...await original<typeof import('../api/dashboard-standalone-lanes')>(), ...projectionApi }))
 vi.mock('../lib/model-setup-resume', async original => ({ ...await original<typeof import('../lib/model-setup-resume')>(), resumeSavedModelSetup: followup.resumeSavedModelSetup }))
 vi.mock('../lib/runtime-config-refresh', () => ({ refreshRuntimeConfigConsumers: followup.refreshRuntimeConfigConsumers }))
@@ -315,14 +320,21 @@ describe('Browser activity operator flow', () => {
     preview.resolve({ ok: true, can_save: true }); expect(await saving).toBe(false)
     expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled(); expect(session.state.value.draft?.enabled).toBe(false)
   })
-  it('ignores a late save receipt after leaving the workspace', async () => {
+  it('announces a late save receipt without adopting it after leaving the workspace', async () => {
     const { session, authority } = await draft(), response = deferred<ReturnType<typeof receipt>>()
     api.saveRuntimeTomlConfig.mockReturnValueOnce(response.promise)
     const saving = session.save(authority); await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
     workspace('/fixture/B'); const fresh = workspace('/fixture/A'); await session.read(fresh)
-    response.resolve(receipt(off)); expect(await saving).toBe(false)
-    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current?.source_text).toBe(source)
+    const raw = runtimeTomlSessionFor(fresh); await raw.read(fresh, 'reload')
+    expect(session.state.value.current?.source_text).toBe(source); expect(raw.state.value.needsRead).toBe(false)
+    stored = off; response.resolve(receipt(off)); expect(await saving).toBe(false)
+    // The file changed, so neither screen keeps the read from before the write.
+    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current).toBeNull()
+    expect(session.state.value.notice).toBe('이전에 보낸 저장이 늦게 완료됐습니다. 현재 설정을 다시 읽으세요.')
+    expect(raw.state.value.needsRead).toBe(true)
     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+    await session.read(fresh)
+    expect(session.state.value.current?.source_text).toBe(off)
   })
   it('keeps the current Browser basis retryable after a typed pre-write rejection', async () => {
     const { session, authority } = await draft(), before = session.state.value.current
@@ -418,7 +430,7 @@ describe('Browser inventory and backend isolation', () => {
     const next = remount ? await mount() : first
     await act(async () => { stored = off; response.resolve(receipt(off)) })
     await next.panel.findByText('파일 설정: 꺼짐')
-    expect(within(next.view.getByRole('region', { name: `Details for ${title}` })).getByText(/Off · configuration and sessions retained/)).toBeTruthy()
+    expect(await within(next.view.getByRole('region', { name: `Details for ${title}` })).findByText(/Off · configuration and sessions retained/)).toBeTruthy()
     expect(next.view.getByRole('button', { name: '활동 설정 닫기' })).toBeTruthy()
     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
     expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)

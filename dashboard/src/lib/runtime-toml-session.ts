@@ -1,8 +1,8 @@
-import { batch, effect, signal } from '@preact/signals'
+import { effect, signal } from '@preact/signals'
 import { fetchRuntimeTomlConfig, type CommittedRuntimeTomlConfig, type RuntimeTomlConfig } from '../api/dashboard'
 import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlCurrentSource, type RuntimeTomlRequestOptions } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
-import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { runtimeConfigCommitReceiptNotice } from './runtime-config-receipt'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
@@ -66,7 +66,11 @@ export class RuntimeTomlSession {
   requestOptions(authority: ExecutionWorkspaceAuthority): RuntimeTomlRequestOptions {
     return { beforeDispatch: () => {
       if (!this.admits(authority)) throw new Error('작업공간이 바뀌어 요청을 보내지 않았습니다.')
-    } }
+    },
+    // The receipt invalidates every other editor. While this session still
+    // owns the workspace it adopts that receipt below, so it keeps its own
+    // basis; otherwise it hears the write like any other screen.
+    onCommitted: () => { if (this.admits(authority)) this.generation = runtimeTomlSourceGeneration.peek() } }
   }
   invalidate(authority: ExecutionWorkspaceAuthority | null, generation: number) {
     const state = this.state.peek()
@@ -166,12 +170,6 @@ export class RuntimeTomlSession {
             + (latest.draft !== submitted && latest.draft !== before.draft ? ' 저장 중 추가한 초안은 저장되지 않았습니다.' : '')
           : 'runtime assignment unchanged' })
       if ('unchanged' in result) return false
-      // The file receipt invalidates other editors even if setup resume fails.
-      // This session has already adopted that receipt, so keep its own basis.
-      batch(() => {
-        announceRuntimeTomlWritten()
-        this.generation = runtimeTomlSourceGeneration.peek()
-      })
       // Unmount does not interrupt the saved file's session. A different
       // workspace does prevent follow-up writes to model setup.
       if (!this.admits(authority)) return true

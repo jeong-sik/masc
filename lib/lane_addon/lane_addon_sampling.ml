@@ -154,14 +154,16 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     let request = Store.blob_reference request_bytes in
     (* Refuse before publishing: if the failure reply cannot fit the envelope
        the transport allows for this request, do not write a request that
-       cannot be answered. [refusal_bytes] is that budget. *)
+       cannot be answered. [refusal_bytes] is that budget, measured like the
+       wire frame: the receipt travels as a JSON string (quotes and escapes
+       inside the message) and the frame ends in one counted newline. *)
     let* () =
       let references = `Assoc ["request",Types.evidence_to_json request;
         "outcome",Types.evidence_to_json request] in
       let reply = `Assoc ["status",`String "invalid_response";"evidence",references] in
-      match encode_bounded ~max_bytes:refusal_bytes reply with
-      | Ok _ -> Ok ()
-      | Error _ -> Error "sampling request cannot be answered within the envelope" in
+      let json_len = String.length (Yojson.Safe.to_string reply) in
+      if json_len + 1 <= refusal_bytes then Ok ()
+      else Error "sampling request cannot be answered within the envelope" in
     let* request = Eio_unix.run_in_systhread (fun () -> Store.write_blob store request_bytes)
       |> Result.map_error (fun _ -> "sampling request could not be retained") in
     let record state =

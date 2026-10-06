@@ -377,6 +377,12 @@ let rotate_availability_change () =
   resolver
 ;;
 
+(* A publication reaches the Curator two ways: [subscribe_lane_changes] fires
+   only when this lane's declaration or admitted targets actually change, and
+   the availability promise rotates on every publication and on the end of a
+   replacement fence. The fence-close rotation is what reopens work deferred
+   while the registry was busy (a fact committed during a config write). The
+   two wake paths are deliberately both live; see the Curator's owner loop. *)
 let with_changed_publication f =
   let* value, resolver = with_publication_lock (fun () ->
     let* value = f () in

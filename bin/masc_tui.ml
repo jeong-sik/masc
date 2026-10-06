@@ -24295,7 +24295,12 @@ and is loaded on demand through keeper_skill.
               end)
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)
-           && Option.is_some (planning_action_of_key key) ->
+           && Option.exists
+                (fun action ->
+                   let goal = Option.get (goal_detail_on_screen state) in
+                   Goal_phase.moves_goal ~phase:goal.pg_phase
+                     ~action:(Goal_phase.Public_action.to_action action))
+                (planning_action_of_key key) ->
            (* Detail actions take precedence over global refresh/navigation.
               The displayed keys and parser share one owner. *)
            Option.iter

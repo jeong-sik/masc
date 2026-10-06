@@ -1931,6 +1931,59 @@ let test_mcp_notification_is_acknowledged_on_the_control_channel () =
       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
 ;;
 
+let test_a_client_reconnect_handshakes_again_on_the_same_session () =
+  let session = Runtime_official_client_mcp.create_session () in
+  let send ~id ~method_name ~params =
+    Runtime_official_client_mcp.handle_message
+      ~session
+      ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+      ~tool_specs:(fun () -> [])
+      ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> None)
+      (`Assoc
+         ([ "jsonrpc", `String "2.0"; "method", `String method_name; "params", params ]
+          @ match id with
+            | Some id -> [ "id", `Int id ]
+            | None -> []))
+  in
+  let initialize id =
+    send
+      ~id:(Some id)
+      ~method_name:"initialize"
+      ~params:
+        (`Assoc
+           [ "protocolVersion", `String "2025-11-25"
+           ; "capabilities", `Assoc []
+           ; ( "clientInfo"
+             , `Assoc [ "name", `String "claude-code"; "version", `String "fixture" ] )
+           ])
+  in
+  let admitted label = function
+    | Ok _ -> ()
+    | Error { Runtime_official_client_mcp.detail; _ } -> failf "%s refused: %s" label detail
+  in
+  let phase () =
+    match (Runtime_official_client_mcp.snapshot_session session).phase with
+    | Runtime_official_client_mcp.Awaiting_initialize -> "awaiting_initialize"
+    | Runtime_official_client_mcp.Awaiting_initialized -> "awaiting_initialized"
+    | Runtime_official_client_mcp.Ready -> "ready"
+  in
+  admitted "first initialize" (initialize 1);
+  admitted
+    "first initialized"
+    (send ~id:None ~method_name:"notifications/initialized" ~params:(`Assoc []));
+  check string "ready after first handshake" "ready" (phase ());
+  admitted "reconnect initialize" (initialize 2);
+  check string "reconnect restarts the handshake" "awaiting_initialized" (phase ());
+  (match send ~id:(Some 3) ~method_name:"tools/list" ~params:(`Assoc []) with
+   | Error { stage; _ } -> check string "stage" "MCP tools/list" stage
+   | Ok _ -> fail "tools/list ran before the reconnect handshake finished");
+  admitted
+    "second initialized"
+    (send ~id:None ~method_name:"notifications/initialized" ~params:(`Assoc []));
+  admitted "tools/list after reconnect" (send ~id:(Some 4) ~method_name:"tools/list" ~params:(`Assoc []))
+;;
+
 let test_shared_mcp_bridge_owns_exact_dispatch () =
   let tool_specs () =
     [ `Assoc
@@ -2781,6 +2834,10 @@ let () =
             test_tool_result_inline_ceiling_is_lane_specific
         ; test_case "host stop carries the newest request input" `Quick
             test_host_stop_carries_the_newest_request_input
+        ; test_case
+            "client reconnect handshakes again on the same session"
+            `Quick
+            test_a_client_reconnect_handshakes_again_on_the_same_session
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

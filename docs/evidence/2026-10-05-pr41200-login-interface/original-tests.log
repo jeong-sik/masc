@@ -1,0 +1,69 @@
+Testing `TUI account login'.
+This run has ID `FBXSEO9I'.
+
+  [OK]          workflow          0   quota scope group ID remains an opaque ...
+  [OK]          workflow          1   disabled client templates stay distinct...
+  [OK]          workflow          2   existing providers group by native acco...
+  [OK]          workflow          3   multi-model selection submits ordered m...
+  [OK]          workflow          4   reopening shows connected models withou...
+  [OK]          workflow          5   pasted credentials preserve bytes and r...
+  [OK]          workflow          6   failed save refreshes revision and reta...
+  [OK]          workflow          7   a long reason is read whole.
+  [OK]          workflow          8   named default lane remains selected.
+  [OK]          workflow          9   Unicode and late input HTTP response.
+  [OK]          workflow         10   verified save survives refresh failure.
+  [OK]          workflow         11   saved activation retry cannot repeat sa...
+  [OK]          workflow         12   closed saving retains its in-flight rec...
+  [OK]          workflow         13   closed activation retains its request a...
+  [OK]          workflow         14   closed activation recovery preserves mu...
+  [OK]          workflow         15   generated account ID restores its saved...
+  [OK]          workflow         16   failed activation cannot start another ...
+  [OK]          workflow         17   a usage-limited save names what was not...
+> [FAIL]        workflow         18   visible save preserves durability uncer...
+  [FAIL]        workflow         19   lock warning survives refresh without e...
+  [OK]          workflow         20   a partly checked save summarizes retain...
+  [OK]          workflow         21   unknown context follows supported provi...
+  [OK]          workflow         22   fragmented remote login.
+  [OK]          workflow         23   malformed and unfinished streams.
+  [OK]          workflow         24   explicit provider and preserved default.
+  [OK]          workflow         25   private input and superseded attempt.
+  [OK]          workflow         26   declared fallback inventory contract.
+  [OK]          workflow         27   account emails beside provider rows.
+  [OK]          workflow         28   clients first, then a client's accounts.
+  [OK]          workflow         29   a client without a catalog entry.
+  [OK]          workflow         30   a later read keeps its view.
+  [OK]          workflow         31   a pending login belongs to the request.
+  [OK]          workflow         32   no account to log in.
+  [OK]          workflow         33   emails for the overview.
+  [OK]          workflow         34   every server email row decodes.
+  [OK]          workflow         35   spawn failure retains recovery receipt.
+  [OK]          workflow         36   retry preserves early input until a new...
+  [OK]          workflow         37   visible cursor and recovery identity.
+  [OK]          workflow         38   official client colours are drawn.
+  [OK]          workflow         39   foreign escapes never reach the terminal.
+  [OK]          workflow         40   removal from the list.
+  [OK]          workflow         41   refused removal.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        workflow         18   visible save preserves durability un...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT visible save retains uncertain durability
+ASSERT warning is visible
+ASSERT refresh failure keeps durability warning
+ASSERT retry refreshes and does not save again
+File "test/test_tui_account_login.ml", line 429, character 2:
+FAIL retry refreshes and does not save again
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_tui_account_login.uncertain_durability_save in file "test/test_tui_account_login.ml", line 429, characters 2-103
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/check-pr41200-login-interface-20261005/_build/_tests/TUI account login/workflow.018.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/check-pr41200-login-interface-20261005/_build/_tests/TUI account login'.
+2 failures! in 0.005s. 42 tests run.

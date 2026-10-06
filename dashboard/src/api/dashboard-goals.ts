@@ -1,4 +1,5 @@
 import { decodeGoalProof } from './goal-proof'
+import { decodeGoalResumePhase } from './goal-lifecycle'
 // MASC Dashboard — Goals projections (goal tree + detail).
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
@@ -406,6 +407,7 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     id,
     title,
     phase,
+    resume_phase: decodeGoalResumePhase(phase, raw.resume_phase),
     phase_color: asString(raw.phase_color, ''),
     goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, phase),
     verification: decodeGoalProof(raw.verification),

@@ -7340,6 +7340,15 @@
   (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
+ (alias runtest-test_tui_keeper_items_equip_pty)
+ (deps
+  test_tui_keeper_items_equip_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
+ (action
+  (run python3 %{dep:test_tui_keeper_items_equip_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
  (alias runtest-test_tui_queue_visibility_pty)
  (deps test_tui_queue_visibility_pty.py
   tui_keyboard_chat.py
@@ -7401,6 +7410,10 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_items_equip_pty)))
 
 (rule
  (alias runtest-test_tui_acting_pane_floor_pty)

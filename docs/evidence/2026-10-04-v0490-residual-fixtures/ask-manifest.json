@@ -1,0 +1,6 @@
+{
+  "scope": "fd7e6c37 candidate binary plus edited fixture diagnostic; not PR41031 exact-head binary verification",
+  "candidate_commit": "fd7e6c37e006af09b1dba65fb2b3b55249104c7f",
+  "source_sha256": "5e1e408dc7c414c8997f7da885c7d8e7adab4baf60785ebc8d6931f90e607c35",
+  "binary_sha256": "f3531778d03b6b2bfd68ae86ba47507cb653bcffd62cd543b2720c4e918b882d"
+}

@@ -252,14 +252,14 @@ def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, 
     return {"top": tops[0], "bottom": bottoms[0]}
 
 
-def assert_pane_edge(rows: dict[int, bytes], column: int, where: str) -> None:
+def assert_pane_edge(rows: dict[int, bytes], column: int, where: str, *, title_row: int = 3) -> None:
     """The column a side pane's border stands in holds a border glyph on the
     title row, so a body slice cut there is cut at the pane and not inside
     the body."""
-    edge = cells(rows[3], column, column + 1)
+    edge = cells(rows[title_row], column, column + 1)
     if edge not in BORDER_GLYPHS:
         raise AssertionError(f"{where}: no pane border at cell {column} "
-                             f"({edge!r}): {rows[3]!r}")
+                             f"({edge!r}): {rows[title_row]!r}")
 
 
 def print_screen(name: str, columns: int, output: bytearray) -> None:

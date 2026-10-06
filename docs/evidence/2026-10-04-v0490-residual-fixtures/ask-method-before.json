@@ -1,0 +1,38 @@
+{
+  "scope": "existing Ask fixture over real ephemeral loopback HTTP; no TUI run",
+  "source_sha256": "332847e5ade476ffe5aa6e03d9be0adccb832ccf43bc64c7aa67ea6cb3caf19b",
+  "observations": [
+    {
+      "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+      "method": "GET",
+      "status": 405,
+      "response": "{\"error\": \"POST required\"}",
+      "admitted_count": 0,
+      "gate_requested": false
+    },
+    {
+      "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+      "method": "DELETE",
+      "status": 200,
+      "response": "{\"ok\": true}",
+      "admitted_count": 1,
+      "gate_requested": true
+    },
+    {
+      "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+      "method": "GET",
+      "status": 405,
+      "response": "{\"error\": \"POST required\"}",
+      "admitted_count": 0,
+      "gate_requested": false
+    },
+    {
+      "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+      "method": "DELETE",
+      "status": 200,
+      "response": "{\"ok\": true}",
+      "admitted_count": 1,
+      "gate_requested": true
+    }
+  ]
+}

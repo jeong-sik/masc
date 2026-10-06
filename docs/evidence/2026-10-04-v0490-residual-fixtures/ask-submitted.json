@@ -1,0 +1,30 @@
+{
+  "description": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+  "admitted_count": 1,
+  "admitted_method_phase": [
+    [
+      "POST",
+      "a"
+    ]
+  ],
+  "response_recorded_count": 1,
+  "response_recorded_bodies": [
+    {
+      "name": "alpha",
+      "ask_id": "ask-1",
+      "answers": [
+        {
+          "question_id": "q-1",
+          "response": {
+            "kind": "chose",
+            "choice_ids": [
+              "c-yes"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "gate_requested": true,
+  "gate_completed": true
+}

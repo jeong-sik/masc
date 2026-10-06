@@ -29,9 +29,9 @@ let rec durable_directory t ~sync_parent directory =
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
          if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
            raise (Sys_error "retained evidence root is not a directory"));
-    (* Reconfirm the root entry across store handles: an existing directory
-       may be a preceding attempt whose publication sync failed. Never walk
-       above the root's immediate parent. *)
+    (* An existing root may be a rename/mkdir whose parent sync failed in
+       another store handle or process. Establish that entry's durability
+       before creating children, without walking external ancestors. *)
     sync_parent parent)
   else if parent <> directory then (
     durable_directory t ~sync_parent parent;

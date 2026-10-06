@@ -312,6 +312,9 @@ def task_cancel_previous_workspace_receipt(executable):
                 }).encode(), content_type="application/json")
 
             def rpc(body):
+                # GET /mcp opens the observer transport without a JSON-RPC body.
+                if not body:
+                    return h.RawHttpResponse(204, b"", content_type="application/json")
                 request = json.loads(body)
                 method = request.get("method")
                 if method == "tools/call":

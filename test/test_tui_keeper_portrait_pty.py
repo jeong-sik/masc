@@ -190,7 +190,8 @@ def open_alpha_detail(process, fd, output) -> None:
 def reopen_alpha_items(process, fd, output, balance: bytes) -> None:
     h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
-    # Re-enter explicitly; identity recovery can retain detail navigation and its tab.
+    # Choose the Keeper explicitly after recovery; the chosen detail tab is
+    # retained regardless of which surface authority withdrawal displayed.
     h.send_and_wait(process, fd, output, b"\r", balance)
 
 
@@ -994,7 +995,17 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
 
     def frame(process, fd, output, predicate):
         assert h.wait_for_fixture_state(process, fd, output,
-            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10), last_frame_rows(output)
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10), \
+            f"Item {boundary} authority did not reach the expected state: {last_frame_rows(output)!r}"
+
+    def withdrawn(text):
+        # Identity loss clears selected Keeper data while preserving detail
+        # navigation. A roster failure can retain the selected local Keeper,
+        # but must withdraw its authenticated account and pending read.
+        unavailable = b"Account unavailable:" in text
+        if boundary == "identity":
+            unavailable = unavailable or b"No keeper selected" in text
+        return unavailable and b"Balance " not in text
 
     def recover(process, fd, output):
         probes = identity["probes"]
@@ -1010,13 +1021,8 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
             h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
-            if boundary == "identity":
-                # Temporary identity loss retains the detail tab while its
-                # Keeper rows and authenticated account authority are withdrawn.
-                frame(process, fd, output, lambda text:
-                      b"No keeper selected." in text and b"Balance " not in text)
-            else:
-                frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            frame(process, fd, output, withdrawn)
+            capture_item_screen(output, f"items-{boundary}-authority-withdrawn")
             balance[0] = "13000"
             recover(process, fd, output)
             if boundary == "identity":
@@ -1027,10 +1033,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             os.write(fd, b"r")
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
-            if boundary == "identity":
-                frame(process, fd, output, lambda text: b"No keeper selected." in text and b"Balance " not in text)
-            else:
-                frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            frame(process, fd, output, withdrawn)
             # Keep authority unread until the late response has settled.
             # Roster failure leaves health ready and must revoke the detail ticket.
             start = len(output)
@@ -1041,18 +1044,16 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
                 lambda: identity["probes"] >= probes + 2, timeout=10)
             assert h.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
-            if boundary == "identity":
-                assert b"No keeper selected." in text
-            else:
-                assert b"Account unavailable:" in text
-            assert b"Balance " not in text
-            assert b"Balance 13.000 Candle" not in output[start:]
+            assert withdrawn(text), f"late Item reply restored unread {boundary} authority: {text!r}"
+            assert b"Balance " not in output[start:], "late Item reply flashed monetary facts"
+            capture_item_screen(output, f"items-{boundary}-late-reply-rejected")
             balance[0] = "14000"
             recover(process, fd, output)
             if boundary == "identity":
                 reopen_alpha_items(process, fd, output, b"Balance 14.000 Candle")
             else:
                 frame(process, fd, output, lambda text: b"Balance 14.000 Candle" in text)
+            capture_item_screen(output, f"items-{boundary}-authority-recovered")
             os.write(fd, b"q")
         finally:
             release.set()

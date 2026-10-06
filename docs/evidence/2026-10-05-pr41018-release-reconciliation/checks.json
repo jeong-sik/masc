@@ -1,0 +1,38 @@
+{
+  "original_head": "6084a6946ee868529112277a29c13698657a7e06",
+  "actual_parent": "bdd448e956fab264219713b26bd554d3023dfed4",
+  "source_sha256": {
+    "bin/masc_tui.ml": "5e628fc1ec066cef8d649c093d131ef944652f6e195ff283a7e0611280c1ffd6",
+    "test/test_keeper_portrait_http.ml": "bcfcca4ad92404122e4cb3ae704570859e1147520c8a2eafd91aae7bd1f989ae",
+    "test/test_tui_keeper_portrait.ml": "3fd5747e0575aa89ea9ef1349dbb09d317dea214466ff782a0bfb84ddc91771f",
+    "test/test_tui_keyboard_input.py": "9deb29da5906dabf1edf58620adff621da53e3df69d492da677678a2b2b5ac60",
+    "test/test_tui_remote_workspace_history_pty.py": "38eff88e96da6bb51af2ef3ca714f43bbefd3cc7be039cb027cad165a08bff0f",
+    "test/test_tui_keeper_portrait_pty.py": "d3b7a8d4eed031ffc9bc87a9cba1720cc11f89bb570d05379140a02dda0bfd9b",
+    "test/test_tui_chat_portrait_pty.py": "96240c8377042cb323bf418f1638ac42ef3e55e8d9633b15a1ae4701cefd52df"
+  },
+  "raw_sha256": {
+    "pr41018-merge-build.log": "6f94d91e9e13245bab24985ca1396707526d8c7b478933bc60c405f6e087ddb4",
+    "pr41018-merge-ruff.log": "21e98252aa48948a3e4ae2189c6f09b3942377a79b202c73c17b19e0e1cace18",
+    "pr41018-focused-behavior.log": "d072fd88211163f0354e4a664434e73f7be650687db2073547fa23f1f6a017c8",
+    "pr41018-badge-final.log": "4ce38b589d289e55ed5b915a261c016c22ac1362afd805b28a72db1863fc715f",
+    "pr41018-pyright-baseline.json": "f119560f1f56b720c747e386b263de68beec8df728949604d8dfac2fcd37ebb2",
+    "pr41018-pyright-current-final.json": "b27c5ae60e5171124c9a224fc5d025f43e1e9e08019581b57842515cf7f0564a"
+  },
+  "binary_sha256": {
+    "bin/masc_tui.exe": "f15bb7b65cd14dc8dd017a153641c04e19ce2bca75d347a8de10b9b5f2e16e3c",
+    "test/test_keeper_portrait_http.exe": "2eb7f7a11f3313ec692df657afa7567a1208c0e904b1541f07a753a32aa6175a",
+    "test/test_tui_keeper_portrait.exe": "28d3c83fefb6fc0cae4ec7acc8a24d0c5fb145bf97836e6ebe536c07bff9a8b0"
+  },
+  "build_exit": 0,
+  "native_cases": 31,
+  "focused_pty_groups": 5,
+  "badge_final_rerun_exit": 0,
+  "pyright": {
+    "baseline_errors": 400,
+    "current_errors": 400,
+    "diagnostic_multiset_equal": true
+  },
+  "full_behavior_suite": false,
+  "release_qualification": false,
+  "TerminalBench": "unrun"
+}

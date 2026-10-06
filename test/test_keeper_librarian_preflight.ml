@@ -29,6 +29,8 @@ let generated = Yojson.Safe.to_string (`Assoc
    execution basis, neither of which the prompt shows. *)
 type context_shape = No_context | Pending_source | Unavailable_source | Live_nothing_pending
 
+let established_claim = "The established constraint is still valid."
+
 let consumed_source =
   {Keeper_librarian_context.reference="consumed"; content=`String "An answered question"}
 
@@ -43,13 +45,14 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
   Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
   let jev_calls = ref 0 and llm_calls = ref 0 in
+  let jev_bodies = ref [] and llm_prompts = ref [] in
   let before_reply = ref (fun () -> ()) in
   let socket = Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
     (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
   let port = match Eio.Net.listening_addr socket with
     | `Tcp (_, port) -> port | _ -> Alcotest.fail "no loopback port" in
   let handler _ _ incoming =
-    ignore (Eio.Buf_read.(of_flow ~max_size:max_int incoming |> take_all));
+    jev_bodies := Eio.Buf_read.(of_flow ~max_size:max_int incoming |> take_all) :: !jev_bodies;
     incr jev_calls;
     (* The runtime's source record must exist before this effect. *)
     Alcotest.(check bool) "source persisted before JEV"
@@ -78,7 +81,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
   set_activity lane_enabled;
   if disable_during_preflight then before_reply := (fun () -> set_activity false);
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let fact : Memory.fact = Memory.observed ~claim:"The established constraint is still valid."
+  let fact : Memory.fact = Memory.observed ~claim:established_claim
     ~category:Memory.Constraint ~now:1000.
     ~origin:{Memory.kind=Memory.Authored; trace_id=name} in
   let stored = match Current.replace ~keepers_dir ~keeper_id:name ~expected_revision:None
@@ -112,7 +115,8 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     {receipt_scope="preflight-fixture";trace_id=name;history_start_boundary_line=1;
      start_atom=0;end_atom=1;last_atom_digest=String.make 64 'a';
      end_boundary_line=2;boundary_lines_seen=2} in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    llm_prompts := prompt :: !llm_prompts;
     incr llm_calls; Ok (if context_only then {|{"working_contexts":[]}|} else generated) in
   let committed = ref false in
   Keeper_librarian_runtime.run_best_effort
@@ -122,6 +126,22 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     ~base_path ~keepers_dir ~keeper_id:name ~expected_revision:(Some stored.revision) input;
   Alcotest.(check int) "actual JEV dispatches" expected_jev !jev_calls;
   Alcotest.(check int) "actual generation dispatches" expected_llm !llm_calls;
+  (* JEV judges the new evidence alone; the generating Librarian compares it
+     with the current memories. *)
+  let contains text needle = String_util.contains_substring text needle in
+  List.iter (fun body ->
+    Alcotest.(check bool) "JEV reads the new evidence" true
+      (contains body "The already remembered constraint still holds.");
+    Alcotest.(check bool) "JEV reads the Keeper instructions" true
+      (contains body "Keep explicit constraints.");
+    Alcotest.(check bool) "JEV does not read the current memories" false
+      (contains body established_claim))
+    !jev_bodies;
+  if not context_only then
+    List.iter (fun prompt ->
+      Alcotest.(check bool) "the generating Librarian reads the current memories" true
+        (contains prompt established_claim))
+      !llm_prompts;
   if not lane_enabled then (
     Alcotest.(check bool) "off must not acknowledge memory consumption" false !committed;
     (match Current.committed_durable_range ~keepers_dir ~keeper_id:name ~receipt_scope:range.receipt_scope with

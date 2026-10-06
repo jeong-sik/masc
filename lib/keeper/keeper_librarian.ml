@@ -319,6 +319,8 @@ let facts_budget_variable (inp : input) =
       current_ordinary )
 ;;
 
+let current_memory_variable = "current_memory"
+
 let prompt_variables (inp : input) : (string * string) list =
   [ keeper_id_variable inp
   ; facts_budget_variable inp
@@ -329,7 +331,7 @@ let prompt_variables (inp : input) : (string * string) list =
   ; "continuity", "null"
   ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
-  ; "current_memory", format_current_selection_for_prompt inp.current
+  ; current_memory_variable, format_current_selection_for_prompt inp.current
   ; ( "conversation_history"
     , format_messages_for_prompt inp.messages )
   ; ( "turn_tool_observations"
@@ -347,7 +349,7 @@ let continuity_prompt_variables (inp : input) ~continuity =
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
-  ; "current_memory", format_current_selection_for_prompt inp.current
+  ; current_memory_variable, format_current_selection_for_prompt inp.current
   ; "conversation_history", format_messages_for_prompt inp.messages
   ; "continuity", Yojson.Safe.to_string continuity
   ]
@@ -358,7 +360,7 @@ let working_context_prompt_variables (inp : input) =
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
-  ; "current_memory", format_current_selection_for_prompt inp.current
+  ; current_memory_variable, format_current_selection_for_prompt inp.current
   ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
   ]
 ;;

@@ -256,6 +256,18 @@ let librarian_prompt_variables ?continuity input =
   with_working_contexts_rule (prompt_variables_of_pass pass (input_for_pass pass input))
 ;;
 
+(* What the JEV no-change preflight reads in place of the current Memory
+   facts. The preflight decides whether the new evidence carries anything
+   Memory must process; comparing it with the facts is the text-generating
+   Librarian's work. Without the facts the request stays within the judge's
+   input limit whatever the Keeper's Memory size (#41365). *)
+let preflight_current_memory = "(이 판정 요청에는 싣지 않았습니다.)"
+
+let preflight_prompt_variables variables =
+  (Keeper_librarian.current_memory_variable, preflight_current_memory)
+  :: List.remove_assoc Keeper_librarian.current_memory_variable variables
+;;
+
 let render_librarian_prompt input =
   Result.bind (librarian_prompt_variables input) (render_prompt Prompt_names.librarian)
 ;;
@@ -1400,11 +1412,11 @@ let run_best_effort
            let result =
              let open Result.Syntax in
              let* selected_slots, cli_slots = acquired in
-             let* prompt =
+             let* material =
                prompt_material
-               |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
+             let prompt = material.rendered in
              let* (answer, exact_output), served_slot =
                (* Judged by what the prompt shows. Once a Keeper has any
                   working-context snapshot, [previous] is [Some] on every
@@ -1418,7 +1430,12 @@ let run_best_effort
                  | Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _ -> false in
                let observation = Typesafeai_librarian_preflight.assess
                  ~observe:(fun observation -> observed_preflight := Some observation)
-                 ~clock ~keeper_id ~eligible ~prompt () in
+                 ~clock ~keeper_id ~eligible
+                 ~request:(fun () ->
+                   Prompt_registry.render_resolved_prompt_template
+                     (prompt_key_of_pass pass) material.resolution
+                     (preflight_prompt_variables prompt_variables))
+                 () in
                observed_preflight := Some observation;
                let execute_full () =
                  full_lane_entered := true;

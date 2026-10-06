@@ -148,6 +148,9 @@ val wire_dropped_fields : string list
 
 val goal_context_to_json : goal_context -> Yojson.Safe.t
 
+(** The template variable that carries the current Memory facts. *)
+val current_memory_variable : string
+
 val prompt_variables : input -> (string * string) list
 
 (** Variables of the continuity pass over a range whose Memory is already

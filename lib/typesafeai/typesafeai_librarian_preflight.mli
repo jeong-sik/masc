@@ -12,9 +12,14 @@ type outcome =
   | Invalid_answer of Typesafeai_client.evaluated * string
   | Judged of Typesafeai_client.evaluated * decision Typesafeai_types.decoded_choice
 type t = { outcome : outcome; elapsed_s : float option }
+(** [request] renders the [librarian_request] JEV reads: the Librarian's
+    Memory-pass request with the current memories left out, so the judgment
+    is about the new evidence alone. It is called only for an eligible pass
+    whose preflight is configured; a rendering error is
+    [Question_unavailable]. *)
 val assess :
   ?observe:(t -> unit) ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  keeper_id:string -> eligible:bool -> prompt:string -> unit -> t
+  keeper_id:string -> eligible:bool -> request:(unit -> (string, string) result) -> unit -> t
 val keeps_current : t -> bool
 val to_yojson : t -> Yojson.Safe.t

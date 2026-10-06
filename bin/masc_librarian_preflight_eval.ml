@@ -122,7 +122,8 @@ let run () =
          historical_task_contexts=[]; goal_context=Keeper_librarian.No_task;
          tool_observations=[]; counterpart_observations=[]} in
       let* variables = Keeper_librarian_runtime.librarian_prompt_variables inp in
-      let* _, prompt = Prompt_registry.resolve_and_render_prompt_template "librarian" variables in
+      let* _, prompt = Prompt_registry.resolve_and_render_prompt_template "librarian"
+        (Keeper_librarian_runtime.preflight_prompt_variables variables) in
       let+ rest = prepare rest in (case, prompt) :: rest in
   let* requests = prepare cases in
   let identity = Build_identity.current () in
@@ -166,7 +167,8 @@ let run () =
         | (case, prompt) :: rest ->
           let observe observation = match save case.id observation with
             | Ok () -> () | Error detail -> raise (Sys_error detail) in
-          let observation = P.assess ~observe ~clock:env#clock ~keeper_id ~eligible:true ~prompt () in
+          let observation = P.assess ~observe ~clock:env#clock ~keeper_id ~eligible:true
+            ~request:(fun () -> Ok prompt) () in
           let* () = save case.id observation in loop rest in
       let* () = loop requests in
       let classifications = List.map (fun (case, _) ->

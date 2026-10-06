@@ -17,6 +17,11 @@ val librarian_prompt_variables
   -> Keeper_librarian.input
   -> ((string * string) list, string) result
 
+(** [variables] of a Memory pass with the current Memory facts left out:
+    what the JEV no-change preflight renders the [librarian] template with.
+    The preflight judges the new evidence alone. *)
+val preflight_prompt_variables : (string * string) list -> (string * string) list
+
 type extraction_error
 
 val extraction_error_to_string : extraction_error -> string

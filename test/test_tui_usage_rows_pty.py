@@ -1,13 +1,14 @@
 """Usage coverage remains reachable when a metric row exceeds the viewport."""
 import os
 import sys
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+from tui_keyboard_chat import unwrapped
 
 
 
 
 def run(executable):
-    fixtures = {
+    fixtures: h.HttpFixtures = {
         "/api/v1/dashboard/keeper-costs?window=1440": (200, {
             "cache": {"state": "fresh"}, "generated_at": 1,
             "window_minutes": 1440, "keepers": [{
@@ -16,7 +17,7 @@ def run(executable):
                 "tokens_reported_samples": 9, "tokens_unreported_samples": 2,
                 "tokens_unread_samples": 1, "cost_reported_samples": 8,
                 "cost_unreported_samples": 3, "cost_unread_samples": 1,
-                "metrics_read": {"state": "read", "malformed_rows": 7},
+                "metrics_read": {"state": "read", "malformed_rows": 7, "unread_turn_rows": 0},
             }],
         }),
     }
@@ -31,7 +32,7 @@ def run(executable):
                                       final_cursor=b"\x1b[?25l")
             # Read this resize's completed frame so an earlier, wider screen
             # cannot supply coverage that disappeared at the current width.
-            screen = h.unwrapped(h.screen_text(frame))
+            screen = unwrapped(h.screen_text(frame))
             for evidence in (b"Tokens 9876 \xc2\xb7 9 reported, 3 missing",
                              b"Cost $0.1234 \xc2\xb7 8 reported, 4 missing",
                              b"7 malformed rows"):
@@ -40,9 +41,9 @@ def run(executable):
         # Make the wrapped content exceed the body, then reach its final row.
         h.resize_and_wait(process, master_fd, output, rows=18, columns=60,
                           needle=b"MASC Usage", final_cursor=b"\x1b[?25l")
-        h.send_and_wait(process, master_fd, output, b"j" * 30, b"Transport")
+        h.send_and_wait(process, master_fd, output, b"j" * 30, b"7 malformed rows")
         h.drain_until_quiet(process, master_fd, output)
-        screen = h.unwrapped(h.screen_text(bytes(output)))
+        screen = unwrapped(h.screen_text(bytes(output)))
         if b"7 malformed rows" not in screen:
             raise AssertionError(f"wrapped coverage is unreachable by scrolling: {screen!r}")
         os.write(master_fd, b"q")

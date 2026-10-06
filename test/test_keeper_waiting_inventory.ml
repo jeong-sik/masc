@@ -719,8 +719,12 @@ let test_scoped_confirmations_keep_target_identity () =
   ensure_keeper config other;
   let global = pending_confirm_fixture () in
   let targeted target token =
-    { global with Operator_pending_confirm.target_type = "keeper";
-      target_id = Some target; confirm_token = token } in
+    { global with
+      Operator_pending_confirm.action_type = "keeper_message";
+      Operator_pending_confirm.target_type = "keeper";
+      Operator_pending_confirm.target_id = Some target;
+      Operator_pending_confirm.delegated_tool = "masc_keeper_delegate";
+      confirm_token = token } in
   write_pending_confirms_exn config
     [global; targeted requested "confirm-a"; targeted other "confirm-b";
      targeted "not-registered" "confirm-missing"];
@@ -800,7 +804,12 @@ let test_scoped_schedules_keep_participant_identity () =
   check (list string) "fleet row retains both participants"
     [other; requested]
     U.(cross_wake |> member "detail" |> member "keeper_participants" |> to_list |> List.map to_string);
-  save_text (Filename.concat (Workspace_utils.masc_dir config) "schedules.json") "{broken";
+  let masc_dir = Workspace_utils.masc_dir config in
+  (* RFC-0234: a corrupt primary with a parseable .last-good mirror loads from
+     the mirror on purpose (Loaded + warning, not Corrupt). To pin the
+     read_error surface both copies must be unreadable. *)
+  save_text (Filename.concat masc_dir "schedules.json") "{broken";
+  save_text (Filename.concat masc_dir "schedules.json.last-good") "{broken too";
   let failed = Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name:requested in
   check (list string) "scoped schedule read failure stays visible" ["read_error"]
     (U.(failed |> member "global_waiting_on" |> to_list) |> List.map (json_string_member "source"))

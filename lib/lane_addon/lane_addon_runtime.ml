@@ -510,12 +510,10 @@ type observation_writer = store:Lane_addon_store.t -> instance_id:string -> seq:
 let observation_writer_key : observation_writer Eio.Fiber.key = Eio.Fiber.create_key ()
 let commit_output m e ~sources output =
   let seq = e.seq + 1 in
-  (* The declared observation envelope also bounds the host representation.
-     Check prefix expansion before allocating it: package-controlled relation
-     lists cannot manufacture extra retained capacity. *)
-  let* () =
-    if String.length (Yojson.Safe.to_string (output_to_json output)) <= e.package.resources.max_reply_bytes
-    then Ok () else Error "observation exceeds the package output envelope" in
+  (* The declared observation envelope also bounds the host representation:
+     package-controlled relation lists cannot manufacture extra retained
+     capacity. The allowance is never negative, so this one check also covers
+     the package's own bytes. *)
   let* allowance = namespace_allowance e seq output in
   let* namespaced_bytes = add_output_bytes
     (Int64.of_int (String.length (Yojson.Safe.to_string (output_to_json output)))) allowance in
@@ -1450,7 +1448,7 @@ let enqueue_action ?caller m args =
         let* () = if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then Ok ()
           else Error (Request_rejected "action input exceeds the package message envelope") in
         let* () = runtime_result (Lane_addon_action.validate_schema schema) in
-        let* _ = request_result (Lane_addon_action.validate ~schema ~name arguments) in
+        let* _ = request_result (Lane_addon_action.validate_input ~schema ~name arguments) in
         let receipt : Lane_addon_action.receipt = {instance_id; incarnation; request_id; requester;
           executor = None; input_sha256; action; state = Queued; result = None; detail = None} in
         let* () = runtime_result (save_action_unlocked m receipt) in

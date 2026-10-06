@@ -677,7 +677,7 @@ let exact_slot_body_deadline_gaps_of
   | Runtime_binding_targets ->
     List.concat_map
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         List.filter_map (gap_of lane) lane.slot_ids)
+         if lane.enabled then List.filter_map (gap_of lane) lane.slot_ids else [])
       decls
 ;;
 
@@ -1056,16 +1056,20 @@ let materialize_config
     validate_runtime_references ~dropped_bindings runtimes lanes
       (media_failover_references cfg.media_failover)
   in
-  let* () =
-    validate_runtime_references ~dropped_bindings runtimes lanes
-      (verifier_exact_slot_references cfg.exact_output_lane_decls)
+  let active_exact_output_lanes =
+    List.filter (fun (lane : Runtime_schema.exact_output_lane_decl) -> lane.enabled)
+      cfg.exact_output_lane_decls
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
-      (exact_lane_cli_slot_references cfg.exact_output_lane_decls)
+      (verifier_exact_slot_references active_exact_output_lanes)
   in
   let* () =
-    validate_exact_lane_cli_slots ~runtimes cfg.exact_output_lane_decls
+    validate_runtime_references ~dropped_bindings runtimes lanes
+      (exact_lane_cli_slot_references active_exact_output_lanes)
+  in
+  let* () =
+    validate_exact_lane_cli_slots ~runtimes active_exact_output_lanes
   in
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
@@ -1800,7 +1804,7 @@ let verifier_exact_lane_resolution () =
                     selected_slots))))
 ;;
 
-let verifier_exact_lane_slot_ids () =
+let verifier_exact_lane_slots () =
   Result.bind (verifier_exact_lane_resolution ()) (fun lane ->
     match
       lane.admitted_catalog_slot_ids @ lane.admitted_cli_slot_ids, lane.slot_rejections
@@ -1813,14 +1817,16 @@ let verifier_exact_lane_slot_ids () =
         (Printf.sprintf
            "verifier_exact has no slot that can judge: %s"
            (String.concat "; " (List.map verifier_slot_rejection_to_string rejections)))
-    | (_ :: _ as slot_ids), _ -> Ok slot_ids)
+    | _ :: _, _ ->
+      Ok (List.map (fun id -> id, Types_core.Catalog_slot) lane.admitted_catalog_slot_ids
+          @ List.map (fun id -> id, Types_core.Cli_slot) lane.admitted_cli_slot_ids))
 ;;
 
 (* [Ok] carries the declared slots this lane cannot judge through, so a caller
    that reports readiness can also say why the lane is short of the
    declaration. An empty list means the whole declaration is usable.
 
-   Readiness and {!verifier_exact_lane_slot_ids} now answer from one
+   Readiness and {!verifier_exact_lane_slots} now answer from one
    admission. They used to disagree — readiness applied a second, stricter
    predicate to catalog slots — and that disagreement is what let the
    completion authority start on a lane that refused every review. *)
@@ -1870,17 +1876,13 @@ let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
 ;;
 
-let verifier_exact_slot_admission ~runtime_id =
-  let direct () = match get_runtime_by_id runtime_id with
-    | Some runtime -> verifier_runtime_admission runtime
-    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
-  match Runtime_exact_output_registry.current () with
-  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
-  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
-  | Ok registry ->
-    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Verifier) with
-     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
-     | Ok _ | Error _ -> direct ())
+let verifier_exact_slot_admission ~candidate_kind ~runtime_id =
+  match candidate_kind with
+  | Types_core.Cli_slot -> verifier_cli_slot_admission ~runtime_id
+  | Types_core.Catalog_slot | Types_core.Explicit_runtime ->
+    (match get_runtime_by_id runtime_id with
+     | Some runtime -> verifier_runtime_admission runtime
+     | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime"))
 ;;
 
 let is_local_runtime_id (id : string) : bool option =
@@ -2767,6 +2769,8 @@ let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
       "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
       feature
       lane_id
+  | Error (Runtime_exact_output_registry.Exact_lane_off _) ->
+    Log.Server.info "exact_output: lane %S is off; its candidate configuration is retained" lane_id
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Log.Server.warn
       "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"

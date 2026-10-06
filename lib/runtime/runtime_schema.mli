@@ -348,6 +348,10 @@ type lane_decl =
 
 type exact_output_lane_decl =
   { id : string
+  ; enabled : bool
+        (** Whether new work may acquire this lane. Omitting [enabled] in TOML
+            means true. False preserves its candidates and request settings;
+            already acquired immutable run snapshots are unaffected. *)
   ; slot_ids : string list
   ; cli_slot_ids : string list
         (** [cli_slots] — official-client runtime ids walked as one-shot
@@ -364,7 +368,7 @@ type exact_output_lane_decl =
   ; thinking : bool option
         (** [thinking] — [Some flag] sends [enable_thinking = flag] on every
             HTTP slot of the lane. [None] leaves each slot's catalog default
-            (the model's [thinking-support]). Every slot of the lane must be
+            (the model's [thinking-support]). Every slot of an enabled lane must be
             able to carry the setting; registry publication refuses the lane
             and names the slot otherwise ([Lane_thinking_not_encodable]). *)
   }

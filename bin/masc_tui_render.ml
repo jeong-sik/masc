@@ -3147,6 +3147,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      for exactly that reason. The obligation is in the words. *)
   let state_style =
     match lane.sl_configuration_state with
+    | Tui_decode.Lane_off -> Theme.recede ()
     | Tui_decode.Lane_ready -> Ansi.reset
     | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
     | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
@@ -3171,6 +3172,8 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   let activity =
     let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
     match lane.sl_status, lane.sl_last_started_at with
+    | Tui_decode.Standalone_off, _ ->
+        Printf.sprintf "Activity: off · %d accepted runs finishing" lane.sl_running_count
     | Tui_decode.Standalone_running, Some started ->
         Printf.sprintf "Activity: %d running · latest started %s ago"
           lane.sl_running_count (Masc_tui_answering.elapsed_text ~now started)

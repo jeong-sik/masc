@@ -12,6 +12,7 @@ type lane_configuration =
           (** [cli_slots] in source order, including any client admission rejected. *)
       ; admission_error : string option
       }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
   | Unconfigured of string
   | Registry_unavailable of string
 
@@ -462,7 +463,7 @@ let jev_lane_readiness configuration = function
      | Configured { admitted_slots = _ :: _; _ } -> Jev_configured { destinations }
      | Configured { admitted_slots = []; cli_slots = _ :: _; _ } -> Jev_cli_only
      | Configured { admitted_slots = []; cli_slots = []; _ }
-     | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
+     | Disabled _ | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
 ;;
 
 let jev_readiness_json = function
@@ -714,12 +715,15 @@ let lane_json
        then "degraded" else "ready"),
       (admitted_slots, cli_slots, dropped_slots, declared_slots, declared_cli_slots),
       admission_error
+    | Disabled { declared_slots; declared_cli_slots } ->
+      Some true, "off", ([], [], [], declared_slots, declared_cli_slots), None
     | Unconfigured error -> Some false, "unconfigured", ([], [], [], [], []), Some error
     | Registry_unavailable error -> None, "unavailable", ([], [], [], [], []), Some error
   in
   let admitted_slots, cli_slots, dropped_slots, declared_slots, declared_cli_slots = admitted_slots in
   let status =
     match configuration with
+    | Disabled _ -> "off"
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
     | Configured { admitted_slots = []; cli_slots = []; _ } -> "degraded"
     (* A lane that could not admit is not healthy while it runs, and this word
@@ -939,6 +943,8 @@ let live_lane_configuration registry lane_id =
                      (List.map Runtime.verifier_slot_rejection_to_string rejections)))
            | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ -> None))
       }
+  | Error (Runtime_exact_output_registry.Exact_lane_off _) ->
+    Disabled { declared_slots; declared_cli_slots }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured
       (Runtime_exact_output_registry.lane_resolution_error_to_string

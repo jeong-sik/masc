@@ -1238,7 +1238,7 @@
  (deps
   ../config/runtime.toml
   (source_tree ../scripts/fixtures))
- (libraries masc_test_deps exact_output_fixture))
+ (libraries masc_test_deps exact_output_fixture masc.toml_line_editor))
 
 (test
  (name test_tui_config_pane_title_head)
@@ -1888,8 +1888,9 @@
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
-  test_board_core_payload)
+ test_board_core_payload)
  (libraries
+  masc.toml_line_editor
   masc.browser_lane
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline

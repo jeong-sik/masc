@@ -20,6 +20,7 @@ let declaration_summary = function
   | Absent -> "declaration absent"
   | Unobserved -> "declaration not observed"
 let row_summary (row : row) = match row.state with
+  | Exact_state (Disabled _) -> "off; candidates retained"
   | Exact_state (Unconfigured _) -> "unconfigured"
   | Exact_state (Registry_unavailable _) -> "registry unavailable"
   | Exact_state (Configured c) ->
@@ -56,6 +57,10 @@ let detail_lines (row : row) =
      | Declaration path -> ["TOML: " ^ path]
      | Manual_instance _ -> ["No declaration file; this is a manual attachment."])
   @ (match row.state with
+     | Exact_state (Disabled c) ->
+         ["New work is off; accepted runs finish with their acquired candidates.";
+          "Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
+          "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
      | Exact_state (Configured c) ->
          ["Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
           "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
@@ -105,6 +110,7 @@ let row_summary_in (snapshot : snapshot) (row : row) =
        | None -> admission
        | Some lane ->
            let observation = match lane.sl_status with
+             | Masc.Tui_decode.Standalone_off -> Printf.sprintf "off · %d finishing" lane.sl_running_count
              | Masc.Tui_decode.Standalone_running -> Printf.sprintf "%d running" lane.sl_running_count
              | Standalone_idle -> "idle"
              | Standalone_degraded -> "needs attention"

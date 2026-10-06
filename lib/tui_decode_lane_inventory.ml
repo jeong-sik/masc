@@ -11,6 +11,7 @@ type configuration =
       declared_slots : string list; declared_cli_slots : string list;
       dropped_slots : string list; admission_error : string option;
     }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
   | Unconfigured of string
   | Registry_unavailable of string
 
@@ -104,6 +105,11 @@ let selection json =
 let configuration json =
   let* tag = kind json in
   match tag with
+  | "off" ->
+      let* f = fields ["kind";"declared_slots";"declared_cli_slots"] json in
+      let* declared_slots = get (list nonblank) "declared_slots" f in
+      let* declared_cli_slots = get (list nonblank) "declared_cli_slots" f in
+      Ok (Disabled { declared_slots; declared_cli_slots })
   | "configured" ->
       let* f = fields ["kind";"admitted_slots";"cli_slots";"declared_slots";"declared_cli_slots";"dropped_slots";"admission_error"] json in
       let* admitted_slots = get (list nonblank) "admitted_slots" f in
@@ -196,6 +202,11 @@ let exact_matches snapshot (row : row) = match row.selection,row.state with
        | None -> false
        | Some item ->
            match configuration with
+           | Disabled c -> item.sl_configuration_state=Tui_decode.Lane_off
+               && item.sl_status=Tui_decode.Standalone_off
+               && item.sl_declared_slots=c.declared_slots && item.sl_declared_cli_slots=c.declared_cli_slots
+               && item.sl_admitted_slots=[] && item.sl_cli_slots=[] && item.sl_dropped_slots=[]
+               && item.sl_admission_error=None
            | Unconfigured detail -> item.sl_configuration_state=Tui_decode.Lane_unconfigured
                && item.sl_admission_error=Some detail
            | Registry_unavailable detail -> item.sl_configuration_state=Tui_decode.Lane_registry_unavailable

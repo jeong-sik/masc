@@ -1,0 +1,61 @@
+{
+  "head": "758d8d672e90056c61ad07db996c2cf70b692797",
+  "parent_integration": "pending; no new parent merged",
+  "red": {
+    "admission_handle": 42565,
+    "admission_exit": 1,
+    "optional_account_handle": 95406,
+    "optional_account_exit": 1
+  },
+  "final": {
+    "build_handle": 80167,
+    "build_exit": 0,
+    "config_handle": 35413,
+    "config_exit": 0,
+    "config_tests": 147,
+    "account_execution": "exec completed directly",
+    "account_exit": 0,
+    "account_tests": 8
+  },
+  "commands": [
+    "opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_runtime_config_validity.exe test/test_runtime_account_removal.exe",
+    "_build/default/test/test_runtime_config_validity.exe",
+    "_build/default/test/test_runtime_account_removal.exe"
+  ],
+  "logs": {
+    "admission-red.log": {
+      "source": "/tmp/pr41162-off-admission-red.log",
+      "sha256": "16a53d97f0eb85ee002ea6e6258cd2a26c164cab9d30153f32608d6f72783eba"
+    },
+    "optional-account-red.log": {
+      "source": "/tmp/pr41162-off-account-optional-red.log",
+      "sha256": "fffe15bd5b67e5b618903ba18cf0c70786abdb8fe6608d2e8a7325b106a6b814"
+    },
+    "excluded-required-fixture.log": {
+      "source": "/tmp/pr41162-off-account-red.log",
+      "sha256": "0aea355054f54f93bfeb3bc8418c32c102a527b87aa7b2fe310fa33b321bede6"
+    },
+    "build.log": {
+      "source": "/tmp/pr41162-off-final-build.log",
+      "sha256": "182efedd146f501256b25c64f692242cacac3cf8b088a86dc4953fa9a2bd5237"
+    },
+    "config-green.log": {
+      "source": "/tmp/pr41162-off-final-config.log",
+      "sha256": "bb1e104b6769aa1229aed5a3be91d8a1db48520458cae826d2a3e2cbf05fb515"
+    },
+    "account-green.log": {
+      "source": "/tmp/pr41162-off-final-account.log",
+      "sha256": "53d74394fcb28a4ae72237cf370b987bdfe8e73d9cc7276887155b186558196f"
+    }
+  },
+  "source_sha256": {
+    "lib/runtime/runtime_exact_output_registry.ml": "22d438f0f501a8d585e820f9f8bd0e70a740469aa6c3f0393b9b730668e2bef3",
+    "lib/runtime/runtime_account_removal.ml": "6bc2c335f0a7854733d3263fc8f0a5360d11f642b59f04fd7b0d51ee8e6f59db",
+    "test/test_runtime_config_validity.ml": "ae35b516c3117acccdb51efba90c239086e97449d919199b8c8b4e4734eaf1d9",
+    "test/test_runtime_account_removal.ml": "d9660e5fb12719d7d6088a73de36f1f72ceee0aec164609a6fd7fd4dc44cbca7"
+  },
+  "binaries": {
+    "_build/default/test/test_runtime_config_validity.exe": "8b790c0fd0ba9562a1d5cf9be1c1b05007e30b147565cc25d0889e81570de6d3",
+    "_build/default/test/test_runtime_account_removal.exe": "48be4e478e24bef14a5ab74a1b348af7aefd313cca7188fe4f3fc4bdd69e2a44"
+  }
+}

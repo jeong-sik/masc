@@ -8,6 +8,8 @@ status: reference
 
 For Dashboard editing, draft retention, revision conflicts and workspace changes,
 see [runtime.toml drafts](../guides/runtime-toml-drafts.md).
+For configuration-preserving Exact Lane activity and its Required/Optional
+boundary, see [Exact Lane activity](../guides/exact-lane-activity.md).
 
 ## 1. SSOT and path boundary
 

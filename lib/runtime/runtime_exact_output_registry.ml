@@ -9,6 +9,7 @@ type admitted_slot =
 
 type admitted_lane =
   { id : string
+  ; enabled : bool
   ; slots : admitted_slot list
   ; cli_slots : string list
     (* Official-client runtime ids walked as one-shot fallbacks after every
@@ -108,6 +109,7 @@ type publication_error =
       ; rejection : Llm_provider.Complete_common.thinking_control_request_rejection
       }
   | Required_lane_unavailable of { lane_id : string }
+  | Required_lane_disabled of { lane_id : string }
   | Resolver_snapshot_rejected of Exact_output.resolver_snapshot_error
 
 type selected_slot =
@@ -123,6 +125,7 @@ type resolved_lane =
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
+  | Exact_lane_off of { lane_id : string }
   | No_admitted_lane_slots of { lane_id : string }
 
 type prepared_replacement =
@@ -229,6 +232,13 @@ let admit_lane_slots resolver_snapshot admitted_by_id
       then Error (Blank_lane_slot { lane_id = lane.id; position })
       else if String_set.mem slot_id seen
       then Error (Duplicate_lane_slot { lane_id = lane.id; position; slot_id })
+      else if not lane.enabled then
+        (match Exact_output.admit_target_ref resolver_snapshot slot_id with
+         | Error (Exact_output.Target_ref_rejected cause) ->
+             Error (Invalid_lane_slot {lane_id=lane.id;position;slot_id;cause})
+         | Ok _ | Error (Exact_output.Target_not_in_catalog _) ->
+             loop (position + 1) (String_set.add slot_id seen) admitted_by_id
+               admitted_slots rejected_slots rest)
       else
         let admitted = String_map.find_opt slot_id admitted_by_id in
         (match admitted with
@@ -264,7 +274,7 @@ let admit_lane_slots resolver_snapshot admitted_by_id
                 rest))
   in
   match lane.slot_ids, lane.cli_slot_ids with
-  | [], [] -> Error (Empty_lane { lane_id = lane.id })
+  | [], [] when lane.enabled -> Error (Empty_lane { lane_id = lane.id })
   | slot_ids, _ -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
 ;;
 
@@ -312,12 +322,13 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
         let* slots, admitted_by_id, lane_rejected_slots =
           admit_lane_slots resolver_snapshot admitted_by_id lane
         in
-        let* () = validate_lane_thinking lane slots in
+        let* () = if lane.enabled then validate_lane_thinking lane slots else Ok () in
         loop
           (position + 1)
           (String_set.add lane.id seen)
           admitted_by_id
           ({ id = lane.id
+           ; enabled = lane.enabled
            ; slots
            ; cli_slots = lane.cli_slot_ids
            ; max_output_tokens = lane.max_output_tokens
@@ -365,6 +376,12 @@ let required_less_excused required_lane_ids ~excused_lane_ids =
 (* [publish]'s admission, which changes nothing: the lanes a publication would
    admit and the slots it would reject, or the error that refuses it. *)
 let admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot =
+  let* () =
+    match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+      not lane.enabled && List.mem lane.id required_lane_ids) lanes with
+    | Some lane -> Error (Required_lane_disabled { lane_id = lane.id })
+    | None -> Ok ()
+  in
   let* exact_output_lanes, rejected_slots =
     admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
   in
@@ -446,12 +463,8 @@ let prepare_replacement ~runtime_observations ~lanes ~excused_lane_ids ~load_res
       |> Result.map_error (fun error -> Resolver_snapshot_rejected error)
     in
     let* exact_output_lanes, rejected_slots =
-      admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
-    in
-    let* () =
-      validate_required_lanes
-        (required_less_excused previous.required_lane_ids ~excused_lane_ids)
-        exact_output_lanes
+      admit_publication ~required_lane_ids:previous.required_lane_ids
+        ~excused_lane_ids ~lanes resolver_snapshot
     in
     Ok
       { base
@@ -601,6 +614,7 @@ let resolve_lane registry ~lane_id =
       registry.exact_output_lanes
   with
   | None -> Error (Exact_lane_unconfigured { lane_id })
+  | Some { enabled = false; _ } -> Error (Exact_lane_off { lane_id })
   | Some lane ->
     (* A lane is empty only when it has NOTHING to run: cli fallbacks keep a
        lane alive even when every catalog slot was dropped (and a cli-only
@@ -740,6 +754,8 @@ let publication_error_to_string = function
       thinking
       slot_id
       detail
+  | Required_lane_disabled { lane_id } ->
+    Printf.sprintf "required exact-output lane %S cannot be disabled" lane_id
   | Required_lane_unavailable { lane_id } ->
     Printf.sprintf
       "required exact-output lane %S has no admitted target in the frozen catalog"
@@ -749,6 +765,8 @@ let publication_error_to_string = function
 ;;
 
 let lane_resolution_error_to_string = function
+  | Exact_lane_off { lane_id } ->
+    Printf.sprintf "exact-output lane %S is off; set runtime.exact_output_lanes.%s.enabled = true to accept new work" lane_id lane_id
   | Exact_lane_unconfigured { lane_id } ->
     Printf.sprintf "exact-output lane %S is not configured" lane_id
   | No_admitted_lane_slots { lane_id } ->

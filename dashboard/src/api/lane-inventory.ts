@@ -6,6 +6,7 @@ const text = Schema.NonEmptyString
 const texts = Schema.Array(text)
 const count = Schema.Int.pipe(Schema.nonNegative())
 const configuration = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('off'), declared_slots: texts, declared_cli_slots: texts }),
   Schema.Struct({ kind: Schema.Literal('configured'), admitted_slots: texts, cli_slots: texts,
     declared_slots: texts, declared_cli_slots: texts, dropped_slots: texts, admission_error: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('unconfigured', 'unavailable'), detail: Schema.String }),
@@ -67,14 +68,27 @@ export function parseLaneInventory(raw: unknown) {
       const config = item.state.configuration
       const same = (left: readonly string[], right: readonly string[]) =>
         left.length === right.length && left.every((value, index) => value === right[index])
-      if (!observed || (config.kind === 'configured'
-        ? observed.configured !== true || observed.configurationState !==
-            (config.admission_error !== null || config.admitted_slots.length + config.cli_slots.length === 0 ? 'degraded' : 'ready')
-          || !same(config.admitted_slots, observed.admittedSlots)
-          || !same(config.cli_slots, observed.cliSlots) || !same(config.declared_slots, observed.declaredSlots)
-          || !same(config.declared_cli_slots, observed.declaredCliSlots) || !same(config.dropped_slots, observed.droppedSlots)
-          || config.admission_error !== observed.admissionError
-        : config.kind !== observed.configurationState || config.detail !== observed.admissionError)) {
+      let agrees = false
+      if (observed) {
+        switch (config.kind) {
+          case 'configured':
+            agrees = observed.configured === true && observed.configurationState ===
+              (config.admission_error !== null || config.admitted_slots.length + config.cli_slots.length === 0 ? 'degraded' : 'ready')
+              && same(config.admitted_slots, observed.admittedSlots) && same(config.cli_slots, observed.cliSlots)
+              && same(config.declared_slots, observed.declaredSlots) && same(config.declared_cli_slots, observed.declaredCliSlots)
+              && same(config.dropped_slots, observed.droppedSlots) && config.admission_error === observed.admissionError
+            break
+          case 'off':
+            agrees = observed.configurationState === 'off'
+              && same(config.declared_slots, observed.declaredSlots) && same(config.declared_cli_slots, observed.declaredCliSlots)
+            break
+          case 'unconfigured':
+          case 'unavailable':
+            agrees = config.kind === observed.configurationState && config.detail === observed.admissionError
+            break
+        }
+      }
+      if (!agrees) {
         throw new Error('Lane inventory exact reading disagrees with configuration')
       }
     }

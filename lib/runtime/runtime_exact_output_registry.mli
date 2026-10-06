@@ -35,6 +35,7 @@ type publication_error =
       (** The lane declares [thinking] and this admitted slot's model cannot
           carry it, so every request on the slot would be refused. *)
   | Required_lane_unavailable of { lane_id : string }
+  | Required_lane_disabled of { lane_id : string }
   | Resolver_snapshot_rejected of Agent_core.Exact_output.resolver_snapshot_error
       (** The resolver snapshot for a replacement could not be built from the
           text being committed. *)
@@ -106,6 +107,7 @@ type resolved_lane =
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
+  | Exact_lane_off of { lane_id : string }
   | No_admitted_lane_slots of { lane_id : string }
 
 val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
@@ -140,6 +142,10 @@ val publish
     unless it is in [excused_lane_ids] (a lane rule 3 emptied): that lane is
     unavailable alone. The registry keeps [required_lane_ids] whole, so a
     replacement requires an excused lane again unless it excuses it too.
+    Disabled declarations retain their candidates and may be empty. Blank
+    and duplicate candidates are still rejected; live target and thinking
+    capability admission apply only when enabled. A required lane cannot be disabled,
+    even through [excused_lane_ids].
     Returns [Publication_busy] while a replacement reservation is active. *)
 
 val check_publication
@@ -247,7 +253,9 @@ val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error)
 (** Acquire one lane exclusively from the immutable admitted handles retained
     by the supplied registry. This does not resolve credentials or
     select provider targets; AGENT_CORE owns those operations while executing the
-    exact flow. Slot declaration order is preserved. *)
+    exact flow. Slot declaration order is preserved. [Exact_lane_off] refuses
+    new acquisitions from a disabled declaration. Earlier registry and run
+    snapshots remain valid until their existing work finishes. *)
 
 val catalog_generation_fingerprint : t -> string
 (** Opaque identity of the frozen catalog generation. This exposes neither

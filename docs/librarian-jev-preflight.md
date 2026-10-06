@@ -1,7 +1,7 @@
 # Librarian JEV no-change preflight
 
-The Librarian's Memory-only pass can ask JEV whether the exact supplied
-memory-selection request warrants any change. Explicit opt-in in the loaded
+The Librarian's Memory-only pass can ask JEV whether the pass's new evidence
+carries anything Memory must process. Explicit opt-in in the loaded
 runtime.toml enables it:
 
 ```toml
@@ -11,8 +11,24 @@ librarian_preflight = true
 
 The declared lane, destinations, credentials and Keeper exclusions still
 apply. The setting defaults to false. It sends the rendered memory-selection
-request to the configured destination; the existing Board opt-in does not
-enable this input path.
+request, with the current Memory facts left out, to the configured
+destination; the existing Board opt-in does not enable this input path.
+
+JEV reads the same `librarian` template the generating Librarian reads,
+rendered with the same variables (`Keeper_librarian_runtime.preflight_prompt_variables`)
+except `current_memory`, which says the facts are not included. The request
+keeps the Keeper instructions, the conversation, counterpart and tool
+observations, the task and goal contexts and the selection rules. Without the
+facts it stays within JEV's input limit whatever the Keeper's Memory size:
+recorded requests were 30 KB at the median and 50 KB at most, where the whole
+prompt reached 482 KB and JEV refused it from about 115 KB.
+
+The question is therefore about the new evidence alone. Evidence that repeats
+a current memory, corrects it or completes an obligation it records is
+`needs_generation`; comparing it with the facts is the generating
+Librarian's work. A pass whose evidence carries nothing for Memory is
+`keep_current` even when the full lane would have consolidated existing
+facts; that consolidation waits for the next pass that generates.
 
 Only a `Memory_pass None` whose prompt shows no working context is eligible:
 no pending source and no unavailable source
@@ -57,6 +73,22 @@ received client evidence provides model and request hash. Existing client
 failure observations can contain provider response bodies.
 
 ## Verification and measurement
+
+`masc_librarian_preflight_replay` (not installed) sends recorded Librarian
+runs whose preflight reached JEV through the current request builder and
+writes one private report. It reads `exact-lane-run-payloads` only; it
+registers no run, consumes no range and writes no Memory:
+
+```sh
+_build/default/bin/masc_librarian_preflight_replay.exe \
+  --payloads ~/.masc/exact-lane-run-payloads \
+  --output /path/to/new-private-report.json \
+  --config /path/to/runtime.toml \
+  --prompt-dir config/prompts
+```
+
+The report keeps request sizes and hashes and each observation, not the
+requests; `--limit N` replays the first N runs.
 
 The TUI's Librarian run detail first shows the recorded generation path and
 snapshot result in a full-width reading, then the JEV decision. `d` expands the

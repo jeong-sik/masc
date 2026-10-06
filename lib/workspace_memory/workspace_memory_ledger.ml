@@ -335,7 +335,8 @@ let digest_line (claim_id, claim) =
     | Some cut -> String.sub claim_id 0 cut in
   let id = String_util.utf8_prefix ~max_bytes:digest_id_max_bytes id_text in
   let id_marked =
-    if String.length id < String.length id_text then id ^ "…" else id in
+    if String.length id < String.length id_text
+       || String.length id_text < String.length claim_id then id ^ "…" else id in
   let first_line = match String.index_opt claim '\n' with
     | None -> claim
     | Some cut -> String.sub claim 0 cut in

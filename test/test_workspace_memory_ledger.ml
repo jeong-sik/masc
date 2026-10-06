@@ -187,8 +187,12 @@ let test_observe_digest_is_bounded_and_first_line_only () =
 let test_observe_digest_binds_a_hostile_claim_id () =
   let base_path = Filename.temp_dir "workspace-ledger-hostile-id" "" in
   let huge_id = "c-huge" ^ String.make 9000 'A' in
+  let newline_first_id = "\n둘째 줄부터 시작하는 id" in
+  let claims = [ huge_id, "단일 주장"; newline_first_id, "둘째 주장" ] in
   let ledger =
-    decode (ledger_json ~claims:[huge_id, "단일 주장"] [ordinary_ref "writer" "단일 주장", claim_member huge_id]) in
+    decode (ledger_json ~claims
+              [ ordinary_ref "writer" "단일 주장", claim_member huge_id
+              ; ordinary_ref "writer" "둘째 주장", claim_member newline_first_id ]) in
   (match Ledger.save ~base_path ledger with Ok () -> () | Error detail -> Alcotest.fail detail);
   match Ledger.observe ~base_path with
   | Ledger.Available row ->
@@ -196,8 +200,10 @@ let test_observe_digest_binds_a_hostile_claim_id () =
     Alcotest.(check bool) "the codec accepted the ledger, so the budget must still hold"
       (String.length joined <= Ledger.digest_budget_bytes) true;
     Alcotest.(check bool) "an oversized id is cut and marked, not carried whole"
-      (String.ends_with ~suffix:"…: 단일 주장" joined) true;
-    Alcotest.(check bool) "one claim fits, so nothing was left out"
+      (String.ends_with ~suffix:"…: 단일 주장" (List.nth row.claims_digest 1)) true;
+    Alcotest.(check bool) "an id whose first line is empty is dropped, and the row says so"
+      (String.starts_with ~prefix:"- …: 둘째 주장" (List.nth row.claims_digest 0)) true;
+    Alcotest.(check bool) "both claims fit, so nothing was left out"
       row.claims_digest_truncated false
   | Ledger.Missing -> Alcotest.fail "saved ledger observed as missing"
   | Ledger.Unavailable detail -> Alcotest.fail ("saved ledger observed as unavailable: " ^ detail)

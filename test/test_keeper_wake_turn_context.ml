@@ -770,10 +770,10 @@ let test_direct_turn_discovers_published_workspace_memory () =
 
 let test_workspace_memory_observation_carries_the_claims_digest () =
   let module Ledger = Masc.Workspace_memory_ledger in
-  let observation ?(truncated = false) () =
+  let observation ?(claim_count = 2) ?(truncated = false) () =
     Ledger.Available
       { ledger_sha256 = "digest-sha"
-      ; claim_count = 2
+      ; claim_count
       ; conflict_count = 0
       ; classified_count = 2
       ; claims_digest = [ "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장" ]
@@ -784,10 +784,12 @@ let test_workspace_memory_observation_carries_the_claims_digest () =
     (contains ~needle shared))
     [ "digest-sha"; "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장";
       "each of the 2 shared claims"; "keeper_workspace_memory_read" ];
+  (* Two digest rows against three claims is the shape observe produces when
+     the budget stops the walk: the note must state that reachable slice. *)
   let truncated =
-    Prompt.format_workspace_memory_observation (observation ~truncated:true ()) |> Option.get in
+    Prompt.format_workspace_memory_observation (observation ~claim_count:3 ~truncated:true ()) |> Option.get in
   check bool "a truncated digest says which slice it holds" true
-    (contains ~needle:"the digest shows the first 2 of 2 claims in id order" truncated);
+    (contains ~needle:"the digest shows the first 2 of 3 claims in id order" truncated);
   let none_yet =
     Prompt.format_workspace_memory_observation
       (Ledger.Available

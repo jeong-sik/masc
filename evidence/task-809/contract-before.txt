@@ -1,0 +1,67 @@
+
+==================== D. masc_status BEFORE fix (lib at 4f7400f1, parent of 06507a6e) ====================
+[healthy] is_success=true
+[healthy] degraded=false
+[healthy] backlog_authority=primary
+[healthy] observation_failures=[]
+[healthy] failure_class=none
+
+healthy snapshot:
+🏢 Cluster: default
+Project: task809-evidence-1791246840-69754
+📍 Workspace: root
+📁 Path: /tmp/task809-evidence-1791246840-69754
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Snapshot: agents=1 | tasks active=0 todo=0 claimed=0 in_progress=0 | messages=1
+🧭 You: agent=demo-agent-neat-shark | bound=yes | owned=- | current=-
+🔎 Task binding: assigned_set=[] | primary_owned=- | planning_current=- | current_is_assigned=no | effective_current=- | drift_reason=- | claim_first_suppressed=no
+Credential: required=yes | available=no | candidates=demo-agent,demo-agent-neat-shark
+
+Attention:
+  - Lifecycle actions are credential-blocked for demo-agent/demo-agent-neat-shark.
+Players:
+  🟢 demo-agent-neat-shark (you) -> active
+
+Quest Board:
+  (no active tasks)
+  Summary: active=0, done=0, cancelled=0, total=0
+
+Messages: 1 (cumulative)
+
+[broken] is_success=true
+[broken] degraded=false
+[broken] backlog_authority=primary
+[broken] observation_failures=[]
+[broken] failure_class=none
+
+broken snapshot:
+🏢 Cluster: default
+Project: task809-evidence-1791246840-69754
+📍 Workspace: root
+📁 Path: /tmp/task809-evidence-1791246840-69754
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Snapshot: agents=1 | tasks active=0 todo=0 claimed=0 in_progress=0 | messages=1
+🧭 You: agent=demo-agent | bound=no | owned=- | current=-
+🔎 Task binding: assigned_set=[] | primary_owned=- | planning_current=- | current_is_assigned=no | effective_current=- | drift_reason=- | claim_first_suppressed=no
+Credential: required=yes | available=no | candidates=demo-agent
+
+Attention:
+  - Your agent session is not bound.
+  - Lifecycle actions are credential-blocked for demo-agent.
+Players:
+  🟢 demo-agent-neat-shark -> active
+
+Quest Board:
+  (no active tasks)
+  Summary: active=0, done=0, cancelled=0, total=0
+
+Messages: 1 (cumulative)
+
+[check] is_failed=false
+[check] failure_class=none
+
+check message:
+{"assertions":[{"assertion":"task_claimed","passed":false}],"all_passed":false}
+

@@ -1,0 +1,18 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><title>masc status degraded #41252</title><style>body{background:#14171c;color:#d6d9de;font:13px/1.5 Menlo,Consolas,monospace;margin:0;padding:20px 24px}h1{font-size:13px;color:#9aa4b2;font-weight:600;margin:0 0 10px}pre{margin:0;white-space:pre}</style><h1>masc status - degraded observation (after fix 06507a6e, agents dir broken) - verbatim block from contract-after.txt ([broken] is_success .. Credential) - PR #41252 / issue #26656</h1><pre>[broken] is_success=true
+[broken] degraded=true
+[broken] backlog_authority=primary
+[broken] observation_failures=[&quot;session binding read for demo-agent: Sys_error(\&quot;/tmp/task809-evidence-1791246678-69754/.masc/agents: Not a directory\&quot;)&quot;]
+[broken] failure_class=none
+
+broken snapshot:
+⚠ Observation incomplete — session binding read for demo-agent: Sys_error(&quot;/tmp/task809-evidence-1791246678-69754/.masc/agents: Not a directory&quot;). The status below is missing whatever those reads would have carried.
+🏢 Cluster: default
+Project: task809-evidence-1791246678-69754
+📍 Workspace: root
+📁 Path: /tmp/task809-evidence-1791246678-69754
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Snapshot: agents=1 | tasks active=0 todo=0 claimed=0 in_progress=0 | messages=1
+🧭 You: agent=demo-agent | bound=no | owned=- | current=-
+🔎 Task binding: assigned_set=[] | primary_owned=- | planning_current=- | current_is_assigned=no | effective_current=- | drift_reason=- | claim_first_suppressed=no
+Credential: required=yes | available=no | candidates=demo-agent</pre></html>

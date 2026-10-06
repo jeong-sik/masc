@@ -1,0 +1,104 @@
+Testing `Tool_workspace'.
+This run has ID `UY2PKQ3K'.
+
+  [OK]          coverage          0   dispatch_unknown_tool.
+  [OK]          coverage          1   dispatch_init.
+  [OK]          coverage          2   dispatch_status.
+  [OK]          coverage          3   dispatch_status_refuses an uninitialize...
+  [OK]          coverage          4   dispatch_status_revision_covers_rendere...
+  [OK]          coverage          5   dispatch_status_observes_recovered_back...
+  [OK]          coverage          6   dispatch_status_reports_backlog_read_fa...
+> [FAIL]        coverage          7   dispatch_status_names_non_backlog_obser...
+  [FAIL]        coverage          8   dispatch_check_refuses_when_state_reads...
+  [OK]          coverage          9   dispatch_status_hides_stale_current_tas...
+  [OK]          coverage         10   workspace_status_hides_stale_current_ta...
+  [OK]          coverage         11   dispatch_status_includes_runtime_agents...
+  [OK]          coverage         12   dispatch_status_summary_and_cap.
+  [OK]          coverage         13   dispatch_status_done_summary.
+  [OK]          coverage         14   dispatch_status_leaves_unlinked_task_un...
+  [OK]          coverage         15   dispatch_status_surfaces_task_goal_link.
+  [OK]          coverage         16   dispatch_status_surfaces_awaiting_verif...
+  [OK]          coverage         17   dispatch_status_hides_completed_stale_a...
+  [OK]          coverage         18   dispatch_status_players_prefer_live_boa...
+  [OK]          coverage         19   dispatch_removed_named_workspace_tools.
+  [OK]          coverage         20   dispatch_check_transition_claim_auto_bi...
+  [OK]          coverage         21   dispatch_check_claim_next_marks_current...
+  [OK]          coverage         22   dispatch_status_multi_assignment_curren...
+  [OK]          coverage         23   dispatch_check_owned_current_drift_fail...
+  [OK]          coverage         24   dispatch_status_surfaces_owned_current_...
+  [OK]          coverage         25   dispatch_status_suppresses_lifecycle_gu...
+  [OK]          coverage         26   dispatch_status_treats_registered_keepe...
+  [OK]          coverage         27   dispatch_status_no_owned_reports_drift_...
+  [OK]          coverage         28   get_string_present.
+  [OK]          coverage         29   get_string_missing.
+  [OK]          coverage         30   get_bool_true.
+  [OK]          coverage         31   get_bool_false.
+  [OK]          coverage         32   get_bool_missing.
+  [OK]          coverage         33   next_hint_todo lists claim and cancel, ...
+  [OK]          coverage         34   next_hint_claimed lists submit, start, ...
+  [OK]          coverage         35   next_hint_in_progress lists submit and ...
+  [OK]          coverage         36   next_hint_awaiting_verification offers ...
+  [OK]          coverage         37   next_hint_done is empty (terminal).
+  [OK]          coverage         38   next_hint_cancelled is empty (terminal).
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        coverage          7   dispatch_status_names_non_backlog_ob...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-06 01:39:33] [INFO] [Workspace] MASC base: /tmp/masc-workspace-test-1791247173232-8 (no git root found)
+[2026-10-06 01:39:33] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/masc-workspace-test-1791247173232-8 for test executable test_tool_workspace_coverage.exe
+[2026-10-06 01:39:33] [INFO] [Misc] workspace broadcast committed from=test-agent-noble-bear mention=none request_id=wmsg-1f742c50a78165394a58e0ed8a2391cb seq=1 bytes=49
+[2026-10-06 01:39:33] [INFO] [Workspace] agent session bound: test-agent-noble-bear
+[2026-10-06 01:39:33] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-06 01:39:33] [WARN] [Workspace] is_agent_session_bound failed for test-agent: Sys_error("/tmp/masc-workspace-test-1791247173232-8/.masc/agents: Not a directory")
+[failure] missing expected substring "\226\154\160 Observation incomplete" in output:
+🏢 Cluster: default
+Project: masc-workspace-test-1791247173232-8
+📍 Workspace: root
+📁 Path: /tmp/masc-workspace-test-1791247173232-8
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Snapshot: agents=1 | tasks active=0 todo=0 claimed=0 in_progress=0 | messages=1
+🧭 You: agent=test-agent | bound=no | owned=- | current=-
+🔎 Task binding: assigned_set=[] | primary_owned=- | planning_current=- | current_is_assigned=no | effective_current=- | drift_reason=- | claim_first_suppressed=no
+
+Attention:
+  - Your agent session is not bound.
+Players:
+  🟢 test-agent-noble-bear -> active
+
+Quest Board:
+  (no active tasks)
+  Summary: active=0, done=0, cancelled=0, total=0
+
+Messages: 1 (cumulative)
+
+          Raised at Stdlib.failwith in file "stdlib.ml", line 29, characters 17-33
+          Called from Dune__exe__Test_tool_workspace_coverage.(fun) in file "test/test_tool_workspace_coverage.ml", line 419, characters 6-58
+          Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+          Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+          Called from Eio_linux__Sched.run.(fun) in file "lib_eio_linux/sched.ml", line 468, characters 22-90
+          Re-raised at Eio_linux__Sched.run in file "lib_eio_linux/sched.ml", line 479, characters 22-57
+          Called from Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 506, characters 8-18
+          Re-raised at Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 511, characters 4-39
+          Called from Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", lines 543-545, characters 8-109
+          Re-raised at Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", line 556, characters 8-43
+          Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+          Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+          Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+          Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+          Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+          Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+          Called from Eio_linux__Sched.run.(fun) in file "lib_eio_linux/sched.ml", line 468, characters 22-90
+          Re-raised at Eio_linux__Sched.run in file "lib_eio_linux/sched.ml", line 479, characters 22-57
+          Called from Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 506, characters 8-18
+          Re-raised at Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 511, characters 4-39
+          Called from Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", lines 543-545, characters 8-109
+          Re-raised at Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", line 556, characters 8-43
+          Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+          Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+          
+Logs saved to `/masc-work/polisher/masc/_build/_tests/Tool_workspace/coverage.007.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/masc-work/polisher/masc/_build/_tests/Tool_workspace'.
+2 failures! in 0.499s. 39 tests run.

@@ -1,0 +1,68 @@
+
+==================== A/B/C. masc_status + masc_check AFTER fix (lib at 06507a6e) ====================
+[healthy] is_success=true
+[healthy] degraded=false
+[healthy] backlog_authority=primary
+[healthy] observation_failures=[]
+[healthy] failure_class=none
+
+healthy snapshot:
+🏢 Cluster: default
+Project: task809-evidence-1791246678-69754
+📍 Workspace: root
+📁 Path: /tmp/task809-evidence-1791246678-69754
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Snapshot: agents=1 | tasks active=0 todo=0 claimed=0 in_progress=0 | messages=1
+🧭 You: agent=demo-agent-quick-badger | bound=yes | owned=- | current=-
+🔎 Task binding: assigned_set=[] | primary_owned=- | planning_current=- | current_is_assigned=no | effective_current=- | drift_reason=- | claim_first_suppressed=no
+Credential: required=yes | available=no | candidates=demo-agent,demo-agent-quick-badger
+
+Attention:
+  - Lifecycle actions are credential-blocked for demo-agent/demo-agent-quick-badger.
+Players:
+  🟢 demo-agent-quick-badger (you) -> active
+
+Quest Board:
+  (no active tasks)
+  Summary: active=0, done=0, cancelled=0, total=0
+
+Messages: 1 (cumulative)
+
+[broken] is_success=true
+[broken] degraded=true
+[broken] backlog_authority=primary
+[broken] observation_failures=["session binding read for demo-agent: Sys_error(\"/tmp/task809-evidence-1791246678-69754/.masc/agents: Not a directory\")"]
+[broken] failure_class=none
+
+broken snapshot:
+⚠ Observation incomplete — session binding read for demo-agent: Sys_error("/tmp/task809-evidence-1791246678-69754/.masc/agents: Not a directory"). The status below is missing whatever those reads would have carried.
+🏢 Cluster: default
+Project: task809-evidence-1791246678-69754
+📍 Workspace: root
+📁 Path: /tmp/task809-evidence-1791246678-69754
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Snapshot: agents=1 | tasks active=0 todo=0 claimed=0 in_progress=0 | messages=1
+🧭 You: agent=demo-agent | bound=no | owned=- | current=-
+🔎 Task binding: assigned_set=[] | primary_owned=- | planning_current=- | current_is_assigned=no | effective_current=- | drift_reason=- | claim_first_suppressed=no
+Credential: required=yes | available=no | candidates=demo-agent
+
+Attention:
+  - Your agent session is not bound.
+  - Lifecycle actions are credential-blocked for demo-agent.
+Players:
+  🟢 demo-agent-quick-badger -> active
+
+Quest Board:
+  (no active tasks)
+  Summary: active=0, done=0, cancelled=0, total=0
+
+Messages: 1 (cumulative)
+
+[check] is_failed=true
+[check] failure_class=runtime_failure
+
+check message:
+{"status":"error","error_code":"internal_error","message":"identity resolution for demo-agent: Sys_error(\"/tmp/task809-evidence-1791246678-69754/.masc/agents: Not a directory\")"}
+

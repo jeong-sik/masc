@@ -1,6 +1,6 @@
 (** Goal_phase — state machine SSOT for goal lifecycle.
 
-    Encodes the five phases a goal can be in, the operator/system
+    Encodes the lifecycle states a goal can be in, the operator/system
     actions that drive transitions, and the deterministic decision
     function {!decide_transition}. Used by the goal subsystem to keep
     transition logic out of caller code.
@@ -11,7 +11,10 @@
     operator can leave it without a verdict: [Drop] to [Dropped], [Reopen]
     to [Executing]. *)
 
-(** Goal lifecycle phases. *)
+(** Only these live states can be suspended. *)
+type resumable = Resume_executing | Resume_verifying | Resume_awaiting_confirmation
+
+(** Goal lifecycle phases. Suspensions always retain their restore target. *)
 type t =
   | Executing
   | Verifying
@@ -20,12 +23,15 @@ type t =
   | Awaiting_confirmation
   | Completed
   | Dropped
+  | Paused of resumable
+  | Blocked of resumable
 
 val to_string : t -> string
 (** Lowercase canonical name ([Executing -> "executing"], …). *)
 
 val of_string : string -> t option
-(** Inverse of {!to_string}. Returns [None] for unknown input. *)
+(** Parses unsuspended states only. Suspensions require a restore target;
+    use {!of_fields} for a Goal row or {!of_yojson} for a lifecycle value. *)
 
 val parse : string -> t option
 (** Like {!of_string} but trims whitespace and lowercases first. *)
@@ -35,8 +41,24 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val all : t list
-(** Every phase in declaration order. SSOT for callers that need the full
-    string set (MCP schema enum, validator) via [List.map to_string all]. *)
+(** All eleven lifecycle values, including each suspension restore target. *)
+
+module Kind : sig
+  type t = Executing | Verifying | Awaiting_confirmation | Completed | Dropped | Paused | Blocked
+  val all : t list
+  val to_string : t -> string
+  val parse : string -> t option
+end
+val kind : t -> Kind.t
+val resume_phase : t -> t option
+(** [None] for an unsuspended Goal. *)
+val resume_phase_to_yojson : t -> Yojson.Safe.t
+(** Canonical restore-state string, or null when unsuspended. *)
+val of_fields : Yojson.Safe.t -> (t, string) result
+(** Decode string [phase] and optional [resume_phase] from a Goal row.
+    Reject missing/invalid suspension targets and targets on live/terminal rows. *)
+val criterion_changed : t -> t
+(** Invalidate proof progress while preserving suspension or abandonment. *)
 
 val admits_self_directed_progress : t -> bool
 (** Whether a keeper waking on this goal can make progress on it. [Verifying]
@@ -48,6 +70,10 @@ type action =
   | Request_complete
   | Drop
   | Reopen
+  | Pause
+  | Resume
+  | Block
+  | Unblock
   | Record_proof_proven
       (** Verifier commit: the completion proof held. [Verifying ->
           Awaiting_confirmation]. Requires non-blank evidence at the tool boundary. *)
@@ -71,6 +97,10 @@ module Public_action : sig
     | Request_complete
     | Drop
     | Reopen
+    | Pause
+    | Resume
+    | Block
+    | Unblock
 
   val to_action : t -> action
   val to_string : t -> string

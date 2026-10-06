@@ -290,7 +290,7 @@ let goal_context_to_json = function
         [ "status", `String "available"
         ; "goals", `List (List.map (fun (goal_id, phase, criterion) ->
             `Assoc [ "goal_id", `String goal_id
-                   ; "phase", `String (Goal_phase.to_string phase)
+                   ; "phase", Goal_phase.to_yojson phase
                    ; "criterion", Goal_store.criterion_to_yojson criterion ]) goals) ]
     in
     `Assoc (("task_id", `String task_id) :: fields)

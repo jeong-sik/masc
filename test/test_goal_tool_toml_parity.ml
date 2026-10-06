@@ -23,15 +23,15 @@ open Alcotest
 let published =
   [ ( "masc_goal_list"
   , "List shared planning goals, optionally filtered by explicit lifecycle phase."
-  , "{\"type\":\"object\",\"properties\":{\"phase\":{\"type\":\"string\",\"enum\":[\"executing\",\"verifying\",\"awaiting_confirmation\",\"completed\",\"dropped\"],\"description\":\"Optional explicit Goal lifecycle phase filter\"}},\"additionalProperties\":false}" )
+  , "{\"type\":\"object\",\"properties\":{\"phase\":{\"type\":\"string\",\"enum\":[\"executing\",\"verifying\",\"awaiting_confirmation\",\"completed\",\"dropped\",\"paused\",\"blocked\"],\"description\":\"Optional explicit Goal lifecycle phase filter\"}},\"additionalProperties\":false}" )
   ; ( "masc_goal_measure"
   , "Record an explicit observation of a Goal's declared metric. Supply the exact\ncurrent criterion_revision from masc_goal_list, the observed value, and\nsupporting evidence. This records a reported value; it does not prove\nthat the target was reached or change the Goal phase."
   , "{\"type\":\"object\",\"properties\":{\"goal_id\":{\"type\":\"string\"},\"criterion_revision\":{\"type\":\"string\"},\"observed_value\":{\"type\":\"string\"},\"evidence\":{\"type\":\"string\",\"description\":\"An Evidence Reference: artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or fusion:<run-id>. Any other form is rejected.\"}},\"required\":[\"goal_id\",\"criterion_revision\",\"observed_value\",\"evidence\"],\"additionalProperties\":false}" )
   ; ( "masc_goal_transition"
   , "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
 
-request_complete moves executing -> verifying and persists a durable proof request; repeated while verifying, it re-arms that request. drop and reopen also leave verifying. Verifier verdicts are not accepted by this MCP tool. A Goal whose criterion was judged unreachable is refused on request_complete."
-  , "{\"type\":\"object\",\"properties\":{\"goal_id\":{\"type\":\"string\"},\"action\":{\"type\":\"string\",\"enum\":[\"request_complete\",\"drop\",\"reopen\"]},\"note\":{\"type\":\"string\"},\"evidence_refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"For request_complete: explicit board:<post_id> or fusion:<run_id> references. Their exact source is captured with this proof request. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request.\"}},\"required\":[\"goal_id\",\"action\"],\"additionalProperties\":false}" )
+request_complete moves executing -> verifying and persists a durable proof request; repeated while verifying, it re-arms that request. drop and reopen also leave verifying. Verifier verdicts are not accepted by this MCP tool. pause/block suspend Goal progression and new verification work, preserving the prior live phase. resume/unblock restore it. Linked Tasks remain independent. Terminal Goals must be reopened first."
+  , "{\"type\":\"object\",\"properties\":{\"goal_id\":{\"type\":\"string\"},\"action\":{\"type\":\"string\",\"enum\":[\"request_complete\",\"drop\",\"reopen\",\"pause\",\"resume\",\"block\",\"unblock\"]},\"note\":{\"type\":\"string\"},\"evidence_refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"For request_complete: explicit board:<post_id> or fusion:<run_id> references. Their exact source is captured with this proof request. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request.\"}},\"required\":[\"goal_id\",\"action\"],\"additionalProperties\":false}" )
   ; ( "masc_goal_upsert"
   , "Create or update flat Goal metadata.
 

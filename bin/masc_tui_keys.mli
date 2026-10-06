@@ -76,6 +76,11 @@ val opens_keepers : message_mode:bool -> string -> bool
     declined it. Message mode never treats the printable {!keepers_jump} key
     as this jump. *)
 
+val chat_quiet_leave : input_supported:bool -> turn_active:bool -> draft_empty:bool -> string -> bool
+(** [Q] leaves a transcript-only viewport, or an active turn with an empty
+    visible draft. Ctrl-Q leaves independently of the draft and turn state.
+    Neither key requests a turn interrupt. *)
+
 val cancels_two_press :
   input_seen:bool -> key:string option -> second_press:string list -> bool
 (** Whether the input the loop just read cancels a standing two-press
@@ -225,6 +230,7 @@ val footer_hints_lanes_run_list : string
 (** The Lanes run-list footer: the drill-down under a standalone lane row. *)
 
 val footer_hints_lanes_run_detail : string
+val footer_hints_lanes_run_detail_for : preflight:bool -> string
 (** The Lanes run-detail footer. The window the stacked Input/Output list drew
     travels the way the Fusion detail footer's does; the split panes name
     theirs in their own titles and pass none. *)

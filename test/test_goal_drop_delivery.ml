@@ -101,7 +101,7 @@ let test_repeat_repairs_audit () = with_workspace @@ fun config abandoned _ ->
   check (option string) "repeat preserves the original cancellation reason"
     (Some "operator cancellation") current.last_review_note;
   let before = Fs_compat.load_file (Goal_store.goals_path config) in
-  ignore (drop config goal.id |> success);
+  ignore (drop config ~note:"settled repeat" goal.id |> success);
   check string "settled repeat does not rewrite the Goal" before
     (Fs_compat.load_file (Goal_store.goals_path config));
   check int "repeats do not notify verifier again" 1 !abandoned;
@@ -127,7 +127,7 @@ let test_failed_commit_has_no_effect () = with_workspace @@ fun config abandoned
   let directory = Filename.dirname path in
   Unix.chmod directory 0o500;
   let result = Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700)
-    (fun () -> drop config goal.id) in
+    (fun () -> drop config ~note:"operator cancellation" goal.id) in
   check bool "failed state commit is a failure" false (Tool_result.is_success result);
   check string "primary unchanged" before (Fs_compat.load_file path);
   check int "no cancellation hook before commit" 0 !abandoned;
@@ -138,14 +138,14 @@ let test_unavailable_is_not_a_drop () = with_workspace @@ fun config abandoned _
   let goal = create config in
   let path = Goal_store.goals_path config in
   Fs_compat.save_file path "{broken";
-  let result = drop config goal.id in
+  let result = drop config ~note:"operator cancellation" goal.id in
   check bool "unreadable primary is refused" false (Tool_result.is_success result);
   check string "corrupt primary is preserved" "{broken" (Fs_compat.load_file path);
   check int "no verifier cancellation" 0 !abandoned;
   check bool "no audit on failed read" false (Sys.file_exists (audit_path config))
 
 let test_missing_goal_is_not_created () = with_workspace @@ fun config abandoned _ ->
-  let result = drop config "goal-missing" in
+  let result = drop config ~note:"operator cancellation" "goal-missing" in
   check bool "missing Goal is refused" false (Tool_result.is_success result);
   check bool "no Goal invented" false (Sys.file_exists (Goal_store.goals_path config));
   check int "no verifier cancellation" 0 !abandoned

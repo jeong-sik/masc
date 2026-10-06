@@ -809,7 +809,10 @@ let test_board_compose_footers_are_projected () =
     (Masc_tui_keys.footer_hints_board_compose_armed ~reply:false);
   check str "a reply's menu has no hearth to cycle"
     "s:send  e:edit in $EDITOR  d:discard  Esc:keep writing"
-    (Masc_tui_keys.footer_hints_board_compose_armed ~reply:true)
+    (Masc_tui_keys.footer_hints_board_compose_armed ~reply:true);
+  check str "a drop reason names its two keys and no q"
+    "type why  Enter:drop  Esc:cancel"
+    Masc_tui_keys.footer_hints_goal_drop_reason
 
 let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before

@@ -22,6 +22,20 @@ function reply(body: unknown, status = 409) {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('raw runtime.toml revision-checked write', () => {
+  it.each([401, 403])('classifies structured raw-save authorization status %s as pre-handler refusal', async status => {
+    const fetchMock = reply({ error: 'authorization rejected', auth_error_code: status === 401 ? 'token_expired' : 'insufficient_role' }, status)
+    await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toMatchObject({ name: 'RuntimeTomlSaveRejected' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+  it.each([401, 403])('does not invent a typed auth refusal from unstructured status %s', async status => {
+    reply({ error: 'unrecognized gateway refusal' }, status)
+    await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toBeInstanceOf(ApiRequestError)
+  })
+  it.each([401, 403])('keeps ambiguous authorization status %s unknown', async status => {
+    reply({ error: 'authorization-like failure after application', config_applied: true }, status)
+    await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toBeInstanceOf(ApiRequestError)
+  })
+
   it.each([
     ['read', (options: RuntimeTomlRequestOptions) => fetchRuntimeTomlConfig(options)],
     ['raw save', (options: RuntimeTomlRequestOptions) => saveRuntimeTomlConfig('# draft', revision, { ...options, ...saveOptions })],

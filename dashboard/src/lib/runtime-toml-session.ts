@@ -1,12 +1,13 @@
-import { effect, signal } from '@preact/signals'
+import { batch, effect, signal } from '@preact/signals'
 import { fetchRuntimeTomlConfig, type CommittedRuntimeTomlConfig, type RuntimeTomlConfig } from '../api/dashboard'
 import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlCurrentSource, type RuntimeTomlRequestOptions } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
-import { runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { runtimeConfigCommitReceiptNotice } from './runtime-config-receipt'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
 import { errorToString } from './format-string'
+import { announceExactLaneObservationChanged } from './exact-lane-observation'
 
 export type RuntimeSectionId = 'routing' | 'lanes' | 'providers' | 'models' | 'bindings' | 'assignments' | 'toml'
 type Phase = 'idle' | 'loading' | 'reading' | 'saving_raw' | 'saving_patch'
@@ -77,6 +78,7 @@ export class RuntimeTomlSession {
     if (authority?.workspaceRoot === this.workspaceRoot && generation !== this.generation) {
       this.generation = generation
       if (state.config !== null) this.update({ needsRead: true, currentSource: null,
+        projectionRevision: state.projectionRevision + 1,
         error: 'runtime.toml 이 다른 화면에서 저장되었습니다. 초안은 유지됩니다. 현재 파일을 읽고 비교한 뒤 저장 기준을 선택하세요.' })
     }
   }
@@ -164,6 +166,12 @@ export class RuntimeTomlSession {
             + (latest.draft !== submitted && latest.draft !== before.draft ? ' 저장 중 추가한 초안은 저장되지 않았습니다.' : '')
           : 'runtime assignment unchanged' })
       if ('unchanged' in result) return false
+      // The file receipt invalidates other editors even if setup resume fails.
+      // This session has already adopted that receipt, so keep its own basis.
+      batch(() => {
+        announceRuntimeTomlWritten()
+        this.generation = runtimeTomlSourceGeneration.peek()
+      })
       // Unmount does not interrupt the saved file's session. A different
       // workspace does prevent follow-up writes to model setup.
       if (!this.admits(authority)) return true
@@ -174,7 +182,9 @@ export class RuntimeTomlSession {
       // Setup resume may publish the registry for the first time after the
       // file receipt. Editors that remounted during this write must reread it.
       this.update({ projectionRevision: this.state.peek().projectionRevision + 1 })
-      this.committed.value = { authority, generation: runtimeTomlSourceGeneration.peek() }
+      announceRuntimeTomlCommitted(authority)
+      // A mounted All Lanes panel rereads only on this observation signal.
+      announceExactLaneObservationChanged(authority)
       try { await refreshRuntimeConfigConsumers() }
       catch (error) { if (this.admits(authority)) this.update({ error: `대시보드 런타임 갱신 실패: ${errorToString(error)}` }) }
       return true
@@ -187,7 +197,13 @@ export class RuntimeTomlSession {
         this.update({ uncertainWrite: false, error: `${errorToString(error)} 저장 전에 거절되었습니다. 초안과 저장 기준은 유지됩니다.` })
       } else this.update({ uncertainWrite: true, error: `${errorToString(error)} 초안은 유지됩니다. 파일 변경 여부를 확인하지 못했습니다. 현재 파일을 읽고 비교한 뒤 다시 저장하세요.` })
       return false
-    } finally { this.resumeController = null; this.update({ phase: 'idle' }) }
+    } finally {
+      this.resumeController = null
+      this.update({ phase: 'idle' })
+      // Another editor may commit while this write owns setup/refresh follow-up.
+      // Re-read only an owned, certain session; ensure preserves dirty drafts.
+      if (this.admits(authority) && !this.state.peek().uncertainWrite) await this.ensure(authority)
+    }
   }
 }
 
@@ -195,6 +211,12 @@ export function runtimeTomlSessionFor(authority: ExecutionWorkspaceAuthority): R
   let session = sessions.get(authority.workspaceRoot)
   if (!session) { session = new RuntimeTomlSession(authority.workspaceRoot); sessions.set(authority.workspaceRoot, session) }
   return session
+}
+/** Notify mounted settings of an owned file commit without adopting its raw draft. */
+export function announceRuntimeTomlCommitted(authority: ExecutionWorkspaceAuthority) {
+  const session = runtimeTomlSessionFor(authority)
+  if (!session.admits(authority)) return
+  session.committed.value = { authority, generation: runtimeTomlSourceGeneration.peek() }
 }
 // Keep dirty/uncertain documents guarded even while every editor is unmounted.
 effect(() => {

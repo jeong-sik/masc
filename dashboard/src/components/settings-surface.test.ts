@@ -1,3 +1,5 @@
+import * as runtimeApi from '../api/dashboard-runtime'
+import { exactLaneActivitySessionFor, resetExactLaneActivitySessionsForTesting } from '../lib/exact-lane-activity-session'
 import * as coreApi from '../api/core'
 import * as dashboardApi from '../api/dashboard'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
@@ -2065,8 +2067,9 @@ describe('SettingsSurface', () => {
     }
   })
 
-  it.each([false, true])('refreshes mounted Settings after its editor unmounts during a save, provider failure=%s', async providerFailure => {
-    const epoch = `settings-late-save-${providerFailure}`
+  it.each([{ providerFailure: false, activity: false }, { providerFailure: true, activity: false }, { providerFailure: false, activity: true }])('refreshes mounted Settings after a save, provider failure=$providerFailure activity=$activity', async ({ providerFailure, activity }) => {
+    const epoch = `settings-late-save-${providerFailure}-${activity}`
+    resetExactLaneActivitySessionsForTesting()
     resetRuntimeTomlSessionsForTesting()
     invalidateExecutionSnapshotGeneration(epoch, 0)
     hydrateExecutionSnapshot({ execution_publication_epoch: epoch,
@@ -2076,22 +2079,38 @@ describe('SettingsSurface', () => {
       { schema: 'masc.standalone_llm_lanes.v2', generatedAt: '2026-10-04T00:00:00Z',
         observedAtUnix: 0, observationOnly: true, exactRunProjectionCount: 0,
         exactRunSourceTotal: 0, exactRunProjectionTruncated: false, lanes: [] })
-    const resume = vi.spyOn(coreApi, 'postControlPlane').mockResolvedValue({ runtime_ready: true,
+    const resume = vi.spyOn(coreApi, 'postControlPlane').mockResolvedValue({ runtime_ready: !activity,
       exact_output_authority_available: true, model_setup: { status: 'available' } })
     const config = { ok: true, path: MOCK_RUNTIME_PATH, file_name: 'runtime.toml',
-      source_text: '[runtime]\ndefault = "rt-a"\n', source_revision: 'a'.repeat(64),
+      source_text: '[runtime]\ndefault = "rt-a"\n[runtime.exact_output_lanes.librarian_exact]\nslots=["rt-a"]\nenabled=true\n', source_revision: 'a'.repeat(64),
       provider_protocols: runtimeProviderProtocols, reserved_provider_ids: [...runtimeReservedProviderIdsFixture] }
     apiMock.fetchRuntimeTomlConfig.mockResolvedValue(config)
     let finish!: (value: ReturnType<typeof committedRuntimeTomlConfigFixture>) => void
     apiMock.saveRuntimeTomlConfig.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const activityMocks = activity ? [
+      vi.spyOn(runtimeApi, 'fetchRuntimeTomlConfig').mockImplementation(apiMock.fetchRuntimeTomlConfig),
+      vi.spyOn(runtimeApi, 'saveRuntimeTomlConfig').mockImplementation(apiMock.saveRuntimeTomlConfig),
+      vi.spyOn(runtimeApi, 'previewRuntimeTomlConfig').mockResolvedValue({ ok: true, can_save: true,
+        validation: { valid: true, schema_version: 1, current_schema_version: 1,
+          forward_schema: false, issues: [] } }),
+    ] : []
     try {
       render(html`<${SettingsSurface} />`, container)
       await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtimes"]')!)
       await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(config.source_text))
-      const draft = config.source_text + '# committed while hidden\n'
-      fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
-      fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+      let draft = activity ? config.source_text.replace('enabled=true', 'enabled = false')
+        : config.source_text + '# committed while hidden\n'
+      if (activity) {
+        const authority = executionWorkspaceAuthority.peek()!
+        const session = exactLaneActivitySessionFor(authority, { laneId: 'librarian_exact', required: false })
+        await session.read(authority); session.toggle(authority)
+        void session.save(authority)
+      } else {
+        fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
+        fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
+      }
       await waitFor(() => expect(apiMock.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+      if (activity) draft = apiMock.saveRuntimeTomlConfig.mock.calls[0]![0] as string
       await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]')!)
       expect(container.querySelector('[data-testid="runtime-toml-editor"]')).toBeNull()
       const counts = [apiMock.fetchRuntimeDefaults.mock.calls.length, apiMock.fetchRuntimeProviders.mock.calls.length,
@@ -2102,7 +2121,15 @@ describe('SettingsSurface', () => {
       } }))
       apiMock.fetchRuntimeTomlConfig.mockResolvedValue({ ...config, source_text: draft, source_revision: 'b'.repeat(64) })
       if (providerFailure) apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider snapshot unavailable'))
-      finish(committedRuntimeTomlConfigFixture({ ...config, source_text: draft }))
+      const saved = committedRuntimeTomlConfigFixture({ ...config, source_text: draft })
+      saved.source_revision = 'b'.repeat(64)
+      saved.commit.source_revision = saved.source_revision
+      finish(saved)
+      if (activity) {
+        const session = exactLaneActivitySessionFor(executionWorkspaceAuthority.peek()!, { laneId: 'librarian_exact', required: false })
+        await waitFor(() => expect(session.state.value.receipt).not.toBeNull())
+        await waitFor(() => expect(session.state.value.setupResumeError).not.toBeNull())
+      }
       await waitFor(() => expect(container.textContent).toContain('late-save-visible-model'))
       if (providerFailure) {
         expect(container.querySelector('[data-testid="runtime-catalog-error"]')).not.toBeNull()
@@ -2114,6 +2141,8 @@ describe('SettingsSurface', () => {
     } finally {
       render(null, container)
       resetRuntimeTomlSessionsForTesting()
+      resetExactLaneActivitySessionsForTesting()
+      for (const mock of activityMocks) mock.mockRestore()
       resume.mockRestore()
       lanes.mockRestore()
       invalidateExecutionSnapshotGeneration('settings-late-save-finished', 0)

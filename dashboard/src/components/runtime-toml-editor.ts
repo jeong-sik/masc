@@ -19,6 +19,7 @@ import {
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { runtimeTomlSessionFor, type RuntimeTomlSession, type RuntimeSectionId } from '../lib/runtime-toml-session'
 import { errorToString } from '../lib/format-string'
+import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import {
   cascadeDeleteProvider,
   createRuntimeTomlBinding,
@@ -33,6 +34,7 @@ import {
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
+import { announceExactLaneObservationChanged, exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -216,13 +218,14 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
   const setSection = (value: RuntimeSectionId) => session.edit('section', value)
   const ready = session.writable(authority)
   const canAdopt = session.ready(authority)
+  const observationRevision = exactLaneObservationRevision(authority)
   const [projection, setProjection] = useState<{
-    authority: ExecutionWorkspaceAuthority; config: typeof config; revision: number;
+    authority: ExecutionWorkspaceAuthority; config: typeof config; revision: number; observationRevision: number;
     lanes: StandaloneLaneSnapshotRow[] | null; runtimes: RuntimeResolution[] | null; error: string | null;
   } | null>(null)
   const projectionRequest = useRef(0)
   const currentProjection = projection?.authority === authority && projection.config === config
-    && projection.revision === projectionRevision ? projection : null
+    && projection.revision === projectionRevision && projection.observationRevision === observationRevision ? projection : null
   const exactLanes = currentProjection?.lanes ?? null, laneRuntimes = currentProjection?.runtimes ?? null
   const exactLaneError = currentProjection?.error ?? null
   useEffect(() => {
@@ -230,13 +233,13 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
     if (config === null) return
     void Promise.all([fetchStandaloneLanes(), fetchRuntimeResolved()]).then(([snapshot, resolved]) => {
       if (mounted.current && session.admits(authority) && projectionRequest.current === request)
-        setProjection({ authority, config, revision: projectionRevision, lanes: snapshot.lanes, runtimes: resolved.runtimes, error: null })
+        setProjection({ authority, config, revision: projectionRevision, observationRevision, lanes: snapshot.lanes, runtimes: resolved.runtimes, error: null })
     }, error => {
       if (mounted.current && session.admits(authority) && projectionRequest.current === request)
-        setProjection({ authority, config, revision: projectionRevision, lanes: null, runtimes: null, error: errorToString(error) })
+        setProjection({ authority, config, revision: projectionRevision, observationRevision, lanes: null, runtimes: null, error: errorToString(error) })
     })
     return () => { ++projectionRequest.current }
-  }, [session, authority, config, projectionRevision])
+  }, [session, authority, config, projectionRevision, observationRevision])
 
   useEffect(() => {
     if (!onClose) return undefined
@@ -258,6 +261,15 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
   useEffect(() => {
     void session.ensure(authority)
   }, [session, authority, sourceGeneration])
+
+  async function afterSetupResume() {
+    if (!session.admits(authority)) return
+    announceExactLaneObservationChanged(authority)
+    try { await refreshRuntimeConfigConsumers() }
+    catch (error) {
+      if (mounted.current && session.admits(authority)) setError(`런타임 목록 갱신 실패: ${errorToString(error)}`)
+    }
+  }
 
   async function afterWrite(committed: boolean) {
     if (!committed || !mounted.current || !session.admits(authority)) return
@@ -897,7 +909,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
     return html`
       <div class="rt-overlay" data-testid="runtime-toml-editor" onClick=${onClose}>
         <div class="rt-overlay-content" onClick=${stopOverlayContentClick}>
-          <${ModelSetupResumeControl} disabled=${saving} />
+          <${ModelSetupResumeControl} disabled=${saving} onComplete=${afterSetupResume} />
           ${body}
         </div>
       </div>
@@ -911,7 +923,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
       testId="runtime-toml-editor"
       right=${statusPill}
     >
-      <${ModelSetupResumeControl} disabled=${saving} />
+      <${ModelSetupResumeControl} disabled=${saving} onComplete=${afterSetupResume} />
       ${body}
     <//>
   `

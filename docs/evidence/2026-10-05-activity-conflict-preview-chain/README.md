@@ -1,0 +1,7 @@
+# Activity conflict/preview boundary chain
+
+The reviewed introducing-owner repairs are propagated through twelve existing PR branches by actual parent merges. Every merge was clean; no conflict resolution or additional product patch was needed. The retained Settings architecture at #41194 keeps its own session behavior while receiving the narrow Exact/Browser catch changes. Machine retains its existing unsent-generation guard. All native bin/lib/test bytes remain identical to each member's previously published head.
+
+The final combined leaf passed **391 tests across seven Web suites**, TypeScript and scoped ESLint. The three separate owner suites previously reproduced eight failures and passed 43/46/55 cases; those counts are separate runs, not added to 391. Their raw evidence remains in each introducing PR's conflict-preview-boundaries directory. This is mocked-HTTP component/session proof, not real-server, browser, native/PTY, provider, release or full-suite execution.
+
+Commands from dashboard: `pnpm test src/lib/browser-lane-activity.test.ts src/lib/machine-lane-activity.test.ts src/components/exact-lane-activity-panel.test.ts src/components/runtime-toml-editor.test.ts src/components/browser-lane-activity-panel.test.ts src/components/machine-lane-activity-panel.test.ts src/components/settings-surface.test.ts`; `pnpm exec tsc --noEmit`; scoped ESLint on the three changed activity sessions and their three component suites. Raw logs are tracked byte-exact. Source hashes and tested pre-evidence commit are in checks.json.

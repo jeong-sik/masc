@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef } from 'preact/hooks'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
 import type {
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
@@ -512,36 +513,48 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
 }
 
 function RuntimeProbePanel() {
-  const state = useSignal<{
+  const authority = executionWorkspaceAuthority.value
+  const received = useSignal<{
+    authority: ExecutionWorkspaceAuthority
     data: DashboardRuntimeProbeResponse | null
     loading: boolean
     error: string | null
-  }>({
-    data: null,
-    loading: true,
-    error: null,
-  })
+  } | null>(null)
+  const request = useRef<AbortController | null>(null)
+  const state = authority !== null && received.value?.authority === authority
+    ? received.value
+    : { data: null, loading: authority !== null,
+      error: authority === null ? '작업공간을 확인한 뒤 연결 상태를 검사할 수 있습니다.' : null }
 
-  async function load(force = false) {
-    state.value = { ...state.value, loading: true, error: null }
+  const load = useCallback(async (force = false) => {
+    if (authority === null || executionWorkspaceAuthority.peek() !== authority) return
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
+    const current = () => request.current === controller && !controller.signal.aborted
+      && executionWorkspaceAuthority.peek() === authority
+    const previous = received.peek()
+    const data = previous?.authority === authority ? previous.data : null
+    received.value = { authority, data, loading: true, error: null }
     try {
-      const data = await fetchDashboardRuntimeProbe(force)
-      state.value = { data, loading: false, error: null }
+      const data = await fetchDashboardRuntimeProbe(force, { signal: controller.signal })
+      if (current()) received.value = { authority, data, loading: false, error: null }
     } catch (error) {
-      state.value = {
-        ...state.value,
-        loading: false,
-        error: errorToString(error),
-      }
+      if (current()) received.value = { authority, data, loading: false, error: errorToString(error) }
+    } finally {
+      if (request.current === controller) request.current = null
     }
-  }
+  }, [authority, received])
 
   useEffect(() => {
     void load(false)
+    return () => { request.current?.abort(); request.current = null }
+  }, [load])
+  useEffect(() => {
     loadRuntimeCatalog()
   }, [])
 
-  const probe = state.value.data?.probe ?? null
+  const probe = state.data?.probe ?? null
   const providerProbes = probe?.providers ?? []
   const catalog = runtimeCatalogState.value
   const catalogEntries = catalog.status === 'loaded' ? catalog.data : []
@@ -558,34 +571,35 @@ function RuntimeProbePanel() {
         <${StatusChip} tone=${probe?.status === 'warming_up' ? 'neutral' : probe?.probe_ok === false ? 'bad' : 'ok'}>
           ${probe?.status ?? 'probe pending'}
         <//>
-        ${state.value.data
+        ${state.data
           ? html`
               <${StatusChip} tone="neutral" uppercase=${false}>
-                ${runtimeProbeRefreshLabel(state.value.data)} · age ${state.value.data.cache_age_sec == null ? MISSING_DATA_DASH : `${formatNumber(state.value.data.cache_age_sec, 1)}s`}
+                ${runtimeProbeRefreshLabel(state.data)} · age ${state.data.cache_age_sec == null ? MISSING_DATA_DASH : `${formatNumber(state.data.cache_age_sec, 1)}s`}
               <//>
             `
           : null}
         <${Btn}
           size="sm"
           class="v2-lab-action ml-auto"
+          disabled=${authority === null || state.loading}
           onClick=${() => void load(true)}
         >
-          ${state.value.loading ? 'probing...' : 'refresh probe'}
+          ${state.loading ? 'probing...' : 'refresh probe'}
         <//>
       </div>
 
-      ${state.value.error
+      ${state.error
         ? html`
             <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[var(--rose-fg)]">
-              ${state.value.error}
+              ${state.error}
             </div>
           `
         : null}
 
-      ${!state.value.error && !probe
+      ${!state.error && !probe
         ? html`
             <div class="text-xs text-[var(--color-fg-muted)]">
-              ${state.value.loading ? '불러오는 중…' : 'probe result가 아직 없음'}
+              ${state.loading ? '불러오는 중…' : 'probe result가 아직 없음'}
             </div>
           `
         : null}

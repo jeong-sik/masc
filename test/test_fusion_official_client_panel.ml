@@ -613,7 +613,7 @@ notify("usage/changed", {"observedAtMs": 100000, "tier": "fixture",
     "weekly": {"usedPercent": 99, "resetsAtMs": 900000}})
 notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
     "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
-    "status": "completed", "text": "MUSE_PANEL_ANSWER"}})
+    "status": "completed", "text": control.get("answers", {}).get(opened["params"]["modelId"], "MUSE_PANEL_ANSWER")}})
 notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
                           "terminal": control.get("terminal", "completed"), "viewCursor": "v:4",
                           "error": control.get("error"),
@@ -1281,6 +1281,48 @@ let run_single_judge ~base_dir ~route ~on_route =
       ())
 ;;
 
+let test_judge_blank_synthesis_uses_the_next_candidate () =
+  List.iter (fun blank ->
+    with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+      let config_path = Filename.concat base_dir "runtime.toml" in
+      Out_channel.with_open_gen [Open_append; Open_text] 0o600 config_path (fun channel ->
+        output_string channel {|
+[models.muse-fallback]
+api-name = "muse-fallback"
+max-context = 1007997
+max-prompt-bytes = 1048576
+reasoning-effort = "high"
+[muse_code.muse-fallback]
+[runtime.lanes.blank-judge]
+candidates = ["muse_code.muse-spark", "muse_code.muse-fallback"]
+|});
+      (match Runtime.init_default ~config_path with
+       | Ok () -> () | Error detail -> fail detail);
+      let response answer = `String (Yojson.Safe.to_string (judge_synthesis_json ~answer)) in
+      write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+        (Yojson.Safe.to_string (`Assoc ["answers", `Assoc
+          ["muse-spark-1.3", response blank; "muse-fallback", response "Supported answer"]]));
+      let route = ref None in
+      (match run_single_judge ~base_dir ~route:"blank-judge"
+          ~on_route:(fun observed -> route := Some observed) with
+       | Ok (synthesis, usage) ->
+         check string "fallback supplies the conclusion" "Supported answer"
+           synthesis.Fusion_types.resolved_answer;
+         check int "both candidates retain paid input" 22 usage.input_tokens;
+         check int "both candidates retain paid output" 14 usage.output_tokens
+       | Error (failure, _) -> fail (Fusion_types.judge_failure_text failure));
+      match !route with
+      | Some { Fusion_types.answered_by = Some "muse_code.muse-fallback"
+             ; failed_attempts =
+                 [{ Fusion_types.attempt_runtime = "muse_code.muse-spark"
+                  ; attempt_failure = Fusion_types.Judge_attempt_failed (Fusion_types.Parse_error _) }]
+             ; _ } -> ()
+      | Some observed -> failf "unexpected fallback evidence: %s"
+          (Fusion_types.show_seat_route observed)
+      | None -> fail "judge did not record candidate attempts"))
+    [""; " \t\n"]
+;;
+
 (* A judge seat naming a lane tries every candidate, in the lane's order, when
    each one fails. The spawn count is compared with a baseline measured on a
    one-candidate seat in the same test rather than with an assumed number of
@@ -1684,6 +1726,8 @@ let () =
         ; test_case "all official clients retain failed-turn spend" `Quick test_all_official_client_failed_usage
         ; test_case "Muse judge parse failure retains paid usage" `Quick
             test_muse_judge_parse_failure_retains_reported_usage
+        ; test_case "blank Judge synthesis uses the next candidate" `Quick
+            test_judge_blank_synthesis_uses_the_next_candidate
         ; test_case
             "Muse Code panelist works in its own directory"
             `Quick

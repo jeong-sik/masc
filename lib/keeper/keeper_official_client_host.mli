@@ -269,6 +269,24 @@ val start_held_context :
     names it, except blocks {!Prompt_block_id.resent_when_held} sends every
     time. *)
 
+type carried_summary =
+  { label : string
+  ; bytes : int
+  ; sha256_prefix : string
+  ; resent_every_resume : bool
+  }
+(** One carried context as a log line names it: what composed it, the bytes a
+    resume renders for it, the first 12 hex digits of its digest, and whether
+    its block is sent on every resume. *)
+
+val carried_summaries :
+  ?composed_context:composed_context ->
+  Agent_core.Types.message list ->
+  carried_summary list
+(** The contexts {!resume_prompt} selects, in order, summarized for logging.
+    A lane without a held set compares the digests across turns to see which
+    contexts it resends unchanged. *)
+
 val resume_prompt :
   goal:string ->
   held:Keeper_official_client_session_store.held_context list ->

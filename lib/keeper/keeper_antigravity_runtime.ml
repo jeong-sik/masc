@@ -763,6 +763,23 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       (String.length prepared.system_prompt)
       (String.length goal)
       (string_of_int capacity_bytes);
+    (* Measurement for the held-set decision: the same blocks with the same
+       digest on consecutive resumes are what a held set would skip. *)
+    if is_resume
+    then
+      Log.Keeper.info
+        ~keeper_name
+        "%s resume carried contexts: %s"
+        runtime_label
+        (Host.carried_summaries ?composed_context prepared.messages
+         |> List.map (fun (item : Host.carried_summary) ->
+           Printf.sprintf
+             "%s bytes=%d sha=%s%s"
+             item.label
+             item.bytes
+             item.sha256_prefix
+             (if item.resent_every_resume then " always_resent" else ""))
+         |> String.concat "; ");
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools

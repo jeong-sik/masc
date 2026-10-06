@@ -1712,7 +1712,6 @@ let run_named
     ?transport
     ?checkpoint_sidecar
     ?(cache_system_prompt = false)
-    ?(yield_on_tool = false)
     ?checkpoint_sink
     ?context_injector
     ?context
@@ -3105,7 +3104,6 @@ let run_named
             ; transport_resolved
             ; checkpoint_sidecar
             ; cache_system_prompt
-            ; yield_on_tool
             ; checkpoint_sink =
                 Option.map
                   (canonical_checkpoint_sink ~replay_prefix_projection)

@@ -362,7 +362,6 @@ type try_provider_ctx =
   ; transport_resolved : Masc_grpc_transport.t
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
-  ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
   ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option

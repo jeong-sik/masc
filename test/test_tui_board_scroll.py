@@ -3,7 +3,6 @@ import os
 import re
 import sys
 import time
-
 import tui_keyboard_harness as h
 
 
@@ -253,6 +252,7 @@ def run_independent_windows(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Comment row 000")
         h.resize_and_wait(process, fd, output, rows=30, columns=SIDE_COLUMNS,
                           needle=b"Comment row 000", controls=(h.FULL_REDRAW,))
@@ -314,6 +314,7 @@ def run_full_width_comments(executable: str) -> None:
         for columns in (240, 270, 100):
             h.resize_and_wait(process, fd, output, rows=48, columns=columns,
                               needle=paragraph.encode(), controls=(h.FULL_REDRAW,))
+            assert h.drain_until_quiet(process, fd, output)
             screen = h.screen_text(bytes(output))
             for expected in (paragraph, korean, code):
                 if expected.encode() not in screen:
@@ -405,7 +406,8 @@ def run_history_refresh_ownership(executable: str) -> None:
     path = "/api/v1/board/post-held?format=flat"
     full_path = path + "&comment_offset=0&comment_limit=100"
     newest = h.SequencedHttpResponse([(200, h.board_detail_page(post, comments))])
-    gate = h.GatedHttpResponse((200, h.board_detail_page(post, comments, offset=0, limit=100)),
+    refreshed_post = {**post, "title": "Held history refresh settled"}
+    gate = h.GatedHttpResponse((200, h.board_detail_page(refreshed_post, comments, offset=0, limit=100)),
                               hold_seconds=30.0)
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     fixtures[path] = newest
@@ -422,11 +424,14 @@ def run_history_refresh_ownership(executable: str) -> None:
             os.write(fd, b"R")
             assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=10)
             before = newest.served
-            refreshing = h.send_and_wait(process, fd, output, b"o", b"Held reply 000")
-            assert b"Held reply 000" in h.screen_text(refreshing)
+            os.write(fd, b"o")
+            # A blocked toggle leaves the retained frame unchanged.
+            assert h.drain_until_quiet(process, fd, output)
+            assert b"Held reply 000" in h.screen_text(bytes(output))
             assert newest.served == before, "history toggled during its active request"
             assert not gate.completed.is_set(), "refresh fixture was not held"
-            h.release_and_wait_for_frame(process, fd, output, gate, b"Held reply 000")
+            h.release_and_wait_for_frame(process, fd, output, gate, b"Held history refresh settled")
+            assert b"Held reply 000" in h.screen_text(bytes(output))
             h.send_and_wait(process, fd, output, b"o", b"Held reply 021")
             assert newest.served > before, "settled history could not return to newest page"
             os.write(fd, b"q")

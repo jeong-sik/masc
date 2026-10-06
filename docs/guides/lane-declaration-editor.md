@@ -71,6 +71,11 @@ current file**은 표시된 현재 원문으로 초안을 바꾼다. 이후 저�
 원래 작업공간에서 **Read current file**로 현재 파일을 확인한 뒤 필요한 revision을
 명시적으로 선택한다. 작업공간 전환은 진행 중 요청의 즉시 취소를 뜻하지 않는다.
 
+Add-ons 목록과 Slice 관측은 현재 확인된 작업공간에만 표시한다. 작업공간을 전환하면
+이전 worker의 조작 버튼과 고정한 Slice를 숨긴다. 새 작업공간의 조회가 실패해도 이전
+목록으로 조작하지 않는다. 작업공간 확인 전에는 조회·Attach·Slice도 사용할 수 없다.
+TOML 초안은 위의 편집 세션 규칙대로 별도로 유지한다.
+
 ## Keeper와 공통 API
 
 Keeper는 기존 도구 선택 경로에서 `masc_lane_declaration_read`와

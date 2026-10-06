@@ -152,10 +152,12 @@ let test_invite_routes () =
         let dir = Filename.temp_dir "play-invite-dos-" "" in
         Fun.protect
           ~finally:(fun () ->
+            Dos_lane.install_activity_observer None;
             (match Dos_lane.eject ~who:"operator" ~announce:ignore () with
              | Ok () | Error _ -> ());
             remove_tree dir)
           (fun () ->
+            Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
             dos_ok "load"
               (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                  ~saves_dir:(Filename.concat dir "saves")
@@ -185,10 +187,12 @@ let test_invite_routes () =
         let dir = Filename.temp_dir "play-invite-retake-" "" in
         Fun.protect
           ~finally:(fun () ->
+            Dos_lane.install_activity_observer None;
             (match Dos_lane.eject ~who:"operator" ~announce:ignore () with
              | Ok () | Error _ -> ());
             remove_tree dir)
           (fun () ->
+            Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
             dos_ok "load"
               (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                  ~saves_dir:(Filename.concat dir "saves")

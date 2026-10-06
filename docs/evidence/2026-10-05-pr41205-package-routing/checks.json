@@ -1,0 +1,43 @@
+{
+  "baseline_head": "88ee4e48474aea2178fdfeb6f56623fa8e41dafe",
+  "comments": [
+    4179325381,
+    4179325382
+  ],
+  "source_sha256": {
+    "lib/server/server_h2_gateway.ml": "71355738fc9d3f22508755574256d768cd87db7945f1ffcab5221010d9f2a846",
+    "lib/server/server_routes_http_routes_lane_addons.ml": "466cf6116e777b2dc25851832dc0da9122edbeed09f0bce3f34b36af2b294ce2",
+    "lib/server/server_routes_http_routes_lane_addons.mli": "fcdd9c353fd667ca67a08dfcf07efc18570a26719792fc1e947ebf35d35bb889",
+    "test/test_h2_request_body_admission.ml": "6c091d08406d5d58e929d1d67c1385b0fc06124da856f741a070af25d7c2763e"
+  },
+  "raw_log_sha256": {
+    "pr41205-catalog-red-build.log": "52c87bc9d474b83a0fec89de5f8a483c21f7281c18bd94bbfd8e18c0cabeae69",
+    "pr41205-catalog-red-build2.log": "f49e60d54f833d47d1016548d4f58b1c0fcd72708f0475c06632463bb58884db",
+    "pr41205-catalog-red-build3.log": "7236b84b356e2e36b3ef918a23b03b1343ec31a09d2395cd8ae0300e6f261d57",
+    "pr41205-catalog-red-build4.log": "7236b84b356e2e36b3ef918a23b03b1343ec31a09d2395cd8ae0300e6f261d57",
+    "pr41205-catalog-red.log": "bd7138edd7ca8ea349545fddf8d7be3dec9f0ddb51b85760cc095971711e27e0",
+    "pr41205-catalog-worktree-setup-failure.log": "ccc8f479aab8ab0ba5681f27710aff4c3428349f75a49a35fdeff13e07a8b950",
+    "pr41205-catalog-red-valid.log": "fca6aa4c81149bfd799d754963bff3594bb10e9a1fe440b9429b1be13fa68659",
+    "pr41205-catalog-worktree-red-valid.log": "f0fa2b95b93638e01b3721959b0e02e7fa383df3c6c4b0dec701a2aeb4324380",
+    "pr41205-catalog-green-build.log": "7236b84b356e2e36b3ef918a23b03b1343ec31a09d2395cd8ae0300e6f261d57",
+    "pr41205-catalog-green.log": "fb83997eb4de926054f91798f7c362a3866dccda509a8abf8a4148951babf8c6",
+    "pr41205-preview-red-build.log": "7236b84b356e2e36b3ef918a23b03b1343ec31a09d2395cd8ae0300e6f261d57",
+    "pr41205-preview-red.log": "d0dd93694d29b43802bd0b1aa016f3b106445a8580f565874e3bb73328afdd01",
+    "pr41205-catalog-final-build.log": "7236b84b356e2e36b3ef918a23b03b1343ec31a09d2395cd8ae0300e6f261d57",
+    "pr41205-catalog-final-green.log": "201a9cf31f7c525814a0f5d0ebf9d9b2e7b959a856cf81d5ec04d59daaf0b099"
+  },
+  "binary_sha256": "3017603905386cf3d94f3054261253bd23fbe6205741a188ffe1b4a3751a8821",
+  "meaningful_red": [
+    "H2 catalog GET requires401 but original404",
+    "linked-worktree catalog returns main checkout instead of active directory",
+    "preview old-root-only reversion returns Main checkout package instead of Active branch package"
+  ],
+  "final_green": {
+    "test_cases": 9,
+    "failed": 0
+  },
+  "H2_scope": "real H2 client/server frames in-memory against actual gateway handler, not network negotiation",
+  "H1_scope": "same shared payload tested directly; existing read-auth wrappers unchanged; no new H1 wire run",
+  "full_suite": false,
+  "TerminalBench": "unrun"
+}

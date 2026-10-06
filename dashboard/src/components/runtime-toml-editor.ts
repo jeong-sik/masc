@@ -1,8 +1,7 @@
 import { ModelSetupResumeControl } from './model-setup-resume-control'
-import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 import { html } from 'htm/preact'
 import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchRuntimeTomlConfig,
   fetchRuntimeResolved,
@@ -11,16 +10,16 @@ import {
   patchRuntimeExactSlot,
   patchRuntimeRouting,
   saveRuntimeTomlConfig,
-  type CommittedRuntimeTomlConfig,
-  type RuntimeTomlConfig,
   type RuntimeRoutingLane,
   type RuntimeExactSlotAction,
   type RuntimeExactSlotDirection,
   type RuntimeResolution,
   type StandaloneLaneSnapshotRow,
 } from '../api/dashboard'
-import { RuntimeTomlRevisionConflict, type RuntimeTomlCurrentSource } from '../api/dashboard-runtime'
+import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
+import { runtimeTomlSessionFor, type RuntimeTomlSession, type RuntimeSectionId } from '../lib/runtime-toml-session'
 import { errorToString } from '../lib/format-string'
+import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import {
   cascadeDeleteProvider,
   createRuntimeTomlBinding,
@@ -34,9 +33,8 @@ import {
   type RuntimeTomlCredentialType,
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
-import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
-import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
+import { announceExactLaneObservationChanged, exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -51,6 +49,7 @@ import {
   type RuntimeStructuredSection,
 } from './runtime-environment-editor'
 import { RuntimeExactLaneEditor } from './runtime-exact-lane-editor'
+import { laneTargetLabel, runtimeTargetRange, type RuntimeLaneTarget } from '../lib/lane-navigation'
 
 type LoadState = 'idle' | 'loading' | 'loaded'
 
@@ -143,14 +142,6 @@ const editorFocusClasses = ringFocusClasses({
 // from the Claude-Design prototype runtime-editor.jsx:8-15 (RT_SECS). The
 // glyphs are the prototype's exact characters — do not substitute lucide icons,
 // the prototype uses these literal glyphs.
-type RuntimeSectionId =
-  | 'routing'
-  | 'lanes'
-  | 'providers'
-  | 'models'
-  | 'bindings'
-  | 'assignments'
-  | 'toml'
 
 interface RuntimeSection {
   readonly id: RuntimeSectionId
@@ -183,6 +174,7 @@ function stopOverlayContentClick(event: MouseEvent) {
 }
 
 export interface RuntimeTomlEditorProps {
+  navigationTarget?: RuntimeLaneTarget
   onClose?: () => void
   /** Called after a successful backend write (raw save, routing patch, or
    *  assignment patch). Use this in parent surfaces that also display derived
@@ -190,35 +182,116 @@ export interface RuntimeTomlEditorProps {
   onSaved?: () => void
 }
 
-export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps = {}) {
+export function RuntimeTomlEditor(props: RuntimeTomlEditorProps = {}) {
+  const authority = executionWorkspaceAuthority.value
+  const [recovering, setRecovering] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  async function verify() {
+    setRecovering(true); setError(null)
+    try { await refreshExecution({ force: true }); if (executionWorkspaceAuthority.peek() === null) setError('작업공간을 확인하지 못했습니다. 다시 시도하세요.') }
+    catch (error) { setError(errorToString(error)) }
+    finally { setRecovering(false) }
+  }
+  if (authority === null) return html`<section aria-label="runtime.toml 작업공간 확인">
+    <p>작업공간을 확인한 뒤 런타임 설정을 편집할 수 있습니다. 보관된 초안은 유지됩니다.</p>
+    <button type="button" disabled=${recovering} onClick=${verify}>${recovering ? '작업공간 확인 중' : '작업공간 확인'}</button>
+    ${error && html`<p role="alert">${error}</p>`}
+    ${props.onClose && html`<button type="button" onClick=${props.onClose}>닫기</button>`}
+  </section>`
+  return html`<${RuntimeTomlEditorContent} key=${authority.workspaceRoot} ...${props}
+    authority=${authority} session=${runtimeTomlSessionFor(authority)} />`
+}
+
+function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authority, session }: RuntimeTomlEditorProps & {
+  authority: ExecutionWorkspaceAuthority; session: RuntimeTomlSession;
+}) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const lineGutterRef = useRef<HTMLPreElement | null>(null)
-  const [loadState, setLoadState] = useState<LoadState>('loading')
-  const [config, setConfig] = useState<RuntimeTomlConfig | null>(null)
-  const [draft, setDraft] = useState('')
-  const [modelContextDrafts, setModelContextDrafts] = useState<Record<string, string>>({})
-  const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [currentSource, setCurrentSource] = useState<RuntimeTomlCurrentSource | null>(null)
-  const [readingCurrent, setReadingCurrent] = useState(false)
-  const [section, setSection] = useState<RuntimeSectionId>('routing')
-  const [exactLanes, setExactLanes] = useState<StandaloneLaneSnapshotRow[] | null>(null)
-  const [laneRuntimes, setLaneRuntimes] = useState<RuntimeResolution[] | null>(null)
-  const [exactLaneError, setExactLaneError] = useState<string | null>(null)
-
-  const refreshExactLanes = useCallback(async () => {
-    try {
-      const [snapshot, resolved] = await Promise.all([fetchStandaloneLanes(), fetchRuntimeResolved()])
-      setExactLanes(snapshot.lanes)
-      setLaneRuntimes(resolved.runtimes)
-      setExactLaneError(null)
-    } catch (err: unknown) {
-      setExactLanes(null)
-      setLaneRuntimes(null)
-      setExactLaneError(errorToString(err))
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const { config, draft, modelContextDrafts, error, notice, currentSource, section, phase, needsRead, projectionRevision } = session.state.value
+  const saving = phase === 'saving_raw' || phase === 'saving_patch', readingCurrent = phase === 'reading'
+  const loadState: LoadState = phase === 'loading' || config === null && error === null
+    ? 'loading' : config === null ? 'idle' : 'loaded'
+  const setDraft = (value: string | ((current: string) => string)) => session.edit('draft', value)
+  const setModelContextDrafts = (value: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => session.edit('modelContextDrafts', value)
+  const setError = (value: string | null) => session.edit('error', value)
+  const setNotice = (value: string | null) => session.edit('notice', value)
+  const setSection = (value: RuntimeSectionId) => session.edit('section', value)
+  // A target is selected once, when it is found. Until then every draft
+  // change looks it up again so the notice follows the text; the first
+  // attempt also moves focus into the editor. A target that only becomes
+  // locatable after the reader edits is offered, not selected: selecting it
+  // under the caret would let the next keystroke overwrite the declaration.
+  const focusedNavigation = useRef<RuntimeLaneTarget | undefined>(undefined)
+  const attemptedNavigation = useRef<RuntimeLaneTarget | undefined>(undefined)
+  const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
+  const [locatedNavigation, setLocatedNavigation] = useState<[number, number] | null>(null)
+  useEffect(() => {
+    if (navigationTarget) session.edit('section', navigationTarget.kind === 'exact' ? 'lanes' : 'toml')
+    setNavigationNotice(null); setLocatedNavigation(null)
+  }, [navigationTarget, session])
+  const selectNavigation = (range: [number, number] | null) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    const start = range?.[0] ?? draft.length, end = range?.[1] ?? start
+    textarea.setSelectionRange(start, end)
+    const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight)
+    if (Number.isFinite(lineHeight)) {
+      textarea.scrollTop = draft.slice(0, start).split('\n').length * lineHeight - lineHeight
+      if (lineGutterRef.current) lineGutterRef.current.scrollTop = textarea.scrollTop
     }
-  }, [])
+  }
+  useEffect(() => {
+    if (!navigationTarget || navigationTarget.kind === 'exact' || config === null || section !== 'toml'
+      || focusedNavigation.current === navigationTarget || !textareaRef.current) return
+    let range: [number, number] | null = null, notice: string | null = null
+    try {
+      range = runtimeTargetRange(draft, navigationTarget)
+      if (range === null) notice = 'This target is not declared in the current draft. No configuration was inserted; edit the original TOML to add it.'
+    } catch (cause) { notice = `Cannot locate the target in this draft: ${errorToString(cause)}. Your text is unchanged.` }
+    setNavigationNotice(notice)
+    const firstAttempt = attemptedNavigation.current !== navigationTarget
+    attemptedNavigation.current = navigationTarget
+    if (firstAttempt) selectNavigation(range)
+    if (range !== null && firstAttempt) { focusedNavigation.current = navigationTarget; setLocatedNavigation(null) }
+    else setLocatedNavigation(range)
+  }, [navigationTarget, config, section, draft])
+  // Returning to the TOML section while a Browser/Machine target is linked
+  // gives keyboard focus back to the editor. Only focus moves: the reader's
+  // selection stays where they left it, never jumping to the declaration.
+  const inToml = useRef(section === 'toml')
+  useEffect(() => {
+    const entering = section === 'toml' && !inToml.current
+    inToml.current = section === 'toml'
+    if (entering && navigationTarget && navigationTarget.kind !== 'exact'
+      && attemptedNavigation.current === navigationTarget) textareaRef.current?.focus()
+  }, [section, navigationTarget])
+  const ready = session.writable(authority)
+  const canAdopt = session.ready(authority)
+  const observationRevision = exactLaneObservationRevision(authority)
+  const [projection, setProjection] = useState<{
+    authority: ExecutionWorkspaceAuthority; config: typeof config; revision: number; observationRevision: number;
+    lanes: StandaloneLaneSnapshotRow[] | null; runtimes: RuntimeResolution[] | null; error: string | null;
+  } | null>(null)
+  const projectionRequest = useRef(0)
+  const currentProjection = projection?.authority === authority && projection.config === config
+    && projection.revision === projectionRevision && projection.observationRevision === observationRevision ? projection : null
+  const exactLanes = currentProjection?.lanes ?? null, laneRuntimes = currentProjection?.runtimes ?? null
+  const exactLaneError = currentProjection?.error ?? null
+  useEffect(() => {
+    const request = ++projectionRequest.current
+    if (config === null) return
+    void Promise.all([fetchStandaloneLanes(), fetchRuntimeResolved()]).then(([snapshot, resolved]) => {
+      if (mounted.current && session.admits(authority) && projectionRequest.current === request)
+        setProjection({ authority, config, revision: projectionRevision, observationRevision, lanes: snapshot.lanes, runtimes: resolved.runtimes, error: null })
+    }, error => {
+      if (mounted.current && session.admits(authority) && projectionRequest.current === request)
+        setProjection({ authority, config, revision: projectionRevision, observationRevision, lanes: null, runtimes: null, error: errorToString(error) })
+    })
+    return () => { ++projectionRequest.current }
+  }, [session, authority, config, projectionRevision, observationRevision])
 
   useEffect(() => {
     if (!onClose) return undefined
@@ -235,73 +308,29 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   const invalidModelContexts = Object.keys(modelContextDrafts).length > 0
   const dirty = invalidModelContexts || (config !== null && draft !== config.source_text)
 
-  async function adoptSavedRuntimeConfig(saved: CommittedRuntimeTomlConfig) {
-    setConfig(saved)
-    setDraft(saved.source_text)
-    setCurrentSource(null)
-    const applicationNotice = runtimeConfigCommitReceiptNotice(saved)
-    await resumeSavedModelSetup()
-    await refreshExactLanes()
-    try {
-      await refreshRuntimeConfigConsumers()
-      setNotice(applicationNotice)
-    } catch (err: unknown) {
-      setNotice(applicationNotice)
-      setError(`대시보드 런타임 갱신 실패: ${errorToString(err)}`)
-    } finally {
-      onSaved?.()
+  const refresh = () => session.read(authority, 'reload')
+  const sourceGeneration = runtimeTomlSourceGeneration.value
+  useEffect(() => {
+    void session.ensure(authority)
+  }, [session, authority, sourceGeneration])
+
+  async function afterSetupResume() {
+    if (!session.admits(authority)) return
+    announceExactLaneObservationChanged(authority)
+    try { await refreshRuntimeConfigConsumers() }
+    catch (error) {
+      if (mounted.current && session.admits(authority)) setError(`런타임 목록 갱신 실패: ${errorToString(error)}`)
     }
   }
 
-  const refresh = useCallback(async () => {
-    setLoadState('loading')
-    setCurrentSource(null)
-    setError(null)
-    setNotice(null)
-    try {
-      const next = await fetchRuntimeTomlConfig()
-      setConfig(next)
-      setDraft(next.source_text)
-      setModelContextDrafts({})
-      setLoadState('loaded')
-      await refreshExactLanes()
-    } catch (err: unknown) {
-      setError(errorToString(err))
-      setLoadState('idle')
-    }
-  }, [refreshExactLanes])
-
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  // Another surface wrote runtime.toml. Re-read it unless the operator holds
-  // an unsaved draft, which a reload would discard; say so instead.
-  const sourceGeneration = runtimeTomlSourceGeneration.value
-  const seenSourceGeneration = useRef(sourceGeneration)
-  useEffect(() => {
-    if (seenSourceGeneration.current === sourceGeneration) return
-    seenSourceGeneration.current = sourceGeneration
-    if (dirty) {
-      setError('runtime.toml 이 다른 화면에서 저장되었습니다. 초안은 유지됩니다. 현재 파일을 읽고 비교한 뒤 저장 기준을 선택하세요.')
-      return
-    }
-    void refresh()
-  }, [sourceGeneration])
-
-  useEffect(() => {
-    if (!dirty || typeof window === 'undefined') return undefined
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [dirty])
+  async function afterWrite(committed: boolean) {
+    if (!committed || !mounted.current || !session.admits(authority)) return
+    onSaved?.()
+  }
 
   async function handleSave(sourceText?: string) {
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
-    if (config === null || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts) return
+    if (!ready || config === null || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts) return
     if (nextSourceText === config.source_text) return
     const expectedSourcePath = config.path
     if (expectedSourcePath === null || expectedSourcePath === '') {
@@ -322,115 +351,31 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
         return
       }
     }
-    setSaving(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const saved = await saveRuntimeTomlConfig(nextSourceText, config.source_revision, { expectedSourcePath })
-      await adoptSavedRuntimeConfig(saved)
-    } catch (err: unknown) {
-      if (err instanceof RuntimeTomlRevisionConflict && err.current.source_path === config.path) {
-        setCurrentSource(err.current)
-        setSection('toml')
-        setError(`${err.message} 저장하지 않았습니다. 초안과 기존 저장 기준을 유지했습니다.`)
-      } else {
-        setError(`${errorToString(err)} 초안은 유지됩니다. 파일 변경 여부를 확인하지 못했습니다. 현재 파일을 읽고 비교한 뒤 다시 저장하세요.`)
-      }
-    } finally {
-      setSaving(false)
-    }
+    await afterWrite(await session.write(authority,
+      options => saveRuntimeTomlConfig(nextSourceText, config.source_revision, { ...options, expectedSourcePath }), nextSourceText))
   }
 
-  async function handleReadCurrent() {
-    if (saving || readingCurrent || loadState !== 'loaded' || config === null) return
-    setReadingCurrent(true)
-    setError(null)
-    try {
-      const current = await fetchRuntimeTomlConfig()
-      if (current.path === null || current.path !== config.path) {
-        throw new Error('현재 파일 경로가 편집 중인 runtime.toml과 다릅니다.')
-      }
-      setCurrentSource({ source_path: current.path, source_text: current.source_text,
-        source_revision: current.source_revision })
-      setSection('toml')
-      setNotice('현재 파일을 읽었습니다. 초안과 저장 기준은 바뀌지 않았습니다.')
-    } catch (err: unknown) {
-      setError(`현재 파일 읽기 실패: ${errorToString(err)} 초안과 저장 기준은 유지됩니다.`)
-    } finally {
-      setReadingCurrent(false)
-    }
-  }
-
-  async function useCurrentSource(replaceDraft: boolean) {
-    if (config === null || currentSource === null || saving || readingCurrent) return
-    setConfig({ ...config, path: currentSource.source_path,
-      source_text: currentSource.source_text, source_revision: currentSource.source_revision })
-    if (replaceDraft) {
-      setReadingCurrent(true)
-      setExactLanes(null)
-      setLaneRuntimes(null)
-      setDraft(currentSource.source_text)
-      setModelContextDrafts({})
-      try {
-        await refreshExactLanes()
-      } finally {
-        setReadingCurrent(false)
-      }
-    }
-    setCurrentSource(null)
-    setError(null)
-    setNotice(replaceDraft
-      ? '표시된 현재 원문으로 초안을 교체했습니다.'
-      : '표시된 현재 revision을 저장 기준으로 채택했습니다. 초안은 유지됩니다. 다음 저장은 이 초안으로 현재 파일을 교체합니다.')
-  }
+  async function handleReadCurrent() { await session.read(authority, 'compare') }
+  function useCurrentSource(replaceDraft: boolean) { session.useCurrent(authority, replaceDraft) }
 
   async function handleRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null) {
-    if (saving || readingCurrent || currentSource !== null || loadState === 'loading' || dirty) return
-    setSaving(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const saved = await patchRuntimeRouting(lane, runtimeId)
-      await adoptSavedRuntimeConfig(saved)
-    } catch (err: unknown) {
-      setError(errorToString(err))
-    } finally {
-      setSaving(false)
-    }
+    await afterWrite(await session.write(authority, options => patchRuntimeRouting(lane, runtimeId, options)))
   }
 
   async function handleAssignmentPatch(keeperName: string, runtimeId: string | null) {
-    if (saving || readingCurrent || currentSource !== null || loadState === 'loading' || dirty || !config) return
-    setSaving(true)
-    setError(null)
-    setNotice(null)
-    try {
+    if (!config) return
+    await afterWrite(await session.write(authority, async options => {
       const environment = parseRuntimeTomlEnvironment(config.source_text, config.reserved_provider_ids)
       if (environment.parseError !== null) throw new Error(environment.parseError)
       const currentRuntimeId = environment.assignments[keeperName]
       const expectedAssignmentRevision = {
-        state: 'runtime_config_present' as const,
-        source_revision: config.source_revision,
-        assignment: currentRuntimeId
-          ? { state: 'assigned' as const, runtime_id: currentRuntimeId }
+        state: 'runtime_config_present' as const, source_revision: config.source_revision,
+        assignment: currentRuntimeId ? { state: 'assigned' as const, runtime_id: currentRuntimeId }
           : { state: 'missing' as const },
       }
-      const saved = await patchRuntimeAssignment(
-        keeperName,
-        runtimeId,
-        expectedAssignmentRevision,
-      )
-      if ('assignment_revision' in saved) {
-        setNotice('runtime assignment unchanged')
-        await refresh()
-      } else {
-        await adoptSavedRuntimeConfig(saved)
-      }
-    } catch (err: unknown) {
-      setError(errorToString(err))
-    } finally {
-      setSaving(false)
-    }
+      const saved = await patchRuntimeAssignment(keeperName, runtimeId, expectedAssignmentRevision, options)
+      return 'assignment_revision' in saved ? { unchanged: await fetchRuntimeTomlConfig(options) } : saved
+    }))
   }
 
   function editDraft(edit: (current: string) => string) {
@@ -458,18 +403,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   async function handleExactSlotAction(laneId: string, action: RuntimeExactSlotAction,
     runtimeId: string, direction?: RuntimeExactSlotDirection) {
-    if (saving || readingCurrent || currentSource !== null || loadState !== 'loaded' || dirty) return
-    setSaving(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const saved = await patchRuntimeExactSlot(laneId, action, runtimeId, direction)
-      await adoptSavedRuntimeConfig(saved)
-    } catch (err: unknown) {
-      setError(errorToString(err))
-    } finally {
-      setSaving(false)
-    }
+    await afterWrite(await session.write(authority,
+      options => patchRuntimeExactSlot(laneId, action, runtimeId, direction, options)))
   }
 
   function handleExactBodyDeadlineChange(providerId: string, seconds: number | null) {
@@ -630,6 +565,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   }
 
   function handleEditorInput(event: Event) {
+    if (!session.admits(authority)) return
     setDraft((event.target as HTMLTextAreaElement).value)
     setNotice(null)
   }
@@ -764,7 +700,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             variant="primary"
             size="sm"
             onClick=${handleSave}
-            disabled=${!dirty || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts}
+            disabled=${!ready || !dirty || saving || readingCurrent || currentSource !== null || loadState === 'loading' || invalidModelContexts}
             ariaBusy=${saving}
             ariaLabel="runtime.toml 저장 및 적용"
             title="저장 및 적용 경계 확인"
@@ -784,6 +720,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
         <span>${stats.charCount} chars</span>
         <span>${dirty ? 'unsaved' : 'synced'}</span>
       </div>
+      ${needsRead ? html`<p role="status">현재 파일을 읽고 비교한 뒤 저장 기준을 선택하세요. 초안은 유지됩니다.</p>` : null}
       ${invalidModelContexts ? html`<p role="alert">모델 컨텍스트 입력을 수정하거나 되돌린 뒤 저장하세요.</p>` : null}
       ${parseError !== null ? html`<p role="alert" data-testid="runtime-toml-parse-error">${parseError}</p>` : null}
       ${impact ? html`<${RuntimeTomlImpactPreview} impact=${impact} />` : null}
@@ -866,8 +803,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 </div>
                 <p>초안을 유지하고 현재 revision을 채택하면, 다음 저장 시 현재 파일을 아래 초안으로 교체합니다. 필요한 변경을 먼저 합치세요.</p>
                 <div class="flex flex-wrap gap-2">
-                  <${ActionButton} disabled=${saving || readingCurrent} onClick=${() => useCurrentSource(false)} testId="runtime-toml-adopt-revision">현재 revision 채택 · 초안 유지<//>
-                  <${ActionButton} disabled=${saving || readingCurrent} onClick=${() => useCurrentSource(true)} testId="runtime-toml-replace-draft">현재 원문으로 초안 교체<//>
+                  <${ActionButton} disabled=${!canAdopt || saving || readingCurrent} onClick=${() => useCurrentSource(false)} testId="runtime-toml-adopt-revision">현재 revision 채택 · 초안 유지<//>
+                  <${ActionButton} disabled=${!canAdopt || saving || readingCurrent} onClick=${() => useCurrentSource(true)} testId="runtime-toml-replace-draft">현재 원문으로 초안 교체<//>
                 </div>
               </section>
             ` : null}
@@ -940,7 +877,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 reservedProviderIds=${config.reserved_provider_ids}
                 section=${structuredSection}
                 disabled=${loadState !== 'loaded' || parseError !== null}
-                draftDirty=${dirty || readingCurrent || currentSource !== null}
+                draftDirty=${!ready || dirty || readingCurrent || currentSource !== null}
                 saving=${saving}
                 onRoutingChange=${(lane: RuntimeRoutingLane, runtimeId: string | null) => {
                   void handleRoutingPatch(lane, runtimeId)
@@ -963,10 +900,14 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             </div>
 
             <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
+              ${navigationTarget?.kind === 'exact' && html`<p role="status">Selected Lane: ${navigationTarget.lane}</p>`}
+              ${navigationTarget?.kind === 'exact' && exactLanes && !exactLanes.some(lane => lane.laneId === navigationTarget.lane)
+                && html`<p role="alert">The selected Lane is absent from the current runtime reading.</p>`}
               ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}
               ${parseError !== null ? html`<p role="alert">${parseError}</p>` : exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
+                selectedLane=${section === 'lanes' && navigationTarget?.kind === 'exact' ? navigationTarget.lane : undefined}
                 sourceText=${draft} lanes=${exactLanes} runtimes=${laneRuntimes}
-                slotsDisabled=${saving || readingCurrent || currentSource !== null || loadState !== 'loaded' || dirty}
+                slotsDisabled=${!ready || saving || readingCurrent || currentSource !== null || loadState !== 'loaded' || dirty}
                 deadlineDisabled=${saving || loadState !== 'loaded'}
                 onSlotAction=${(laneId: string, action: RuntimeExactSlotAction, runtimeId: string,
                   direction?: RuntimeExactSlotDirection) => { void handleExactSlotAction(laneId, action, runtimeId, direction) }}
@@ -974,6 +915,10 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
+              ${navigationTarget && navigationTarget.kind !== 'exact' && html`<p role="status">Selected configuration: ${laneTargetLabel(navigationTarget)}. Existing draft text is retained.</p>`}
+              ${navigationNotice && html`<p role="status">${navigationNotice}</p>`}
+              ${locatedNavigation && navigationTarget && navigationTarget.kind !== 'exact' && html`<p role="status">The selected configuration is now declared in this draft.
+                <button type="button" onClick=${() => { selectNavigation(locatedNavigation); focusedNavigation.current = navigationTarget; setLocatedNavigation(null) }}>Select target</button></p>`}
               <div class="rt-toml-wrap">
                 <div class="rt-toml-bar">
                   <span class="mono">${path}</span>
@@ -1007,7 +952,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                     spellcheck=${false}
                     autocapitalize="off"
                     autocorrect="off"
-                    disabled=${saving}
+                    disabled=${phase === 'saving_patch'}
                     onInput=${handleEditorInput}
                     onKeyDown=${handleEditorKeyDown}
                     onScroll=${handleEditorScroll}
@@ -1024,7 +969,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     return html`
       <div class="rt-overlay" data-testid="runtime-toml-editor" onClick=${onClose}>
         <div class="rt-overlay-content" onClick=${stopOverlayContentClick}>
-          <${ModelSetupResumeControl} disabled=${saving} />
+          <${ModelSetupResumeControl} disabled=${saving} onComplete=${afterSetupResume} />
           ${body}
         </div>
       </div>
@@ -1038,7 +983,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       testId="runtime-toml-editor"
       right=${statusPill}
     >
-      <${ModelSetupResumeControl} disabled=${saving} />
+      <${ModelSetupResumeControl} disabled=${saving} onComplete=${afterSetupResume} />
       ${body}
     <//>
   `

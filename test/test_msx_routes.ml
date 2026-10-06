@@ -16,6 +16,7 @@ let with_tick_machine f =
   let dir = Filename.temp_dir "msx-tick-route-" "" in
   Fun.protect
     ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
       (match Lane.eject () with
        | Ok () | Error Lane.No_machine -> ()
        | Error e -> fail (Lane.error_to_string e));
@@ -24,6 +25,7 @@ let with_tick_machine f =
         (Sys.readdir dir);
       Unix.rmdir dir)
     (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       (match
          Lane.load
            ~ledger_dir:dir
@@ -451,7 +453,7 @@ let loopback_request_authority () =
   | Error `Malformed -> fail "failed to construct loopback request authority"
 ;;
 
-let dispatch_press ~state ~authorization ~body =
+let dispatch_request ~method_ ~path ~state ~authorization ~body =
   Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
     let router = Route.add_routes (Masc.Http_server_eio.Router.create ()) in
     Server_auth.publish_server_state state;
@@ -462,13 +464,14 @@ let dispatch_press ~state ~authorization ~body =
     in
     let request_str =
       Printf.sprintf
-        "POST /api/v1/msx/press HTTP/1.1\r\n\
+        "%s %s HTTP/1.1\r\n\
          Host: 127.0.0.1:8935\r\n\
          Origin: http://127.0.0.1:8935\r\n\
          %sContent-Type: application/json\r\n\
          Content-Length: %d\r\n\
          \r\n\
          %s"
+        method_ path
         (match authorization with
          | Some token -> Printf.sprintf "Authorization: Bearer %s\r\n" token
          | None -> "")
@@ -506,11 +509,66 @@ let dispatch_press ~state ~authorization ~body =
     Buffer.contents response_buf)
 ;;
 
+let dispatch_press ~state ~authorization ~body =
+  dispatch_request ~method_:"POST" ~path:"/api/v1/msx/press" ~state ~authorization ~body
+
 let status_of_response response =
   match String.split_on_char ' ' response with
   | _ :: status :: _ -> int_of_string status
   | _ -> failf "could not parse response status: %S" response
 ;;
+
+let test_activity_read_and_route_refusals () =
+  with_tick_machine (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+      let before = current_frame_number () in
+      List.iter (fun (activity,wire,code) ->
+        Msx_lane.install_activity_observer (Some (fun () -> activity));
+        check (option string) "read reports activity independently of the loaded frame" (Some wire)
+          (match member "activity" (Route.activity_json ()) with Some (`String value) -> Some value | _ -> None);
+        let status,body = Route.tick_response ~body:"{}" in
+        check bool "known activity refusal is HTTP 409" true (status=`Conflict);
+        check bool "closed refusal code" true (body=`Assoc ["ok",`Bool false;"code",`String code]);
+        let press_status,press_body =
+          Route.press_response
+            ~config:(Lazy.force unwatched_config)
+            ~who:"unit-presser"
+            ~body:{|{"keys":["space"]}|}
+        in
+        check bool "press answers the same activity refusal as tick" true
+          (press_status = `Conflict && press_body = body);
+        check int "refusal never advances" before (current_frame_number ()))
+        [Machine_configuration.Disabled,"off","activity_disabled";
+         Machine_configuration.Unobserved,"unobserved","activity_unobserved"];
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      let status,body = Route.tick_response ~body:{|{"frames":1}|} in
+      check bool "reactivation admits a new tick" true (status=`OK);
+      check int "new tick advances exactly once" (before+1) (frame_number body)))))
+
+let test_activity_route_read_authority () =
+  with_tick_machine (fun () ->
+    let base_path = Filename.temp_dir "msx-activity-auth-" "" in
+    let previous = Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" in
+    Fun.protect ~finally:(fun () ->
+      Masc.Server_startup_state.reset ();
+      (match previous with Some value -> Unix.putenv "MASC_HTTP_AUTH_STRICT" value | None -> Unix.unsetenv "MASC_HTTP_AUTH_STRICT");
+      remove_tree base_path) (fun () ->
+      Unix.putenv "MASC_HTTP_AUTH_STRICT" "true";
+      Auth.save_auth_config base_path {Masc_domain.default_auth_config with enabled=true;require_token=true};
+      let token = match Auth.create_token base_path ~agent_name:"machine-reader" ~role:Masc_domain.Worker with
+        | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Masc.Server_startup_state.mark_state_ready () |> Result.get_ok;
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Disabled));
+      Eio_main.run (fun _env ->
+        let before = current_frame_number () in
+        let get authorization = dispatch_request ~method_:"GET" ~path:"/api/v1/msx/activity" ~state ~authorization ~body:"" in
+        check int "strict read requires credentials" 401 (status_of_response (get None));
+        check int "reader can observe off activity" 200 (status_of_response (get (Some token)));
+        check int "activity GET does not advance machine" before (current_frame_number ());
+        check int "activity endpoint has no write handler" 405
+          (status_of_response (dispatch_request ~method_:"POST" ~path:"/api/v1/msx/activity" ~state ~authorization:(Some token) ~body:"{}")))))
 
 let test_press_route_names_the_resolved_actor () =
   with_tick_machine (fun () ->
@@ -575,9 +633,11 @@ let test_encoded_pixel_snapshot () =
   let base_path = Filename.temp_dir "msx-encoded-frame-" "" in
   Fun.protect
     ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
       ignore (Lane.eject () : (unit, Lane.error) result);
       remove_tree base_path)
     (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       let ledger_dir = Filename.concat base_path "ledger" in
       let require = function
         | Ok value -> value
@@ -710,16 +770,7 @@ let () =
         ] )
     ; ( "press_json"
       , [ test_case "press result carries ok and the new frame" `Quick (fun () ->
-            let dir = Filename.temp_dir "msx-press-route-" "" in
-            (match
-               Lane.load
-                 ~ledger_dir:dir
-                 ~roms_dir:None
-                 ~cart_path:None
-                 ~disk_path:None
-             with
-             | Ok _ -> ()
-             | Error e -> fail (Lane.error_to_string e));
+            with_tick_machine (fun () ->
             (match
                Lane.press
                  ~who:"operator"
@@ -766,8 +817,7 @@ let () =
               (Some "nope")
               (match member "message" j with
                | Some (`String m) -> Some m
-               | _ -> None);
-            ignore (Lane.eject () : (unit, Lane.error) result))
+               | _ -> None)))
         ] )
     ; ( "carts_json"
       , [ test_case
@@ -864,7 +914,9 @@ let () =
             test_press_route_names_the_resolved_actor
         ] )
     ; ( "tick"
-      , [ test_case
+      , [ test_case "activity reads and typed refusals preserve the machine" `Quick test_activity_read_and_route_refusals
+        ; test_case "activity route follows read authority without execution" `Quick test_activity_route_read_authority
+        ; test_case
             "retained pixels keep atomic advancement and fresh metadata"
             `Quick
             test_retained_tick

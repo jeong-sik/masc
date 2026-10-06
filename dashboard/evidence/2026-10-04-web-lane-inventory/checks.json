@@ -1,0 +1,49 @@
+{
+  "base": "13dfb8a31f40dda913bfdb049c19d7c99afa480b",
+  "checked_at": "2026-10-04T08:43:29.265226+00:00",
+  "scope": "Web only; actual components/decoder plus synthetic HTTP Chromium. No native/backend/worker/deployment proof.",
+  "results": {
+    "vitest": {
+      "passed": 66,
+      "files": 4
+    },
+    "typescript": "pass",
+    "changed_file_eslint": "pass",
+    "chromium_synthetic": "pass"
+  },
+  "commands": [
+    "pnpm --dir dashboard test src/api/lane-inventory.test.ts src/components/lane-inventory-panel.test.ts src/config/navigation.test.ts src/components/status.test.ts",
+    "pnpm --dir dashboard typecheck",
+    "pnpm --dir dashboard exec eslint src/api/lane-inventory.ts src/api/lane-inventory.test.ts src/components/lane-inventory-panel.ts src/components/lane-inventory-panel.test.ts src/components/status.ts src/config/navigation.ts src/config/navigation.test.ts",
+    "cd dashboard; MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:1 node evidence/2026-10-04-web-lane-inventory/browser-fixture.mjs"
+  ],
+  "hashes": {
+    "dashboard/evidence/2026-10-04-web-lane-inventory/README.md": "1f7fd81418e73beaac45df5e2ce467383718f02a2bbc696d4485bd08e1108d6d",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/all-lanes-desktop.png": "38ea5df28177316e442dfe3481bb5c318a19c906634ec2f4e8939ce2749b13d4",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/browser-fixture.mjs": "3cbed8e8ada87646d6a6df88edb84d56e63586ca0fed585fa52fa5d9db9e2ba3",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/browser-result.json": "6773c45fdf12edfea821da8d9d419bd4612734717d0ee7bf0c499f9d05492eb9",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/browser.txt": "b38ed44ed1ad8023b11c171de7b007f05554df5fd6a146ff5774146648153a4b",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/fixture.html": "7fc6354ee8011e01bedb9d7964252e3a7c5595aea06806f36ce0871576ad706f",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/fixture.ts": "a8d140f9618450887a0553a264080c3d944716dc95e5662eca4c122230442189",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/stale-mobile.png": "7bd4358c1d102880533de51d938163ac3df3b5045376f16a5345f21af7eb0b38",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/tests.txt": "590a647832a101d480dfafc46c7b5b05db85ff1999b16fd9b469f5a4c55301be",
+    "dashboard/evidence/2026-10-04-web-lane-inventory/typecheck.txt": "acaeff3195a007894c30484d3d4e1d72b5bd378111e2f27b4819f1d1166ca9fc",
+    "dashboard/src/api/fixtures/lane-inventory.json": "854bc3f2170b7e1752a9af6da12ebd5ac1336b23449796750092611fc65e0f26",
+    "dashboard/src/api/lane-inventory.test.ts": "62cad3ddbb06435bd77cd0e49b14cc20d9c15640fcf7527851cd4f2e8a0fd3d1",
+    "dashboard/src/api/lane-inventory.ts": "657a7eb6fb9e0fbd832de815380ffc19e9af1b763bf313a1b02781fb8543e65c",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "e4d39414bf62ce9ecd1d52acc4b6d5f17bed8d9b54fa77cc610c393f74f08929",
+    "dashboard/src/components/lane-inventory-panel.ts": "733734acc345c0b1b36324b0c3afcbe1f578853c1c5668284d080c99f7e35ba7",
+    "dashboard/src/components/status.ts": "758343c89e03f1b288f340e139ff49cde9c9ebfa4520de154a03aa9265e36374",
+    "dashboard/src/config/navigation.test.ts": "71c7a05cab47009cece753e1885b2ec3515e4386a03f254a588772fb7e2bcc4a",
+    "dashboard/src/config/navigation.ts": "02cc60b5ab7d8e6ad4c3805e6be906ebc17636c144e7e646d86ab33bba054bd3",
+    "docs/guides/lane-inventory.md": "6073b3e17a9412e018bb582f00ed14c7beb75632dc4395bf5b085cdf3f04d08a"
+  },
+  "review_response": {
+    "initial_findings": [
+      "null workspace token admits old readings across unknown connection changes",
+      "exact reading/configuration and declaration owner revision inconsistencies accepted"
+    ],
+    "correction": "Do not fetch/display without accepted authority; abort and match the authority object; validate exact projection and declaration worker revisions. Negative tests added."
+  }
+}

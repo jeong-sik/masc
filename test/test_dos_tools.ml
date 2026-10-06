@@ -35,11 +35,14 @@ let with_workspace f =
   let base_path = Filename.temp_dir "masc-dos-tools-" "" in
   Fun.protect
     ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
       (* The machine is process-global: a test that leaves one loaded would
          hand it to the next one. *)
       eject_held ();
       Fs_compat.remove_tree base_path)
-    (fun () -> f base_path)
+    (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      f base_path)
 ;;
 
 let member name = function
@@ -1424,6 +1427,25 @@ let test_a_damaged_autosave_is_named_not_hidden () =
       (member "unreadable" (autosave_field listing) <> None))
 ;;
 
+let test_activity_refusal_is_proven_pre_effect () =
+  with_workspace @@ fun base_path ->
+  List.iter (fun activity ->
+    Dos_lane.install_activity_observer (Some (fun () -> activity));
+    List.iter (fun (name, args) ->
+      let result = dispatch ~base_path name args in
+      check bool "activity refusal took no requested machine effect" true
+        (match result with
+         | Tool_result.Failed { effect_disposition=Tool_result.Proven_pre_effect;
+             class_=Tool_result.Workflow_rejection; _ } -> true
+         | _ -> false))
+      ["masc_dos_step", ["steps", `Int 1];
+       "masc_dos_press", ["keys", `List [`String "space"]]];
+    List.iter (fun name ->
+      check bool "inventory inspection remains available" true
+        (is_completed (dispatch ~base_path name []))) ["masc_dos_load"; "masc_dos_restore"])
+    [Machine_configuration.Disabled; Unobserved]
+;;
+
 let () =
   run "dos-lane-tools"
     [ ( "tools"
@@ -1498,6 +1520,7 @@ let () =
         ; test_case "no machine names the autosave" `Quick
             test_no_machine_names_the_autosave_after_an_eject
         ; test_case "inventory names the autosave" `Quick test_inventory_names_the_autosave
+        ; test_case "activity refusal is proven pre-effect" `Quick test_activity_refusal_is_proven_pre_effect
         ; test_case "a damaged autosave is named" `Quick test_a_damaged_autosave_is_named_not_hidden
         ] )
     ]

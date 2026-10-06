@@ -1,0 +1,22 @@
+{
+  "tested_head": "9d5af91e0c74aae1981ad286d7c511bc39ef5400",
+  "tests": 373,
+  "suites": 7,
+  "web_exit": 0,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "source_sha256": {
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "e1f81069ec084c339c85c7d00b3616112c35149b692f847d605f27dee9443ebb",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "226665aeb62c066f4b0218fe44c33f39f790968d2a9cb2efe082dfb817663f18",
+    "dashboard/src/components/settings-surface.test.ts": "5c137fc4712080e04c79622080339bfe0089b00e821189242af8c23f9c8194bf",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "e0e70f5ff89debe2414c0411cf70cd463552f244733933acdc21adb2933ff2e7",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "3884215f426ff7c9a2a370d8028ef19fe5064f2441576da7daade0284b02c635",
+    "dashboard/src/lib/runtime-toml-session.ts": "ec18284ea7a43a811a335fe1dd3f208316b1eba26741c60c07f6bb3a5221b8ac"
+  },
+  "logs_sha256": {
+    "web.log": "ce588e23786867af559e7cc4e7fe304e612804a060a465920244803901e9e385",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "native_unchanged": true
+}

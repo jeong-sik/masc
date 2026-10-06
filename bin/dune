@@ -478,10 +478,16 @@
   masc_tui_keeper_chat_projection masc_tui_sse_lines yojson))
 
 (library
+ (name masc_tui_lane_application)
+ (wrapped false)
+ (modules masc_tui_lane_application)
+ (libraries yojson))
+
+(library
  (name masc_tui_lane_declaration)
  (wrapped false)
  (modules masc_tui_lane_declaration)
- (libraries yojson otoml masc.toml_line_editor))
+ (libraries yojson otoml masc.toml_line_editor masc_tui_lane_application))
 
 (library
  (name masc_tui_schema_form)
@@ -490,10 +496,16 @@
  (libraries masc yojson))
 
 (library
+ (name masc_tui_package_browser)
+ (wrapped false)
+ (modules masc_tui_package_browser)
+ (libraries masc yojson))
+
+(library
  (name masc_tui_lane_installer)
  (wrapped false)
  (modules masc_tui_lane_installer)
- (libraries masc_tui_schema_form masc_tui_lane_declaration yojson otoml))
+ (libraries masc_tui_package_browser masc_tui_schema_form masc_tui_lane_declaration yojson otoml))
 
 (library
  (name masc_tui_lane_subscriptions)
@@ -517,7 +529,7 @@
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
+ (libraries masc masc_tui_lane_application masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
 
 ;; The Fusion launch form: what it offers, what a submit means, what the
 ;; overlay says. Names Fusion_types for the topology sum, so it lists
@@ -1386,7 +1398,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1399,6 +1411,7 @@
   masc_workspace
   masc_tui_answering
   masc.masc_tool_blob_store
+  masc_tui_lane_application
   masc_tui_lane_addons
   masc_tui_lane_broadcast_pending
   masc_tui_fusion_launch
@@ -1556,6 +1569,13 @@
  (wrapped false)
  (modules masc_tui_runtime_account_form)
  (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
+
+(library
+ (name masc_tui_exact_activity)
+ (wrapped false)
+ (modules masc_tui_exact_activity)
+ (libraries masc.runtime masc.runtime_toml_namespace otoml masc.toml_line_editor
+  masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
 
 (library
  (name masc_tui_runtime_config_edit)
@@ -1885,7 +1905,13 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
+<<<<<<< HEAD
  (libraries masc_tui_lane_inventory masc_tui_approvals_window masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+||||||| b44740689a
+ (libraries masc_tui_lane_inventory masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+=======
+ (libraries masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+>>>>>>> origin/main
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle
@@ -1911,6 +1937,7 @@
   masc.voice_setup
   masc.voice_config
   masc.workspace_connection
+  masc_tui_lane_application
   masc_tui_lane_addons
   masc_tui_lane_broadcast_pending
   masc_tui_fusion_launch
@@ -2412,6 +2439,20 @@
  (wrapped false)
  (modules masc_tui_render_github)
  (libraries masc_tui_ansi masc))
+
+(library
+ (name masc_tui_browser_activity)
+ (wrapped false)
+ (modules masc_tui_browser_activity)
+ (libraries masc.browser_lane masc.browser_configuration masc.runtime_toml_namespace
+  otoml masc.toml_line_editor masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+
+(library
+ (name masc_tui_machine_activity)
+ (wrapped false)
+ (modules masc_tui_machine_activity)
+ (libraries masc masc.machine_configuration masc.runtime_toml_namespace
+  otoml masc.toml_line_editor masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
 
 (library
  (name masc_tui_model_form)

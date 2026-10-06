@@ -324,15 +324,15 @@ let log_event = function
   | Session.Connection_ended reason -> Log.Server.info "browser-lane stagehand: connection ended: %s" reason
 ;;
 
-let start ~sw ~env ~base_path =
+let prepare_start ~cleanup ~sw ~env ~base_path ~configuration =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
-  Eio.Fiber.fork ~sw (fun () ->
-    stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
-    match Server_browser_configuration.load ~base_path with
-    | Error detail -> Log.Server.error "browser-lane: %s" detail
-    | Ok { Browser_configuration.stagehand = None; _ } ->
+  (fun () ->
+    cleanup ~clock:(Eio.Stdenv.clock env) ~masc_root;
+    match configuration with
+    | None -> Log.Server.error "browser-lane: Runtime configuration is unavailable"
+    | Some { Browser_configuration.stagehand = None; _ } ->
       Log.Server.info "browser-lane: stagehand has no [browser.stagehand]"
-    | Ok { Browser_configuration.stagehand = Some config; _ } ->
+    | Some { Browser_configuration.stagehand = Some config; _ } ->
       let clock = Eio.Stdenv.clock env in
       (* [base_path] is where the lane's official-client CLI slots run. *)
       let model params =
@@ -356,3 +356,13 @@ let start ~sw ~env ~base_path =
       Eio.Switch.on_release sw (fun () -> Browser_lane.install_stagehand_executor None);
       Log.Server.info "browser-lane: stagehand serves with %s" config.Browser_configuration.chrome)
 ;;
+
+let start ~sw ~env ~base_path ~configuration =
+  let worker = prepare_start ~cleanup:stop_left_behind ~sw ~env ~base_path ~configuration in
+  Eio.Fiber.fork ~sw worker
+module For_testing = struct
+  let start_with_cleanup ~cleanup ~sw ~env ~base_path ~configuration =
+    let worker = prepare_start ~sw ~env ~base_path ~configuration
+        ~cleanup:(fun ~clock:_ ~masc_root:_ -> cleanup ()) in
+    Eio.Fiber.fork_promise ~sw worker
+end

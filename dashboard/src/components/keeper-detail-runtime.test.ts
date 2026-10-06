@@ -1,3 +1,4 @@
+import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { h } from 'preact'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1156,3 +1157,5 @@ describe('filterSignalGroups', () => {
     expect(result[0]?.rows.map(r => r.label)).toEqual(['CPU Saturation'])
   })
 })
+
+beforeEach(() => { confirmRuntimeTestWorkspace() })

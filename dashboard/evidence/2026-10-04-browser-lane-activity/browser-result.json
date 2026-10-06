@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-04T14:50:54.190Z",
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status, inventory, HTTP decoder and rendering with synthetic Browser observations. No activity save UI, Runtime publication, real Browser sessions, native TUI or deployment.",
+  "checks": [
+    "off and registered executor remain separate, with status/close and startup-path guidance",
+    "live off preserves the observed connected-client count",
+    "missing configuration authority is distinct from executor registration",
+    "a refreshed on observation replaces the previous activity",
+    "mobile has no horizontal overflow",
+    "zero writes, page errors and unexpected API routes"
+  ],
+  "reads": 3,
+  "errors": [],
+  "writes": [],
+  "unexpected": []
+}

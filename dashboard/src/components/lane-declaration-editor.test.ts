@@ -123,9 +123,10 @@ describe('Lane declaration editing through the status surface', () => {
     let finish!: () => void
     workspace.refreshExecution.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
     const screen = render(html`<${LaneAddonsPanel} />`)
-    await screen.findByRole('table', { name: 'TOML declarations' })
+    expect(screen.queryByRole('table', { name: 'TOML declarations' })).toBeNull()
+    expect(lane.fetchLaneAddons).not.toHaveBeenCalled()
     expect((screen.getByRole('button', { name: 'New TOML' }) as HTMLButtonElement).disabled).toBe(true)
-    await screen.findByText(/TOML editing is unavailable until the workspace is confirmed/)
+    await screen.findByText(/Lane reads and actions are unavailable until the workspace is confirmed/)
     fireEvent.click(screen.getByRole('button', { name: 'Verify workspace' }))
     expect(workspace.refreshExecution).toHaveBeenCalledWith({ force: true })
     expect((screen.getByRole('button', { name: 'Checking workspace…' }) as HTMLButtonElement).disabled).toBe(true)

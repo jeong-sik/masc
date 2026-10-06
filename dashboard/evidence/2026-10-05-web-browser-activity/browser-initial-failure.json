@@ -1,0 +1,34 @@
+{
+  "error": "Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Inspect Browser Stagehand', exact: true }) resolved to 2 elements:\n    1) <button aria-pressed=\"false\" class=\"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50\" data-masc-source=\"{\"schema\":\"masc.source.v1\",\"file\":\"dashboard/src/components/lane-inventory-panel.ts\",\"line\":148,\"column\":37,\"kind\":\"template\",\"digest\":\"ddb98acbca0f460d9e52fab30eb7fc001308dd75863aafd7a0070bb812b8642c\"}\">Inspect Browser Stagehand</button> aka getByRole('button', { name: 'Inspect Browser Stagehand' }).first()\n    2) <button aria-pressed=\"false\" class=\"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50\" data-masc-source=\"{\"schema\":\"masc.source.v1\",\"file\":\"dashboard/src/components/lane-inventory-panel.ts\",\"line\":148,\"column\":37,\"kind\":\"template\",\"digest\":\"ddb98acbca0f460d9e52fab30eb7fc001308dd75863aafd7a0070bb812b8642c\"}\">Inspect Browser Stagehand</button> aka getByRole('button', { name: 'Inspect Browser Stagehand' }).nth(1)\n\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Inspect Browser Stagehand', exact: true })\u001b[22m\n",
+  "errors": [],
+  "unexpected": [],
+  "mutations": [
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "b3d4cec87ba947b671980cfae59b406d780f773bc80b6f0fb9f118b5e5e6ad02"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "5d7989eca814ca66cddf7e1e6aa5e8e8ed026c11fc194fae72a2b6ab3cd36df0"
+      }
+    }
+  ],
+  "body": "Synthetic HTTP · actual Status, Browser activity, raw editor, router and API · no backend/model execution\n\nFixture All LanesFixture Runtime\nKEEPER FLEET\nINTERNAL AGENTS\nTOOL MONITOR\nRUNTIME\nOBSERVATORY\nSKILLS\nALL LANES\nLANE ADD-ONS\nLANE · QUEUE\nALL LANES\n\nBuilt-in Lane kinds, package declarations and manual workers.\n\nRefresh Lanes\n\nObserved 2026-08-24T07:47:49.715Z · 12 inventory rows\n\nPackage read: complete · manager present\n\nExact run reading: 60 of 60\n\nFind a Lane\nBOARD ATTENTION\n\nexact/board_attention_exact\n\nJudges one durable Board candidate for Keeper attention.\n\n1 HTTP · 0 CLI admitted\n\nrunning · 1 running · 12 retained runs\n\nInspect Board Attention\nHITL AUTO JUDGE\n\nexact/hitl_auto_judge\n\nProduces the structured judgment for one held approval.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect HITL Auto Judge\nLIBRARIAN\n\nexact/librarian_exact\n\nSelects the next Memory OS snapshot from immutable Keeper history.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect Librarian\nWORKSPACE CURATOR\n\nexact/workspace_curator_exact\n\nSynthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect Workspace Curator\nVERIFIER\n\nexact/verifier_exact\n\nReviews Task completion and Goal proof evidence.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect Verifier\nBROWSER STAGEHAND\n\nexact/browser_stagehand_exact\n\nAnswers structured model requests from the Stagehand browser lane; run records are not retained yet.\n\n1 HTTP · 0 CLI admitted\n\nno_retained_observation · 0 running · 0 retained runs\n\nInspect Browser Stagehand\nCANDLE APPRAISER\n\nexact/candle_appraiser\n\nAppraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect Candle Appraiser\nLIVE BROWSER\n\nbrowser/live\n\nBrowser backend observation.\n\nNew requests enabled\n\n2 connected clients\n\nInspect Live browser\nBROWSER AUTOMATION\n\nbrowser/automation\n\nBrowser backend observation.\n\nOff · configuration and sessions retained\n\nExecutor not registered\n\nStatus and close remain available while off. Executable and profile paths apply at server startup.\n\nInspect Browser automation\nBROWSER STAGEHAND\n\nbrowser/stagehand\n\nBrowser backend observation.\n\nOff · configuration and sessions retained\n\nExecutor not registered\n\nStatus and close remain available while off. Executable and profile paths apply at server startup.\n\nInspect Browser Stagehand\nMSX\n\nmachine/msx\n\nPublished machine state.\n\nNo screen observed\n\nInspect MSX\nDOS\n\nmachine/dos\n\nPublished machine state.\n\nNo screen observed\n\nInspect DOS"
+}

@@ -212,9 +212,15 @@ let toggle t = match ready t with
 let reapply t = match ready t with
   | Error detail -> {t with message=Some detail}
   | Ok (draft,current) ->
-    (match apply draft.desired t.owner.lane current with
-     | Error detail -> {t with message=Some detail}
-     | Ok _ -> {t with draft=Some {draft with base=current};message=Some "Activity reapplied to current settings. s saves explicitly."})
+    (match apply draft.desired t.owner.lane current, activity t.owner.lane current with
+     | Error detail, _ | _, Error detail -> {t with message=Some detail}
+     | Ok _, Ok enabled ->
+       (* Saving requires a changed value, so a file that already holds the
+          desired activity leaves nothing for s to save. *)
+       let message = if enabled=draft.desired
+         then "Current settings already have this activity. Nothing to save."
+         else "Activity reapplied to current settings. s saves explicitly." in
+       {t with draft=Some {draft with base=current};message=Some message})
 let discard t =
   if busy t then {t with message=Some "A request is pending."} else
   match t.current with
@@ -232,7 +238,9 @@ let start_save ~generation t =
   let* () = if was_enabled=draft.desired then Error "No activity change to save." else Ok () in
   let* source_text = apply draft.desired t.owner.lane draft.base in
   let write = {source_text;expected_source_revision=draft.base.source_revision;expected_source_path=draft.base.path} in
-  Ok ({t with phase=Writing generation;message=None},
+  (* A receipt describes the previous attempt. Kept beside this one, it would
+     read as this save's result after a refusal or conflict. *)
+  Ok ({t with phase=Writing generation;message=None;receipt=None},
       {owner=t.owner;generation;operation=Save write},write)
 let finish_save request result t =
   if not (matches request t) then t else

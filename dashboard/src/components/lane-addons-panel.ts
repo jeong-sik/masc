@@ -397,16 +397,23 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
     if (previous?.target === navigationTarget && previous.authority === authority && previous.attempt === navigationAttempt) return
     if (navigationTarget.kind === 'declaration') {
       // Wait for an existing read/save to settle, then read the selected file.
-      // The session retains the draft and its original CAS basis separately.
+      // The session retains the draft and its original CAS basis separately,
+      // and opens the file only after its installation ID matches the target.
       if (!session || targetDraft && targetDraft.phase !== 'idle') return
       const reading = { authority, target: navigationTarget, attempt: navigationAttempt }
       handledNavigation.current = reading
       session.closeActivity(authority)
-      void session.open(navigationTarget.path, authority, true).then(document => {
+      const installation = navigationTarget.installation
+      void session.openAccepted(navigationTarget.path, authority, document => {
+        if (installation === null) return null
+        try {
+          return declarationIdentity(document.source_text) === installation ? null
+            : 'The file read belongs to a different installation. The replacement was not opened.'
+        } catch { return 'The file read cannot confirm the selected installation ID. Open the file explicitly from the current workspace to repair it.' }
+      }).then(result => {
         const current = currentNavigation.current
         if (!mounted.current || current.authority !== authority || current.target !== navigationTarget || current.attempt !== navigationAttempt) return
-        setFileCheck({ ...reading, error: document ? null
-          : session.state.peek().drafts[navigationTarget.path]?.error ?? 'The selected file could not be read. Retry to confirm it.' })
+        setFileCheck({ ...reading, error: result.opened ? null : result.error })
       })
     } else {
       setInstance(navigationTarget.instance); setSelected([])
@@ -414,14 +421,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       handledNavigation.current = { authority, target: navigationTarget, attempt: navigationAttempt }
     }
   }, [navigationTarget, authority, snapshot, inventoryCurrent, session, snapshotTargetError, navigationAttempt, targetDraft?.phase])
-  let targetError = snapshotTargetError ?? (fileChecked ? fileCheck?.error ?? null : null)
-  const loaded = targetDraft?.current ?? targetDraft?.document
-  if (!targetError && fileChecked && navigationTarget?.kind === 'declaration' && navigationTarget.installation !== null && loaded) {
-    try {
-      if (declarationIdentity(loaded.source_text) !== navigationTarget.installation)
-        targetError = 'The file read belongs to a different installation. The replacement was not opened.'
-    } catch { targetError = 'The file read cannot confirm the selected installation ID. Open the file explicitly from the current workspace to repair it.' }
-  }
+  const targetError = snapshotTargetError ?? (fileChecked ? fileCheck?.error ?? null : null)
   const targetPending = !inventoryCurrent || navigationTarget?.kind === 'declaration' && !fileChecked
   // A target selected while this panel stays mounted reads the inventory
   // again; the mount read above already serves the first target.

@@ -2206,6 +2206,8 @@ let planning_phase_label = function
   | Goal_phase.Awaiting_confirmation -> "confirming"
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
+  | Goal_phase.Paused _ -> "paused"
+  | Goal_phase.Blocked _ -> "blocked"
 
 (* The key a goal detail takes for each lifecycle request, and the words its
    Actions and ARMED rows say it with. The Actions row called [c] "Complete"
@@ -2217,11 +2219,24 @@ let planning_action_key = function
   | Goal_phase.Public_action.Request_complete -> "c"
   | Goal_phase.Public_action.Drop -> "x"
   | Goal_phase.Public_action.Reopen -> "o"
+  | Goal_phase.Public_action.Pause -> "p"
+  | Goal_phase.Public_action.Resume -> "r"
+  | Goal_phase.Public_action.Block -> "b"
+  | Goal_phase.Public_action.Unblock -> "u"
+
+let planning_action_of_key key =
+  let key = String.lowercase_ascii key in
+  List.find_opt (fun action -> String.equal (planning_action_key action) key)
+    Goal_phase.Public_action.all
 
 let planning_action_label = function
   | Goal_phase.Public_action.Request_complete -> "Request completion"
   | Goal_phase.Public_action.Drop -> "Drop"
   | Goal_phase.Public_action.Reopen -> "Reopen"
+  | Goal_phase.Public_action.Pause -> "Pause"
+  | Goal_phase.Public_action.Resume -> "Resume"
+  | Goal_phase.Public_action.Block -> "Block"
+  | Goal_phase.Public_action.Unblock -> "Unblock"
 
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
@@ -2256,6 +2271,8 @@ let planning_phase_color = function
   | Goal_phase.Awaiting_confirmation -> Theme.warn ()
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
+  | Goal_phase.Paused _ -> Theme.warn ()
+  | Goal_phase.Blocked _ -> Theme.bad ()
 
 ;;
 
@@ -2302,6 +2319,8 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
        ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
        ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
        ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
+       ; (Goal_phase.Paused Goal_phase.Resume_executing, "Ⅱ", "Pause", rollup.pr_paused)
+       ; (Goal_phase.Blocked Goal_phase.Resume_executing, "!", "Block", rollup.pr_blocked)
        ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
        ]
        |> List.filter_map (fun (phase, glyph, name, value) ->

@@ -4390,15 +4390,14 @@ let launch_repositories_load state ~mailbox =
   end
 
 let launch_memory_health_load state ~mailbox =
-  if state.memory_health_inflight then ()
+  if state.memory_health_inflight
+     || not (same_workspace_identity state.server_identity state.server_identity) then ()
   else begin
     state.memory_health_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> state.memory_health_inflight <- false)
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Memory_loaded result))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Memory_loaded result)
       (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
@@ -4409,9 +4408,15 @@ let launch_memory_facts_read state ~mailbox ~key read =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (memory_facts, request) ->
       state.memory_facts <- memory_facts;
+      (* The read's answer belongs to the workspace authority that asked for
+         it. A same-port identity change withdraws this browser's owner and
+         with it this request; an unscoped delivery would let workspace A's
+         held facts land in workspace B's browser because the request key
+         names a Keeper, not a workspace (#41163). *)
+      let enqueue_scoped = workspace_enqueue state in
       Masc_tui_async_read.launch
         ~deliver:(fun result ->
-          enqueue_async mailbox (Memory_facts_loaded (request, result)))
+          enqueue_scoped mailbox (Memory_facts_loaded (request, result)))
         read
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
@@ -5058,6 +5063,7 @@ let open_lane_run_detail state ~mailbox ~(lane : Standalone_lane.t) ~run_id =
   state.lane_run_detail <- None;
   state.lane_run_detail_error <- None;
   state.lane_run_detail_scroll <- 0;
+  state.lane_run_preflight_details <- false;
   state.lane_run_detail_content_height <- 0;
   launch_lane_run_detail_load state ~mailbox ~run_id
 
@@ -10172,6 +10178,27 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.presets_error <- None;
   state.presets_cursor <- 0;
   state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
+  (* The facts browser reads a workspace's keepers. The key names a Keeper,
+     so without this clear a held A read's late completion would still match
+     B's pending request and populate B's browser with A's facts (#41163). *)
+  if state.view = Memory && Option.is_some state.memory_facts_keeper then begin
+    state.search <- None;
+    state.search_last <- ""
+  end;
+  state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
+  state.memory_facts_keeper <- None;
+  state.memory_fact_detail_open <- false;
+  state.memory_fact_detail_scroll <- 0;
+  state.memory_facts_cursor <- 0;
+  state.memory_facts_scroll <- 0;
+  state.memory_fact_claim_wrap <- None;
+  state.memory_facts_category <- Category_all;
+  (* Enter must select a newly read B health row, never A's retained row. *)
+  state.memory_health <- None;
+  state.memory_health_error <- None;
+  state.memory_health_inflight <- false;
+  state.memory_health_cursor <- 0;
+  state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
   state.preset_restore_armed <- None;
   state.preset_report <- None;
@@ -17752,7 +17779,7 @@ let main
   in
   (* The raw editor and account form share preview and guarded commit. Each
      caller keeps the revision from the same read as the text it edits. *)
-  let save_runtime_config_text ~authority ~identity ~expected_source_revision edited =
+  let save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision edited =
     let host = server_peer_host in
     let port = state.port in
     let ( let* ) = Result.bind in
@@ -17766,7 +17793,7 @@ let main
     | Masc_tui_runtime_config_receipt.Can_save ->
       let* () = refused (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ()) in
       let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
-        ~source_text:edited ~expected_source_revision in
+        ~source_text:edited ~expected_source_path ~expected_source_revision in
       launch_runtime_config_load ~force:true state ~mailbox:async_messages;
       Ok receipt
   in
@@ -17776,7 +17803,7 @@ let main
     let identity = state.server_identity in
     Masc_tui_types.put_runtime_config_edit state ~workspace session;
     match save_runtime_config_text ~authority ~identity
-        ~expected_source_revision:session.Edit.base.source_revision session.text with
+        ~expected_source_path:session.Edit.base.path ~expected_source_revision:session.Edit.base.source_revision session.text with
     | Ok receipt ->
       (match receipt.Masc_tui_runtime_config_receipt.durability with
        | Masc_tui_runtime_config_receipt.Durable ->
@@ -20042,7 +20069,7 @@ and is loaded on demand through keeper_skill.
                   let* reading = Masc_tui_runtime_config_view.decode json in
                   let* draft = Masc_tui_model_form.apply form reading.source_text in
                   save_runtime_config_text ~authority ~identity
-                    ~expected_source_revision:reading.metadata.source_revision draft
+                    ~expected_source_path:reading.path ~expected_source_revision:reading.metadata.source_revision draft
                   |> Result.map Masc_tui_runtime_config_receipt.lane_summary
                   |> Result.map_error Masc_tui_http.runtime_config_save_error_message in
                 (match result with
@@ -20092,12 +20119,12 @@ and is loaded on demand through keeper_skill.
                        Masc_tui_runtime_account_form.declare_on
                          ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
                          current.Masc_tui_runtime_config_view.source_text
-                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision)
+                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision, current.path)
                    in
                    match declared with
                    | Error form -> state.runtime_account_form <- Some form
-                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision) -> (
-                       match save_runtime_config_text ~authority ~identity ~expected_source_revision text with
+                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision, expected_source_path) -> (
+                       match save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision text with
                        | Ok receipt ->
                          let summary = Masc_tui_http.runtime_config_commit_receipt_summary receipt in
                          (* A sign-in keeps the form open on its command;
@@ -22401,6 +22428,15 @@ and is loaded on demand through keeper_skill.
              Masc_tui_types.next_memory_overview_sort state.memory_overview_sort;
            state.memory_health_cursor <- 0;
            state.memory_health_scroll <- 0
+       | Some ("d" | "D")
+         when state.view = Memory && Option.is_some state.memory_facts_keeper ->
+           toggle_memory_facts_categories ~cols:terminal_columns state
+       | Some ("d" | "D")
+         when state.view = Lanes && (match state.lanes_mode, state.lane_run_detail with
+           | Lanes_run_detail (_, _), Some {Tui_decode.lrd_librarian_preflight=Some _;_} -> true
+           | _ -> false) ->
+           state.lane_run_preflight_details <- not state.lane_run_preflight_details;
+           state.lane_run_detail_scroll <- 0
        | Some ("d" | "D")
          when state.view = Memory
               && Option.is_none state.memory_facts_keeper ->
@@ -25868,6 +25904,8 @@ and is loaded on demand through keeper_skill.
             goto_surface state ~mailbox:async_messages Clients
        | Some "c" when state.view = Config && state.config_pane = Config_models ->
            handle_model_form_open Masc_tui_model_form.Copy ()
+       | Some "m" when state.view = Config && state.config_pane = Config_models ->
+           handle_config_models_open_source ()
 | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
@@ -26195,8 +26233,6 @@ and is loaded on demand through keeper_skill.
            (* The picker owns focus while it is open. *)
            if Option.is_none state.runtime_lane_pick then
              open_selected_slot_config ()
-       | Some "o" when state.view = Config && state.config_pane = Config_models ->
-           handle_config_models_open_source ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the

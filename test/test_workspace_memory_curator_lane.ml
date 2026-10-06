@@ -153,7 +153,7 @@ module Registry = Runtime_exact_output_registry
 let registry_ok result = result |> Result.map_error Registry.publication_error_to_string |> require
 
 let curator_lane : Runtime_schema.exact_output_lane_decl =
-  { id = "workspace_curator_exact"; slot_ids = ["curator-test"];
+  { id = "workspace_curator_exact"; enabled = true; slot_ids = ["curator-test"];
     cli_slot_ids = []; max_output_tokens = None; thinking = None }
 
 let curator_snapshot base_url =

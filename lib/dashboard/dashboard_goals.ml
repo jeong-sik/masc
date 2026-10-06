@@ -221,6 +221,7 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
       | Some Goal_phase.Completed | Some Goal_phase.Dropped -> true
       | Some Goal_phase.Executing
       | Some Goal_phase.Verifying
+      | Some (Goal_phase.Paused _ | Goal_phase.Blocked _)
       | Some Goal_phase.Awaiting_confirmation
       | None -> false
     in
@@ -311,7 +312,8 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
       ("criterion_revision", `String goal.criterion_revision);
       ("verification", verification_for_goal goal);
       ("measurement", measurement_for_goal goal);
-      ("phase", Goal_phase.to_yojson goal.phase);
+      ("phase", `String (Goal_phase.to_string goal.phase));
+      ("resume_phase", Goal_phase.resume_phase_to_yojson goal.phase);
       ("phase_color", `String (goal_phase_color goal.phase));
       ("goal_fsm", goal_fsm_to_json goal node);
       ("priority", `Int goal.priority);
@@ -495,11 +497,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
                node.tasks))
       0 all_nodes
   in
-  let count_phase phase =
-    goals
-    |> List.filter (fun (goal : Goal_store.goal) -> goal.phase = phase)
-    |> List.length
-  in
+
   let active_goal_count =
     goals
     |> List.filter (fun (goal : Goal_store.goal) ->
@@ -524,14 +522,10 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
             ("total_goals", `Int total_goals);
             ("active_goals", `Int active_goal_count);
             ( "phase_counts",
-              `Assoc
-                [
-                  ("executing", `Int (count_phase Goal_phase.Executing));
-                  ("verifying", `Int (count_phase Goal_phase.Verifying));
-                  ("awaiting_confirmation", `Int (count_phase Goal_phase.Awaiting_confirmation));
-                  ("completed", `Int (count_phase Goal_phase.Completed));
-                  ("dropped", `Int (count_phase Goal_phase.Dropped));
-                ] );
+              `Assoc (List.map (fun kind ->
+                Goal_phase.Kind.to_string kind,
+                `Int (List.length (List.filter (fun (g : Goal_store.goal) -> Goal_phase.kind g.phase = kind) goals)))
+                Goal_phase.Kind.all) );
             ("total_tasks", `Int total_tasks);
             ("done_tasks", `Int done_tasks);
             ("pending_approvals", `Int pending_approval_total);

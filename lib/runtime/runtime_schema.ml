@@ -108,9 +108,8 @@ type capabilities =
   }
 [@@deriving show, eq]
 
-(** [providers.<id>] — connection + behavior. The deleted
-    [runtime_provider]'s [log] sub-record is still ignored. [healthcheck.path]
-    is retained as provider-owned metadata for install/setup probes; runtime
+(** [providers.<id>] — connection + behavior. Only declared provider fields
+    are accepted. [healthcheck.path] is retained as provider-owned metadata for install/setup probes; runtime
     startup does not use it for admission. [headers] is retained for
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"

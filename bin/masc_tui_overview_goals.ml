@@ -6,7 +6,7 @@ open Masc_tui_ansi
 
 let drawn_phase : Goal_phase.t -> bool = function
   | Goal_phase.Executing | Goal_phase.Verifying
-  | Goal_phase.Awaiting_confirmation ->
+  | Goal_phase.Awaiting_confirmation | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
       true
   | Goal_phase.Completed | Goal_phase.Dropped -> false
 
@@ -123,6 +123,8 @@ let goal_rows ~now ~inner_width goals =
         match goal.og_phase with
         | Goal_phase.Executing -> []
         | Goal_phase.Verifying -> [ "verify" ]
+        | Goal_phase.Paused _ -> [ "paused" ]
+        | Goal_phase.Blocked _ -> [ "blocked" ]
         | Goal_phase.Awaiting_confirmation -> [ "confirm" ]
         | Goal_phase.Completed | Goal_phase.Dropped -> []
       in

@@ -1626,6 +1626,13 @@ let test_the_default_may_name_a_lane () =
     Alcotest.(check string) "the route is the lane" "coding" (Runtime.get_default_route ());
     Alcotest.(check string) "the runtime it enters on is the lane's head" "openai.gpt"
       (Runtime.get_default_runtime_id ());
+    let projection = Server_dashboard_runtime_resolved_json.build
+        ~generated_at_iso:"2026-10-02T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.dirname path)) in
+    Alcotest.(check string) "resolved document keeps the configured route"
+      "coding" (projection |> J.member "default_route" |> J.to_string);
+    Alcotest.(check string) "resolved document names its separate entry runtime"
+      "openai.gpt" (projection |> J.member "default_runtime" |> J.member "id" |> J.to_string);
     (* Removing it is still refused, and for the same reason as before. *)
     lane_write_refused "remove the lane the default names" ~path
       ~names:[ "[runtime].default" ]

@@ -45,6 +45,7 @@ let runpod_provider =
   ; headers = None
   ; connect_timeout_s = None
   ; exact_body_timeout_s = None
+  ; admission_priority_run_limit = None
   ; antigravity_cli = None
   ; account_home = None
   ; usage_read = None

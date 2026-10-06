@@ -432,7 +432,9 @@ let prepare_attempt ~requirement ~selected_slots messages =
       |> Result.map_error (fun error ->
         Exact_setup_failed (Exact_flow_snapshot_failed error))
     in
-    Exact_output.start_flow snapshot
+    Exact_output.start_flow
+      ~admission_class:(Standalone_lane.admission_class Librarian)
+      snapshot
     |> Result.map_error (fun error ->
       Exact_setup_failed (Exact_flow_start_failed error))
 ;;

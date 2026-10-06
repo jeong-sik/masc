@@ -40,6 +40,11 @@ val obligation : t -> obligation
     commit that leaves a [Required] lane without an admitted slot, and the
     standalone-lane projection draws the same answer. *)
 
+val admission_class : t -> Llm_provider.Admission_class.t
+(** The admission queue the lane's provider requests join. It orders permit
+    waits only on an account that declares [admission-priority-run-limit].
+    This is the one place that says which lanes go first. *)
+
 val required_ids : string list
 (** The {!to_id} of every [Required] lane, in {!all} order: the
     [required_lane_ids] the exact-output registry is published with. *)

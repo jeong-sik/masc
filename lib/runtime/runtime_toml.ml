@@ -815,6 +815,7 @@ let provider_keys =
   ; "is-non-interactive"; "credentials"; "capabilities"; "healthcheck"; "headers"
   ; "kind"; "max-context"; "account-home"; "request-path"; "model-set"; usage_read_key
   ; Runtime_schema.connect_timeout_s_key; Runtime_schema.exact_body_timeout_s_key
+  ; Runtime_schema.admission_priority_run_limit_key
   ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
 ;;
 
@@ -984,6 +985,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
        in
        (let ( let* ) = Result.bind in
         let* max_context = positive_int_opt_field ~path ~key:"max-context" tbl in
+        let* admission_priority_run_limit =
+          positive_int_opt_field ~path ~key:Runtime_schema.admission_priority_run_limit_key tbl
+        in
         let* capabilities = capabilities_result in
         let* enabled_opt = enabled_result in
         let* healthcheck_path = healthcheck_result in
@@ -1013,6 +1017,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; headers
             ; connect_timeout_s
             ; exact_body_timeout_s
+            ; admission_priority_run_limit
             ; antigravity_cli
             ; usage_read
             }))
@@ -3085,6 +3090,44 @@ let validate_ollama_only_binding_fields
     bindings
 ;;
 
+(* [admission-priority-run-limit] orders the queue for an account's permits,
+   and a binding has that queue only when it declares [max-concurrent]. The
+   limit is declared once on the provider, so every binding of that provider
+   carries it; a binding without [max-concurrent] would carry a run limit
+   with no queue, and every request on it would be refused at dispatch.
+   Refusing at load names the binding instead. *)
+let validate_priority_run_limit_bindings
+      (providers : Runtime_schema.provider list)
+      (bindings : Runtime_schema.binding list)
+  : parse_error list
+  =
+  let run_limit_of_provider provider_id =
+    List.find_map
+      (fun (provider : Runtime_schema.provider) ->
+         if String.equal provider.id provider_id
+         then provider.admission_priority_run_limit
+         else None)
+      providers
+  in
+  List.concat_map
+    (fun (binding : Runtime_schema.binding) ->
+       match run_limit_of_provider binding.provider_id, binding.max_concurrent with
+       | None, (None | Some _) | Some _, Some _ -> []
+       | Some limit, None ->
+         error
+           (binding.provider_id ^ "." ^ binding.model_id)
+           (Printf.sprintf
+              "provider %S declares %s = %d, and this binding declares no \
+               max-concurrent, so it has no permit queue for the limit to order. \
+               Declare max-concurrent on this binding, or remove %s from the \
+               provider."
+              binding.provider_id
+              Runtime_schema.admission_priority_run_limit_key
+              limit
+              Runtime_schema.admission_priority_run_limit_key))
+    bindings
+;;
+
 (* --- [typesafeai] --- *)
 
 let typesafeai_keys =
@@ -3396,10 +3439,13 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let browser = extract_after_all_errors_guard ~label:(Ns.key Ns.Browser) browser_result in
     let machines = extract_after_all_errors_guard ~label:(Ns.key Ns.Machines) machines_result in
     let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
-    (* Cross-table Gate: a binding field only reaches the wire through its
-       provider's request builder, so whether it is carriable is a fact about
-       the provider, not about the binding table it was written in. *)
-    match validate_ollama_only_binding_fields providers bindings with
+    (* Cross-table Gates: whether a binding's declaration can take effect
+       depends on its provider -- the request builder that carries a field,
+       or the provider's run limit that needs the binding's permit queue. *)
+    match
+      validate_ollama_only_binding_fields providers bindings
+      @ validate_priority_run_limit_bindings providers bindings
+    with
     | _ :: _ as errors -> Error errors
     | [] ->
       Ok

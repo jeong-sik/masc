@@ -238,6 +238,10 @@ let resolver_catalog_generation (snapshot : resolver_snapshot) = snapshot.genera
 let resolver_catalog_evidence (snapshot : resolver_snapshot) = snapshot.evidence
 let resolver_rejected_target_bindings snapshot = snapshot.rejected_target_bindings
 let target_identity_fingerprint identity = identity.fingerprint
+let selected_target_with_admission_class (target : selected_target) admission_class =
+  { target with config = { target.config with admission_class } }
+;;
+
 let selected_target_identity (target : selected_target) = target.identity
 let selected_target_catalog_generation (target : selected_target) = target.generation
 let selected_target_catalog_evidence (target : selected_target) = target.evidence

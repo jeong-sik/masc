@@ -277,6 +277,11 @@ connect-timeout-s = 1200.0
 # it matches the measured connect-timeout-s above. See the ollama_cloud
 # comment for what the key bounds.
 exact-body-timeout-s = 1200.0
+# Judgment requests (verifier, board attention, hitl auto judge) take a freed
+# admission permit ahead of Keeper turns, at most 3 in a row while a Keeper
+# turn waits. Every glm-coding binding below declares max-concurrent, which
+# this key needs (RFC judgment-lanes-take-account-admission-before-keeper-turns).
+admission-priority-run-limit = 3
 
 [providers.glm-coding.healthcheck]
 path = "/models"

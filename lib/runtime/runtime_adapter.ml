@@ -784,6 +784,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
+            ?admission_priority_run_limit:provider.admission_priority_run_limit
             ?max_tokens
             ())
      | Error reason -> Error reason)
@@ -840,6 +841,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
+            ?admission_priority_run_limit:provider.admission_priority_run_limit
             ?max_tokens
             ())
      | Error reason -> Error reason)

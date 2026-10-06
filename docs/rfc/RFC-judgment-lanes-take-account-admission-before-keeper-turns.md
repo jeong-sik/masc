@@ -110,8 +110,10 @@ masc 에서 `Priority` 를 다는 곳:
 | 레인 | 다는 위치 | 이유 |
 |---|---|---|
 | verifier | `anti_rationalization_reviewer_provider_config` | Task 완료가 이 판정을 기다린다 |
-| hitl auto judge | 해당 exact 레인의 admission 설정 | 운영자 확인 흐름이 이 판정을 기다린다 |
-| board attention | 해당 exact 레인의 admission 설정 | Keeper 가 무엇을 볼지가 이 판정으로 정해진다 |
+| hitl auto judge | exact flow 시작(`Exact_output.start_flow`) | 운영자 확인 흐름이 이 판정을 기다린다 |
+| board attention | exact flow 시작(`Exact_output.start_flow`) | Keeper 가 무엇을 볼지가 이 판정으로 정해진다 |
+
+어느 레인이 `Priority` 인지는 `Standalone_lane.admission_class` 한 곳에서 정한다. 세 곳 모두 이 함수로 등급을 받는다. 레인이 새로 생기면 이 함수의 match 가 컴파일되지 않으므로, 등급을 정하지 않은 레인은 생길 수 없다.
 
 librarian 은 `Standard` 로 둔다. 기억 정리는 다른 일을 막지 않고, 요청 하나가 67~136KB 로 크다. 우선 칸을 큰 요청이 오래 쥐면 판정 레인이 다시 기다린다.
 
@@ -130,6 +132,8 @@ librarian 은 `Standard` 로 둔다. 기억 정리는 다른 일을 막지 않�
 [providers.glm-coding]
 admission-priority-run-limit = 3
 ```
+
+이 키를 선언한 provider 의 binding 은 모두 `max-concurrent` 를 선언해야 한다. 칸 수가 없는 binding 에는 기다리는 줄이 없어서, 한도를 지닌 요청은 보내기 전에 거절된다. 그래서 그런 설정은 읽을 때 binding 을 짚어 거절한다.
 
 3이면 두 줄이 모두 기다릴 때 `Standard` 가 칸의 4분의 1 이상을 받는다. 지금 판정 레인은 호출의 약 5%라서, 평소에는 한도에 닿지 않는다.
 
@@ -162,7 +166,7 @@ admission-priority-run-limit = 3
 ### 4.2 masc 연결 테스트
 
 - verifier, hitl auto judge, board attention 의 provider 설정이 `Priority` 이고, Keeper 턴과 librarian 이 `Standard` 인지 확인한다.
-- `admission-priority-run-limit` 이 없거나 1보다 작으면 설정을 읽을 때 거절한다.
+- `admission-priority-run-limit` 이 1보다 작거나, 그 provider 에 `max-concurrent` 없는 binding 이 있으면 설정을 읽을 때 거절한다. 키가 없으면 그 계정은 도착 순서 한 줄이다.
 
 ### 4.3 운영 측정
 
@@ -196,8 +200,9 @@ admission-priority-run-limit = 3
 ## 7. 단계
 
 1. agent_core: `Slot_scheduler` 두 줄과 연속 한도, `Provider_admission`·`Provider_config` 의 등급, §4.1 테스트.
-2. masc: 세 판정 레인에 `Priority`, `admission-priority-run-limit` 읽기와 seed 설정, §4.2 테스트, 등급별 대기 기록.
-3. 배포 뒤 하루 측정하고 §4.3 표를 채운다.
+2. masc: 세 판정 레인에 `Priority`, `admission-priority-run-limit` 읽기와 seed 설정, §4.2 테스트.
+3. 등급별 대기 기록(§4.3).
+4. 배포 뒤 하루 측정하고 §4.3 표를 채운다.
 
 ## 8. 열린 질문
 

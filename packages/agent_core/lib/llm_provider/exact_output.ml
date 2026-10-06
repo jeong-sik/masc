@@ -247,6 +247,7 @@ type flow_attempt =
   ; candidates : flow_candidate_step list
   ; messages : Types.message list
   ; requirement : output_requirement
+  ; admission_class : Admission_class.t
   ; progress :
       ( candidate_admission
         , flow_attempt_publication
@@ -484,7 +485,7 @@ let start_attempt (ready : ready_plan) =
     Ok { ready; receipt }
 ;;
 
-let start_flow (ready : flow_snapshot) =
+let start_flow ?(admission_class = Admission_class.Standard) (ready : flow_snapshot) =
   match Random_id.create () with
   | Error detail -> Error (Flow_id_generation_failed detail)
   | Ok raw_flow_id ->
@@ -508,6 +509,7 @@ let start_flow (ready : flow_snapshot) =
       ; candidates
       ; messages = ready.messages
       ; requirement = ready.requirement
+      ; admission_class
       ; progress = Flow_state.create_progress ()
       }
 ;;
@@ -1989,6 +1991,9 @@ let execute_flow_candidate
   match resolve_target candidate.admitted_target with
   | Error cause -> reject (Target_selection_rejected cause)
   | Ok target ->
+    (* The flow's class orders both of its permit waits on the endpoint: the
+       token-count measurement and the generation dispatch. *)
+    let target = selected_target_with_admission_class target flow.admission_class in
     let flow_measurement receipt : flow_measurement_receipt =
       { visit = candidate.visit; receipt }
     in

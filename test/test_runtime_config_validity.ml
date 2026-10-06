@@ -2754,6 +2754,130 @@ let test_runtime_toml_rejects_non_positive_repeat_penalty () =
          errs)
 
 (* -1 is Ollama's "the whole context"; anything below it has no meaning. *)
+(* [admission-priority-run-limit] is declared once on the provider. Its
+   bindings need [max-concurrent]: that is the permit queue the limit orders. *)
+let run_limit_config ~run_limit ~second_binding =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     admission-priority-run-limit = %s\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.other]\n\
+     api-name = \"other\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-concurrent = 2\n\
+     \n\
+     [local.other]\n\
+     %s\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+    run_limit
+    second_binding
+
+let render_parse_errors errs =
+  errs
+  |> List.map (fun (err : Runtime_toml.parse_error) ->
+    Printf.sprintf "%s: %s" err.path err.message)
+  |> String.concat "\n"
+
+let test_runtime_toml_parses_the_provider_priority_run_limit () =
+  match
+    Runtime_toml.parse_string
+      (run_limit_config ~run_limit:"3" ~second_binding:"max-concurrent = 2")
+  with
+  | Error errs ->
+    failf "a run limit over bindings with max-concurrent should parse:\n%s"
+      (render_parse_errors errs)
+  | Ok cfg ->
+    (match cfg.Runtime_schema.providers with
+     | [ provider ] ->
+       check (option int) "the provider carries the run limit" (Some 3)
+         provider.Runtime_schema.admission_priority_run_limit
+     | providers -> failf "expected one provider, got %d" (List.length providers))
+
+let test_runtime_toml_rejects_a_priority_run_limit_below_one () =
+  match
+    Runtime_toml.parse_string
+      (run_limit_config ~run_limit:"0" ~second_binding:"max-concurrent = 2")
+  with
+  | Ok _ -> failf "admission-priority-run-limit = 0 should be rejected"
+  | Error errs ->
+    check bool "names the offending key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+            String.ends_with ~suffix:".admission-priority-run-limit" err.path)
+         errs)
+
+let test_runtime_toml_rejects_a_priority_run_limit_over_a_binding_without_max_concurrent () =
+  match
+    Runtime_toml.parse_string (run_limit_config ~run_limit:"3" ~second_binding:"")
+  with
+  | Ok _ ->
+    failf "a run limit over a binding without max-concurrent should be rejected"
+  | Error errs ->
+    check (list string) "names only the binding without max-concurrent"
+      [ "local.other" ]
+      (List.map (fun (err : Runtime_toml.parse_error) -> err.path) errs)
+
+(* The RFC's table, read from the one function the lanes' call sites use. *)
+let test_judgment_lanes_join_the_priority_queue () =
+  check
+    (list (pair string string))
+    "admission class per lane"
+    [ "librarian_exact", "standard"
+    ; "hitl_auto_judge", "priority"
+    ; "board_attention_exact", "priority"
+    ; "workspace_curator_exact", "standard"
+    ; "verifier_exact", "priority"
+    ; "browser_stagehand_exact", "standard"
+    ; "candle_appraiser", "standard"
+    ]
+    (List.map
+       (fun lane ->
+          ( Standalone_lane.to_id lane
+          , Llm_provider.Admission_class.to_string (Standalone_lane.admission_class lane) ))
+       Standalone_lane.all)
+
+(* The seed declares the run limit on glm-coding; every runtime built from a
+   glm-coding binding carries it with that binding's permit count, and its
+   ordinary requests stay [Standard]. Only the judgment lanes ask for
+   [Priority]. *)
+let test_repo_glm_coding_runtimes_carry_the_priority_run_limit () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match load_list_text ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    let glm_configs =
+      List.filter_map
+        (fun (runtime : Runtime_instance.t) ->
+           match runtime.execution with
+           | Runtime_execution.Agent_core config
+             when config.Llm_provider.Provider_config.provider_id = Some "glm-coding" ->
+             Some (runtime.id, config)
+           | Runtime_execution.Agent_core _
+           | Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _ -> None)
+        runtimes
+    in
+    check bool "the seed has glm-coding runtimes" true (glm_configs <> []);
+    List.iter
+      (fun (id, (config : Llm_provider.Provider_config.t)) ->
+         check (option int) (id ^ " run limit") (Some 3) config.admission_priority_run_limit;
+         check (option int) (id ^ " permit count") (Some 4) config.max_concurrent_requests;
+         check string (id ^ " class") "standard"
+           (Llm_provider.Admission_class.to_string config.admission_class))
+      glm_configs
+
 let test_runtime_toml_rejects_repeat_last_n_below_minus_one () =
   let content = "[providers.local]\n\
      protocol = \"ollama-http\"\n\
@@ -6678,6 +6802,17 @@ let () =
             test_runtime_toml_rejects_non_positive_repeat_penalty;
           test_case "repeat-last-n below -1 is rejected" `Quick
             test_runtime_toml_rejects_repeat_last_n_below_minus_one;
+          test_case "the provider priority run limit parses" `Quick
+            test_runtime_toml_parses_the_provider_priority_run_limit;
+          test_case "a priority run limit below one is rejected" `Quick
+            test_runtime_toml_rejects_a_priority_run_limit_below_one;
+          test_case "a priority run limit over a binding without max-concurrent is rejected"
+            `Quick
+            test_runtime_toml_rejects_a_priority_run_limit_over_a_binding_without_max_concurrent;
+          test_case "repo glm-coding runtimes carry the priority run limit" `Quick
+            test_repo_glm_coding_runtimes_carry_the_priority_run_limit;
+          test_case "judgment lanes join the priority queue" `Quick
+            test_judgment_lanes_join_the_priority_queue;
           test_case "repetition samplers off the ollama wire are rejected" `Quick
             test_runtime_toml_rejects_repetition_samplers_off_the_ollama_wire;
           test_case "repetition samplers on the ollama wire still parse" `Quick

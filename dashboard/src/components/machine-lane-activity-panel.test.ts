@@ -390,7 +390,8 @@ describe('Machine activity operator flow', () => {
     expect(await session.save(authority)).toBe(false); expect(session.state.value.current).toBeNull()
     expect(await session.save(authority)).toBe(false); expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     await session.read(authority)
-    expect(session.state.value.uncertain).toBeNull(); expect(session.state.value.notice).toMatch(/반영된 것을 확인/)
+    expect(session.state.value.uncertain?.stage).toBe('answered'); expect(session.state.value.notice).toMatch(/보낸 내용이 파일에 보입니다/)
+    session.reapply(authority)
     expect(await session.save(authority)).toBe(false); expect(session.modified()).toBe(false)
     expect(stored).toBe(off)
   })
@@ -490,7 +491,7 @@ describe('Machine inventory and backend isolation', () => {
     await view.findByText('서버 활동 (마지막 조회): 미확인')
     expect(view.queryByText(/파일 설정과 마지막 서버 활동이 다릅니다/)).toBeNull()
   })
-  it('settles an unanswered write as unwritten when an explicit read finds the old revision', async () => {
+  it('retains uncertainty even when readback finds the old revision; explicit reapply enables retry', async () => {
     const { session, authority } = await draft()
     api.saveRuntimeTomlConfig.mockRejectedValueOnce(new Error('lost before reply'))
     expect(await session.save(authority)).toBe(false)
@@ -500,8 +501,9 @@ describe('Machine inventory and backend isolation', () => {
     expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     await session.read(authority)
     expect(session.state.value.current?.source_text).toBe(source)
-    expect(session.state.value.uncertain).toBeNull(); expect(session.state.value.notice).toMatch(/파일을 바꾸지 않았습니다/)
-    expect(await session.save(authority)).toBe(true); expect(stored).toBe(off)
+    expect(session.state.value.uncertain?.stage).toBe('answered'); expect(session.state.value.notice).toMatch(/아직 저장 전 그대로/)
+    expect(await session.save(authority)).toBe(false); expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    session.reapply(authority); expect(await session.save(authority)).toBe(true); expect(stored).toBe(off)
   })
   it('keeps a saved receipt when file readback fails, and recovers on explicit read', async () => {
     const { session, authority } = await draft()

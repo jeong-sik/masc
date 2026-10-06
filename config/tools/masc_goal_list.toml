@@ -12,5 +12,5 @@ defer_loading = true
 [[params]]
 name = "phase"
 type = "string"
-enum = ["executing", "verifying", "awaiting_confirmation", "completed", "dropped"]
+enum = ["executing", "verifying", "awaiting_confirmation", "completed", "dropped", "paused", "blocked"]
 description = "Optional explicit Goal lifecycle phase filter"

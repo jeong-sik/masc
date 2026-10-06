@@ -59,7 +59,7 @@ jobs:
 
       - name: Look for a successful build of these inputs
         id: receipt
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: .ci-main-build-receipt
           key: ${{ steps.inputs.outputs.receipt }}
@@ -73,7 +73,7 @@ jobs:
 
       - name: Reuse Dune build artifacts
         if: steps.receipt.outputs.cache-hit != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/masc-dune-cache
           key: ${{ steps.inputs.outputs.dune }}-${{ github.sha }}
@@ -93,7 +93,7 @@ jobs:
       # at the next scheduled check; cache eviction also causes a rebuild.
       - name: Remember successful build inputs
         if: success() && steps.receipt.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: .ci-main-build-receipt
           key: ${{ steps.inputs.outputs.receipt }}

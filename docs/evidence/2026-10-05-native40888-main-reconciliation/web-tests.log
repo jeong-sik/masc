@@ -1,0 +1,41 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40888-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard.test.ts src/api/schemas/runtime-resolved.test.ts src/components/settings-surface.test.ts src/components/fleet-aside-extras.test.ts src/components/fusion-settings-panel.test.ts src/components/keeper-runtime-model-editor.test.ts src/components/overview/runtime-stats.test.ts src/lib/fusion-routes.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/reconcile-native40888-20261005/dashboard
+
+AggregateError: 
+    at internalConnectMultiple (node:net:1193:18)
+    at afterConnectMultiple (node:net:1783:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    }
+  ]
+}
+
+ Test Files  8 passed (8)
+      Tests  377 passed (377)
+   Start at  03:38:25
+   Duration  8.00s (tests 31%, import 21%, transform 19%, environment 16%, setup 12%)
+
+    Isolate  8 workers spawned · ~243ms startup each (spawn + environment, per file)
+             at least ~1.70s faster with isolate: false — reuses workers across files instead of one per file
+

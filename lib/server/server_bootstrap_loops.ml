@@ -386,11 +386,12 @@ let append_workspace_message_to_recipient ~base_path ~sender_authority
     | External_sender ->
         Ok {Keeper_chat_store.speaker_id=Some delivery.from_agent;
           speaker_name=Some delivery.from_agent; speaker_authority=Keeper_chat_store.External} in
-  let appended=Eio_unix.run_in_systhread (fun () ->
-    Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
+  (* The store runs on this fiber: it takes Eio_guard mutexes, which raise on a
+     system thread, and Fs_compat already moves the file transaction itself to
+     a system thread. *)
+  let appended=Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
       ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
-      ~speaker ~mention_policy:Keeper_chat_store.Passive_context ()) in
-  (* Notify only after returning to the owner domain from transcript I/O. *)
+      ~speaker ~mention_policy:Keeper_chat_store.Passive_context () in
   match appended with
   | Error detail -> Error detail
   | Ok (Keeper_chat_store.Already_present _) -> Ok ()

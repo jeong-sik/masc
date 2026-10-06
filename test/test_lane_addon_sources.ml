@@ -1,4 +1,7 @@
 (** Source acquisition reuses owners and preserves measured bytes. *)
+(* This standalone fixture explicitly enables new Browser work, so the
+   automation document source is observable instead of refused as inactive. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
 open Alcotest
 module Sources = Masc.Lane_addon_sources
 module Store = Masc.Lane_addon_store

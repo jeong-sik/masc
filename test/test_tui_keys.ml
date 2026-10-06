@@ -664,7 +664,7 @@ let test_memory_footer_offers_the_fact_browser () =
      moving a cursor through it, and Esc clears that filter before it leaves,
      so both are named the way the fact browser names them. *)
   check str "the health table names the way into the facts"
-    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  d:detail  Esc:clear / back  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  u:units  d:detail  Esc:clear / back  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   (* #39831: the block under the selected keeper folds its ledger rows until
      [d] asks for them, so the key has to be on the surface it toggles. *)

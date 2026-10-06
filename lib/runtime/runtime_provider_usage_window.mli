@@ -52,10 +52,11 @@ type source =
   | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
   | Antigravity_usage_read
       (** Antigravity [agy -p "/usage" --output-format json], no turn. *)
-  | Muse_usage_changed
-      (** Muse Code [usage/changed], pushed while a session runs
-          ({!Runtime_muse_usage}). *)
-  | Muse_usage_read  (** Muse Code [usage/read], no turn. *)
+  | Muse_subscription_usage
+      (** Muse Code's subscription windows, from [usage/changed] during a
+          session or a [usage/read] answer ({!Runtime_muse_usage}). Both
+          state the same two windows, so they are one source: a complete
+          report from either replaces the other's rows. *)
 
 (** What a window limits, set by each decoder from the provider's own
     shape, never from a label. *)

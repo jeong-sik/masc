@@ -20,8 +20,8 @@ def viewport_journey(executable, *, unread, no_color):
         expected = b"not fully read"
     else:
         fixtures, _items, _new = _keyboard_harness.approval_selection_http_fixtures()
-        ready = b"Approvals and questions: 3"
-        expected = b"3 need you"
+        ready = b"Approvals and questions: not fully read \xc2\xb7 confirm queue"
+        expected = b"not fully read"
     requests = []
 
     def interact(process, fd, _slave, output, _base):

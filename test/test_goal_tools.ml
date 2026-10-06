@@ -556,12 +556,16 @@ let test_metadata_edit_survives_event_recording_failure () =
       match Tool_workspace.dispatch (workspace_ctx config) ~name ~args:(`Assoc args) with
       | Some result -> parse_json_result result
       | None -> fail (name ^ " not handled") in
+    (* B2 refuses a goal born overdue, so the overdue fixture is created
+       reachable and backdated by update, which stays ungated. *)
     let created = call "masc_goal_upsert"
         [ "title", `String "Overdue shared Goal"; "metric", `String "artifacts"
-        ; "target_value", `String "1"; "due_date", `String "2000-01-01" ] in
+        ; "target_value", `String "1"; "due_date", `String "2030-05-05" ] in
     check_event_recordings "creation reports its actual append"
       [ "goal_created", "recorded" ] created;
     let goal_id = get_string_field created "goal_id" in
+    ignore (call "masc_goal_upsert"
+        [ "id", `String goal_id; "due_date", `String "2000-01-01" ] : Yojson.Safe.t);
     (match phase with
      | `Executing -> ()
      | `Dropped -> ignore (call "masc_goal_transition"
@@ -939,7 +943,7 @@ let test_callers_share_a_goal_without_private_delivery () =
     (get_string_field incomplete "error_code");
   let created = call creator "masc_goal_upsert"
       [ "title", `String "Ship together"; "metric", `String "verified artifacts"
-      ; "target_value", `String "1"; "due_date", `String "2000-01-01" ] in
+      ; "target_value", `String "1"; "due_date", `String "2099-01-01" ] in
   let goal_id = get_string_field created "goal_id" in
   let initial = shared_row "created Goal" (member "goal" created) in
   check string "a new shared Goal is executing" "executing"

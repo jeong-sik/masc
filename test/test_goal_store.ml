@@ -561,7 +561,7 @@ let test_criterion_edits_invalidate_proof_phase () =
     last_review_note = Some "proved"; last_review_at = Some (iso_now ()) } in
   Goal_store.write_state config { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [completed] };
   let same = upsert_exn config ~id:original.id ~title:original.title ~metric:"p99"
-      ~target_value:"400ms" ~priority:1 ~due_date:"2026-09-23" () in
+      ~target_value:"400ms" ~priority:1 ~due_date:"2027-09-23" () in
   check string "priority, due date and no-op criterion preserve revision" original.criterion_revision same.criterion_revision;
   check bool "unrelated edit preserves completion" true (same.phase = Goal_phase.Completed);
   let changed = upsert_exn config ~id:original.id ~target_value:"200ms" () in
@@ -587,8 +587,8 @@ let test_criterion_edits_invalidate_proof_phase () =
    spellings [int_of_string_opt] alone would take as a year. *)
 let due_dates_that_are_not_a_calendar_day =
   [ "tomorrow"; ""; "2026-9-3"; "2026-09-3"; "26-09-23"; "2026-13-01"
-  ; "2026-00-10"; "2026-02-30"; "2027-02-29"; " 2026-09-23"; "2026-09-23 "
-  ; "2026-09-23T10:00:00Z"; "2026/09/23"; "2026-0x-23"; "+026-09-23"
+  ; "2026-00-10"; "2026-02-30"; "2027-02-29"; " 2027-09-23"; "2027-09-23 "
+  ; "2027-09-23T10:00:00Z"; "2026/09/23"; "2026-0x-23"; "+026-09-23"
   ; "2_26-09-23" ]
 
 let test_upsert_refuses_a_due_date_that_is_not_a_calendar_day () =
@@ -622,14 +622,55 @@ let test_upsert_accepts_a_real_calendar_day () =
       in
       check (option string) (raw ^ " is stored as written") (Some raw)
         goal.due_date)
-    [ "2026-09-23"; "2028-02-29"; "9999-12-31" ]
+    [ "2027-09-23"; "2028-02-29"; "9999-12-31" ]
+
+(* RFC-0387 B2: creation is a feasibility review. A goal born without a
+   name states no success condition to hold it to, on either create path;
+   a goal born past its due date is overdue before its first observation.
+   Updates stay ungated: an existing goal's due date passing is ordinary
+   life, and backdating a stored date is a correction, not a birth. *)
+let test_upsert_b2_reviews_a_new_goal_for_feasibility () =
+  with_workspace @@ fun config ->
+  let rejected_as_b2 = function
+    | Error (Goal_store.Rejected message) ->
+      check bool "the refusal names B2" true
+        (String_util.contains_substring message "RFC-0387 B2")
+    | Error other -> fail ("B2 refusal was not Rejected: " ^ write_error_msg other)
+    | Ok _ -> fail "an infeasible goal was created"
+  in
+  (* A whitespace title states nothing, on the id-less path (refused before
+     the lock, beside the pre-existing missing-title check) … *)
+  (match Goal_store.upsert_goal config ~title:"   " ~metric:"m" ~target_value:"1" () with
+   | Error (Goal_store.Rejected _) -> ()
+   | Error other -> fail ("blank title was not Rejected: " ^ write_error_msg other)
+   | Ok _ -> fail "a goal with a blank title was created");
+  (* … and an explicit unknown id no longer defaults to "Untitled goal". *)
+  rejected_as_b2
+    (Goal_store.upsert_goal config ~id:"goal-explicit-no-title" ~metric:"m"
+       ~target_value:"1" ());
+  (* A past due date is unreachable by construction. *)
+  rejected_as_b2
+    (Goal_store.upsert_goal config ~title:"Late" ~metric:"m" ~target_value:"1"
+       ~due_date:"2000-01-01" ());
+  check bool "refused creates wrote no goals.json" false
+    (Sys.file_exists (Goal_store.goals_path config));
+  (* A reachable future date creates. *)
+  let goal =
+    upsert_exn config ~title:"Early" ~metric:"m" ~target_value:"1"
+      ~due_date:"2099-01-01" ()
+  in
+  check (option string) "the future date is stored" (Some "2099-01-01") goal.due_date;
+  (* Backdating that same row by update is a correction, not a birth. *)
+  let backdated = upsert_exn config ~id:goal.id ~due_date:"2000-01-01" () in
+  check (option string) "the backdate is stored" (Some "2000-01-01") backdated.due_date
+;;
 
 (* An update is checked like a create, and a refused one changes nothing. *)
 let test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused () =
   with_workspace @@ fun config ->
   let goal =
     upsert_exn config ~title:"Dated" ~metric:"m" ~target_value:"1"
-      ~due_date:"2026-09-23" ()
+      ~due_date:"2027-09-23" ()
   in
   let before = available config in
   (match Goal_store.upsert_goal config ~id:goal.id ~due_date:"TBD" () with
@@ -640,7 +681,7 @@ let test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused () =
   check int "a refused update writes nothing" before.version after.version;
   match after.goals with
   | [ stored ] ->
-    check (option string) "the stored due date is unchanged" (Some "2026-09-23")
+    check (option string) "the stored due date is unchanged" (Some "2027-09-23")
       stored.due_date
   | goals -> fail (Printf.sprintf "expected one goal, got %d" (List.length goals))
 
@@ -650,13 +691,13 @@ let test_upsert_returns_the_row_as_it_was_before_an_update () =
   with_workspace @@ fun config ->
   let created =
     upsert_exn config ~title:"Dated" ~metric:"m" ~target_value:"1"
-      ~due_date:"2026-09-23" ~priority:2 ()
+      ~due_date:"2027-09-23" ~priority:2 ()
   in
   match
     Goal_store.upsert_goal config ~id:created.id ~due_date:"2026-10-15" ~priority:5 ()
   with
   | Ok (updated, `updated previous) ->
-    check (option string) "the due date it held" (Some "2026-09-23") previous.due_date;
+    check (option string) "the due date it held" (Some "2027-09-23") previous.due_date;
     check int "the priority it held" 2 previous.priority;
     check (option string) "the due date now" (Some "2026-10-15") updated.due_date;
     check int "the priority now" 5 updated.priority
@@ -1249,6 +1290,8 @@ let () =
             test_upsert_refuses_a_due_date_that_is_not_a_calendar_day;
           test_case "a real calendar day is stored as written" `Quick
             test_upsert_accepts_a_real_calendar_day;
+          test_case "B2 reviews a new goal for feasibility" `Quick
+            test_upsert_b2_reviews_a_new_goal_for_feasibility;
           test_case "a refused update keeps the stored due date" `Quick
             test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused;
           test_case "an update returns the row as it was" `Quick

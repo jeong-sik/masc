@@ -988,7 +988,7 @@ let append_audit_event_after_pending config json =
 let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
     ?priority () =
   let is_new_goal = id = None in
-  if is_new_goal && (title = None || title = Some "") then
+  if is_new_goal && blank_opt title then
     Error (Rejected "title required for new goal")
   else
     match due_date_refusal due_date with
@@ -1053,14 +1053,51 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                      not to hold the row. On refusal the closure returns the
                      state it received and [update_state] writes nothing; the
                      error is carried out via [refusal]. *)
-                  if blank_opt metric || blank_opt target_value then (
-                    refusal :=
+                  (* RFC-0387 B2: creation is a feasibility review, not just
+                     a shape check. A goal born without a name states no
+                     condition to hold it to — the [id = None] path is
+                     refused before the lock, while an explicit unknown id
+                     reaches this arm and used to default to "Untitled
+                     goal". And a goal born past its due date is overdue
+                     before its first observation: unreachable by
+                     construction. Updates stay ungated: an existing goal's
+                     due date passing is ordinary life, and backdating a
+                     stored date is a correction, not a birth. *)
+                  let b2_refusal =
+                    if blank_opt title then
                       Some
-                        "metric and target_value are required for a new goal \
-                         (RFC-0387 B1: a goal must declare a measurable \
-                         success condition)";
-                    state)
-                  else (
+                        "a non-blank title is required for a new goal \
+                         (RFC-0387 B2: a goal without a name states no \
+                         success condition to hold it to)"
+                    else (
+                      match due_date with
+                      | None -> None
+                      | Some raw ->
+                        (match Ptime.of_float_s (Time_compat.now ()) with
+                         | None -> None
+                         | Some now ->
+                           if Goal_due.is_overdue ~now (Goal_due.read (Some raw))
+                           then
+                             Some
+                               (Printf.sprintf
+                                  "due_date %S is already past: a goal born \
+                                   overdue is unreachable (RFC-0387 B2)"
+                                  raw)
+                           else None))
+                  in
+                  (match b2_refusal with
+                   | Some message ->
+                     refusal := Some message;
+                     state
+                   | None ->
+                     if blank_opt metric || blank_opt target_value then (
+                       refusal :=
+                         Some
+                           "metric and target_value are required for a new goal \
+                            (RFC-0387 B1: a goal must declare a measurable \
+                            success condition)";
+                       state)
+                     else (
                   let new_goal =
                       {
                         id = resolved_id;
@@ -1082,7 +1119,7 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                     state with version = state.version + 1;
                     updated_at = now;
                     goals = state.goals @ [ new_goal ];
-                  }) in
+                  })) in
               match actor, !upserted, find_goal_in next.goals resolved_id with
               | Some actor, Some action, Some goal ->
                   pending := upsert_event_intents ~actor ~revision:next.version goal action;

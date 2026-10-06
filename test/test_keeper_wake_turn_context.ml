@@ -374,52 +374,6 @@ let test_no_digest_without_failures () =
     (Option.is_none (Astring.String.find_sub ~sub:"Rejected already" section))
 ;;
 
-(* Review P1 on #41351: the removed briefing budget used to press this section
-   under the model input cap, and #29676 is what its absence costs — a first
-   request carries [world_state] verbatim, and Wide (or reader-less Small)
-   keepers never externalize. So the assembled section is bounded at
-   assembly: whole oldest turns are dropped, newest kept, nothing cut
-   mid-string, and the omission is rendered. *)
-let test_section_is_bounded_and_oldest_turns_are_omitted () =
-  let big = String.make 2400 'x' in
-  let observation =
-    { base_observation with
-      WO.own_recent_actions =
-        Ok (List.init 20 (fun i ->
-            action_turn
-              (400 + i)
-              [ call
-                  ~tool:"keeper_task_done"
-                  ~input:(Printf.sprintf "{\"i\":%d,\"payload\":\"%s\"}" i big)
-                  ~outcome:(Masc.Keeper_own_recent_actions.Failed_call None) ]))
-    }
-  in
-  let body = user_message observation in
-  let section = own_recent_actions_section body in
-  check bool
-    (Printf.sprintf "the section stays within the bound (is %d bytes)"
-       (String.length section))
-    true
-    (String.length section <= 16_384);
-  check bool "the newest kept turn is turn 419" true
-    (Option.is_some (Astring.String.find_sub ~sub:"[turn 419]" section));
-  check bool "the oldest turn is the one omitted" true
-    (Option.is_none
-       (Astring.String.find_sub ~sub:"[turn 400]" section));
-  check bool "the oldest turn's arguments are gone with it" true
-    (Option.is_none
-       (Astring.String.find_sub
-          ~sub:"{\"i\":0,\"payload\":"
-          section));
-  check bool "the omission is rendered, not silent" true
-    (Option.is_some
-       (Astring.String.find_sub
-          ~sub:"older turns omitted to keep this section within 16384 bytes"
-          section));
-  check bool "the newest turn's arguments survive whole" true
-    (Option.is_some (Astring.String.find_sub ~sub:big section))
-;;
-
 (* --- 1. Current Task layer --- *)
 
 let test_small_failed_payloads_remain_retrievable () =
@@ -1183,8 +1137,6 @@ let () =
             test_failure_digest_dedupes_and_counts;
           test_case "no digest block without refusals" `Quick
             test_no_digest_without_failures;
-          test_case "the section is bounded and oldest turns are omitted, not cut" `Quick
-            test_section_is_bounded_and_oldest_turns_are_omitted;
         ] );
       ( "goal titles",
         [

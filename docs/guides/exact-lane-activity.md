@@ -80,7 +80,9 @@ Inside **Exact activity**:
 - **Space** changes the on/off draft. Candidates and their order are retained.
 - **s** previews and saves using the original source revision. Required lanes
   cannot be switched off; an empty lane needs a candidate before enabling it.
-- **r** reads the current file without replacing the draft.
+- **r** reads the current file, preserving unsaved activity changes. With no
+  unsaved change and the same file path, the draft follows the current setting
+  and revision. Reopening the activity screen uses the same rule.
 - After a concurrent edit, **u** reapplies only the desired activity to that
   current file; **s** then saves. Other current settings are preserved.
 - **x** discards the draft. **Esc** or **q** closes the screen while retaining

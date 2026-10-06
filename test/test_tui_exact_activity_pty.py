@@ -2,7 +2,8 @@
 
 HTTP is synthetic. Opening, toggling, closing, reopening and Required refusal
 must not write. Preview failure retains the draft; conflict recovery reapplies
-only activity over the latest file. This suite needs a separately built binary
+only activity over the latest file. Read/reopen follows external activity when
+no unsaved change is pending. This suite needs a separately built binary
 from the tested source and is not a backend/model execution proof.
 """
 import hashlib
@@ -98,6 +99,20 @@ def run(binary):
         h.palette_go(process, fd, output, b'go lanes', b'All lanes')
         select(process, fd, output, 'exact/librarian_exact', b'Librarian')
         h.send_and_wait(process, fd, output, b' ', b'Current file: On')
+        with server.lock:
+            server.text = SOURCE.replace('enabled = true', 'enabled = false')
+        h.send_and_wait(process, fd, output, b'r', b'Current file: Off')
+        h.drain_until_quiet(process, fd, output)
+        screen = h.screen_text(bytes(output))
+        assert b'Activity draft: Off' in screen, 'clean activity retained an old flag'
+        assert b'File changed.' not in screen, 'clean activity fabricated a conflict'
+        with server.lock:
+            server.text = SOURCE
+        h.send_and_wait(process, fd, output, b'\x1b', b'All lanes')
+        h.send_and_wait(process, fd, output, b' ', b'Current file: On')
+        h.drain_until_quiet(process, fd, output)
+        assert b'Activity draft: On' in h.screen_text(bytes(output)), 'reopen retained a clean stale draft'
+        assert server.previews == 0 and not server.saves, 'following the current file submitted a write'
         h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
         h.send_and_wait(process, fd, output, b'?', b'MASC Cheat Sheet')
         h.send_and_wait(process, fd, output, b'\x1b', b'MASC Exact activity')

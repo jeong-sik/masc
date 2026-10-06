@@ -73,7 +73,16 @@ let finish_read request result t =
     (match activity t.owner.lane current with
      | Error detail -> {t with message=Some detail}
      | Ok (enabled, _, _) ->
-       let draft = match t.draft with None -> Some {base=current;desired=enabled} | Some _ as draft -> draft in
+       let retain = match t.draft with
+         | None -> false
+         | Some draft -> draft.base.path <> current.path ||
+           (match activity t.owner.lane draft.base with
+            | Error _ -> true
+            | Ok (base_enabled, _, _) -> draft.desired <> base_enabled) in
+       (* Saving requires a changed value. An unconfirmed write keeps that
+          original base, so this read retains the intended change. A later
+          explicit edit, reapply or discard can resolve the retained intent. *)
+       let draft = if retain then t.draft else Some {base=current;desired=enabled} in
        {t with draft;current=Some current;message=None})
 let ready t =
   if busy t then Error "A request is pending." else

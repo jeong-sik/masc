@@ -17,8 +17,9 @@ val report :
   ( Runtime_provider_usage_window.report
     , Runtime_provider_usage_window.decode_error )
     result
-(** Both windows as {!Runtime_provider_usage_window.Percent} with no
-    [limit_id], each {!Runtime_provider_usage_window.Gates_model_calls} and
+(** Both windows under {!Runtime_provider_usage_window.Muse_subscription_usage}
+    whichever [origin] stated them, as {!Runtime_provider_usage_window.Percent}
+    with no [limit_id], each {!Runtime_provider_usage_window.Gates_model_calls} and
     its reset in epoch seconds. The rolling window's kind follows its stated
     length ({!Runtime_provider_usage_window.window_kind_of_minutes}); the
     weekly window is {!Runtime_provider_usage_window.Seven_day}. A rolling
@@ -30,7 +31,9 @@ val observe :
   origin ->
   Runtime_muse_msp.subscription_usage ->
   unit
-(** Record the windows ({!Runtime_provider_usage_window.record}, stamped
-    with the time masc heard them) and, when a window is spent, rest [scope]
-    until it resets ({!Runtime_quota_window.note_exhausted}). A usage
-    {!report} refuses is logged and not recorded; the rest still applies. *)
+(** When a window is spent, rest [scope] until it resets
+    ({!Runtime_quota_window.note_exhausted}); then record the windows
+    ({!Runtime_provider_usage_window.record}, stamped with the time masc
+    heard them). The rest comes first so a cancelled record cannot skip it. A
+    usage {!report} refuses is logged and not recorded; the rest still
+    applies. *)

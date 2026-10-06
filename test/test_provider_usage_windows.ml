@@ -1217,17 +1217,16 @@ let nest rows = List.map (fun (limit, kind, percent, resets, role) -> (limit, ki
 let test_muse_report_names_both_windows () =
   let usage = muse_usage ~window_mins:300 ~window_percent:37 in
   let changed = decode_ok (Runtime_muse_usage.report Runtime_muse_usage.Usage_changed usage) in
-  check string "pushed usage source" "muse.usage_changed" (Usage.source_to_string changed.source);
+  check string "pushed usage source" "muse.subscription_usage" (Usage.source_to_string changed.source);
   check muse_row "rolling and weekly windows"
     (nest
        [ "-", "5h", 37, 1791262200, "gates_model_calls"
        ; "-", "7d", 12, 1791730800, "gates_model_calls" ])
     (nest (muse_window_rows changed.windows));
   let read = decode_ok (Runtime_muse_usage.report Runtime_muse_usage.Usage_read usage) in
-  check string "read answer source" "muse.usage_read" (Usage.source_to_string read.source);
-  check bool "both answers are complete snapshots" true
-    (Usage.report_shape changed.source = Usage.Complete_snapshot
-     && Usage.report_shape read.source = Usage.Complete_snapshot);
+  check bool "a read answer is the same source" true (read.source = changed.source);
+  check bool "it is a complete snapshot" true
+    (Usage.report_shape changed.source = Usage.Complete_snapshot);
   let other_length = decode_ok
     (Runtime_muse_usage.report Runtime_muse_usage.Usage_changed
        (muse_usage ~window_mins:5 ~window_percent:1)) in
@@ -1265,6 +1264,20 @@ let test_muse_observe_records_and_rests_by_one_rule () =
       (Runtime_quota_window.is_exhausted ~scope ~now:1791262199.);
     check bool "the rest ends at the stated reset" false
       (Runtime_quota_window.is_exhausted ~scope ~now:1791262200.);
+    let relength = Runtime_quota_window.scope_of_muse_home "/fixture/muse-relength-account" in
+    Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_changed
+      (muse_usage ~window_mins:300 ~window_percent:37);
+    Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_read
+      (muse_usage ~window_mins:180 ~window_percent:40);
+    (match Usage.state ~scope:relength with
+     | Usage.Reported (first, rest) ->
+       check (list string) "a read with a new rolling length replaces the pushed row"
+         [ "180min"; "7d" ]
+         (List.map (fun (_, kind, _, _, _) -> kind)
+            (muse_window_rows (List.map (fun (r : Usage.recorded) -> r.window) (first :: rest)))
+          |> List.sort String.compare)
+     | Usage.Not_reported_since_start | Usage.Reported_no_windows _ ->
+       fail "relength usage was not recorded");
     let refused = Runtime_quota_window.scope_of_muse_home "/fixture/muse-refused-account" in
     Runtime_muse_usage.observe ~scope:refused Runtime_muse_usage.Usage_changed
       (muse_usage ~window_mins:10080 ~window_percent:100);

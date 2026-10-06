@@ -14,14 +14,16 @@ Enter로 폴더를 열거나 패키지를 고른다. 현재 폴더와 바로 아
 레지스트리를 검색하는 카탈로그는 아니다. 읽을 수 없거나 잘못된 manifest는 Issue로 남는다.
 
 Left는 상위 폴더, Right는 선택한 패키지의 폴더, `g`는 폴더 경로 입력,
-`p`는 기존 manifest 경로 직접 입력, `r`은 다시 읽기다. 같은 workspace에서는 마지막
-성공한 폴더를 기억하며 workspace가 바뀌면 초기화한다. 긴 목록의 선택 행은 화면 안에
+`p`는 기존 manifest 경로 직접 입력, `n`은 원문 TOML 선언 작성, `r`은 다시 읽기다.
+같은 workspace에서는 마지막 성공한 폴더를 기억하며 workspace가 바뀌면 초기화한다.
+기억한 폴더를 읽지 못하면 Left가 workspace 최상위 폴더를 연다. 긴 목록의 선택 행은 화면 안에
 유지하고, 선택 항목의 전체 경로·설명은 PgUp/PgDn으로 읽는다.
 
 패키지를 선택하면 manifest와 image 상태를 다시 읽는다. 이때부터 기존 schema 입력 폼을
 사용하며, 검토 후 Enter는 로컬 TOML 초안만 만든다. `s`를 눌러야 저장·적용을 요청한다.
 탐색과 미리보기는 image를 pull/build하거나 worker를 시작하지 않는다. image 검사 실패는
-unverified로 표시한다. binding schema가 없는 패키지는 `n`의 원문 TOML 편집을 사용한다.
+unverified로 표시한다. binding schema가 없는 패키지는 탐색기에서 `n`을 눌러 원문 TOML
+선언을 쓴다. manifest 경로를 직접 입력했다면 Esc로 Add-ons 목록에 돌아가 `n`을 누른다.
 
 탐색은 읽는 시점의 경로와 symlink가 workspace 안에 있는지 확인한다. 기존 미리보기와
 같이 경로 확인 후 manifest를 여는 방식이므로, 동시에 파일·상위 폴더를 교체하는 writer를

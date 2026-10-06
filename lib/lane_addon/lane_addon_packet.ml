@@ -8,9 +8,7 @@ let text = function `String value when String.trim value <> "" -> Ok value
 let traverse f values =
   List.fold_left (fun acc value -> let* acc = acc in let* value = f value in Ok (value :: acc))
     (Ok []) values |> Result.map List.rev
-let decode ?store ~max_bytes json =
-  let* () = if String.length (Yojson.Safe.to_string json) <= max_bytes then Ok ()
-    else Error "artifact output exceeds the package reply envelope" in
+let decode ?store json =
   let* fields, packet_artifacts = match json with
     | `Assoc fields when List.sort String.compare (List.map fst fields) = ["coverage"; "rows"] ->
         Ok (fields, `List [])

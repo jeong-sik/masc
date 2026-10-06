@@ -1408,8 +1408,13 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
             ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
             ~args:(`Assoc ["query", `String "no matching astronomy"; "limit", `Int 10])
             |> Yojson.Safe.from_string in
+        (* source_verification is written only when some selected source was
+           deferred (keeper_tool_memory_runtime.ml, [] -> []); a complete
+           lookup omits the key, and json_field fails on an absent key. *)
         Alcotest.(check bool) "unselected unreadable sources do not make a lookup incomplete" true
-          (json_field "source_verification" unrelated = `Null
+          ((match unrelated with
+            | `Assoc fields -> not (List.mem_assoc "source_verification" fields)
+            | _ -> Alcotest.fail "memory search result must be an object")
            && json_field "no_match" unrelated = `Bool true);
         Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in

@@ -1,0 +1,22 @@
+{
+  "base": "462ec1b1ce50bb8ae30c4629bc1601f265154bd6",
+  "binary_sha256": "196d9fce8ecced88ab44ac424d300d9744299ee1f707d323eac9c0803d7bae0e",
+  "fixture_sha256": "22ba57dfef8cc5a677ffec975f1a87b0d8a9e3ddf46b481f0ca83c21f583e45e",
+  "pyright_baseline": 142,
+  "pyright_current": 141,
+  "current_rules": {
+    "reportIndexIssue": 118,
+    "reportAttributeAccessIssue": 2,
+    "reportArgumentType": 20,
+    "reportOperatorIssue": 1
+  },
+  "pyright_raw_hashes": {
+    "baseline-pyright": "04816fc97f75b982db35a8b7e6294c7493e178293ab808118da5725eb2424715",
+    "final-pyright": "f705c4b1e8d7576523cc42db8b477d53413c2b71dee5d0847c2ea400acffe24b"
+  },
+  "goal_function_unchanged": true,
+  "goal_function_sha256": "8e6f3d35a1fa5374ef89abf160ef3f008eed80df9713a73991cc336f19986d6d",
+  "goal_issue_comment": "https://github.com/jeong-sik/masc/issues/40438#issuecomment-5981746201",
+  "full_script_fixture_sha256": "12f2d71aacdc49b9897e4e3fb18ac9e147528d8dd798c2043f718eec0e152a60",
+  "full_attempt_before_final_tuple_narrowing": true
+}

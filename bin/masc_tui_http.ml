@@ -763,22 +763,29 @@ let post_msx_checkpoint ~host ~port ~restore ~slot =
    instead of a plain frame read so a game flows even when no keeper is pressing.
    The step size is the server's default -- the cadence policy lives there, not
    here -- so the body carries no frame count. Transport/shape errors remain
-   distinct from [Ok None] (no machine); a lost mutation response must not
+   distinct from [Advanced (None, None)] (no machine) and [Not_started]
+   (known activity refusal); a lost mutation response must not
    silently trigger another automatic tick. The operator bearer is captured once.
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
 let tick_msx ~(host : string) ~(port : int) :
-    (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result =
+    (Masc_tui_msx_tick.response, string) result =
   let headers = auth_headers () in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
         ~host ~port ~path:msx_tick_path ~body with
     | Error _ as error -> error
-    | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
+    | Ok (status_code, body) ->
+        (* Only the tick decoder may interpret a typed activity refusal. *)
+        Result.map (fun json -> status_code,json)
+          (decode_json ~allow_empty:false ~status_code:(if status_code=409 then 200 else status_code) ~body)
   in
   Masc_tui_msx_tick.fetch msx_tick_cache ~host ~port ~headers ~request
 ;;
+
+let fetch_msx_activity ~host ~port =
+  Result.bind (get_json ~host ~port ~path:"/api/v1/msx/activity") Masc_tui_msx_tick.decode_activity
 
 
 let keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request =
@@ -1469,6 +1476,19 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("chat history page was not JSON: " ^ detail))
 
+let fetch_keeper_memory_input ~host ~port ~keeper_name =
+  let path = Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+      (percent_encode_path_segment keeper_name) Masc_tui_memory_usage.page_limit in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (named_refusal "Memory input" ~status ~body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc_tui_memory_usage.decode ~keeper:keeper_name json
+       | exception Yojson.Json_error detail ->
+           Error ("Memory input was not JSON: " ^ detail))
+
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)
@@ -1489,7 +1509,8 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   let encoded = percent_encode_path_segment keeper_name in
   let turn =
     fetch ~label:"turn-records"
-      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+               encoded Masc_tui_memory_usage.page_limit)
       ~decode:Masc_tui_context_inspector.decode_turn_records
   in
   (* Which row the exact provider input is read for. Stepping back names the

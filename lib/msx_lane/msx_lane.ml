@@ -23,15 +23,30 @@ type observation = {
 type entry = { at_frame : int; who : string; key_name : string; down : bool }
 
 type error =
+  | Activity_disabled
+  | Activity_unobserved
   | No_machine
   | Invalid_request of string
   | Unreadable of string
 
 let error_to_string = function
+  | Activity_disabled -> "machines.msx is off; enable it before new machine work"
+  | Activity_unobserved -> "Machine activity configuration is unavailable"
   | No_machine -> "no MSX machine is loaded: call masc_msx_load first"
   | Invalid_request message -> message
   | Unreadable message -> message
 ;;
+
+let ( let* ) = Result.bind
+let activity_observer : (unit -> Machine_configuration.activity) option Atomic.t = Atomic.make None
+let install_activity_observer observer = Atomic.set activity_observer observer
+let activity () = match Atomic.get activity_observer with
+  | None -> Machine_configuration.Unobserved
+  | Some observe -> observe ()
+let require_activity () = match activity () with
+  | Machine_configuration.Enabled -> Ok ()
+  | Disabled -> Error Activity_disabled
+  | Unobserved -> Error Activity_unobserved
 
 (* NTSC: the VDP runs 262 lines a frame at 60 Hz, the machine [load] boots.
    Every "seconds" figure over frames in the lane and its routes divides by
@@ -392,6 +407,7 @@ let medium_of (st : machine option) =
 ;;
 
 let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
+  let* () = require_activity () in
   locked (fun () ->
     (* Read under the lock the load commits under: two loads that serialise
        here see the machine each one replaced, not the one both started
@@ -479,6 +495,7 @@ let advance st n =
 ;;
 
 let step ~frames =
+  let* () = require_activity () in
   with_machine (fun st ->
     match check_frames ~what:"frames" frames with
     | Error e -> Error e
@@ -501,6 +518,7 @@ type until_change = {
    한 번의 호출로. 지문은 screen_view 그대로고 판정은 순수 코어(Screen_change)
    가 한다: 키퍼는 큰 관찰 없이도 변화·정지·키 대기 후보를 알 수 있다. *)
 let step_until_change ~max_frames =
+  let* () = require_activity () in
   with_machine (fun st ->
     match check_frames ~what:"frames" max_frames with
     | Error e -> Error e
@@ -574,6 +592,7 @@ let releasing_on_raise st keys body =
 ;;
 
 let press ~who ~keys ~hold_frames ~step_frames ~sequence =
+  let* () = require_activity () in
   with_machine (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
     else
@@ -649,6 +668,7 @@ let frame () = locked (fun () -> Option.map frame_of !state)
 ;;
 
 let step_frame ~frames =
+  let* () = require_activity () in
   with_machine (fun st ->
     match check_frames ~what:"frames" frames with
     | Error _ as error -> error
@@ -861,6 +881,7 @@ let decode_checkpoint json =
 ;;
 
 let restore ~path ~ledger_dir =
+  let* () = require_activity () in
   (* A slot that was never saved is the caller naming one that does not
      exist, which is an argument problem and refusable. Reaching the read
      first turned it into [Unreadable], and the tool answered with a runtime
@@ -891,6 +912,7 @@ let restore ~path ~ledger_dir =
 ;;
 
 let change_disk ~path ~backup_path =
+  let* () = require_activity () in
   try
     let original = read_file path in
     let target_id = media_id original in

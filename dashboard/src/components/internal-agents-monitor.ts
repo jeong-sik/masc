@@ -4,14 +4,18 @@ import {
   fetchExactLaneRun,
   fetchExactLaneRuns,
   fetchFusionRuns,
+  fetchGoalVerificationRuns,
   fetchStandaloneLanes,
   fetchVerificationRuns,
+  type ExactLane,
   type ExactLaneRunRecord,
   type ExactLaneRunSummary,
   type FusionRunRecord,
+  type GoalVerificationRunRecord,
   type StandaloneLanesSnapshot,
   type VerificationRunRecord,
 } from '../api/dashboard'
+import type { VerificationToolObservation } from '../api/dashboard-verification-runs'
 import {
   fetchKeeperMemoryJournal,
   type MemoryJournal,
@@ -28,6 +32,9 @@ import type { ExactLanePayloadAvailability } from '../api/dashboard-exact-lane-r
 import { formatDateTimeKo, relativeTime } from '../lib/format-time'
 import { hashForRoute } from '../router'
 import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
+import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
+import type { LaneNavigationTarget } from '../lib/lane-navigation'
+import { goalVerificationRunTone } from './goal-verification-runs-panel'
 
 type Filter =
   | 'all'
@@ -41,6 +48,7 @@ type Filter =
 type Row =
   | { source: 'exact'; id: string; run: ExactLaneRunSummary }
   | { source: 'verification'; id: string; run: VerificationRunRecord }
+  | { source: 'goal_verification'; id: string; run: GoalVerificationRunRecord }
   | { source: 'fusion'; id: string; run: FusionRunRecord }
 type CommittedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'committed' }>
 type FailedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'failed' }>
@@ -127,18 +135,77 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 
 type RunReading = 'loading' | 'ready' | 'stale' | 'unavailable'
 type RunSource = Row['source']
+type SelectedLane = Extract<LaneNavigationTarget, { kind: 'exact' }>['lane']
+type SelectedLaneRuns = { lane: SelectedLane; rows: Row[]; reading: RunReading }
 
-function sourceForKind(kind: Exclude<Filter, 'all'>): RunSource {
+// Where a selected Lane's runs are kept. Exact-lane runs never name
+// verifier_exact or browser_stagehand_exact (ExactLane excludes both). The
+// Verifier's runs are its task and Goal reviews, and Stagehand keeps no run
+// history at all. The target's rows and its availability reading both come
+// from this one read, so an unrelated source's failure cannot mark the
+// target's observations unavailable.
+type LaneRunHistory =
+  | { kind: 'exact'; lane: ExactLane }
+  | { kind: 'verifier' }
+  | { kind: 'not_retained' }
+
+function laneRunHistory(lane: SelectedLane): LaneRunHistory {
+  switch (lane) {
+    case 'board_attention_exact': case 'hitl_auto_judge': case 'librarian_exact':
+    case 'workspace_curator_exact': case 'candle_appraiser': return { kind: 'exact', lane }
+    case 'verifier_exact': return { kind: 'verifier' }
+    case 'browser_stagehand_exact': return { kind: 'not_retained' }
+  }
+}
+
+function exactRow(run: ExactLaneRunSummary): Row {
+  return { source: 'exact', id: `exact:${run.runId}`, run }
+}
+
+function verificationRow(run: VerificationRunRecord): Row {
+  return { source: 'verification', id: `verification:${run.verificationId}`, run }
+}
+
+function goalVerificationRow(run: GoalVerificationRunRecord): Row {
+  return { source: 'goal_verification', id: `goal_verification:${run.runId}`, run }
+}
+
+// The exact-run request names the lane, so the server filters before it
+// pages and a busy Lane cannot fill the page and hide the selected one.
+async function fetchLaneRuns(history: LaneRunHistory): Promise<Row[]> {
+  switch (history.kind) {
+    case 'exact':
+      return (await fetchExactLaneRuns({ lane: history.lane })).runs.map(exactRow)
+    case 'verifier': {
+      const [task, goal] = await Promise.all([fetchVerificationRuns(), fetchGoalVerificationRuns()])
+      return [...task.runs.map(verificationRow), ...goal.runs.map(goalVerificationRow)]
+        .sort((a, b) => startedAt(b) - startedAt(a))
+    }
+    case 'not_retained': return []
+  }
+}
+
+// Verification counts task and Goal reviews, the two run kinds the server's
+// Lane matrix attributes to verifier_exact.
+function sourcesForKind(kind: Exclude<Filter, 'all'>): RunSource[] {
   switch (kind) {
-    case 'verification': return 'verification'
-    case 'fusion': return 'fusion'
-    case 'librarian': case 'workspace-curator': case 'candle-appraiser': case 'auto-judge': case 'board-attention': return 'exact'
+    case 'verification': return ['verification', 'goal_verification']
+    case 'fusion': return ['fusion']
+    case 'librarian': case 'workspace-curator': case 'candle-appraiser': case 'auto-judge': case 'board-attention': return ['exact']
   }
 }
 
 function nextRunReading(previous: RunReading, result: PromiseSettledResult<unknown>): RunReading {
   if (result.status === 'fulfilled') return 'ready'
   return previous === 'ready' || previous === 'stale' ? 'stale' : 'unavailable'
+}
+
+// Rows drawn from several sources are only as complete as the weakest read:
+// a count missing one source would show fewer runs than happened.
+function combinedReading(readings: RunReading[]): RunReading {
+  if (readings.includes('unavailable')) return 'unavailable'
+  if (readings.includes('loading')) return 'loading'
+  return readings.includes('stale') ? 'stale' : 'ready'
 }
 
 function readingHasRows(reading: RunReading): boolean {
@@ -163,6 +230,7 @@ function ownerLastObserved(latest: number | null, completeReading: boolean, allF
 
 function laneLabel(row: Row): string {
   if (row.source === 'verification') return 'Verification'
+  if (row.source === 'goal_verification') return 'Goal verification'
   if (row.source === 'fusion') return 'Fusion'
   switch (row.run.lane) {
     case 'librarian_exact': return 'Librarian'
@@ -180,6 +248,7 @@ function status(row: Row): string {
 }
 
 function tone(row: Row): StatusBadgeTone {
+  if (row.source === 'goal_verification') return goalVerificationRunTone(row.run.status)
   const value = status(row)
   if (value === 'succeeded' || value === 'completed' || value === 'approved') return 'ok'
   if (value === 'running') return 'warn'
@@ -190,13 +259,14 @@ function tone(row: Row): StatusBadgeTone {
 }
 
 function actor(row: Row): string {
-  if (row.source === 'verification') return row.run.evaluatorRuntime ?? row.run.authorityActor
+  if (row.source === 'verification' || row.source === 'goal_verification') return row.run.evaluatorRuntime ?? row.run.authorityActor
   if (row.source === 'fusion') return row.run.keeper
   return row.run.actor
 }
 
 function subject(row: Row): string {
   if (row.source === 'verification') return row.run.taskId
+  if (row.source === 'goal_verification') return row.run.goalId
   if (row.source === 'fusion') return row.run.runId
   return row.run.subjectId ?? '—'
 }
@@ -220,7 +290,7 @@ function finishedAt(row: Row): number | undefined {
 }
 
 function rowKind(row: Row): Exclude<Filter, 'all'> {
-  if (row.source === 'verification') return 'verification'
+  if (row.source === 'verification' || row.source === 'goal_verification') return 'verification'
   if (row.source === 'fusion') return 'fusion'
   switch (row.run.lane) {
     case 'librarian_exact': return 'librarian'
@@ -582,49 +652,61 @@ function ExactRunDetail({ runId }: { runId: string }) {
     `
 }
 
+function VerificationTools({ id, tools }: { id: string; tools: VerificationToolObservation[] }) {
+  return html`
+    <div class="ia-evi">
+      <div class="ia-k">Internal tool agents (${tools.length})</div>
+      ${tools.length === 0
+        ? html`<p class="ia-note">No tools invoked in this verification run.</p>`
+        : html`<ol class="ia-tools">
+            ${tools.map((tool, index) => html`
+              <li key=${`${id}-${index}`} class="ia-tool">
+                <div class="ia-tool-h">
+                  <b>${index + 1}. ${tool.toolName}</b>
+                  <code class="mono">${tool.disposition}</code>
+                  <time class="ia-ms mono" dateTime=${new Date(tool.finishedAt * 1000).toISOString()}>종료 ${formatDateTimeKo(tool.finishedAt)}</time>
+                  <span class="ia-ms mono">${tool.durationMs.toFixed(0)}ms</span>
+                </div>
+                <div class="ia-tool-io">
+                  <div>
+                    <div class="ia-k"><${EvidenceBadge} kind="typed" /> 입력 preview</div>
+                    <${JsonViewerCard} data=${tool.input} />
+                  </div>
+                  <div>
+                    <div class="ia-k"><${EvidenceBadge} kind="excerpt" /> 출력 ${tool.outputTruncated ? '· truncated' : '· complete excerpt'}</div>
+                    <pre class="mono max-h-80">${tool.outputExcerpt}${tool.outputTruncated ? '\n… 1,024 byte 이후는 registry에 보존되지 않음' : ''}</pre>
+                  </div>
+                </div>
+              </li>
+            `)}
+          </ol>`}
+    </div>
+  `
+}
+
 function Details({ row }: { row: Row }) {
-  if (row.source === 'verification') {
-    const tools = row.run.tools ?? []
+  if (row.source === 'verification' || row.source === 'goal_verification') {
     return html`
       <div class="ia-detail">
         <div class="ia-evi">
           <div class="ia-k"><${EvidenceBadge} kind="typed" /> Execution path</div>
-          <code class="mono">${row.run.producer} → ${row.run.authorityKind} → ${row.run.authorityActor} → ${row.run.status}</code>
+          ${row.source === 'verification'
+            ? html`<code class="mono">${row.run.producer} → ${row.run.authorityKind} → ${row.run.authorityActor} → ${row.run.status}</code>`
+            : html`<code class="mono">goal ${row.run.goalId} · request ${row.run.requestId} → ${row.run.authorityActor} → ${row.run.status}</code>`}
           <p class="ia-note">
             시작 <time dateTime=${new Date(row.run.startedAt * 1000).toISOString()}>${formatDateTimeKo(row.run.startedAt)}</time>
             ${finishedAt(row) == null ? null : html` · 종료 <time dateTime=${new Date(finishedAt(row)! * 1000).toISOString()}>${formatDateTimeKo(finishedAt(row)!)}</time>`}
             ${row.run.evaluatorRuntime ? html` · runtime <code>${row.run.evaluatorRuntime}</code>` : null}
           </p>
-          ${row.run.cause ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
+          ${row.source === 'verification'
+            ? row.run.cause ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null
+            : html`
+              <p class="ia-note">Criterion r${row.run.criterion.revision} · ${row.run.criterion.title}</p>
+              ${row.run.evaluatedVerdict ? html`<p class="ia-note">Verdict ${row.run.evaluatedVerdict.decision} · ${row.run.evaluatedVerdict.reason}</p>` : null}
+              ${row.run.detail ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.detail}</p>` : null}`}
           <p class="ia-note">Review 원문은 저장되지 않음 · 출력은 1,024B excerpt</p>
         </div>
-        <div class="ia-evi">
-          <div class="ia-k">Internal tool agents (${tools.length})</div>
-          ${tools.length === 0
-            ? html`<p class="ia-note">No tools invoked in this verification run.</p>`
-            : html`<ol class="ia-tools">
-                ${tools.map((tool, index) => html`
-                  <li key=${`${row.id}-${index}`} class="ia-tool">
-                    <div class="ia-tool-h">
-                      <b>${index + 1}. ${tool.toolName}</b>
-                      <code class="mono">${tool.disposition}</code>
-                      <time class="ia-ms mono" dateTime=${new Date(tool.finishedAt * 1000).toISOString()}>종료 ${formatDateTimeKo(tool.finishedAt)}</time>
-                      <span class="ia-ms mono">${tool.durationMs.toFixed(0)}ms</span>
-                    </div>
-                    <div class="ia-tool-io">
-                      <div>
-                        <div class="ia-k"><${EvidenceBadge} kind="typed" /> 입력 preview</div>
-                        <${JsonViewerCard} data=${tool.input} />
-                      </div>
-                      <div>
-                        <div class="ia-k"><${EvidenceBadge} kind="excerpt" /> 출력 ${tool.outputTruncated ? '· truncated' : '· complete excerpt'}</div>
-                        <pre class="mono max-h-80">${tool.outputExcerpt}${tool.outputTruncated ? '\n… 1,024 byte 이후는 registry에 보존되지 않음' : ''}</pre>
-                      </div>
-                    </div>
-                  </li>
-                `)}
-              </ol>`}
-        </div>
+        <${VerificationTools} id=${row.id} tools=${row.run.tools ?? []} />
       </div>
     `
   }
@@ -650,57 +732,86 @@ function matches(row: Row, filter: Filter): boolean {
 
 type KeeperIdentity = { name: string; agent_name?: string | null }
 
-function recordedOwner(row: Row): string {
-  if (row.source === 'verification') return row.run.producer
-  if (row.source === 'fusion') return row.run.keeper
-  return row.run.actor
+// The Keeper the run's work belongs to, or null when the run records none:
+// workspace-scoped exact lanes and Goal reviews name no producing Keeper.
+function recordedOwner(row: Row): string | null {
+  switch (row.source) {
+    case 'verification': return row.run.producer
+    case 'goal_verification': return null
+    case 'fusion': return row.run.keeper
+    case 'exact':
+      return row.run.lane === 'workspace_curator_exact' || row.run.lane === 'candle_appraiser' ? null : row.run.actor
+  }
 }
 
-function hasKeeperOwner(row: Row): boolean {
-  return !(row.source === 'exact'
-    && (row.run.lane === 'workspace_curator_exact' || row.run.lane === 'candle_appraiser'))
-}
-
-function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {
+function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string | null {
   const recorded = recordedOwner(row)
+  if (recorded === null) return null
   return roster.find(keeper => keeper.name === recorded || keeper.agent_name === recorded)?.name ?? recorded
 }
 
 export function InternalAgentsMonitor() {
+  const navigation = useLaneNavigation(['exact'])
+  if (navigation.error || navigation.pending) return html`<${LaneNavigationNotice}
+    message=${navigation.error ?? 'Verify the workspace before reading this Lane target.'} pending=${navigation.pending} />`
+  const target = navigation.target?.kind === 'exact' ? navigation.target : undefined
+  return html`<${InternalAgentsMonitorContent} target=${target}
+    key=${navigation.authority ? JSON.stringify([navigation.authority.workspaceRoot, navigation.authority.epoch]) : undefined} />`
+}
+
+function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigationTarget, { kind: 'exact' }> }) {
   const [rows, setRows] = useState<Row[]>([])
+  const targetLane = target?.lane
+  const [laneRuns, setLaneRuns] = useState<SelectedLaneRuns | null>(null)
+  // Rows read for an earlier target never stand in for the current one.
+  const selectedLaneRuns = laneRuns !== null && laneRuns.lane === targetLane ? laneRuns : null
   const [laneMatrix, setLaneMatrix] = useState<StandaloneLanesSnapshot | null>(null)
   const [laneMatrixError, setLaneMatrixError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<Filter>('all')
+  const [filter, setFilterState] = useState<Filter>('all')
+  function setFilter(value: Filter) { setFilterState(value); if (target) clearLaneNavigation() }
   const [expanded, setExpanded] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
   const [runReadings, setRunReadings] = useState<Record<RunSource, RunReading>>({
-    exact: 'loading', verification: 'loading', fusion: 'loading',
+    exact: 'loading', verification: 'loading', goal_verification: 'loading', fusion: 'loading',
   })
   const refreshVersion = useRef(0)
+  const targetRow = useRef<HTMLTableRowElement>(null), focusedTarget = useRef<typeof target>(undefined)
+  useEffect(() => {
+    if (target && target !== focusedTarget.current && targetRow.current) {
+      targetRow.current.focus(); focusedTarget.current = target
+    }
+  }, [target, laneMatrix])
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current
     setLoading(true)
-    const [exact, verification, fusion, standalone] = await Promise.allSettled([
+    const history = targetLane === undefined ? null : laneRunHistory(targetLane)
+    const [exact, verification, goalVerification, fusion, standalone, selected] = await Promise.allSettled([
       fetchExactLaneRuns(),
       fetchVerificationRuns(),
+      fetchGoalVerificationRuns(),
       fetchFusionRuns(),
       fetchStandaloneLanes(),
+      history === null ? Promise.resolve([]) : fetchLaneRuns(history),
     ])
     const next: Row[] = []
     const failures: string[] = []
     if (exact.status === 'fulfilled') {
-      next.push(...exact.value.runs.map(run => ({ source: 'exact' as const, id: `exact:${run.runId}`, run })))
+      next.push(...exact.value.runs.map(exactRow))
     } else failures.push(isForbidden(exact.reason)
       ? 'Exact lanes + RAW: Admin 권한 필요 (Settings에서 Admin bearer token을 사용하세요).'
       : `Exact lanes: ${String(exact.reason)}`)
     if (verification.status === 'fulfilled') {
-      next.push(...verification.value.runs.map(run => ({ source: 'verification' as const, id: `verification:${run.verificationId}`, run })))
+      next.push(...verification.value.runs.map(verificationRow))
     } else failures.push(`Verification: ${String(verification.reason)}`)
+    if (goalVerification.status === 'fulfilled') {
+      next.push(...goalVerification.value.runs.map(goalVerificationRow))
+    } else failures.push(`Goal verification: ${String(goalVerification.reason)}`)
     if (fusion.status === 'fulfilled') {
       next.push(...fusion.value.runs.map(run => ({ source: 'fusion' as const, id: `fusion:${run.runId}`, run })))
     } else failures.push(`Fusion: ${String(fusion.reason)}`)
+    if (targetLane !== undefined && selected.status === 'rejected') failures.push(`Selected Lane ${targetLane}: ${String(selected.reason)}`)
     if (version !== refreshVersion.current) return
     if (standalone.status === 'fulfilled') {
       setLaneMatrix(standalone.value)
@@ -710,7 +821,9 @@ export function InternalAgentsMonitor() {
         ? 'Lanes: Admin 권한 필요.'
         : `Lanes: ${String(standalone.reason)}`)
     }
-    const results = { exact, verification, fusion }
+    const results: Record<RunSource, PromiseSettledResult<unknown>> = {
+      exact, verification, goal_verification: goalVerification, fusion,
+    }
     setRows(previous => [
       ...next,
       ...previous.filter(row => results[row.source].status === 'rejected'),
@@ -718,11 +831,18 @@ export function InternalAgentsMonitor() {
     setRunReadings(previous => ({
       exact: nextRunReading(previous.exact, exact),
       verification: nextRunReading(previous.verification, verification),
+      goal_verification: nextRunReading(previous.goal_verification, goalVerification),
       fusion: nextRunReading(previous.fusion, fusion),
     }))
+    if (targetLane !== undefined) setLaneRuns(previous => {
+      const retained: SelectedLaneRuns = previous?.lane === targetLane ? previous : { lane: targetLane, rows: [], reading: 'loading' }
+      return selected.status === 'fulfilled'
+        ? { lane: targetLane, rows: selected.value, reading: 'ready' }
+        : { ...retained, reading: nextRunReading(retained.reading, selected) }
+    })
     setErrors(failures)
     setLoading(false)
-  }, [])
+  }, [targetLane])
 
   useEffect(() => {
     void refresh()
@@ -733,35 +853,41 @@ export function InternalAgentsMonitor() {
     }
   }, [refresh])
 
-  const visible = useMemo(() => rows.filter(row => matches(row, filter)), [rows, filter])
+  const visible = useMemo<Array<{ row: Row; stale: boolean }>>(() => target
+    ? (selectedLaneRuns?.rows ?? []).map(row => ({ row, stale: selectedLaneRuns?.reading === 'stale' }))
+    : rows.filter(row => matches(row, filter)).map(row => ({ row, stale: runReadings[row.source] === 'stale' })),
+  [rows, filter, target, selectedLaneRuns, runReadings])
+  const targetHistory = target ? laneRunHistory(target.lane) : null
   const roster = keeperRosterSignal.value
   const pausedKeeperNames = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health?.names ?? []
   const keepers = useMemo(() => {
     const names = new Set(roster.map(keeper => keeper.name))
     for (const name of pausedKeeperNames) names.add(name)
     for (const row of rows) {
-      if (hasKeeperOwner(row)) names.add(resolvedOwner(row, roster))
+      const owner = resolvedOwner(row, roster)
+      if (owner !== null) names.add(owner)
     }
     return Array.from(names).sort()
   }, [pausedKeeperNames, rows, roster])
   const allReadings = Object.values(runReadings)
   const completeReading = allReadings.every(readingHasRows)
   const allFresh = allReadings.every(reading => reading === 'ready')
-  const selectedReading = filter === 'all'
-    ? !completeReading ? 'unavailable' : allFresh ? 'ready' : 'stale'
-    : runReadings[sourceForKind(filter)]
+  const selectedReading = combinedReading(target
+    ? [selectedLaneRuns?.reading ?? 'loading']
+    : filter === 'all' ? allReadings : sourcesForKind(filter).map(source => runReadings[source]))
   const inventory = FILTERS.filter(item => item.id !== 'all').map(item => {
     const kind = item.id as Exclude<Filter, 'all'>
     const matching = rows.filter(row => rowKind(row) === kind)
+    const reading = combinedReading(sourcesForKind(kind).map(source => runReadings[source]))
     return {
       ...item,
-      count: readingHasRows(runReadings[sourceForKind(kind)]) ? matching.length : null,
-      reading: runReadings[sourceForKind(kind)],
+      count: readingHasRows(reading) ? matching.length : null,
+      reading,
       latest: matching.reduce<number | null>((value, row) => value == null ? startedAt(row) : Math.max(value, startedAt(row)), null),
     }
   })
   const owners = keepers.map(name => {
-    const owned = rows.filter(row => hasKeeperOwner(row) && resolvedOwner(row, roster) === name)
+    const owned = rows.filter(row => resolvedOwner(row, roster) === name)
     return {
       name,
       total: owned.length,
@@ -772,6 +898,9 @@ export function InternalAgentsMonitor() {
 
   return html`
     <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
+      ${target && html`<p role="status">Selected Lane: ${target.lane}. The run list is limited to this Lane; other Lane observations remain visible in the matrix.
+        <button type="button" onClick=${() => setFilter('all')}>Show all Lane runs</button></p>`}
+      ${target && laneMatrix && !laneMatrix.lanes.some(lane => lane.laneId === target.lane) && html`<p role="alert">The selected Lane is absent from this reading.</p>`}
       <div class="ia-head">
         <h3>Internal execution evidence</h3>
         <span class="ia-count mono">${completeReading ? rows.length : "—"} runs · ${keepers.length} Keeper owners${allFresh ? "" : " · incomplete or stale"}</span>
@@ -839,7 +968,9 @@ export function InternalAgentsMonitor() {
                             ? 'JEV unavailable: Board lane is not ready'
                             : `JEV CONFIGURED · ${lane.jev.destinations.map(d => `${d.destinationUri} (${d.model})`).join(', ')}`
                     return html`
-                      <tr key=${lane.laneId}>
+                      <tr key=${lane.laneId} ref=${target?.lane === lane.laneId ? targetRow : undefined}
+                        tabIndex=${target?.lane === lane.laneId ? -1 : undefined} aria-current=${target?.lane === lane.laneId ? 'true' : undefined}
+                        aria-label=${`Lane observation ${lane.laneId}`}>
                         <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code><p class="text-xs text-[var(--color-fg-muted)]">${lane.purpose}</p>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
                         <td class=${statusClass}><strong>${statusLabel}</strong><br /><span class="text-3xs">Config: ${lane.configurationState}</span>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
                         <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
@@ -868,8 +999,8 @@ export function InternalAgentsMonitor() {
             <button
               key=${item.id}
               type="button"
-              class=${`ai-stat cursor-pointer text-left ${filter === item.id ? 'border-[var(--volt-strong)]' : ''}`}
-              aria-pressed=${filter === item.id}
+              class=${`ai-stat cursor-pointer text-left ${!target && filter === item.id ? 'border-[var(--volt-strong)]' : ''}`}
+              aria-pressed=${!target && filter === item.id}
               onClick=${() => setFilter(item.id)}
             >
               <span class="k">${item.label}</span>
@@ -911,8 +1042,8 @@ export function InternalAgentsMonitor() {
           <button
             key=${item.id}
             type="button"
-            class=${`ia-filter ${filter === item.id ? 'on' : ''}`}
-            aria-pressed=${filter === item.id}
+            class=${`ia-filter ${!target && filter === item.id ? 'on' : ''}`}
+            aria-pressed=${!target && filter === item.id}
             onClick=${() => setFilter(item.id)}
           >${item.label} ${item.id === 'all' ? completeReading ? rows.length : '—' : inventory.find(entry => entry.id === item.id)?.count ?? '—'}</button>
         `)}
@@ -925,9 +1056,9 @@ export function InternalAgentsMonitor() {
         <span class="text-3xs text-[var(--color-fg-muted)]">절대 시각 + 상대 시각 + elapsed</span>
       </div>
       ${!loading && visible.length === 0
-        ? html`<div class="ia-empty">${selectedReading === 'ready' ? 'No internal agent runs for this filter.' : selectedReading === 'stale' ? 'STALE · No runs in the last successful observation.' : 'Run observations unavailable for this filter.'}</div>`
+        ? html`<div class="ia-empty">${targetHistory?.kind === 'not_retained' ? 'Run history is not retained for this Lane.' : selectedReading === 'ready' ? 'No internal agent runs for this filter.' : selectedReading === 'stale' ? 'STALE · No runs in the last successful observation.' : 'Run observations unavailable for this filter.'}</div>`
         : html`<div class="ia-list">
-            ${visible.map(row => {
+            ${visible.map(({ row, stale }) => {
               const open = expanded === row.id
               const startIso = new Date(startedAt(row) * 1000).toISOString()
               return html`
@@ -947,7 +1078,7 @@ export function InternalAgentsMonitor() {
                         : null}
                     </span>
                     <span class="ia-meta mono">
-                      ${runReadings[row.source] === "stale" ? html`<span>STALE</span>` : null}
+                      ${stale ? html`<span>STALE</span>` : null}
                       <span>${actor(row)}</span>
                       <span><time dateTime=${startIso}>${formatDateTimeKo(startedAt(row))}</time> · ${relativeTime(startIso)}</span>
                       <span>elapsed ${formatElapsed(elapsed(row))}</span>

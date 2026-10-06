@@ -1,0 +1,11 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-browser-activity-toml-reader-20261005/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  132 passed (132)
+   Start at  03:55:58
+   Duration  5.61s (tests 43%, import 27%, transform 11%, environment 11%, setup 8%)
+
+    Isolate  4 workers spawned · ~240ms startup each (spawn + environment, per file)
+             at least ~719ms faster with isolate: false — reuses workers across files instead of one per file

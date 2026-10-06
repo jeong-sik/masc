@@ -31,4 +31,4 @@ val validate_input : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yo
 
 val validate : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val input_digest : Yojson.Safe.t -> string
-val decode_result : store:Lane_addon_store.t -> max_bytes:int -> Yojson.Safe.t -> (package_result, string) result
+val decode_result : store:Lane_addon_store.t -> Yojson.Safe.t -> (package_result, string) result

@@ -138,12 +138,26 @@ let model_text r =
    for the two knobs, so a reading longer than its reservation (a wide
    effort, an eleven-cell temperature) is what can push a row past the
    header's own arithmetic. *)
-let row_cells ~provider_width r =
-  provider_width + gutter + Masc_tui_message_layout.display_width (model_text r)
-  + gutter + Masc_tui_message_layout.display_width (effort_text r.reasoning_effort)
+let row_cells ~provider_width ~model_width r =
+  (* [pad] fills a short knob to its reservation and never clips a long one,
+     so each cell is the wider of the two. *)
+  provider_width + gutter + model_width + gutter
+  + max effort_width
+      (Masc_tui_message_layout.display_width (effort_text r.reasoning_effort))
   + gutter
-  + Masc_tui_message_layout.display_width (value_or_absent r.temperature)
+  + max temperature_width
+      (Masc_tui_message_layout.display_width (value_or_absent r.temperature))
   + gutter + Masc_tui_message_layout.display_width (tokens_text r.max_tokens)
+
+(* What [render] reserves before the model column, and the model column it
+   then draws. [fits] measures this same allocation: measuring natural widths
+   accepted tables that [render] clipped (#41026 review). *)
+let fixed_cells ~provider_width =
+  provider_width + gutter + effort_width + gutter + temperature_width
+  + gutter + tokens_width + gutter
+
+let model_column ~width ~provider_width =
+  max 8 (width - fixed_cells ~provider_width)
 
 let header_cells ~provider_width ~model_width =
   provider_width + gutter + model_width + gutter + effort_width + gutter
@@ -160,8 +174,12 @@ let fits ~width rows =
   | [] -> true
   | _ ->
     let provider_width = provider_width_of rows in
-    header_cells ~provider_width ~model_width:(model_width_of rows) <= width
-    && List.for_all (fun r -> row_cells ~provider_width r <= width) rows
+    let model_width = model_column ~width ~provider_width in
+    model_width_of rows <= model_width
+    && header_cells ~provider_width ~model_width <= width
+    && List.for_all
+         (fun r -> row_cells ~provider_width ~model_width r <= width)
+         rows
 
 (* One binding as named, wrapped lines. A label wider than the pane goes on
    its own line and wraps; a value keeps its complete characters because
@@ -213,11 +231,7 @@ let stacked_item_starts ~pane rows =
 
 let render ~width ?pane rows =
   let provider_width = provider_width_of rows in
-  let fixed =
-    provider_width + gutter + effort_width + gutter + temperature_width
-    + gutter + tokens_width + gutter
-  in
-  let model_width = max 8 (width - fixed) in
+  let model_width = model_column ~width ~provider_width in
   let header =
     pad "provider" provider_width
     ^ String.make gutter ' '

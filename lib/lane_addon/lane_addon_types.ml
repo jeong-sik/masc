@@ -16,6 +16,16 @@ type output = { rows : row list; coverage : coverage list }
 type output_selection = All_lanes | Selected_lanes of string list
 type output_ports = (string * output_selection) list
 type resources = { cpus : float; memory_bytes : int64; pids : int; max_reply_bytes : int }
+let nano_cpus_per_cpu = 1_000_000_000.
+let check_resources r =
+  if not (Float.is_finite r.cpus) || r.cpus <= 0. then Error "cpus must be finite and positive"
+  else if r.cpus *. nano_cpus_per_cpu < 1. then
+    Error "cpus must be representable as a positive Docker NanoCpus value"
+  else if r.cpus *. nano_cpus_per_cpu >= Int64.to_float Int64.max_int then
+    Error "cpus exceed Docker NanoCpus representation"
+  else if r.memory_bytes <= 0L || r.pids <= 0 || r.max_reply_bytes <= 0 then
+    Error "memory_bytes, pids and max_reply_bytes must be positive"
+  else Ok ()
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type package = {

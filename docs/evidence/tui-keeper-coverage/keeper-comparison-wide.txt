@@ -1,0 +1,70 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  15:27:02  HTTP [connected]                                                                               
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   Plan    Trend    Keepers    v:next view                                                                              
+                                                                                                                        
+   Keeper usage · last 1440m · recorded turn metrics · 120s old · refresh failed: fixture refresh failure               
+   As of 2026-10-03 00:00 UTC                                                                                           
+   Bars compare reported totals; each metric scales to its largest Keeper.                                              
+   Missing, malformed or unread samples can understate totals; bars are not quota.                                      
+   Scale: tokens 1000 · cost $1.0000                                                                                    
+                                                                                                                        
+     alpha                                                                                                              
+     10 turns · read                                                                                                    
+     Tokens  1000 · 10 reported, 0 missing                                                                              
+     [████████████████████████████████]                                                                                 
+     Cost    $1.0000 · 10 reported, 0 missing                                                                           
+     [████████████████████████████████]                                                                                 
+     beta-partial                                                                                                       
+     10 turns · partial (2 malformed rows, 3 unread turn rows) · totals are lower bounds                                
+     Tokens  500 · 7 reported, 3 missing                                                                                
+     [████████████████░░░░░░░░░░░░░░░░]                                                                                 
+     Cost    $0.2500 · 7 reported, 3 missing                                                                            
+     [████████░░░░░░░░░░░░░░░░░░░░░░░░]                                                                                 
+     gamma-missing                                                                                                      
+     10 turns · partial (0 malformed rows, 4 unread turn rows) · totals are lower bounds                                
+     Tokens  unreported · 0 reported, 10 missing                                                                        
+     [unavailable · no comparison bar]                                                                                  
+     Cost    unreported · 0 reported, 10 missing                                                                        
+     [unavailable · no comparison bar]                                                                                  
+     delta-failed                                                                                                       
+     10 turns · unavailable: fixture read failure                                                                       
+     Tokens  900000 · 10 reported, 0 missing                                                                            
+     [unavailable · no comparison bar]                                                                                  
+     Cost    $900.0000 · 10 reported, 0 missing                                                                         
+     [unavailable · no comparison bar]                                                                                  
+     epsilon-zero                                                                                                       
+     10 turns · read                                                                                                    
+     Tokens  0 · 10 reported, 0 missing                                                                                 
+     [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0                                                                               
+     Cost    $0.0000 · 10 reported, 0 missing                                                                           
+     [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0                                                                               
+                                                                                                                        
+   Transport · queue pressure steady                                                                                    
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:scroll  p:Usage / Telemetry  v:Plan / Trend / Keepers  w:1d / 7d / 14d  Esc:Dashboard  r:refresh  Tab:next  q:quit
+ › to alpha   (i to write)                                                                                              

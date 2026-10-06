@@ -1042,9 +1042,14 @@ let render_planning_list (state : state) =
        in
        let add_summary_if_fits summary =
          if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
-         then Buffer.add_buffer buf summary
+         then (Buffer.add_buffer buf summary; true)
+         else false
        in
        let summary_width = framed_inner_width cols in
+       let wrap_summary summary ~style text =
+         Message_layout.wrap_styled_words ~max_cells:(max 1 summary_width) text
+         |> List.iter (box_line_styled summary cols ~style)
+       in
        let summary_cards =
          studio_pair ~width:summary_width
            (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
@@ -1059,33 +1064,36 @@ let render_planning_list (state : state) =
          && count_frame_lines buf + summary_card_rows + reserved_rows <= rows
        in
        if cards_fit then List.iter (box_line buf cols) summary_cards
-       else box_line buf cols rollup;
-       let trend = Buffer.create 256 in
-       box_line_styled trend cols ~style:(Theme.info ())
-         (match state.planning_baseline with
-          | None -> "  Trend: waiting for the first successful reading"
-          | Some first ->
-              (* How long the reading has been running, not the clock it
-                 started at. The baseline is the first successful read of
-                 this process and is never replaced, so on a screen left open
-                 overnight "since 09:31:39" named a moment on a day the
-                 reader had no way to identify.
-
-                 The sentence names where the span starts, because the span
-                 is not a window anyone chose: "over the last 1d21h" reads
-                 like a day-and-a-half report, when what it measures is how
-                 long this screen has been open. *)
-              Printf.sprintf
-                "  Net change since this TUI's first reading %s ago: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
-                (Masc_tui_wire_age.text ~now:now_unix first.pl_generated_at)
-                (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
-                (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
-                (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
-       add_summary_if_fits trend;
+       else begin
+         let rollup_summary = Buffer.create 256 in
+         wrap_summary rollup_summary ~style:"" rollup;
+         ignore (add_summary_if_fits rollup_summary)
+       end;
        let backlog_summary = Buffer.create 256 in
-       box_line backlog_summary cols
+       wrap_summary backlog_summary ~style:""
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       if not cards_fit then add_summary_if_fits backlog_summary;
+       (* Preserve the current counts before spending optional rows on change
+          since the baseline. Wrapped physical rows share the list budget. *)
+       let backlog_visible = cards_fit || add_summary_if_fits backlog_summary in
+       let trend = Buffer.create 256 in
+       (match state.planning_baseline with
+        | None ->
+            wrap_summary trend ~style:(Theme.info ())
+              "  Change: waiting for the first successful snapshot"
+        | Some first ->
+            (* Baseline and current are server snapshot generation times,
+               not the time this TUI received them or the process age. *)
+            wrap_summary trend ~style:(Theme.recede ())
+              ("  Baseline snapshot: " ^ Terminal_text.single_line first.pl_generated_at);
+            wrap_summary trend ~style:(Theme.recede ())
+              ("  Current snapshot: " ^ Terminal_text.single_line p.pl_generated_at);
+            wrap_summary trend ~style:(Theme.info ())
+              (Printf.sprintf
+                 "  Change from baseline: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
+                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
+                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
+                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)));
+       if backlog_visible then ignore (add_summary_if_fits trend);
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;
@@ -3147,6 +3155,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      for exactly that reason. The obligation is in the words. *)
   let state_style =
     match lane.sl_configuration_state with
+    | Tui_decode.Lane_off -> Theme.recede ()
     | Tui_decode.Lane_ready -> Ansi.reset
     | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
     | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
@@ -3171,6 +3180,8 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   let activity =
     let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
     match lane.sl_status, lane.sl_last_started_at with
+    | Tui_decode.Standalone_off, _ ->
+        Printf.sprintf "Activity: off · %d accepted runs finishing" lane.sl_running_count
     | Tui_decode.Standalone_running, Some started ->
         Printf.sprintf "Activity: %d running · latest started %s ago"
           lane.sl_running_count (Masc_tui_answering.elapsed_text ~now started)
@@ -3627,8 +3638,15 @@ let render_lanes_overview (state : state) =
        if available > 0 then begin
          box_divider buf cols;
          let detail = match selected_standalone_lane state with
-           | Some lane -> standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width:inner lane
-           | None -> Masc_tui_lane_inventory.detail_lines inventory_row
+           | Some lane ->
+               (Theme.info (), "  Space: activity · s: models · a: candidate")
+               :: standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width:inner lane
+           | None ->
+               ((match inventory_row.Masc.Tui_decode_lane_inventory.selection with
+                 | Browser _ -> ["Space: activity · Enter: browser"]
+                 | Machine _ -> ["Space: activity · Enter: spectate"]
+                 | Exact _ | Declaration _ | Manual_instance _ -> [])
+                @ Masc_tui_lane_inventory.detail_lines inventory_row)
                |> List.concat_map (fun line ->
                     Terminal_text.single_line line
                     |> Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
@@ -4962,8 +4980,92 @@ let render_lane_inventory_detail (state : state) target =
   finish_surface state ~clamped:(Lane_run_detail_scroll {scroll;content_height=height})
     ~surface_key:"lane-inventory-detail" ~rows:terminal_rows ~cols buf
 
+let render_machine_activity (state : state) session =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let lines = Masc_tui_machine_activity.lines session
+    |> List.concat_map (fun text -> Terminal_text.single_line text
+      |> Message_layout.wrap_words ~max_cells:width) in
+  let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.lane_run_detail_scroll in
+  let window = Rows.of_list ~first:scroll ~height lines in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Machine activity" ^ "  " ^ connection_badge state);
+  box_divider buf cols;
+  for offset = 0 to height - 1 do
+    match Rows.at window (scroll + offset) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols ("  " ^ line)
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length lines))
+    ~hints:"Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back");
+  finish_surface state ~clamped:(Lane_run_detail_scroll {scroll;content_height=height})
+    ~surface_key:"machine-activity" ~rows:terminal_rows ~cols buf
+
+let render_browser_activity (state : state) session =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let lines = Masc_tui_browser_activity.lines session
+    |> List.concat_map (fun text -> Terminal_text.single_line text
+      |> Message_layout.wrap_words ~max_cells:width) in
+  let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.lane_run_detail_scroll in
+  let window = Rows.of_list ~first:scroll ~height lines in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Browser activity" ^ "  " ^ connection_badge state);
+  box_divider buf cols;
+  for offset = 0 to height - 1 do
+    match Rows.at window (scroll + offset) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols ("  " ^ line)
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length lines))
+    ~hints:"Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back");
+  finish_surface state ~clamped:(Lane_run_detail_scroll {scroll;content_height=height})
+    ~surface_key:"browser-activity" ~rows:terminal_rows ~cols buf
+
+let render_exact_activity (state : state) session =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let lines = Masc_tui_exact_activity.lines session
+    |> List.concat_map (fun text -> Terminal_text.single_line text
+      |> Message_layout.wrap_words ~max_cells:width) in
+  let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.lane_run_detail_scroll in
+  let window = Rows.of_list ~first:scroll ~height lines in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Exact activity" ^ "  " ^ connection_badge state);
+  box_divider buf cols;
+  for offset = 0 to height - 1 do
+    match Rows.at window (scroll + offset) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols ("  " ^ line)
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length lines))
+    ~hints:"Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back");
+  finish_surface state ~clamped:(Lane_run_detail_scroll {scroll;content_height=height})
+    ~surface_key:"exact-activity" ~rows:terminal_rows ~cols buf
+
 let render_lanes (state : state) =
-  match state.lanes_mode with
+  match Masc_tui_types.shown_machine_activity state with
+  | Some session -> render_machine_activity state session
+  | None -> match Masc_tui_types.shown_browser_activity state with
+  | Some session -> render_browser_activity state session
+  | None -> match Masc_tui_types.shown_exact_activity state with
+  | Some session -> render_exact_activity state session
+  | None -> match state.lanes_mode with
   | Lanes_overview -> render_lanes_overview state
   | Lanes_inventory_detail target -> render_lane_inventory_detail state target
   | Lanes_run_list lane -> render_lane_run_list state ~lane
@@ -5093,9 +5195,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           "  Account unavailable: " ^ Terminal_text.single_line detail
       | None, None -> "  Loading Item account…"
     in
+    let is_worn item =
+      match portrait_reading with
+      | Tui_decode.Unavailable _ -> false
+      | Tui_decode.Ready equipment ->
+          (match Keeper_portrait_item.in_slot equipment
+                   (Keeper_portrait_item.slot item) with
+           | None -> false
+           | Some equipped ->
+               String.equal (Keeper_portrait_item.id equipped)
+                 (Keeper_portrait_item.id item))
+    in
+    (* Equipped implies owned: the state word is exclusive so a worn row
+       never reads "owned". The row suffix below carries "equipped", bold
+       so worn rows stand out from owned rows. The word stays the
+       distinguisher: Sgr.bold is colors-gated, so NO_COLOR drops the
+       weight and the words still tell the states apart. *)
+    let equipped_word = "  " ^ Ansi.bold ^ "equipped" ^ Ansi.reset in
     let item_account_facts item =
       match account with
       | Some (Item_account.Ready account) ->
+          let worn = is_worn item in
           let owned =
             List.exists (fun owned ->
               String.equal (Keeper_portrait_item.id owned)
@@ -5110,7 +5230,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                | Item_account.Priced amount -> milli amount)
             | None -> "catalog unavailable"
           in
-          Some (price ^ (if owned then " owned" else ""))
+          Some (price ^ (if worn then "" else if owned then " owned" else ""))
       | Some (Item_account.Off | Item_account.Disabled _) | None -> None
     in
     let portrait =
@@ -5129,17 +5249,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
 
     let item_row cursor index item =
-      let worn =
-        match portrait_reading with
-        | Tui_decode.Unavailable _ -> false
-        | Tui_decode.Ready equipment ->
-            (match Keeper_portrait_item.in_slot equipment
-                     (Keeper_portrait_item.slot item) with
-             | None -> false
-             | Some equipped ->
-                 String.equal (Keeper_portrait_item.id equipped)
-                   (Keeper_portrait_item.id item))
-      in
+      let worn = is_worn item in
       let account_facts =
         if inner < 90 then ""
         else match item_account_facts item with
@@ -5150,7 +5260,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (if index = cursor then ">" else " ") (index + 1)
         (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
         (Keeper_portrait_item.id item) account_facts
-        (if worn then "  equipped" else "")
+        (if worn then equipped_word else "")
     in
     let item_headline cursor count =
       [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
@@ -5184,7 +5294,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | None -> []
         | Some item ->
             (match item_account_facts item with
-             | Some facts -> [ "  Selected: " ^ facts ]
+             | Some facts ->
+               [ "  Selected: " ^ facts ^ (if is_worn item then equipped_word else "") ]
              | None -> []) in
       let footer = [ "  Preview changes this picture only." ] in
       let reserved = List.length headline + List.length selected_facts
@@ -10950,7 +11061,7 @@ let usage_lines ~cols (state : state) =
                   match row.kur_coverage with
                   | Keeper_usage_complete -> "read"
                   | Keeper_usage_partial { malformed_rows; unread_turn_rows } ->
-                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows)"
+                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows) · reported totals are lower bounds"
                         malformed_rows unread_turn_rows
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason
@@ -12189,25 +12300,43 @@ let render_config_models (state : state) =
        let table_mode =
          Masc_tui_model_runtime_table.fits ~width:pane_width state.config_models_rows
        in
+       let starts =
+         if table_mode then []
+         else
+           Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width
+             state.config_models_rows
+       in
        let cursor_line =
          if table_mode then state.config_models_cursor + 1
          else
-           List.nth_opt
-             (Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width state.config_models_rows)
-             state.config_models_cursor
+           List.nth_opt starts state.config_models_cursor
            |> Option.value ~default:0
        in
+       (* The last line of the selected item: items are separated by one
+          blank line and the trailing separator is dropped. In table mode
+          the binding is the single line itself. *)
+       let cursor_stop =
+         if table_mode then cursor_line
+         else
+           match List.nth_opt starts (state.config_models_cursor + 1) with
+           | Some next -> next - 2
+           | None -> total - 1
+       in
        let max_scroll = max 0 (total - table_height) in
-       (* The window follows the cursor rather than the other way round: a
-          cursor the frame does not draw is a selection the reader cannot
-          see, and [e] would act on a row that is off screen. *)
+       (* The window follows the selected item rather than the other way
+          round: an item the frame does not draw at all is a selection the
+          reader cannot see, and [e] would act on it blind. While some line
+          of it is shown the reader's scroll stands, so a stacked item's
+          body -- the fields below its first line -- stays reachable on a
+          short pane (#41026 review). *)
        let scroll = max 0 (min state.config_scroll max_scroll) in
        let scroll =
-         if cursor_line < scroll then cursor_line
-         else if cursor_line >= scroll + table_height
-         then min max_scroll (cursor_line - table_height + 1)
-         else scroll
+         min max_scroll
+           (Masc_tui_scroll.ensure_span_visible ~start:cursor_line
+              ~stop:cursor_stop ~height:table_height scroll)
        in
+       (* The mark rides the first line of the item that is on screen. *)
+       let marked_line = max cursor_line scroll in
        (* The window is cut at the scroll the cursor settled, not the stored
           one. Cut before, a cursor that moved further than a row -- a page
           key, a list that shrank -- drew its rows outside the window, and
@@ -12222,7 +12351,7 @@ let render_config_models (state : state) =
          | Some line ->
              let marked =
                if table_mode && index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
-               else if index = cursor_line then Ansi.bold ^ Theme.info () ^ "> " ^ line ^ Ansi.reset
+               else if index = marked_line then Ansi.bold ^ Theme.info () ^ "> " ^ line ^ Ansi.reset
                else "  " ^ line
              in
              box_line buf cols marked
@@ -12247,6 +12376,51 @@ let render_config_models (state : state) =
     (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_config ~pane:Config_models));
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
+
+(* The models pane's scroll bound. The document is the table when it fits and
+   the stacked items when it does not, which only the pane width decides, so
+   the pane owns the count the keys move through (as Tools and Memory do).
+   Counting the table rows let the keys stop short of the stacked fields
+   (#41026 review). The chrome mirrors [render_config_models]: its own five
+   rows plus the detail block and its rule. *)
+let config_models_scrolled (state : state) : scrolled =
+  let chrome_error = listing_chrome ~error:state.runtime_config_view_error in
+  match state.runtime_config_view_error, state.runtime_config_view with
+  | Some _, _ | None, None ->
+      { sc_count = 0
+      ; sc_chrome = chrome_error
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
+  | None, Some _ ->
+      let terminal_rows, cols = get_terminal_size () in
+      let pane = max 1 (cols - 6 - 2) in
+      let rows = state.config_models_rows in
+      let document =
+        Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows
+      in
+      let content_height =
+        max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
+      in
+      let detail_len =
+        List.nth_opt rows state.config_models_cursor
+        |> Option.map (fun r ->
+               List.length (Masc_tui_model_runtime_table.detail_lines r))
+        |> Option.value ~default:0
+      in
+      let detail_height = min detail_len (max 0 (content_height - 2)) in
+      { sc_count = List.length document
+      ; sc_chrome = 5 + detail_height + if detail_height > 0 then 1 else 0
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
+
+(* Whether the pane draws stacked items at the current width. *)
+let config_models_stacked (state : state) =
+  let _, cols = get_terminal_size () in
+  not
+    (Masc_tui_model_runtime_table.fits ~width:(max 1 (cols - 6 - 2))
+       state.config_models_rows)
 
 let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
@@ -13878,7 +14052,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
     ~title:(screen_title " MASC Lane Add-ons")
     ~hints:(if Option.is_some view.evidence_prompt then "j/k:choose  Enter:preserve  Esc:back"
       else if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
-      else if Option.is_some view.installer || Option.exists (fun (menu : Masc_tui_lane_addons.action_menu) -> Option.is_some menu.form) view.action_menu
+      else if Option.is_some view.installer then Option.fold ~none:"" ~some:Masc_tui_lane_installer.hints view.installer
+      else if Option.exists (fun (menu : Masc_tui_lane_addons.action_menu) -> Option.is_some menu.form) view.action_menu
         then "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
       else if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
       else Masc_tui_lane_addons.overview_hints view)

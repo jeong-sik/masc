@@ -1,0 +1,57 @@
+{
+  "head": "70a3abb094378f7cf7f28468be3ba5c966ad703d",
+  "parent": "874f30e416f139a5882a7b90151f9c522aed40de",
+  "stack_key_present": false,
+  "stack_membership": "unknown",
+  "build": {
+    "handle": 82370,
+    "exit_code": 0,
+    "command": "opam exec --switch=5.5.1 -- scripts/dune-local.sh build bin/masc_tui.exe test/test_tui_exact_activity.exe"
+  },
+  "execution": {
+    "handle": 41516,
+    "exit_code": 0,
+    "commands": [
+      "_build/default/test/test_tui_exact_activity.exe",
+      "python3 test/test_tui_exact_activity_pty.py _build/default/bin/masc_tui.exe"
+    ],
+    "native_tests_passed": 15,
+    "pty_passed": true
+  },
+  "binaries": {
+    "_build/default/bin/masc_tui.exe": "ac04c8c8e45dfb32cbfd0333c06e981d5fd8312e0f1b4a39bcd29482b1486f41",
+    "_build/default/test/test_tui_exact_activity.exe": "0b4ab2aa4be82d70b9d6275aa79be470195e7806b098896e6eb5d386c553b7e3"
+  },
+  "logs": {
+    "focused-build.log": {
+      "source": "/tmp/pr41180-focused-build.log",
+      "sha256": "e5651f951cc0bb4269a45b350ece78c620d34bc468c29c24de1b8796abffaa33",
+      "byte_identical": true
+    },
+    "native.log": {
+      "source": "/tmp/pr41180-native.log",
+      "sha256": "fd7c22f4db060d7ab9e0a8904b0444673b7ca3cc14aad8bf7d6cbe5dd743cc91",
+      "byte_identical": true
+    },
+    "activity-pty.log": {
+      "source": "/tmp/pr41180-pty.log",
+      "sha256": "5b969c0487f393a77eac987de6f3056d5389ad08993339931a34f2aec417db81",
+      "byte_identical": true
+    },
+    "ruff.log": {
+      "source": "/tmp/pr41180-ruff.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "byte_identical": true
+    },
+    "pyright.json": {
+      "source": "/tmp/pr41180-pyright.json",
+      "sha256": "f0ae82167c9141916f431714506aa543e86bacfb59bbddf0d9f07da7e1f85fc1",
+      "byte_identical": true
+    },
+    "historical-parent-pyright.json": {
+      "source": "/tmp/pr41166-pyright-final.json",
+      "sha256": "4b0b2678b607761d9c4618980225812173722e7504a58a374d7558c7de23e14a",
+      "byte_identical": true
+    }
+  }
+}

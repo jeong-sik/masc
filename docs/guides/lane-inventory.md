@@ -30,7 +30,7 @@ Clients use `selection` for navigation, not heuristics over labels or IDs.
 
 | State kind | Fields and meaning |
 | --- | --- |
-| `exact` | `configuration`: `configured` with `admitted_slots`, `cli_slots`, `declared_slots`, `declared_cli_slots`, `dropped_slots`, nullable `admission_error`; or `unconfigured`/`unavailable` with `detail` |
+| `exact` | `configuration`: `configured` with `admitted_slots`, `cli_slots`, `declared_slots`, `declared_cli_slots`, `dropped_slots`, nullable `admission_error`; `off` with `declared_slots` and `declared_cli_slots`; or `unconfigured`/`unavailable` with `detail` |
 | `browser_clients` | `connected_clients`, counted using the existing connection deadline without pruning clients or settling requests |
 | `browser_executor` | `registered`; registration does not prove a child process or browser session is alive |
 | `machine` | `publication`: `no_screen`, `stable` or `running`, from the owner's Atomic publication only |
@@ -40,6 +40,12 @@ An exact registry that cannot be read, including a publication reservation, is
 `unavailable`; it is not interpreted as disabled. Machine reads do not acquire
 the machine lock, capture pixels or infer a controller/program. Browser reads
 never invoke an executor or open a session.
+
+Exact `off` refuses new acquisitions while retaining its declared candidates.
+The embedded standalone snapshot has `configuration_state: "off"`, `status:
+"off"`, and `configured: true`. Admitted/dropped lists are empty in this
+readout; retained run counts remain independent and can show accepted work still
+finishing. See [Exact activity](exact-lane-activity.md).
 
 Package declaration states are:
 
@@ -74,3 +80,37 @@ A package declaration's `enabled` is separate from its payload revision and
 worker presence. Off with a live or unresolved retained worker is an off request,
 not proof of cleanup. See [package activity](lane-package-activity.md) for the
 configuration-preserving control and incomplete-read behavior.
+
+## Dashboard
+
+Monitor → All Lanes reads this same operator inventory. Lane · Queue continues
+to show Keeper execution and queue activity; it is a separate view.
+
+The inventory offers identity/name/purpose search and a detail reading for every
+row. Selecting a row focuses its detail above the list. Cards fit narrow screens
+without requiring the package table's horizontal scrolling. A failed refresh
+retains the previous reading with an explicit stale notice. An unknown workspace
+does not read or retain visible rows; Verify workspace refreshes execution
+authority before reading its inventory. Late replies from another workspace are
+ignored.
+
+Detail links preserve the workspace and selected target. Exact configuration
+opens and focuses that Lane's candidate controls; diagnostics focuses its matrix
+row and filters the retained run list. Browser and machine configuration selects
+the corresponding TOML node in the existing raw draft. A missing node is reported
+without inserting configuration. Selecting another diagnostic filter releases the
+Lane target and keeps the chosen filter.
+
+Package links open the declaration path and verify its known installation ID
+against the inventory and a fresh file read. Manual worker links select both the
+instance ID and incarnation. A changed workspace, missing target, replaced worker
+or mismatched file is reported instead of selecting a replacement. Read target
+again rereads the inventory and declaration; an existing draft and its save basis
+are retained. If the file revision changed, adopting that revision remains an
+explicit editor action. URLs can be reopened directly; drafts survive internal
+screen navigation, not a browser restart.
+
+Navigation never saves configuration or starts/stops workers. Inventory row
+count is not a running-worker count. Executor
+registration is not proof of an active browser session; retained package state
+is not proof of a live process.

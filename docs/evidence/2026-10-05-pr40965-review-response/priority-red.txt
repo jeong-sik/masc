@@ -1,0 +1,17 @@
+BINARY_SHA256=ef23f44392aa4167e899fcee8474f02dfc8beb830eaf1cbd7e421b2a79ed055d
+SUMMARY_PRIORITY={"columns": 44, "no_color": false, "screen": " Dashboard  \u25b8Work  Keepers  Usage 3\u203a\n\n   MASC Work    23:44:02  HTTP [connected]  \n    sort:phase/P1-P5  filter:active         \n \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 \n  Goals: 3 [\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591]  0% (0/3)  \u2502  \u25d0       \n  Exec: 3                                   \n  Net change since this TUI's first         \n  reading 43d14h ago: Goals done +0 \u00b7       \n  Tasks done +0 \u00b7 Goal reviews pending +0   \n \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 \n    PHASE        JUDGE PRI TITLE            \n \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 \n  > [executing]        P1  plan-alpha-294\u2026  \n    [goals 1-1/3]                           \n    goal-a-29424 \u00b7 metric: metric-goal-a-\u2026  \n\n  Right / Enter:detail  Left / Esc:back  q\u2026?\n \u203a to alpha   (i to write)                  "}
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40965-parent-sync-20261004/test/test_tui_surface_studio_pty.py", line 248, in run_summary_priority
+    _keyboard_harness.run_terminal_scenario(executable, description="Work summary priority",
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        interact=interact, http_fixtures=fixtures,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        extra_env={"NO_COLOR": "1"} if no_color else None)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40965-parent-sync-20261004/test/tui_keyboard_harness.py", line 2394, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40965-parent-sync-20261004/test/test_tui_surface_studio_pty.py", line 239, in interact
+    raise AssertionError("Work displayed optional trend while the current backlog did not fit")
+AssertionError: Work displayed optional trend while the current backlog did not fit

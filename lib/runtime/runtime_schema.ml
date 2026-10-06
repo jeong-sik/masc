@@ -459,6 +459,7 @@ type lane_decl =
 
 type exact_output_lane_decl =
   { id : string
+  ; enabled : bool
   ; slot_ids : string list
   ; cli_slot_ids : string list
   ; max_output_tokens : int option
@@ -587,6 +588,10 @@ type config =
         Replaces {!Lsp_process_manager.command_of_language} for that language
         and no other. A key naming no language, or a value that is not a
         non-empty array of strings, is refused at load. *)
+  ; browser : Browser_configuration.t
+    (** Browser backend paths and per-lane activity from the same TOML snapshot. *)
+  ; machines : Machine_configuration.t
+    (** MSX and DOS activity from the same TOML snapshot. *)
   ; typesafeai : typesafeai
     (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list

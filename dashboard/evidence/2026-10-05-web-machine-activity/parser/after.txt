@@ -1,0 +1,8 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  41 passed (41)
+   Start at  03:41:00
+   Duration  1.58s (tests 73%, setup 11%, environment 11%, transform 5%, import 1%)

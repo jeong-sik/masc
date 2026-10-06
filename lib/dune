@@ -72,6 +72,7 @@
   masc.browser_lane
   masc.slack_lane
   masc.machine_live_publication
+  masc.machine_configuration
   masc.msx_lane
   masc.dos_lane
   masc.machine_checkpoint
@@ -125,6 +126,7 @@
   masc.runtime_model
   masc.runtime
   masc.runtime_toml_namespace
+  masc.browser_configuration
   masc.config_journal
   masc.egress_host
   masc.egress_proxy_decision

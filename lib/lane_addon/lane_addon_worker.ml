@@ -44,11 +44,18 @@ let valid_container_id id =
 
 exception Control_reply_too_large
 
+(* Docker control output is host-run CLI output, not a package reply, so the
+   manifest's reply bound does not apply. It is bounded like any other
+   captured subprocess stream, because an image can add large labels to an
+   inspect result. Package stdout goes through the MCP transport's own bound. *)
+let control_output_max_bytes = Common.max_process_capture_head_bytes
+
 (* This reader bounds both Docker control streams before retaining their
-   contents. Package stdout goes through the MCP transport's own bound. *)
-let read_control ~max_bytes flow =
-  let buffer = Buffer.create (min max_bytes 4096) in
-  let chunk = Cstruct.create (min max_bytes 4096) in
+   contents. *)
+let read_control flow =
+  let max_bytes = control_output_max_bytes in
+  let buffer = Buffer.create 4096 in
+  let chunk = Cstruct.create 4096 in
   let rec loop () =
     match Eio.Flow.single_read flow chunk with
     | count ->
@@ -60,7 +67,7 @@ let read_control ~max_bytes flow =
   in
   loop ()
 
-let run_control ~clock ~timeout_sec ~mgr ~docker_command ~max_bytes ~operation args =
+let run_control ~clock ~timeout_sec ~mgr ~docker_command ~operation args =
   let run () =
     try Eio.Switch.run (fun sw ->
       let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -71,8 +78,8 @@ let run_control ~clock ~timeout_sec ~mgr ~docker_command ~max_bytes ~operation a
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
       let stdout, stderr = Eio.Fiber.pair
-          (fun () -> read_control ~max_bytes stdout_r)
-          (fun () -> read_control ~max_bytes stderr_r) in
+          (fun () -> read_control stdout_r)
+          (fun () -> read_control stderr_r) in
       match Eio.Process.await child with
       | `Exited 0 -> Ok stdout
       | `Exited code ->
@@ -99,7 +106,6 @@ let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else
   let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
-      ~max_bytes:package.resources.max_reply_bytes
       ~operation:"image inspect" ["image";"inspect";"--format";"{{.Id}}";package.image] in
   let digest = String.trim raw in
   if digest="" then Error (Docker_failed {operation="image inspect";detail="empty image identity"})
@@ -115,17 +121,10 @@ let mount_argument ({ source; destination } : mount) =
   else Ok (Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination)
 
 let validate_package (package : package) =
-  let resources = package.resources in
-  if not (Float.is_finite resources.cpus) || resources.cpus <= 0. then
-    Error (Invalid_package "cpus must be finite and positive")
-  else if resources.cpus *. 1_000_000_000. < 1. then
-    Error (Invalid_package "cpus must be representable as a positive Docker NanoCpus value")
-  else if resources.cpus *. 1_000_000_000. >= Int64.to_float Int64.max_int then
-    Error (Invalid_package "cpus exceed Docker NanoCpus representation")
-  else if resources.memory_bytes <= 0L || resources.pids <= 0
-          || resources.max_reply_bytes <= 0 then
-    Error (Invalid_package "memory_bytes, pids and max_reply_bytes must be positive")
-  else if String.trim package.image = "" || package.command = [] then
+  match Lane_addon_types.check_resources package.resources with
+  | Error detail -> Error (Invalid_package detail)
+  | Ok () ->
+  if String.trim package.image = "" || package.command = [] then
     Error (Invalid_package "image and command are required")
   else if Filename.is_relative package.directory then
     Error (Invalid_package "package directory must be absolute")
@@ -213,17 +212,15 @@ let inspect_owned_container ~run ~instance_id ~name id =
   with Yojson.Json_error detail ->
     Error (Docker_failed { operation = "recover ownership"; detail })
 
-let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~max_reply_bytes
+let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id
     ?(docker_command = "docker") () =
-  if max_reply_bytes <= 0 then Error (Invalid_package "max_reply_bytes must be positive")
-  else if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
+  if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
   else if Option.exists (fun id -> not (valid_container_id id)) container_id then
     Error (Docker_failed { operation = "recover ownership"; detail = "invalid container ID" })
   else
-    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
-      ~max_bytes:max_reply_bytes in
+    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
     let* found, name = match container_id with
       | None ->
           let name = owned_name instance_id in
@@ -282,19 +279,18 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
      stdout or persisting [on_created]. Domain labels are checked before any
      recovered container is removed. *)
   let name = owned_name instance_id in
-  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
-      ~max_bytes:package.resources.max_reply_bytes in
+  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
   let identity = ref None in
   let cleanup_finished = ref false in
   let cleanup () =
     if !cleanup_finished then Ok ()
     else match !identity with
       | None ->
-          (* create can take effect before its stdout is received (or exceed
-             a tiny reply limit). Verify the binding's deterministic name
-             and label instead of removing an unverified name collision. *)
+          (* create can take effect before its stdout is received. Verify the
+             binding's deterministic name and label instead of removing an
+             unverified name collision. *)
           let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None
-              ~max_reply_bytes:package.resources.max_reply_bytes ~docker_command () in
+              ~docker_command () in
           cleanup_finished := true;
           Ok ()
       | Some id ->
@@ -420,8 +416,7 @@ let observe t ~binding ~sources =
               | None -> Error (Invalid_observation "lane_observe must return structuredContent")
               | Some json ->
                   Eio_unix.run_in_systhread (fun () ->
-                    Lane_addon_packet.decode ?store:t.artifact_store
-                      ~max_bytes:t.package.resources.max_reply_bytes json)
+                    Lane_addon_packet.decode ?store:t.artifact_store json)
                   |> Result.map_error (fun detail -> Invalid_observation detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
@@ -456,7 +451,7 @@ let act t ~arguments =
           (match result.structured_content with
            | None -> Error (Protocol_failed "action tool must return structuredContent")
            | Some json -> Eio_unix.run_in_systhread (fun () ->
-               Lane_addon_action.decode_result ~store ~max_bytes:t.package.resources.max_reply_bytes json)
+               Lane_addon_action.decode_result ~store json)
                |> Result.map_error (fun detail -> Protocol_failed detail))
     with
     | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn

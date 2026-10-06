@@ -2646,6 +2646,7 @@ let test_mcp_item_outlasting_the_idle_window_completes () =
                 ; tool_name = Some "fixture/probe"
                 ; origin = Runtime_native_tools.Mcp_wrapper
                 }
+            ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "the MCP call was not observed as a tool item"))
@@ -2670,6 +2671,7 @@ let test_sleep_item_outlasting_the_idle_window_completes () =
          let open Runtime_codex_app_server in
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
+            ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "a sleep was projected as a tool"))

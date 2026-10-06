@@ -1,0 +1,13 @@
+failed to load config from /Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard/vite.config.ts
+/Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard/vite.config.ts:144
+    throw new Error('MASC_DASHBOARD_PROXY_TARGET is required for `vite serve`.')
+          ^
+
+Error: MASC_DASHBOARD_PROXY_TARGET is required for `vite serve`.
+    at <anonymous> (/Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard/vite.config.ts:144:11)
+    at loadConfigFromFile (/private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/vite@7.3.6_@types+node@22.19.17_jiti@2.6.1_lightningcss@1.32.0_tsx@4.23.12/node_modules/vite/dist/node/chunks/config.js:35853:64)
+    at async resolveConfig (/private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/vite@7.3.6_@types+node@22.19.17_jiti@2.6.1_lightningcss@1.32.0_tsx@4.23.12/node_modules/vite/dist/node/chunks/config.js:35500:22)
+    at async _createServer (/private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/vite@7.3.6_@types+node@22.19.17_jiti@2.6.1_lightningcss@1.32.0_tsx@4.23.12/node_modules/vite/dist/node/chunks/config.js:25441:67)
+    at async file:///Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard/evidence/2026-10-05-web-machine-activity/browser-fixture.mjs:15:16
+
+Node.js v26.3.0

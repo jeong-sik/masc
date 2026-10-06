@@ -11,6 +11,7 @@ export type StandaloneLaneId =
   | 'browser_stagehand_exact'
 
 export type StandaloneLaneStatus =
+  | 'off'
   | 'running'
   | 'idle'
   | 'degraded'
@@ -18,6 +19,7 @@ export type StandaloneLaneStatus =
   | 'unavailable'
 
 export type StandaloneLaneConfigurationState =
+  | 'off'
   | 'ready'
   | 'degraded'
   | 'unconfigured'
@@ -92,8 +94,8 @@ export const LANE_IDS = [
   'verifier_exact',
   'browser_stagehand_exact',
 ] as const satisfies readonly StandaloneLaneId[]
-const STATUSES: readonly string[] = ['running', 'idle', 'degraded', 'no_retained_observation', 'unavailable']
-const CONFIGURATION_STATES: readonly string[] = ['ready', 'degraded', 'unconfigured', 'unavailable']
+const STATUSES: readonly string[] = ['off', 'running', 'idle', 'degraded', 'no_retained_observation', 'unavailable']
+const CONFIGURATION_STATES: readonly string[] = ['off', 'ready', 'degraded', 'unconfigured', 'unavailable']
 const OUTCOMES: readonly string[] = ['succeeded', 'failed', 'cancelled']
 
 function fail(message: string): never {
@@ -176,6 +178,10 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
   if (raw.configured !== null && typeof raw.configured !== 'boolean') {
     fail(`${context}.configured must be a boolean or null`)
   }
+  if ((configurationState === 'off' || status === 'off') &&
+      (configurationState !== 'off' || status !== 'off' || raw.configured !== true || raw.required
+       || raw.admitted_slots.length || raw.cli_slots.length || raw.dropped_slots.length
+       || raw.admission_error !== null)) fail(`${context} off lane has inconsistent admission state`)
   const lastOutcome = raw.last_outcome === null ? null : string(raw.last_outcome, `${context}.last_outcome`)
   if (lastOutcome !== null && !OUTCOMES.includes(lastOutcome)) fail(`${context}.last_outcome is unknown`)
   return {

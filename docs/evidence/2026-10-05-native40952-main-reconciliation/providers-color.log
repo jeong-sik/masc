@@ -1,0 +1,25 @@
+Testing `tui_overview_providers'.
+This run has ID `AHIFZFYY'.
+
+  [OK]          providers          0   unknown report evidence.
+  [OK]          providers          1   exact quota window history join.
+  [OK]          providers          2   account summary and reported gauges.
+  [OK]          providers          3   eighth-block meter.
+  [OK]          providers          4   values read in one unit.
+  [OK]          providers          5   failed read is one line.
+  [OK]          providers          6   empty read names missing usage.
+  [OK]          providers          7   unknown state is rejected.
+  [OK]          providers          8   history uses reported points.
+  [OK]          providers          9   empty reports remain observed in the t...
+  [OK]          providers         10   trend is built from the answer.
+  [OK]          providers         11   scope id is the server's.
+  [OK]          providers         12   USD cards preserve amounts without a f...
+  [OK]          providers         13   a silent account draws only its exhaus...
+  [OK]          providers         14   meter width is bounded.
+  [OK]          providers         15   observation clock follows local dates.
+  [OK]          providers         16   a window that gates nothing is not an ...
+  [OK]          providers         17   unknown role is rejected.
+  [OK]          providers         18   account emails name their accounts.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/native40952-reconcile-20261005/_build/default/test/_build/_tests/tui_overview_providers'.
+Test Successful in 0.005s. 19 tests run.

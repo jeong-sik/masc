@@ -225,6 +225,20 @@ let force_claim_task config ~agent_name ~task_id =
   Workspace.write_backlog config { backlog with tasks }
 ;;
 
+(* Replaces the agents directory with a regular file of the same name. Any
+   read that walks the directory (identity resolution, session binding, the
+   roster) then raises [Sys_error] from [Sys.readdir] — a deterministic
+   non-backlog observation failure for the #26656 regression tests. The
+   caller wipes the whole fixture fs afterwards, so no restore is needed. *)
+let break_agents_dir ctx =
+  let dir = Workspace.agents_dir ctx.config in
+  if Sys.is_directory dir then (
+    Array.iter (fun f -> Sys.remove (Filename.concat dir f)) (Sys.readdir dir);
+    Unix.rmdir dir);
+  let oc = open_out dir in
+  close_out_noerr oc
+;;
+
 (* Test dispatch returns None for unknown tool *)
 let () =
   test "dispatch_unknown_tool" (fun () ->
@@ -375,6 +389,71 @@ let () =
          assert (List.mem_assoc "error_code" fields);
          assert (List.mem_assoc "message" fields)
        | _ -> failwith "expected assoc data envelope")
+    | None -> failwith "dispatch returned None")
+;;
+
+(* #26656: a status read outside the backlog used to swallow its own failure
+   and answer with the substituted default (ctx.agent_name / None / false)
+   inside a success snapshot. Now the failure travels with the snapshot: the
+   renderer names it in the observation-failure banner and the typed data
+   marks the snapshot degraded. *)
+let () =
+  test "dispatch_status_names_non_backlog_observation_failures" (fun () ->
+    Fun.protect ~finally:Fs_compat.clear_fs
+    @@ fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    break_agents_dir ctx;
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      (* The substituted defaults keep the snapshot renderable, but the
+         snapshot no longer pretends the reads succeeded. The broken agents
+         path deterministically fails the session-binding read. The identity
+         and current-task readers are guarded by Sys.file_exists checks, so
+         the same non-directory reaches their bare readdir too; their safe
+         wrappers record the resulting Sys_error in observation_failures.
+         The test only requires at least one recorded failure so the
+         assertion stays robust across the read order. *)
+      assert (Tool_result.is_success result);
+      let message = status_message result in
+      assert_contains message "⚠ Observation incomplete";
+      assert_contains message "session binding read for test-agent";
+      let data = Tool_result.data result in
+      assert (Yojson.Safe.Util.(data |> member "degraded" |> to_bool));
+      let failures =
+        Yojson.Safe.Util.(data |> member "observation_failures" |> to_list)
+      in
+      assert (List.length failures >= 1)
+    | None -> failwith "dispatch returned None")
+;;
+
+(* #26656: masc_check evaluates assertions over the same reads. When those
+   reads fail it must refuse with a typed error instead of answering
+   passed=false from substituted defaults — a false assertion failure would
+   send the caller chasing a state that was never read. *)
+let () =
+  test "dispatch_check_refuses_when_state_reads_fail" (fun () ->
+    Fun.protect ~finally:Fs_compat.clear_fs
+    @@ fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    break_agents_dir ctx;
+    match
+      Tool_workspace.dispatch
+        ctx
+        ~name:"masc_check"
+        ~args:(`Assoc [ "assertions", `List [ `String "task_claimed" ] ])
+    with
+    | Some result ->
+      assert (Tool_result.is_failed result);
+      assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      assert_contains (Tool_result.message result) "identity resolution for test-agent"
     | None -> failwith "dispatch returned None")
 ;;
 

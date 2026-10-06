@@ -1,0 +1,59 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/machine-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+
+ ❯ src/components/machine-lane-activity-panel.test.ts (54 tests | 2 failed) 649ms
+   ❯ Machine activity operator flow (21)
+     × retains a known conflict at another file until explicit discard 11ms
+     × does not adopt a conflict response superseded by another source generation 52ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > retains a known conflict at another file until explicit discard
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:86:43
+     84|     const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+     85|     expect(await session.save(authority)).toBe(false)
+     86|     expect(session.state.value.uncertain).toBe(false)
+       |                                           ^
+     87|     expect(session.state.value.current).toEqual(current)
+     88|     expect(session.state.value.draft).toBe(previous)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > does not adopt a conflict response superseded by another source generation
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:125:43
+    123|     announceRuntimeTomlWritten()
+    124|     pending.resolve(); expect(await saving).toBe(false)
+    125|     expect(session.state.value.uncertain).toBe(false)
+       |                                           ^
+    126|     expect(session.state.value.current).toBeNull()
+    127|     expect(session.ready(authority)).toBe(false)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 52 passed (54)
+   Start at  05:02:47
+   Duration  2.50s (import 28%, tests 27%, transform 25%, environment 11%, setup 9%)
+
+ ELIFECYCLE  Test failed. See above for more details.

@@ -1,0 +1,291 @@
+{
+  "scope": "Actual machine activity draft sources/tests; Masc is a namespace alias to the complete actual Machine_lane source only. No dispatch stub. Not full TUI type/link, PTY, backend or deployment.",
+  "compiler": "5.5.1",
+  "sources": {
+    "lib/runtime_toml_namespace/runtime_toml_namespace.mli": "5e93626163b77fe372ae31942a0034d2df6196536bb27a87be81beb011dbc186",
+    "lib/runtime_toml_namespace/runtime_toml_namespace.ml": "b857b8b3ac3b4d9d2f15c2eff4fd662f2ba0cbcf51f9d8012a74d8baa4361291",
+    "lib/machine_configuration/machine_configuration.mli": "6e8d900c270f239d645ab0e19df47fd49380020b49e6bbf6fe23045e55b4e456",
+    "lib/machine_configuration/machine_configuration.ml": "da03d9ae527fea8b2c05df3b2ca06c81c8b315af6ebe876fafaabf6ea4ce526c",
+    "lib/lane_registry/machine_lane.mli": "4247ff34d946aa7f8088961b6bc0b452f078b9d491f6087f92a0be13db111885",
+    "lib/lane_registry/machine_lane.ml": "ecf71076228ccb7444d295c276092804484e0575ac8af699c6210d265815067d",
+    "lib/toml_line_editor/toml_line_editor.mli": "504727d302e6661dcd3669e37cb36d1c73217cbde404867c1488b390e9927db6",
+    "lib/toml_line_editor/toml_line_editor.ml": "8f837763a9abea4a5494b00e6b168b1de4f9f1f284ba95d28810891660f2b045",
+    "bin/masc_tui_runtime_config_edit.mli": "ab52c36136370980930c5b0746f896b64c8c3aef9e77d962258fe6bcb4a8bf96",
+    "bin/masc_tui_runtime_config_edit.ml": "ad8a30519fd0be019c333766b76cb91181b1322c90cc8b7c05a4dd5514192c39",
+    "bin/masc_tui_runtime_config_receipt.mli": "e52f87e764ff669ea38ba1c04f87db355496a641bcbfbc89442bd03fbce21482",
+    "bin/masc_tui_runtime_config_receipt.ml": "c1dbb284f214e9b771c92baa7516b5be8df9624d3a43ed31f42388aac2ec8e47",
+    "bin/masc_tui_machine_activity.mli": "c0aeaf3b5e6ad54a5066d774e21ca7443cbb786d24926c67b03cf9fc3ea3cfd5",
+    "bin/masc_tui_machine_activity.ml": "ecf4080ed9c3e393171a79fccd7dcb758c0be91ee0151fb016dbd36a7bc600ec",
+    "test/test_tui_machine_activity.ml": "da94d28a83265f342e6903abf0d84f1e233ed44796b0b8b6e1856bcb832e31c0"
+  },
+  "commands": [
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "runtime_toml_namespace.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "runtime_toml_namespace.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "machine_configuration.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "machine_configuration.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "machine_lane.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "machine_lane.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "toml_line_editor.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "toml_line_editor.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_runtime_config_edit.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_runtime_config_edit.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_runtime_config_receipt.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_runtime_config_receipt.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_machine_activity.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_machine_activity.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "test_tui_machine_activity.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "otoml,yojson,alcotest,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-linkpkg",
+        "runtime_toml_namespace.cmo",
+        "machine_configuration.cmo",
+        "machine_lane.cmo",
+        "masc.cmo",
+        "toml_line_editor.cmo",
+        "masc_tui_runtime_config_edit.cmo",
+        "masc_tui_runtime_config_receipt.cmo",
+        "masc_tui_machine_activity.cmo",
+        "test_tui_machine_activity.cmo",
+        "-o",
+        "test.exe"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "./test.exe"
+      ],
+      "returncode": 0
+    }
+  ],
+  "directory": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-machine-activity-i7uts0dl"
+}

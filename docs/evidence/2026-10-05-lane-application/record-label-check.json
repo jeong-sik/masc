@@ -1,0 +1,8 @@
+{
+  "scope": "Reduced compiler probe for record-label inference only, not a Runtime typecheck",
+  "compiler": "5.5.0",
+  "before": "A newer cleanup_publication.phase made unannotated release_detached infer cleanup_publication; e.running then failed. Exit 2 observed.",
+  "after_source": "type entry = { phase : int; running : bool }\ntype cleanup_publication = { fields : unit; terminal_phase : int }\nlet release_detached e = e.phase = 0 && not e.running\n",
+  "after_exit": 0,
+  "after_output": "type entry = { phase : int; running : bool; }\ntype cleanup_publication = { fields : unit; terminal_phase : int; }\nval release_detached : entry -> bool\n"
+}

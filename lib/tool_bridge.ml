@@ -178,7 +178,22 @@ let project_content ?base_path ?stored_preview ~model_projection message =
         }
 ;;
 
+let one_line text = String.map (function '\n' | '\r' -> ' ' | c -> c) text
+
+(* The typed error carries the cause in [message]; the model-facing sentence
+   must not drop it. For a storage failure the message is a raw exception, so
+   the boundary phrase names where it happened and the detail follows it. For
+   an inline-budget refusal the message is already a full sentence naming the
+   limit and the byte counts, so it is used as-is rather than prefixed with a
+   phrase that repeats it. This mirrors [Keeper_terminal_effect_detail], which
+   already keeps the detail on the terminal-effect path; without it the model
+   and the operator see only a bare label they cannot act on. *)
 let externalization_tool_error ~recoverable error =
+  let detail = String.trim (one_line error.message) in
+  let sentence phrase =
+    if String.equal detail "" then phrase
+    else Printf.sprintf "%s: %s" phrase detail
+  in
   match error.kind with
   | Artifact_storage_failure ->
     make_tool_error
@@ -187,12 +202,12 @@ let externalization_tool_error ~recoverable error =
         (if recoverable
          then Agent_core.Types.Transient
          else Agent_core.Types.Unknown)
-      "tool output artifact storage failed"
+      (sentence "tool output artifact storage failed")
   | Inline_budget_exceeded ->
     make_tool_error
       ~recoverable:false
       ~error_class:Agent_core.Types.Deterministic
-      "tool output exceeds descriptor budget"
+      (if String.equal detail "" then "tool output exceeds descriptor budget" else detail)
 ;;
 
 (* The class is typed at the producer and AGENT_CORE folds it into

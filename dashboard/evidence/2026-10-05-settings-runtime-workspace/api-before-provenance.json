@@ -1,0 +1,10 @@
+{
+  "head": "5f8c3c6b5cd0cdfa4d1896b073d9e377f009c0ad",
+  "source_sha256": {
+    "dashboard/src/api/dashboard-runtime.ts": "c859d5c3ba6bc64683bea4d24a77aa5e9146954f28c5fc12aea2b4c658dc9ab4",
+    "dashboard/src/api/dashboard-runtime-routing-lifetime.test.ts": "fa48394db33752777fbd9fd1843335f6d811f1f799e1560c3cafc6d7c84c9d35"
+  },
+  "command": "node node_modules/vitest/vitest.mjs run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-runtime-routing-lifetime.test.ts",
+  "result": "6 failed / 6 passed; before two missing dispatch guards",
+  "log": "/tmp/masc-b10-routing-lifetime-before.txt"
+}

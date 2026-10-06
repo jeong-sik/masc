@@ -1,0 +1,27 @@
+{
+  "base": "9f4e168231a20f0024602fb10740d38ae101c30c",
+  "checked_at": "2026-10-04T09:54:39.245377+00:00",
+  "regression_before": {
+    "failed": 2,
+    "meaning": "old workspace controls and slice still visible"
+  },
+  "focused_after": {
+    "passed": 57,
+    "files": 3
+  },
+  "typescript": "pass",
+  "changed_file_lint": "pass",
+  "browser": "9 assertions, four explicit synthetic mutations, zero page errors",
+  "native_backend": "not_run",
+  "tui": "not_run",
+  "deployment": "not_run",
+  "sha256": {
+    "dashboard/src/components/lane-addons-panel.ts": "347f16f1a975a53430c89f110d8cd45e25a592fbae54f05506f6811cfb766e7a",
+    "dashboard/src/components/lane-addons-panel.test.ts": "46cbabd7d981989585e2dbb05e6dcb8248169163dda491f208de4ecf2565d81e",
+    "dashboard/src/components/lane-addons-workspace.test.ts": "3aafc569e88cb8f147f0c43faf46e940f82fd12c6b14251dc5eba4f5ef5873d6",
+    "dashboard/src/components/lane-declaration-editor.test.ts": "c0e657253df4982bac0dd425ccad49eb9894c9a9ec8146179a91409d3182713b",
+    "dashboard/evidence/2026-10-04-addons-workspace/fixture.ts": "3995c2659aad98da1efea8b29d5ec2922cf11685f345ad46ffddbff638a2a570",
+    "dashboard/evidence/2026-10-04-addons-workspace/fixture.html": "855bd2586f4faf82a5ca79efe67861353ab66dc6c2c48e44dd642fe1c69113c4",
+    "dashboard/evidence/2026-10-04-addons-workspace/browser-fixture.mjs": "2e9fc6bb73155b5aab07161a56ccc932266351061677675e780349e8f611dcb5"
+  }
+}

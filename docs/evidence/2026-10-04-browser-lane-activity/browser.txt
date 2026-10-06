@@ -1,0 +1,4 @@
+(node:85553) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+11:50:51 PM [vite] (client) Re-optimizing dependencies because vite config has changed
+{"passed":true,"checks":["off and registered executor remain separate, with status/close and startup-path guidance","live off preserves the observed connected-client count","missing configuration authority is distinct from executor registration","a refreshed on observation replaces the previous activity","mobile has no horizontal overflow","zero writes, page errors and unexpected API routes"],"reads":3,"writes":[],"errors":[],"unexpected":[]}

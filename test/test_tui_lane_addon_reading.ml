@@ -15,6 +15,7 @@ let declaration : UI.declaration =
   ; instance_id = None
   ; issues = []
   ; enabled = Some true
+  ; application = None
   ; origin = UI.Parsed_declaration
   }
 

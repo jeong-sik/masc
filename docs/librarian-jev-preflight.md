@@ -14,15 +14,22 @@ apply. The setting defaults to false. It sends the rendered memory-selection
 request to the configured destination; the existing Board opt-in does not
 enable this input path.
 
-Only `Memory_pass None` with an empty working-context input is eligible.
-Continuity, working-context generation and any Memory pass carrying working
-context use the existing text-generating lane. JEV selects `keep_current`,
+Only a `Memory_pass None` whose prompt shows no working context is eligible:
+no pending source and no unavailable source
+(`Keeper_librarian_context.shows_no_working_context`). A running Keeper's
+input also carries a prior snapshot and an execution basis; the prompt shows
+neither without a source, so neither decides eligibility. Continuity,
+working-context generation and any Memory pass carrying a pending or
+unavailable source use the existing text-generating lane. JEV selects `keep_current`,
 `needs_generation` or `uncertain`; it does not create a claim, Category name
 or continuity summary. No unmeasured confidence cutoff is introduced.
 
 A decoded `keep_current` decision is translated into an empty delta and
 validated by the existing Librarian parser. An accepted delta follows the
-normal snapshot disposition and range-receipt writer. Validation refusal,
+normal snapshot disposition and range-receipt writer. Its empty
+`working_contexts` is the only valid organization of nothing pending, so it
+is written like a generated one: contexts whose sources were consumed are
+retired on either route. Validation refusal,
 `needs_generation`, `uncertain`, unavailable configuration, transport failure
 and malformed answers use the full lane. Cancellation propagates.
 
@@ -68,8 +75,9 @@ reading overlay.
 `test/test_keeper_librarian_preflight.exe` exercises the actual effect boundary
 with synthetic HTTP and an official-client runner: no-change skips generation,
 preserves Memory and records its normal receipt; generation-needed, uncertain,
-invalid and failed responses call the full lane; opt-out, excluded and context
-units do not call JEV. Fixture decisions establish routing, not JEV quality.
+invalid and failed responses call the full lane; opt-out, excluded, pending-source,
+unavailable-source and context units do not call JEV. A running Keeper with
+nothing pending is judged, and both routes retire its consumed contexts. Fixture decisions establish routing, not JEV quality.
 
 Measure performance with the same frozen inputs and configuration for baseline
 and preflight, recording actual generation calls, paired end-to-end timings,

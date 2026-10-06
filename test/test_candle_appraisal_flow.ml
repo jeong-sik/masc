@@ -135,8 +135,14 @@ let paid config goal_id =
 let one_payment config goal_id = match paid config goal_id with
   | [payment] -> payment | _ -> fail "expected exactly one Paid row"
 
+(* The worker's settle step for each waiting payout, on this fiber. It skips
+   the worker's availability gate and candidate preparation: every caller
+   below starts with Candle enabled and Candidates already written, and with
+   Candle off each payout comes back Superseded instead of being deferred. *)
 let drain config appraise =
-  Candle_appraise.drain_once ~now ~appraise ~base_path:config.Workspace.base_path |> ok
+  let base_path = config.Workspace.base_path in
+  List.map (Candle_appraise.settle_one ~now ~appraise ~base_path)
+    (Candle_appraise.pending ~base_path |> ok)
 
 let trace ?(slot = "fixture.slot") id : A.trace = {run_id=id;slot_id=slot}
 let make_runner ?(relation = fun _ -> A.Related) ?(weight = fun name -> if name="keeper-a" then 2 else 1) calls
@@ -393,6 +399,31 @@ let test_unrelated_and_external_only_work_mint_nothing () =
   check int "external-only work receives no payment" 0 (List.length (paid config "external-only"));
   (match Candle_payout.state ~goal_id:"external-only" (events config) with
    | Candle_payout.Settled -> () | _ -> fail "external-only contribution stayed open")
+
+(* Only the external operator's Task is related. Related work exists, but no
+   Keeper did it, so the payout closes as no_related_keepers rather than
+   all_unrelated, with no weights call and no Paid row. *)
+let test_related_work_done_by_no_keeper_closes_as_no_related_keepers () =
+  with_workspace @@ fun _env config ->
+  ignore (prepared config "external-related");
+  let calls = ref [] in
+  let relation title = if title = "Operator's contribution" then A.Related else A.Unrelated in
+  ignore (drain config (make_runner ~relation calls));
+  check (list string) "grade, then one relation per candidate, and no weights"
+    ["grade";"relation";"relation";"relation"]
+    (List.map (fun (_, request) -> A.stage request) !calls);
+  check int "related work without a Keeper receives no payment" 0
+    (List.length (paid config "external-related"));
+  (match List.rev (events config) with
+   | {E.body=E.Unattributed {goal_id;reason=E.No_related_keepers attribution;_};_} :: _ ->
+     check string "the confirmed Goal closes" "external-related" goal_id;
+     check (list (pair string bool)) "every relation decision is kept"
+       ["task-a", false; "task-b", false; "external", true]
+       (List.map (fun (r : A.task_relation) -> r.task_id, r.relation = A.Related)
+          attribution.relations)
+   | _ -> fail "related work without a Keeper did not close as no_related_keepers");
+  (match Candle_payout.state ~goal_id:"external-related" (events config) with
+   | Candle_payout.Settled -> () | _ -> fail "related work without a Keeper stayed open")
 
 let test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it () =
   with_workspace @@ fun _env config ->
@@ -751,7 +782,7 @@ let test_published_appraiser_repair_releases_rejected_payout ~in_flight () =
     let publish ?(unrelated = false) id base_url =
       let snapshot = F.resolver_snapshot ~source:config.base_path [{F.id; base_url}] in
       let lane : Runtime_schema.exact_output_lane_decl =
-        {id="candle_appraiser";slot_ids=[id];cli_slot_ids=[];
+        {id="candle_appraiser";enabled = true; slot_ids=[id];cli_slot_ids=[];
          max_output_tokens=Some F.fixture_max_output_tokens;thinking=None} in
       let lanes = if unrelated then [lane; {lane with id="other-lane"}] else [lane] in
       match R.publish ~lanes snapshot with
@@ -1007,6 +1038,7 @@ let () =
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
       ;test_case "execution refusal holds through pulses and resumes on event" `Quick test_execution_rejection_waits_for_event_and_preserves_preceding_work
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing
+      ;test_case "related work done by no Keeper closes as no_related_keepers" `Quick test_related_work_done_by_no_keeper_closes_as_no_related_keepers
       ;test_case "failed due date waits for a new corrected pass" `Quick test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it
       ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates
       ;test_case "valid arithmetic cannot authorize an outsider" `Quick test_arithmetic_alone_cannot_authorize_an_outsider

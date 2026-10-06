@@ -1434,6 +1434,28 @@ status: reference
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.mli)
 
+**Lane application (Lane 적용)**
+: Lane Add-on 선언 하나가 실제로 적용됐는지에 대한 읽기 전용 관찰. 파일 저장과 worker
+  적용은 다른 사실이다 — 선언 파일을 저장해도 그 선언으로 도는 worker가 관측됐다는
+  뜻이 아니다. `Lane_addon_application.t`가 닫힌 여섯 값이다 — `Starting_worker`
+  (wire `starting`: 켜짐이 원하는 상태인데 받아들여진 실행 worker가 아직 관측되지 않음)·
+  `Cleaning_workers`(`cleaning`: 살아 있거나 보존된 소유자가 아직 정리를 마치지 못함)·
+  `Applied`(`applied` + `instance_id`: 소유자 하나가 기동을 마치고 돌며 다른 소유자는
+  멈춤)·`Inactive`(`inactive`: 꺼짐이 원하는 상태이고 모든 소유자의 정리가 확인됨)·
+  `Failed`(`failed` + `messages`)·`Unknown`(`unknown` + `messages`: 인벤토리가
+  불완전하거나 이 호출자가 운영자 적용 세부를 볼 수 없음). `Applied`는 실행 중인
+  소유자를 이름할 뿐 그 출력이나 Goal 성공을 보증하지 않는다. `observe`는
+  `complete=false`면 `Applied`·`Inactive`를 내지 않는다. 선언은 두 revision을 갖는다 —
+  `source_revision`(마지막 조정이 읽은 정확한 바이트의 SHA-256, `enabled`와 주석 포함)과
+  의미 revision(코드 `revision`, wire `desired_revision`: worker 입력을 이름하며
+  `enabled`·주석·파일명을 뺀다). 저장된 문서를 추적하는 UI는 workspace·path·
+  installation id·source revision·의미 revision이 모두 맞을 때만 적용 결과를 그 문서에
+  붙인다. 불일치는 제출한 의도가 아직 관측되지 않았다는 뜻이지 완료가 아니다. 적용
+  세부는 운영자 전용이고, 다른 호출자에게는 `unknown`과 고정 설명으로 보인다.
+  → [Lane_addon_application](../../lib/lane_addon/lane_addon_application.mli) ·
+  [Lane_addon_config](../../lib/lane_addon/lane_addon_config.mli) ·
+  [Declaration application observations](lane-application-observation.md)
+
 **Quiz Lane (퀴즈 레인)**
 : 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
   바탕으로 문제를 내고 답을 채점하는 Lane Add-on 패키지 쌍(`quiz-questions`·`quiz-grader`).
@@ -2006,6 +2028,23 @@ status: reference
   `hitl resolution redelivered approval=… occasion=…` 로그를 남길 뿐 행을 적지 않는다.
   채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
   → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
+
+**Keeper Delegate Completion Wake (위임 완료 깨움)**
+: 다른 Keeper에게 떼어 맡긴 turn(`masc_keeper_delegate`)의 답을 요청한 Keeper에게
+  되돌리는 durable 자극. `masc_keeper_delegate`는 operation id만 돌려주고 기다리지
+  않으므로, 이 자극이 없으면 답은 요청한 Keeper가 그 id를 다시 읽어야만 닿았다 —
+  2026-08-17..24 실측에서 위임 4건 중 상태 조회 0건이었다. 자극은
+  `Keeper_event_queue.Delegate_completed`이고 payload는 `delegate_completion`
+  (`dc_operation_id`·`dc_keeper`·`dc_terminal`)이다. `dc_terminal`은 닫힌 세 값이다 —
+  `Delegate_replied`(되돌릴 가시적 답을 나름)·`Delegate_no_reply`(되돌릴 텍스트 없이
+  turn이 끝남; 도구로 다른 곳에 썼는지 아무 말도 안 했는지는 가르지 않는다)·`Delegate_failed`
+  (실패 상세). 자극 id는 `keeper-delegate:<operation_id>`이고, 한 위임은 한 번만 답하므로
+  operation id 하나로 완전한 키다. 답은 먼저 커밋되고 그 뒤에 알린다 — 커밋은 HITL·Fusion과
+  같은 fail-closed durable 경로를 쓰고, 뒤따르는 live wake는 힌트일 뿐이라 `Running`
+  Keeper에게만 닿고 실패는 로그로 남긴다(자극은 이미 큐에 있어 다음 admitted turn에 읽힌다).
+  `Fusion_completed`·`Hitl_resolved`와 같은 부류다.
+  → [Keeper_delegate_completion_wake](../../lib/keeper/keeper_delegate_completion_wake.mli) ·
+  [Keeper_event_queue](../../lib/keeper_runtime/keeper_event_queue.mli)
 
 **Approval Queue Phase (승인 큐 진행 단계)**
 : Human-in-the-Loop (HITL) 승인 큐에서 각 승인 요청 항목이 거치고 있는 진행 단계를

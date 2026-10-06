@@ -11,7 +11,8 @@ operations belong to automation. The current action contracts are in
 Set the existing workspace `runtime.toml`:
 
 ```toml
-[browser]
+[browser.automation]
+enabled = true
 geckodriver = "/absolute/path/to/geckodriver"
 ```
 

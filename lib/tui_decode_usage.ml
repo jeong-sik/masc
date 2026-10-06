@@ -236,7 +236,7 @@ let decode_provider_usage_history json =
 
 type keeper_usage_coverage =
   | Keeper_usage_complete
-  | Keeper_usage_partial of int
+  | Keeper_usage_partial of { malformed_rows : int; unread_turn_rows : int }
   | Keeper_usage_failed of string
 
 type keeper_usage_row = {
@@ -280,9 +280,12 @@ let decode_keeper_usage_row json =
   let* kur_coverage =
     match read_state with
     | "read" ->
-        let* malformed = required_int_field metrics_read "malformed_rows" in
-        Ok (if malformed = 0 then Keeper_usage_complete
-            else Keeper_usage_partial malformed)
+        let* malformed_rows = required_int_field metrics_read "malformed_rows" in
+        let* unread_turn_rows = required_int_field metrics_read "unread_turn_rows" in
+        if malformed_rows < 0 || unread_turn_rows < 0 then
+          Error "keeper usage unread row counts must be nonnegative"
+        else Ok (if malformed_rows = 0 && unread_turn_rows = 0 then Keeper_usage_complete
+            else Keeper_usage_partial { malformed_rows; unread_turn_rows })
     | "failed" ->
         let* reason = required_string_field metrics_read "reason" in
         Ok (Keeper_usage_failed reason)
@@ -320,6 +323,11 @@ let decode_keeper_usage_window json =
         | Dashboard_cache_wire.Cache_warming -> Error "keeper usage still warming"
       in
       let* kuw_generated_at = required_number_field json "generated_at" in
+      let* () =
+        match Ptime.of_float_s kuw_generated_at with
+        | Some _ -> Ok ()
+        | None -> Error "keeper usage generated_at is outside the supported timestamp range"
+      in
       let* kuw_window_minutes = required_int_field json "window_minutes" in
       let* rows = required_list_field json "keepers" in
       let* kuw_rows = decode_list "keepers" decode_keeper_usage_row rows in

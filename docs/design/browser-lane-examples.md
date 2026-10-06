@@ -86,7 +86,8 @@ revision으로 저장한다. 화면을 이동해도 작업공간·backend별 초
 Automation 경로는 `[browser.automation]`이 정본이다. 이 단계에서는 기존
 `[browser] geckodriver/binary`도 받지만 두 자리를 함께 쓰면 저장을 거절한다.
 기존 파일에 `[browser.automation] enabled`를 추가할 때는 경로도 같은 표로
-옮겨야 한다. TUI 활동 저장은 기존 `[browser]` 표의 경로를 같은 초안에서
+옮겨야 한다. TUI에서 Live나 Stagehand 활동을 저장하면 이 경로는 그대로 남는다.
+Automation 활동을 저장할 때는 기존 `[browser]` 표의 경로를 같은 초안에서
 옮기고 다른 backend 설정을 보존한다. inline/dotted 표를 안전하게 바꿀 수
 없으면 저장 전에 원문 편집을 안내한다. Web 활동 편집기는 TOML 구문 트리로
 inline/dotted/quoted 표도 수정하고 automation의 기존 경로를 옮긴다.

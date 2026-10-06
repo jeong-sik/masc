@@ -5,7 +5,7 @@ import {
   type CommittedRuntimeTomlConfig,
 } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
-import { announceRuntimeTomlWritten, announceRuntimeTomlWriteUncertain, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { announceRuntimeTomlWriteUncertain, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { errorToString } from './format-string'
 import { modelSetupResumeState } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
@@ -78,6 +78,7 @@ function document(config: RuntimeTomlConfig): LaneActivityDocument {
 }
 const unobserved = { kind: 'unknown' } as const
 const setupResumeUnconfirmed = '설정은 저장됐지만 런타임 재개를 확인하지 못했습니다. Runtime 설정에서 재개를 다시 시도하세요.'
+const lateCommitNotice = '이전에 보낸 저장이 늦게 완료됐습니다. 현재 설정을 다시 읽으세요.'
 
 /** An activity draft owns only a boolean. It never adopts or overwrites the
  * full raw editor's independent draft, including when that editor is hidden. */
@@ -262,12 +263,17 @@ export class LaneActivitySession<L, O> {
         attempt.stage = 'sent'
       } })
       attempt.stage = 'answered'
-      if (!this.owns(authority, version)) return false
+      if (!this.owns(authority, version)) {
+        // The receipt already told every screen, this one included, that the
+        // file changed. Its document belongs to the old authority and is not
+        // adopted; the notice names this session's own write, not another screen.
+        this.update({ notice: lateCommitNotice })
+        return false
+      }
       const saved = document(receipt)
       if (saved.source_path !== draft.base.source_path || saved.source_text !== source || receipt.commit.source_revision !== saved.source_revision)
         throw new Error('저장 응답이 제출한 파일과 일치하지 않습니다. 현재 설정을 다시 읽으세요.')
       committed = true
-      announceRuntimeTomlWritten()
       this.update({ phase: 'followup', receipt, current: null, observation: unobserved,
         uncertain: receipt.commit.durability === 'durable' ? null : attempt,
         draft: receipt.commit.durability === 'durable' ? { ...draft, base: saved } : draft,

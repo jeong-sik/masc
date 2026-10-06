@@ -20,11 +20,14 @@ const followup = vi.hoisted(() => ({ resumeSavedModelSetup: vi.fn(), refreshRunt
 const inventoryApi = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
 const dispatch = vi.hoisted(() => ({ waitForSaveToken: vi.fn() }))
 vi.mock('../api/lane-inventory', async original => ({ ...await original<typeof import('../api/lane-inventory')>(), ...inventoryApi }))
-vi.mock('../api/dashboard-runtime', async original => ({ ...await original<typeof import('../api/dashboard-runtime')>(), ...api,
-  saveRuntimeTomlConfig: async (...args: [string, string, { beforeDispatch?: () => void }?]) => {
-    await dispatch.waitForSaveToken(); args[2]?.beforeDispatch?.(); return api.saveRuntimeTomlConfig(...args)
-  },
-}))
+vi.mock('../api/dashboard-runtime', async original => {
+  const actual = await original<typeof import('../api/dashboard-runtime')>()
+  // The stand-in save announces its receipt the way the real request does.
+  return { ...actual, ...api, saveRuntimeTomlConfig: async (...args: Parameters<typeof actual.saveRuntimeTomlConfig>) => {
+    await dispatch.waitForSaveToken(); args[2].beforeDispatch?.()
+    return actual.announceRuntimeTomlCommit(await api.saveRuntimeTomlConfig(...args), args[2])
+  } }
+})
 vi.mock('../api/dashboard-standalone-lanes', async original => ({ ...await original<typeof import('../api/dashboard-standalone-lanes')>(), ...projectionApi }))
 vi.mock('../lib/model-setup-resume', async original => ({ ...await original<typeof import('../lib/model-setup-resume')>(), resumeSavedModelSetup: followup.resumeSavedModelSetup }))
 vi.mock('../lib/runtime-config-refresh', () => ({ refreshRuntimeConfigConsumers: followup.refreshRuntimeConfigConsumers }))
@@ -375,14 +378,21 @@ describe('Machine activity operator flow', () => {
     expect(await session.save(fresh)).toBe(true)
     expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1); expect(stored).toBe(off)
   })
-  it('ignores a late save receipt after leaving the workspace', async () => {
+  it('announces a late save receipt without adopting it after leaving the workspace', async () => {
     const { session, authority } = await draft(), response = deferred<ReturnType<typeof receipt>>()
     api.saveRuntimeTomlConfig.mockReturnValueOnce(response.promise)
     const saving = session.save(authority); await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
     workspace('/fixture/B'); const fresh = workspace('/fixture/A'); await session.read(fresh)
-    response.resolve(receipt(off)); expect(await saving).toBe(false)
-    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current?.source_text).toBe(source)
+    const raw = runtimeTomlSessionFor(fresh); await raw.read(fresh, 'reload')
+    expect(session.state.value.current?.source_text).toBe(source); expect(raw.state.value.needsRead).toBe(false)
+    stored = off; response.resolve(receipt(off)); expect(await saving).toBe(false)
+    // The file changed, so neither screen keeps the read from before the write.
+    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current).toBeNull()
+    expect(session.state.value.notice).toBe('이전에 보낸 저장이 늦게 완료됐습니다. 현재 설정을 다시 읽으세요.')
+    expect(raw.state.value.needsRead).toBe(true)
     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+    await session.read(fresh)
+    expect(session.state.value.current?.source_text).toBe(off)
   })
   it('requires a read after an unanswered write and does not blindly repeat it', async () => {
     const { session, authority } = await draft()

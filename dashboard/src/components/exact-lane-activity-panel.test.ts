@@ -7,7 +7,7 @@ import inventory from '../api/fixtures/lane-inventory.json'
 import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { modelSetupResumeState, resumeSavedModelSetup } from '../lib/model-setup-resume'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
-import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
+import { announceRuntimeTomlCommit, RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
 import { readExactActivity, writeExactActivity } from '../lib/exact-lane-activity'
 import { exactLaneActivitySessionFor, resetExactLaneActivitySessionsForTesting } from '../lib/exact-lane-activity-session'
 import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
@@ -25,7 +25,12 @@ const onboardingApi = vi.hoisted(() => ({ fetchSetupStatus: vi.fn(), fetchSetupI
 vi.mock('../api/onboarding', async original => ({ ...await original<typeof import('../api/onboarding')>(), ...onboardingApi }))
 const inventoryApi = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
 vi.mock('../api/lane-inventory', async original => ({ ...await original<typeof import('../api/lane-inventory')>(), ...inventoryApi }))
-vi.mock('../api/dashboard-runtime', async original => ({ ...await original<typeof import('../api/dashboard-runtime')>(), ...api }))
+vi.mock('../api/dashboard-runtime', async original => {
+  const actual = await original<typeof import('../api/dashboard-runtime')>()
+  // The stand-in save announces its receipt the way the real request does.
+  return { ...actual, ...api, saveRuntimeTomlConfig: async (...args: Parameters<typeof actual.saveRuntimeTomlConfig>) =>
+    actual.announceRuntimeTomlCommit(await api.saveRuntimeTomlConfig(...args), args[2]) }
+})
 vi.mock('../api/dashboard-standalone-lanes', async original => ({ ...await original<typeof import('../api/dashboard-standalone-lanes')>(), ...projectionApi }))
 vi.mock('../lib/model-setup-resume', async original => {
   const actual = await original<typeof import('../lib/model-setup-resume')>()
@@ -157,7 +162,7 @@ describe('Exact activity operator flow', () => {
       return { kind: 'active', exactOutputAvailable: true }
     })
     const saving = raw.write(authority, async options => {
-      options.beforeDispatch?.(); stored = rawSource; return receipt(rawSource)
+      options.beforeDispatch?.(); stored = rawSource; return announceRuntimeTomlCommit(receipt(rawSource), options)
     }, rawSource)
     await waitFor(() => expect(raw.state.value.config?.source_text).toBe(rawSource))
     if (dirty) raw.edit('draft', rawSource + '# retained local intent\n')
@@ -463,14 +468,21 @@ describe('Exact activity operator flow', () => {
     preview.resolve({ ok: true, can_save: true }); expect(await saving).toBe(false)
     expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled(); expect(session.state.value.draft?.enabled).toBe(false)
   })
-  it('ignores a late save receipt after leaving the workspace', async () => {
+  it('announces a late save receipt without adopting it after leaving the workspace', async () => {
     const { session, authority } = await draft(), response = deferred<ReturnType<typeof receipt>>()
     api.saveRuntimeTomlConfig.mockReturnValueOnce(response.promise)
     const saving = session.save(authority); await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
     workspace('/fixture/B'); const fresh = workspace('/fixture/A'); await session.read(fresh)
-    response.resolve(receipt(off)); expect(await saving).toBe(false)
-    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current?.source_text).toBe(source)
+    const raw = runtimeTomlSessionFor(fresh); await raw.read(fresh, 'reload')
+    expect(session.state.value.current?.source_text).toBe(source); expect(raw.state.value.needsRead).toBe(false)
+    stored = off; response.resolve(receipt(off)); expect(await saving).toBe(false)
+    // The file changed, so neither screen keeps the read from before the write.
+    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.current).toBeNull()
+    expect(session.state.value.notice).toBe('이전에 보낸 저장이 늦게 완료됐습니다. 현재 설정을 다시 읽으세요.')
+    expect(raw.state.value.needsRead).toBe(true)
     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+    await session.read(fresh)
+    expect(session.state.value.current?.source_text).toBe(off)
   })
   it.each(['raw', 'patch'] as const)('invalidates a retained activity basis after an owned %s file commit', async mode => {
     const { session, authority } = await draft()
@@ -480,7 +492,7 @@ describe('Exact activity operator flow', () => {
     expect(await raw.write(authority, async options => {
       options.beforeDispatch?.()
       stored = off
-      return receipt(off)
+      return announceRuntimeTomlCommit(receipt(off), options)
     }, mode === 'raw' ? off : undefined)).toBe(true)
     expect(session.state.value.current).toBeNull()
     expect(session.state.value.draft?.base).toBe(activityBase)
@@ -490,11 +502,24 @@ describe('Exact activity operator flow', () => {
     expect(await session.save(authority)).toBe(false)
     expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
+  it.each([false, true])('keeps the raw editor on its own receipt without a reread or a foreign-change warning (typed during save: %s)', async typed => {
+    const authority = executionWorkspaceAuthority.peek()!, raw = runtimeTomlSessionFor(authority)
+    await raw.read(authority, 'reload')
+    const reads = api.fetchRuntimeTomlConfig.mock.calls.length
+    expect(await raw.write(authority, async options => {
+      options.beforeDispatch?.(); stored = off
+      if (typed) raw.edit('draft', off + '# typed during save\n')
+      return announceRuntimeTomlCommit(receipt(off), options)
+    }, off)).toBe(true)
+    expect(raw.state.value.needsRead).toBe(false)
+    expect(raw.state.value.error).toBeNull()
+    expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+  })
   it('keeps a clean activity reading unavailable when a raw commit changes its file', async () => {
     const authority = executionWorkspaceAuthority.peek()!, session = exactLaneActivitySessionFor(authority, lane)
     await session.read(authority)
     const raw = runtimeTomlSessionFor(authority); await raw.read(authority, 'reload')
-    expect(await raw.write(authority, async () => { stored = off; return receipt(off) }, off)).toBe(true)
+    expect(await raw.write(authority, async options => { stored = off; return announceRuntimeTomlCommit(receipt(off), options) }, off)).toBe(true)
     expect(session.state.value.current).toBeNull()
     expect(session.ready(authority)).toBe(false)
     await session.read(authority)
@@ -577,7 +602,7 @@ describe('Exact activity operator flow', () => {
     await raw.read(authority, 'reload')
     const before = exactLaneObservationRevision(authority)
     expect(await raw.write(authority, async options => {
-      options.beforeDispatch?.(); stored = off; return receipt(off)
+      options.beforeDispatch?.(); stored = off; return announceRuntimeTomlCommit(receipt(off), options)
     }, off)).toBe(true)
     expect(exactLaneObservationRevision(authority)).toBeGreaterThan(before)
   })

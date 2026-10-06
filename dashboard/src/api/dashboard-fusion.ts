@@ -6,7 +6,7 @@
 import { isRecord, asInt, asString } from '../components/common/normalize'
 import { ApiRequestError, get, post, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
-import { decodeCommittedRuntimeTomlConfig, type CommittedRuntimeTomlConfig } from './dashboard-runtime'
+import { receiveRuntimeTomlCommit, type CommittedRuntimeTomlConfig } from './dashboard-runtime'
 
 /** Status of a tracked fusion deliberation, mirroring the backend
     Fusion_run_registry.status_label vocabulary: a run is `running`, or finished
@@ -504,7 +504,7 @@ export async function applyFusionConfigEdit(
       expected_revision: expectedRevision,
       operation: operationToWire(operation),
     })
-    return decodeCommittedRuntimeTomlConfig(raw)
+    return receiveRuntimeTomlCommit(raw)
   } catch (error) {
     if (error instanceof ApiRequestError) {
       const failure = parseFusionConfigEditError(error.responseData)

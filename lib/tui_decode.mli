@@ -126,6 +126,8 @@ type planning_rollup = {
   pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
+  pr_paused : int;
+  pr_blocked : int;
 }
 
 type planning_backlog = {
@@ -351,6 +353,10 @@ type runtime_option = {
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
       (** The declared list an exact-lane append writes. *)
+  ro_exact_body_deadline_missing : bool;
+      (** An exact HTTP slot on this runtime would be refused on save: its
+          provider declares no [exact-body-timeout-s] (rule 3, #38779). [false]
+          when an older server's row omits it. *)
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -391,6 +397,8 @@ type runtime_resolved_snapshot = {
   rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
+  rrs_default_route : string option;
+      (** [\\[runtime\\].default] as configured: a declared lane or runtime id. *)
   rrs_default_runtime_id : string option;
   rrs_media_failover : string list;
       (** [\[runtime\].media_failover] as boot admitted it, in order: the

@@ -19,15 +19,24 @@ def run(executable, baseline=False):
     print("STUDIO_BINARY_SHA256=" + hashlib.sha256(Path(executable).read_bytes()).hexdigest())
     for failed_now in (False, True):
         fixtures = _keyboard_memory.memory_facts_http_fixtures()
-        health = fixtures["/api/v1/dashboard/keeper-memory-health"][1]
-        row = health["keepers"][0]
+        health = _keyboard_harness.json_payload_fixture(
+            fixtures, "/api/v1/dashboard/keeper-memory-health")
+        keepers = health["keepers"]
+        assert isinstance(keepers, list) and isinstance(keepers[0], dict)
+        row = keepers[0]
+        librarian = row["librarian"]
+        assert isinstance(librarian, dict)
+        alert_summary = health["alert_summary"]
+        assert isinstance(alert_summary, dict)
+        totals = health["totals"]
+        assert isinstance(totals, dict)
         row["snapshot_bytes"] = 262144
         row["librarian_failures"] = 0 if failed_now else 3
-        row["librarian"].update(state="stopped" if failed_now else "drained",
-                                detail="model unavailable" if failed_now else None)
-        health["alert_summary"]["librarian_stopped_keepers"] = int(failed_now)
-        health["totals"].update(snapshot_bytes=262144,
-                                librarian_failures=row["librarian_failures"])
+        librarian.update(state="stopped" if failed_now else "drained",
+                         detail="model unavailable" if failed_now else None)
+        alert_summary["librarian_stopped_keepers"] = int(failed_now)
+        totals.update(snapshot_bytes=262144,
+                      librarian_failures=row["librarian_failures"])
 
         def interact(process, fd, _slave, output, _base):
             _keyboard_harness.palette_go(process, fd, output, b"go Memory", b"MASC Memory")

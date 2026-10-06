@@ -23,7 +23,7 @@ def run(executable: str) -> None:
     detail_path = "/api/v1/dashboard/exact-lane-runs/run-001"
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     template = _keyboard_keepers.verifier_lane_runs_response()[1]["runs"][0]
 
     # The list draws no run id, so each row is told apart on screen by the

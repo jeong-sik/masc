@@ -388,7 +388,7 @@
  (name masc_tui_usage_trend)
  (wrapped false)
  (modules masc_tui_usage_trend)
- (libraries masc masc_tui_chart))
+ (libraries masc masc_tui_chart masc_tui_message_layout unix))
 
 (library
  (name masc_tui_ask_projection)
@@ -481,7 +481,7 @@
  (name masc_tui_lane_declaration)
  (wrapped false)
  (modules masc_tui_lane_declaration)
- (libraries yojson))
+ (libraries yojson otoml masc.toml_line_editor))
 
 (library
  (name masc_tui_schema_form)
@@ -506,6 +506,12 @@
  (wrapped false)
  (modules masc_tui_lane_broadcast_pending)
  (libraries masc.fs_compat yojson unix))
+
+(library
+ (name masc_tui_lane_inventory)
+ (wrapped false)
+ (modules masc_tui_lane_inventory)
+ (libraries masc masc.runtime yojson))
 
 (library
  (name masc_tui_lane_addons)
@@ -979,15 +985,6 @@
  (libraries masc_tui_table))
 
 (library
- (name masc_tui_lane_table)
- (wrapped false)
- ; masc_tui_message_layout so a column is measured in display cells rather
- ; than bytes: a slot list names runtimes, and a byte count would leave the
- ; observed column drawn where the row has no room for it.
- (modules masc_tui_lane_table)
- (libraries masc_tui_message_layout masc_tui_theme))
-
-(library
  (name masc_tui_fleet_line)
  (wrapped false)
  (modules masc_tui_fleet_line)
@@ -1389,7 +1386,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_memory_usage masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_memory_usage masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1553,6 +1550,11 @@
  (wrapped false)
  (modules masc_tui_runtime_account_form)
  (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
+
+(library
+ (name masc_tui_runtime_config_edit)
+ (wrapped false)
+ (modules masc_tui_runtime_config_edit))
 
 (library
  (name masc_tui_runtime_config_receipt)
@@ -1853,6 +1855,7 @@
   masc_tui_ansi
   masc_tui_theme
   masc_tui_message_layout
+  masc_tui_usage_trend
   unix))
 
 ;; The last answer to each dashboard read, kept with its entity tag so the
@@ -1882,7 +1885,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_memory_usage masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_lane_inventory masc_tui_memory_usage masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle
@@ -1918,7 +1921,6 @@
   masc_tui_async_read
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
-  masc_tui_lane_table
   ;; masc_tui_render lays out the Lanes, Changes, Harness and Planning
   ;; tables through Masc_tui_table.fit (#39662).
   masc_tui_table
@@ -1980,6 +1982,7 @@
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
+  masc_tui_runtime_config_edit
   masc_tui_runtime_config_view
   masc.runtime_toml_namespace
   masc_tui_runtime_account_form

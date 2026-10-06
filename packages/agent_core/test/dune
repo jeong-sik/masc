@@ -685,3 +685,10 @@
  (name test_secret_redactor)
  (modules test_secret_redactor)
  (libraries llm_provider alcotest))
+
+; Compile these external consumers against the installed/public CMI boundary.
+; They must not import the private implementation modules behind Agent_core.
+(tests
+ (names test_public_tool_schedule test_public_pre_execution_gate)
+ (modules test_public_tool_schedule test_public_pre_execution_gate)
+ (libraries masc.agent_core))

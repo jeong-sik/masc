@@ -1894,7 +1894,7 @@ let post_runtime_assignment ~(host : string) ~(port : int)
     error rather than a guessed success, matching [tool_envelope_outcome]. *)
 let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ~(expected_runtime_ids : string list) ~(runtime_ids : string list) :
-      (unit, string) result =
+      (runtime_config_commit_receipt, string) result =
   let ( let* ) = Result.bind in
   (* The candidate order and revision must come from the same file read.
      /runtime/resolved is a separately published in-process snapshot and can
@@ -1927,7 +1927,6 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ; "expected_source_revision", `String revision ]) in
     let* json = post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body in
     decode_runtime_config_commit_receipt json
-    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 
 (* The routing API names a standalone lane's walk order "exact/<name>", which
    keeps its names apart from conversation-lane ids. *)
@@ -1941,7 +1940,6 @@ let post_runtime_lane_action ~host ~port fields =
   | Error detail -> Error detail
   | Ok json ->
     decode_runtime_config_commit_receipt json
-    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 ;;
 
 (** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
@@ -1949,27 +1947,28 @@ let post_runtime_lane_action ~host ~port fields =
     route -- it has no per-entry action -- so a caller must know it is sending
     everything the file should hold. *)
 let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)
-  : (unit, string) result =
+  : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String "media_failover"
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
     ]
 
-(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the runtime
-    a keeper with no assignment walks. [None] clears the entry. *)
+(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the lane
+    or runtime a keeper with no assignment walks. The wire field remains
+    [runtime_id]; [None] clears the entry. *)
 let set_runtime_default ~(host : string) ~(port : int)
-      ~(runtime_id : string option) : (unit, string) result =
+      ~(route_id : string option) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String "default"
     ; ( "runtime_id"
-      , match runtime_id with None -> `Null | Some id -> `String id )
+      , match route_id with None -> `Null | Some id -> `String id )
     ]
 
 (** POST /api/v1/runtime/config/routing with [action = "create"]: declare a
     lane under [lane] with [runtime_ids] as its candidates. The server refuses
     a name the file already declares. *)
 let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-      ~(runtime_ids : string list) : (unit, string) result =
+      ~(runtime_ids : string list) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane
     ; "action", `String "create"
@@ -1981,7 +1980,7 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     header and every reference to it -- assignments and [\[runtime\].default] --
     in one validated write, because a lane's name is its routing key. *)
 let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-      ~(new_lane : string) : (unit, string) result =
+      ~(new_lane : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane
     ; "action", `String "rename"
@@ -1995,7 +1994,7 @@ let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     writer added in between is kept. The server refuses an id the lane already
     declares. *)
 let append_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) : (unit, string) result =
+      ~(runtime_id : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "append"
@@ -2016,7 +2015,7 @@ type exact_slot_move =
     declared slot it rejected. The server refuses a slot the lane does not
     declare, and its last one. *)
 let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) : (unit, string) result =
+      ~(runtime_id : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "drop"
@@ -2028,7 +2027,7 @@ let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane
     id and a direction for the same reason as the drop. The server refuses a
     slot already at the end the move heads for. *)
 let move_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
+      ~(runtime_id : string) ~(move : exact_slot_move) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "move"
@@ -2049,7 +2048,7 @@ let replace_exact_lane_slot ~host ~port ~lane ~runtime_id ~replacement_runtime_i
     through it -- an assignment, or [\[runtime\].default] for every keeper
     without one -- and names each. *)
 let remove_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-    : (unit, string) result =
+    : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane; "action", `String "remove" ]
 ;;
@@ -2683,10 +2682,10 @@ let fetch_keeper_lanes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/composite"
 
-(** Fetch the read-only standalone-lane admission and observation matrix. *)
-let fetch_standalone_lanes ~(host : string) ~(port : int) :
+(** Fetch all Lane families from their read-only operator inventory. *)
+let fetch_lane_inventory ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/standalone-lanes"
+  get_json ~host ~port ~path:"/api/v1/lanes"
 
 (** Fetch /api/v1/repositories. *)
 let fetch_repositories ~(host : string) ~(port : int) :
@@ -2924,17 +2923,62 @@ let post_runtime_config_preview ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/runtime/config/raw/preview"
     ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
 
-(** POST /api/v1/runtime/config/raw — write the edited text. Callers go
-    through the preview first; this route also validates, so a race still
-    fails closed. *)
+type runtime_config_save_error =
+  | Runtime_config_conflict of Masc_tui_runtime_config_edit.document
+  | Runtime_config_save_refused of string
+  | Runtime_config_save_unconfirmed of string
+
+let runtime_config_save_error_message = function
+  | Runtime_config_conflict _ -> "The file changed after this draft was opened. Compare the current file before saving."
+  | Runtime_config_save_refused detail -> detail
+  | Runtime_config_save_unconfirmed detail ->
+    detail ^ " The file may already have changed; read the current file before retrying."
+
+let runtime_config_text_revision ~path source_text =
+  let observation = Runtime.config_observation ~path source_text in
+  Runtime.config_source_revision_to_string observation.source_revision
+
+let runtime_config_conflict_document body =
+  let ( let* ) = Result.bind in
+  let* json = try Ok (Yojson.Safe.from_string body)
+    with Yojson.Json_error detail -> Error detail in
+  let* current = match Json_util.assoc_member_opt "code" json, Json_util.assoc_member_opt "current" json with
+    | Some (`String "revision_conflict"), Some (`Assoc _ as current) -> Ok current
+    | _ -> Error "Malformed configuration conflict response" in
+  match Json_util.assoc_member_opt "source_path" current,
+        Json_util.assoc_member_opt "source_text" current,
+        Json_util.assoc_member_opt "source_revision" current with
+  | Some (`String path), Some (`String source_text), Some (`String source_revision)
+    when path <> "" && String_util.is_lowercase_sha256_hex source_revision
+      && String.equal source_revision (runtime_config_text_revision ~path source_text) ->
+    Ok { Masc_tui_runtime_config_edit.path; source_text; source_revision }
+  | _ -> Error "Configuration conflict document has an invalid source revision"
+
+(** Both the preview and guarded save validate, but only the save compares the
+    captured source revision under the server write lock. *)
 let post_runtime_config_raw ~(host : string) ~(port : int)
-    ~(source_text : string) : (runtime_config_commit_receipt, string) result =
-  match
-    post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
-      ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
-  with
-  | Error _ as error -> error
-  | Ok json -> decode_runtime_config_commit_receipt json
+    ~(source_text : string) ~(expected_source_revision : string) ~(expected_source_path : string)
+    : (runtime_config_commit_receipt, runtime_config_save_error) result =
+  let body = Yojson.Safe.to_string (`Assoc
+    [ "source_text", `String source_text;
+      "expected_source_revision", `String expected_source_revision;
+      "expected_source_path", `String expected_source_path ]) in
+  match http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:"/api/v1/runtime/config/raw" ~body with
+  | Error detail -> Error (Runtime_config_save_unconfirmed detail)
+  | Ok (409, body) ->
+    (match runtime_config_conflict_document body with
+     | Ok current -> Error (Runtime_config_conflict current)
+     | Error detail -> Error (Runtime_config_save_unconfirmed detail))
+  | Ok (status_code, body) when status_code >= 400 && status_code < 500 ->
+    Error (Runtime_config_save_refused (refusal ~status_code ~body))
+  | Ok (status_code, body) ->
+    (match Result.bind (decode_json ~allow_empty:false ~status_code ~body)
+        decode_runtime_config_commit_receipt with
+     | Ok receipt when String.equal receipt.source_revision
+         (runtime_config_text_revision ~path:"" source_text) -> Ok receipt
+     | Ok _ -> Error (Runtime_config_save_unconfirmed "Save receipt does not match the submitted draft.")
+     | Error detail -> Error (Runtime_config_save_unconfirmed detail))
 
 type skill_editor_loaded =
   { sel_reference : Skill_reference.t

@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41135-skill-withdrawal-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41135-skill-withdrawal-20261004/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  52 passed (52)
+   Start at  22:52:18
+   Duration  3.68s (import 35%, tests 27%, transform 17%, environment 11%, setup 10%)
+
+    Isolate  2 workers spawned · ~290ms startup each (spawn + environment, per file)
+             at least ~290ms faster with isolate: false — reuses workers across files instead of one per file
+

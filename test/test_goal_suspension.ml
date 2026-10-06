@@ -211,7 +211,62 @@ let test_codec_and_rollup () = with_workspace @@ fun config _ ->
     (GP.admits_self_directed_progress phase))
     [GP.Paused GP.Resume_executing; GP.Blocked GP.Resume_verifying]
 
-let () = run "Goal suspension" ["contract", [
+let add_task ?goal_id config title =
+  match Masc.Workspace.add_task_with_result ?goal_id config ~title ~priority:2 ~description:"" with
+  | Ok created -> created.Masc.Workspace.task_id
+  | Error error -> fail (Masc.Workspace.add_task_error_to_string error)
+let task_status config id =
+  match List.find_opt (fun (task : Masc_domain.task) -> task.id = id) (Masc.Workspace.get_tasks_raw config) with
+  | Some task -> task.task_status
+  | None -> fail ("missing " ^ id)
+let ok_or_fail = function Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error)
+let drop_field json key = Yojson.Safe.Util.(json |> member "tasks" |> member key |> to_list)
+
+let test_drop_cancels_left_over_todo () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let live = match Goal_store.upsert_goal config ~title:"Still live" ~metric:"m" ~target_value:"1" () with
+    | Ok (goal, _) -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
+  let todo = add_task ~goal_id:goal.id config "orphaned todo" in
+  let shared = add_task ~goal_id:goal.id config "also serves a live goal" in
+  (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:live.id ~task_id:shared with
+   | Ok _ -> () | Error _ -> fail "link to the live goal");
+  let held = add_task ~goal_id:goal.id config "held work" in
+  Masc.Workspace.transition_task_r config ~agent_name:"holder" ~task_id:held ~action:Masc_domain.Claim ()
+  |> ok_or_fail;
+  let unlinked = add_task config "unlinked" in
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "only the orphaned todo is cancelled" [todo]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  check int "nothing failed to cancel" 0 (List.length (drop_field json "cancel_failed"));
+  check (list string) "the held task is named with its holder" [held ^ "/holder"]
+    (drop_field json "held" |> List.map (fun row -> Yojson.Safe.Util.(
+       to_string (member "task_id" row) ^ "/" ^ to_string (member "holder" row))));
+  (match task_status config todo with
+   | Masc_domain.Cancelled { cancelled_by; reason = Some reason; _ } ->
+       check string "cancelled by the dropping actor" "operator" cancelled_by;
+       check string "the reason names the goal" (Printf.sprintf "Goal %s was dropped." goal.id) reason
+   | _ -> fail "orphaned todo was not cancelled with a reason");
+  (match task_status config shared, task_status config held, task_status config unlinked with
+   | Masc_domain.Todo, Masc_domain.Claimed { assignee = "holder"; _ }, Masc_domain.Todo -> ()
+   | _ -> fail "a task outside the dropped goal's leftovers changed");
+  (* No recipients in this isolated workspace, so the notice stays pending. *)
+  let contains ~sub text =
+    let n = String.length sub in
+    let rec go i = i + n <= String.length text && (String.sub text i n = sub || go (i + 1)) in
+    go 0 in
+  (match (state config).pending_notifications with
+   | [ notice ] ->
+       check bool "the drop notice names the held task and its holder" true
+         (contains ~sub:"[goal_dropped]" notice.content && contains ~sub:(held ^ " (holder)") notice.content)
+   | notices -> fail (Printf.sprintf "expected one drop notice, got %d" (List.length notices)));
+  let again = transition config goal.id "drop" |> success in
+  check bool "a repeated drop is a no-op" true Yojson.Safe.Util.(again |> member "noop" |> to_bool);
+  check bool "a no-op drop reports no task work" true Yojson.Safe.Util.(again |> member "tasks" = `Null)
+
+let () = run "Goal suspension" ["drop", [
+  test_case "drop cancels leftover todo, keeps shared and held work" `Quick test_drop_cancels_left_over_todo;
+]; "contract", [
   test_case "restore every live state across both suspension kinds" `Quick test_restore_matrix;
   test_case "terminal refusal and Drop/Reopen escape" `Quick test_terminal_and_escape;
   test_case "bound verdict preserves suspension and reconciles on restore" `Quick test_bound_result;

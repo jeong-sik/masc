@@ -195,6 +195,54 @@ let test_a_different_priority_run_limit_is_a_conflict () =
          ~haystack:message)
 ;;
 
+(* The read-only check reports what [with_admission] would refuse, and only
+   that: no admission yet, no declaration, or the same allowance is [None]. *)
+let test_admitted_allowance_change_reports_what_admission_would_refuse () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_url = "http://admitted-change.test:1" in
+  let admitted = make_config ~base_url ~max_concurrent_requests:2 () in
+  let with_run_limit =
+    make_config ~base_url ~max_concurrent_requests:2 ~admission_priority_run_limit:3 ()
+  in
+  let more_permits = make_config ~base_url ~max_concurrent_requests:4 () in
+  let undeclared = make_config ~base_url () in
+  let other_account =
+    make_config ~base_url ~api_key:"other-key" ~max_concurrent_requests:4 ()
+  in
+  let change config = Provider_admission.admitted_allowance_change ~config in
+  check bool "nothing admitted yet" true (Option.is_none (change with_run_limit));
+  check
+    bool
+    "asking installs nothing"
+    true
+    (Option.is_none (Provider_admission.snapshot_for ~config:with_run_limit));
+  Provider_admission.with_admission ~config:admitted (fun () -> ());
+  check bool "the same allowance is no change" true (Option.is_none (change admitted));
+  check bool "no declaration is no change" true (Option.is_none (change undeclared));
+  check bool "another account is no change" true (Option.is_none (change other_account));
+  List.iter
+    (fun (label, config, declared) ->
+       match change config with
+       | None -> failf "%s should be reported" label
+       | Some (conflict : Provider_admission_state.conflict) ->
+         check int (label ^ ": admitted permits") 2 conflict.authoritative.max;
+         check
+           (option int)
+           (label ^ ": admitted run limit")
+           None
+           conflict.authoritative.priority_run_limit;
+         check bool (label ^ ": declared allowance") true (conflict.declared = declared);
+         (match Provider_admission.with_admission ~config (fun () -> ()) with
+          | () -> failf "%s was admitted although it was reported" label
+          | exception Invalid_argument _ -> ()))
+    [ ( "a run limit"
+      , with_run_limit
+      , { Provider_admission_state.max = 2; priority_run_limit = Some 3 } )
+    ; "more permits", more_permits, { max = 4; priority_run_limit = None }
+    ]
+;;
+
 let reject_dispatch_transport : Llm_transport.t =
   { complete_sync = (fun _ -> fail "invalid declaration must never dispatch")
   ; complete_stream =
@@ -768,6 +816,10 @@ let () =
             "a different priority run limit is a conflict"
             `Quick
             test_a_different_priority_run_limit_is_a_conflict
+        ; test_case
+            "admitted allowance change reports what admission would refuse"
+            `Quick
+            test_admitted_allowance_change_reports_what_admission_would_refuse
         ; test_case
             "zero declaration rejected before dispatch"
             `Quick

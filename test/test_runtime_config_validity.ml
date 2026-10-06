@@ -3115,6 +3115,73 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
   | Error detail -> failf "a declared seed bound must still load: %s" detail
 ;;
 
+(* The running server keeps an account's first admission allowance until it
+   restarts, so a save that would give an admitted account other values is
+   refused, and one that keeps them is applied. *)
+let test_a_save_that_changes_an_admitted_allowance_is_refused () =
+  with_config_save_model_catalog @@ fun () ->
+  let content ~binding ~provider =
+    Printf.sprintf
+      "[providers.local]\n\
+       protocol = \"openai-compatible-http\"\n\
+       endpoint = \"http://127.0.0.1:1/admitted-allowance/v1\"\n%s\
+       \n\
+       [models.sample]\n\
+       api-name = \"sample\"\n\
+       max-context = 1024\n\
+       \n\
+       [local.sample]\n%s\
+       \n\
+       [runtime]\n\
+       default = \"local.sample\"\n"
+      provider
+      binding
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "admitted_allowance_" ".toml" in
+  let save text = Runtime.save_config_text ~runtime_config_path:path text in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       let admitted = content ~binding:"max-concurrent = 2\n" ~provider:"" in
+       (match save admitted with
+        | Ok _receipt -> ()
+        | Error detail -> failf "the first save should apply: %s" detail);
+       (match
+          List.find_opt
+            (fun (runtime : Runtime_instance.t) -> String.equal runtime.id "local.sample")
+            (Runtime.get_runtimes ())
+        with
+        | None -> fail "local.sample should be published"
+        | Some runtime ->
+          Eio_main.run (fun _env ->
+            Llm_provider.Provider_admission.with_admission
+              ~config:(agent_core_provider_config runtime)
+              (fun () -> ())));
+       let refused label text =
+         match save text with
+         | Ok _receipt -> failf "%s should be refused while the account is admitted" label
+         | Error detail ->
+           List.iter
+             (fun needle ->
+                check bool (label ^ " names " ^ needle) true
+                  (String_util.contains_substring detail needle))
+             [ "local.sample"; "Stop the server" ]
+       in
+       refused "more permits" (content ~binding:"max-concurrent = 3\n" ~provider:"");
+       refused
+         "a run limit"
+         (content
+            ~binding:"max-concurrent = 2\n"
+            ~provider:"admission-priority-run-limit = 3\n");
+       match save (admitted ^ "# the same allowance\n") with
+       | Ok _receipt -> ()
+       | Error detail -> failf "a save that keeps the allowance should apply: %s" detail)
+;;
+
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
   let content =
     "[providers.local]\n\
@@ -6870,6 +6937,8 @@ let () =
             test_runtime_toml_rejects_a_priority_run_limit_on_an_official_client;
           test_case "repo glm-coding runtimes carry the priority run limit" `Quick
             test_repo_glm_coding_runtimes_carry_the_priority_run_limit;
+          test_case "a save that changes an admitted allowance is refused" `Quick
+            test_a_save_that_changes_an_admitted_allowance_is_refused;
           test_case "judgment lanes join the priority queue" `Quick
             test_judgment_lanes_join_the_priority_queue;
           test_case "repetition samplers off the ollama wire are rejected" `Quick

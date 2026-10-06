@@ -2549,10 +2549,39 @@ let validate_exact_slot_body_deadline_change ~config_path ~validated =
   | added -> Error (Exact_slot_body_deadlines_absent added)
 ;;
 
+(* A runtime whose account the running server admits under another
+   allowance. Boot never meets one: the registry starts empty. *)
+let admitted_allowance_changes_of_validated
+    ((loaded : materialized_config), _, _, _)
+  =
+  List.filter_map
+    (fun (runtime : t) ->
+       match runtime.execution with
+       | Runtime_execution.Agent_core config ->
+         Llm_provider.Provider_admission.admitted_allowance_change ~config
+         |> Option.map (fun change ->
+           { Runtime_config_error.runtime_id = runtime.id; change })
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ -> None)
+    loaded.runtimes
+;;
+
+let validate_admitted_allowance_change ~validated =
+  match admitted_allowance_changes_of_validated validated with
+  | [] -> Ok ()
+  | changes -> Error (Runtime_config_error.Admitted_allowances_changed changes)
+;;
+
 let validate_save_text ~config_path content =
   let* validated = parse_and_validate_config_text ~config_path content in
   let* () =
     validate_exact_slot_body_deadline_change ~config_path ~validated
+    |> Result.map_error (to_diagnostic_text ~config_path)
+  in
+  let* () =
+    validate_admitted_allowance_change ~validated
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
   let* () = validate_fusion_change ~config_path content in

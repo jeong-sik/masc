@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 
 const api = vi.hoisted(() => ({
   fetchExactLaneRuns: vi.fn(), fetchVerificationRuns: vi.fn(), fetchFusionRuns: vi.fn(), fetchStandaloneLanes: vi.fn(),
+  fetchGoalVerificationRuns: vi.fn(),
 }))
 const addons = vi.hoisted(() => ({ fetchLaneAddons: vi.fn() }))
 const files = vi.hoisted(() => ({ fetchLaneDeclaration: vi.fn(), saveLaneDeclaration: vi.fn() }))
@@ -24,19 +25,32 @@ import { LaneAddonsPanel } from './lane-addons-panel'
 import { parseLaneAddonSnapshot } from '../api/lane-addons'
 import { resetLaneDeclarationSessionsForTesting } from '../lib/lane-declaration-sessions'
 import { resetLanePackageActivitiesForTesting } from '../lib/lane-package-activity-session'
+import type { ExactLaneRunSummary } from '../api/dashboard-exact-lane-runs'
+
+// Serves the exact-run endpoint as the server does: a lane filter applies
+// before the page is cut, and an unfiltered page holds only the newest runs.
+function serveExactRuns(runs: ExactLaneRunSummary[], pageSize = Number.POSITIVE_INFINITY) {
+  api.fetchExactLaneRuns.mockImplementation(async (opts?: { lane?: string }) => {
+    const relevant = runs.filter(run => opts?.lane === undefined || run.lane === opts.lane)
+      .sort((a, b) => b.startedAt - a.startedAt)
+    const page = relevant.slice(0, pageSize)
+    return { runs: page, count: page.length, total: relevant.length, hasMore: page.length < relevant.length, generatedAt: 'now' }
+  })
+}
 
 beforeEach(() => {
   resetLaneDeclarationSessionsForTesting(); resetLanePackageActivitiesForTesting()
   invalidateExecutionSnapshotGeneration('f7-filter-audit', 0)
   hydrateExecutionSnapshot({ execution_publication_epoch: 'f7-filter-audit', execution_publication_generation: 1,
     status: { project: 'fixture', workspace_root: '/fixture/navigation' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
-  api.fetchExactLaneRuns.mockResolvedValue({ runs: [
+  serveExactRuns([
     { runId: 'curator-run', runKind: 'exact_output', lane: 'workspace_curator_exact', subjectId: null,
       actor: '/fixture/navigation', startedAt: 1, status: 'succeeded', elapsedSeconds: 1 },
     { runId: 'candle-run', runKind: 'exact_output', lane: 'candle_appraiser', subjectId: null,
       actor: '/fixture/navigation', startedAt: 2, status: 'succeeded', elapsedSeconds: 1 },
-  ], count: 2, total: 2, hasMore: false, generatedAt: 'now' })
+  ])
   api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+  api.fetchGoalVerificationRuns.mockResolvedValue({ runs: [], skippedScans: [], count: 0, generatedAt: 'now' })
   api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
   api.fetchStandaloneLanes.mockResolvedValue({ schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now',
     observedAtUnix: 1, observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
@@ -190,6 +204,38 @@ it('reads verifier_exact availability from verification runs, not the exact-run 
   render(html`<${InternalAgentsMonitor} />`)
   await screen.findByText('No internal agent runs for this filter.')
   expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
+})
+
+it('says Stagehand keeps no run history even while the exact-run endpoint fails', async () => {
+  api.fetchExactLaneRuns.mockRejectedValue(new Error('exact unavailable'))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'browser_stagehand_exact', workspace: '/fixture/navigation' }, true))
+  render(html`<${InternalAgentsMonitor} />`)
+  await screen.findByText('Run history is not retained for this Lane.')
+  expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
+})
+
+it('lists the Verifier Lane Goal reviews beside its task reviews', async () => {
+  api.fetchGoalVerificationRuns.mockResolvedValue({ runs: [{ runId: 'goal-run', goalId: 'goal-fixture', requestId: 'request-fixture',
+    criterion: { revision: 'c1', title: 'ships the fixture', metric: null, target_value: null }, reviewKind: 'proof',
+    authorityActor: 'verifier', startedAt: 3, status: 'committed', elapsedSeconds: 1, evaluatorRuntime: 'runtime-fixture',
+    evaluatedVerdict: { decision: 'approved', reason: 'proof matches' }, tools: [] }], skippedScans: [], count: 1, generatedAt: 'now' })
+  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'verifier_exact', workspace: '/fixture/navigation' }, true))
+  render(html`<${InternalAgentsMonitor} />`)
+  fireEvent.click(await screen.findByRole('button', { name: /committed Goal verification goal-fixture/ }))
+  await screen.findByText('Verdict approved · proof matches')
+  expect(screen.queryByText('No internal agent runs for this filter.')).toBeNull()
+})
+
+it('reads the selected exact Lane from the server filter when a busy Lane fills the newest page', async () => {
+  const librarian = Array.from({ length: 3 }, (_, index): ExactLaneRunSummary => ({ runId: `librarian-${index}`, runKind: 'exact_output',
+    lane: 'librarian_exact', subjectId: null, actor: '/fixture/navigation', startedAt: 10 + index, status: 'succeeded', elapsedSeconds: 1 }))
+  serveExactRuns([...librarian, { runId: 'candle-run', runKind: 'exact_output', lane: 'candle_appraiser', subjectId: null,
+    actor: '/fixture/navigation', startedAt: 2, status: 'succeeded', elapsedSeconds: 1 }], librarian.length)
+  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'candle_appraiser', workspace: '/fixture/navigation' }, true))
+  render(html`<${InternalAgentsMonitor} />`)
+  await screen.findByRole('button', { name: /succeeded Candle Appraiser/ })
+  expect(api.fetchExactLaneRuns).toHaveBeenCalledWith({ lane: 'candle_appraiser' })
+  expect(screen.queryByRole('button', { name: /succeeded Librarian/ })).toBeNull()
 })
 
 it('shows all Lane runs when leaving a target with the Show all action', async () => {

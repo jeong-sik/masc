@@ -142,8 +142,15 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
        if expected_llm = 0 then Alcotest.(check int) "no-change keeps revision"
          stored.revision snapshot.revision
      | Ok None -> Alcotest.fail "snapshot missing" | Error detail -> Alcotest.fail detail));
-  (match context, context_only with
-   | No_context, false ->
+  (match lane_enabled, context, context_only with
+   | false, No_context, _ ->
+     (* Nothing runs while the lane is off, so no working context is written. *)
+     (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
+      | Ok None -> ()
+      | Ok (Some _) -> Alcotest.fail "off wrote a working context"
+      | Error detail -> Alcotest.fail detail)
+   | false, (Live_nothing_pending | Pending_source | Unavailable_source), _ -> ()
+   | true, No_context, false ->
      (* The empty input has no snapshot yet; every route writes the first. *)
      (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
       | Ok (Some snapshot) ->
@@ -151,7 +158,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
         Alcotest.(check int) "with no context" 0 (List.length snapshot.pockets)
       | Ok None -> Alcotest.fail "working context missing"
       | Error detail -> Alcotest.fail detail)
-   | Live_nothing_pending, _ ->
+   | true, Live_nothing_pending, _ ->
      (* Both routes write the only valid organization of nothing pending,
         which retires the consumed source's context. *)
      (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
@@ -160,7 +167,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
         Alcotest.(check int) "consumed context retired" 0 (List.length snapshot.pockets)
       | Ok None -> Alcotest.fail "working context missing"
       | Error detail -> Alcotest.fail detail)
-   | No_context, true | (Pending_source | Unavailable_source), _ -> ());
+   | true, No_context, true | true, (Pending_source | Unavailable_source), _ -> ());
   let run = List.filter (fun (run : Runs.run) -> run.actor = name) (Runs.list_runs registry) in
   match run with
   | [] when not lane_enabled -> ()

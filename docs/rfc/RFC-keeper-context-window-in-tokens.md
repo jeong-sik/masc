@@ -3,7 +3,7 @@ rfc: "keeper-context-window-in-tokens"
 title: "Carry the Keeper window from where the Librarian absorbed; the provider judges request size"
 status: Active
 created: 2026-09-15
-updated: 2026-09-23
+updated: 2026-10-06
 author: vincent
 related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context", "runtime-two-layers"]
 ---
@@ -116,7 +116,9 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
   - 창과 다른 모수(C 의 share)라서, 창을 토큰으로 바꿔도 브리핑은 여전히 C 를 따라간다.
   - Claude Code 는 masc 가 HTTP 본문을 만들지 않는데도 C 가 들어간다.
 - 반론: 브리핑은 창에서 자를 수 없으니 예산이 없으면 창을 잡아먹는다.
-- 결론: 예산은 필요하다. 다만 같은 토큰 창 안의 토큰 예산이어야 한다.
+- 결론: 예산을 두지 않는다. 브리핑에서 크기가 정해지지 않은 내용은 거절된 호출의 인자와 사유뿐이다.
+  `input_policy = small`(기본값)인 Keeper 는 artifact 읽기 도구가 있으면 이 둘을 artifact 참조로 보낸다
+  (`Keeper_own_recent_actions.externalize_failures`). 나머지 절은 행 폭과 행 수가 이미 정해져 있다.
 
 **3. HTTP overflow shrink**
 - 부당한 이유:
@@ -279,7 +281,7 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 1. chat-completions 호환 공급자에서 실측이 없는 요청(첫 턴, 모델 교체 직후)은 무엇으로 자르나. → 답(2026-09-16): 자르지 않는다. 들어가는지는 공급자가 판정하고, 원장은 첫 usage 부터 선다. Unmeasured 부트스트랩 경로는 예외로 좁혀 답한다(결정 2026-09-16, task-1589 Fusion 심의 `kmsg-97ac093dc84309f12224ee760cf10fa8`): 부트스트랩 뷰(`project_newest_atom`)는 pinning된 문맥에 더해 원본 chat-operation이 연 최초 User atom(atom 0)과 최신 atom을 함께 보낸다. 이전 동작은 최신 atom 하나만 남겨 원본 지시를 생략 프리앰블로 치환했고, resume이 처음 쓰는 런타임으로 넘어가는 순간 그 지시가 모델에 도달하지 않았다(test_keeper_direct_runtime_resume가 잡은 결함). 측정된 창 경로와 공급자 overflow shrink는 바꾸지 않는다.
 2. 토큰 예산으로 자르면서 앞부분 흔들림을 어떻게 지금 이하로 유지하나. 지금 흔들림은 얼마인가. → 답: 덧붙이기만 하고 비움·F 변경을 한 턴에 모은다. 흔들림은 usage 의 cache_hit 로 매 턴 잰다.
 3. 창을 바인딩별로 둘지, Keeper별로 둘지.
-4. 브리핑 예산을 토큰 창 안에서 어떻게 나누나. 폴백 뒤 다시 맞추나.
+4. 브리핑 예산을 토큰 창 안에서 어떻게 나누나. 폴백 뒤 다시 맞추나. → 답(2026-10-06): 브리핑 예산은 없다. §4.1 의 2 를 본다.
 5. `ContextOverflow` 의 두 경우(공급자 토큰 초과, masc 바이트 거절)를 어떻게 나누나. 토큰 초과 뒤 줄인 창을 기억할지. → 답: 토큰 초과는 비우기 사다리, 바이트 거절은 전송 상한 그대로. 줄인 창 기억은 없다. 원장이 있다.
 6. librarian 입력은 사다리의 가장 작은 슬롯이 아니라 무엇에 맞춰야 하나. overlay 타깃 상한과 바인딩 상한의 이중 선언을 어떻게 하나.
 7. Vision 해상도는 모델 스펙과 전역 한도 중 무엇을 기준으로 하나.

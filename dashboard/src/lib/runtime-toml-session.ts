@@ -7,6 +7,7 @@ import { runtimeConfigCommitReceiptNotice } from './runtime-config-receipt'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
 import { errorToString } from './format-string'
+import { announceExactLaneObservationChanged } from './exact-lane-observation'
 
 export type RuntimeSectionId = 'routing' | 'lanes' | 'providers' | 'models' | 'bindings' | 'assignments' | 'toml'
 type Phase = 'idle' | 'loading' | 'reading' | 'saving_raw' | 'saving_patch'
@@ -182,6 +183,8 @@ export class RuntimeTomlSession {
       // file receipt. Editors that remounted during this write must reread it.
       this.update({ projectionRevision: this.state.peek().projectionRevision + 1 })
       announceRuntimeTomlCommitted(authority)
+      // A mounted All Lanes panel rereads only on this observation signal.
+      announceExactLaneObservationChanged(authority)
       try { await refreshRuntimeConfigConsumers() }
       catch (error) { if (this.admits(authority)) this.update({ error: `대시보드 런타임 갱신 실패: ${errorToString(error)}` }) }
       return true

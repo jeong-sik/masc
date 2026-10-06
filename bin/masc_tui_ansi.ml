@@ -869,6 +869,52 @@ let box_line_styled buf cols ~style content =
   Buffer.add_string buf
     (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
 
+(* A notice or refusal detail can carry the server's own line breaks: the
+   exact-lane save refusal names the [providers.<id>] table and the missing
+   key on their own lines. [box_line_styled] fits one row and folds those
+   breaks into it, so everything after the first line is cut off. Draw one
+   body row per line instead, and wrap a line longer than the frame, so every
+   line the server sent stays visible whole -- the actionable tail ("add
+   exact-body-timeout-s to [providers.openrouter]") is what the operator
+   needs and it sits at the end of a long line. *)
+let box_lines_wrapped ~cols content =
+  Masc_tui_message_layout.boxed_rows ~inner:(framed_inner_width cols) content
+
+let box_lines_styled buf cols ~style content =
+  List.iter
+    (fun row -> box_line_styled buf cols ~style ("  " ^ row))
+    (box_lines_wrapped ~cols content)
+
+let box_lines_row_count ~cols content = List.length (box_lines_wrapped ~cols content)
+
+(* The same rows, but no more than [budget]. The server's exact-lane refusal
+   leads with "lane write refused: HTTP 400:" and ends with the actionable
+   "add exact-body-timeout-s to [providers.<id>]", so when the frame cannot
+   hold every row keep the first row and the tail, and mark the cut between
+   them. The box never draws past [budget]: at one row it keeps the head, at
+   two the head and the tail, and from three the head, the mark and the tail.
+   Raising a smaller budget to three would draw rows the frame has not got and
+   push the footer off it, so a caller that wants the mark must leave three
+   rows rather than have the box take them. *)
+let box_lines_styled_bounded buf cols ~style ~budget content =
+  let rows = box_lines_wrapped ~cols content in
+  let budget = Int.max 1 budget in
+  let shown =
+    if List.length rows <= budget
+    then rows
+    else if budget = 1
+    then [ List.hd rows ]
+    else if budget = 2
+    then [ List.hd rows; List.nth rows (List.length rows - 1) ]
+    else (
+      let keep_tail = budget - 2 in
+      let dropped = List.length rows - keep_tail in
+      List.hd rows
+      :: "… more; enlarge the terminal"
+      :: List.filteri (fun index _ -> index >= dropped) rows)
+  in
+  List.iter (fun row -> box_line_styled buf cols ~style ("  " ^ row)) shown
+
 (* A row of three parts: a lead, one field that takes what the row has left,
    and a tail. [fit_width] pads as well as cuts, so a field fitted to a
    hand-counted width carries the row past {!framed_inner_width} whenever the

@@ -676,6 +676,19 @@ function runtimeSelectOptionsFromResolved(
   })))
 }
 
+function defaultRouteOptionsFromResolved(
+  resolved: RuntimeResolvedResponse | null,
+): RuntimeSelectOption[] {
+  const lanes = resolved?.lanes.filter(lane => lane.declared && lane.runtime_ids.length > 0).map(lane => ({
+    id: lane.id,
+    label: `${lane.id} · lane (${lane.runtime_ids.join(' → ')})`,
+  })) ?? []
+  return uniqueRuntimeSelectOptions([
+    ...lanes,
+    ...runtimeSelectOptionsFromResolved(resolved?.runtimes ?? []),
+  ])
+}
+
 function RuntimeRoutingSelect({
   label,
   hint,
@@ -1738,14 +1751,14 @@ export function SettingsSurface() {
     }
   }
 
-  async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null): Promise<void> {
+  async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, routeId: string | null): Promise<void> {
     if (runtimeWriteInFlight.current) return
     runtimeWriteInFlight.current = true
     setRuntimeRoutingStatus('saving')
     setRuntimeRoutingMessage('')
     let receipt: CommittedRuntimeTomlConfig
     try {
-      receipt = await patchRuntimeRouting(lane, runtimeId)
+      receipt = await patchRuntimeRouting(lane, routeId)
     } catch (err) {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(errorToString(err))
@@ -1867,6 +1880,7 @@ export function SettingsSurface() {
   const runtimeCatalogEntries = runtimeProviders?.providers ?? []
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
+  const defaultRouteId = runtimeResolved?.default_route ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   // Declared runtime lanes with their ordered candidate chains — the live
@@ -1896,6 +1910,7 @@ export function SettingsSurface() {
       .map(id => ({ id, resolved: false, resolvedRuntimeIds: [], declared: declaredRuntimeLanesById?.get(id) ?? null })),
   ]
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
+  const defaultRouteOptions = defaultRouteOptionsFromResolved(runtimeResolved)
   const runtimeRoutingDisabled =
     runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving' || runtimeResolvedStatus !== 'ready'
   const runtimeResolution = shellRuntimeResolution.value
@@ -2074,28 +2089,31 @@ export function SettingsSurface() {
                       <span class="k">catalog entries</span>
                     </div>
                   </div>
-                  ${runtimeSelectOptions.length > 0
+                  ${defaultRouteOptions.length > 0
                     ? html`
                       <${RuntimeRoutingSelect}
-                        label="Default runtime"
-                        hint="[runtime].default · 새 keeper 가 시작될 런타임 id (provider.model)"
-                        value=${defaultRuntimeId}
-                        options=${runtimeSelectOptions}
+                        label="Default route"
+                        hint="[runtime].default · 새 keeper 가 걷는 레인 또는 런타임"
+                        value=${defaultRouteId}
+                        options=${defaultRouteOptions}
                         disabled=${runtimeRoutingDisabled}
                         testId="runtime-default-runtime"
                         required=${true}
-                        onChange=${(runtimeId: string | null) => {
-                          if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
+                        onChange=${(routeId: string | null) => {
+                          if (routeId && routeId !== defaultRouteId) void applyRuntimeRoutingPatch('default', routeId)
                         }}
                       />
                     `
                     : html`
-                      <${SetRow} label="Default runtime" hint="[runtime].default">
-                        ${defaultRuntimeId
-                          ? html`<span class="set-ro mono" data-testid="runtime-default-readonly">${defaultRuntimeId}</span>`
+                      <${SetRow} label="Default route" hint="[runtime].default">
+                        ${defaultRouteId
+                          ? html`<span class="set-ro mono" data-testid="runtime-default-readonly">${defaultRouteId}</span>`
                           : html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`}
                       <//>
                     `}
+                  <${SetRow} label="Entry runtime" hint="Runtime reached by the default route">
+                    <span class="set-ro mono" data-testid="runtime-default-entry">${defaultRuntimeId ?? '—'}</span>
+                  <//>
                   <${SetRow} label="Default model" hint="Resolved model API name">
                     <span class="set-ro mono" data-testid="runtime-default-model">${runtimeResolved?.default_runtime?.model ?? '—'}</span>
                   <//>
@@ -2148,15 +2166,15 @@ export function SettingsSurface() {
                   <div class="set-sub-h">Model routing</div>
                   <div class="settings-runtime-routing-editor" data-testid="runtime-routing-summary">
                     <${RuntimeRoutingSelect}
-                      label="Default"
-                      hint="[runtime].default · 기본 — keeper 채팅, 미할당 keeper 가 상속"
-                      value=${defaultRuntimeId}
-                      options=${runtimeSelectOptions}
+                      label="Default route"
+                      hint=${`[runtime].default · 진입 runtime ${defaultRuntimeId ?? '—'} · 미할당 keeper 가 상속`}
+                      value=${defaultRouteId}
+                      options=${defaultRouteOptions}
                       disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-default"
                       required=${true}
-                      onChange=${(runtimeId: string | null) => {
-                        if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
+                      onChange=${(routeId: string | null) => {
+                        if (routeId && routeId !== defaultRouteId) void applyRuntimeRoutingPatch('default', routeId)
                       }}
                     />
                     <${RuntimeMediaFailoverEditor}

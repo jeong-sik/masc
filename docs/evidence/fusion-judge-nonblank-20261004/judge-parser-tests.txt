@@ -1,0 +1,17 @@
+Testing `Judge synthesis contract'.
+This run has ID `ZALWO5GU'.
+
+  [OK]          parse          0   valid.
+  [OK]          parse          1   recommend.
+  [OK]          parse          2   insufficient.
+  [OK]          parse          3   rejects_blank_conclusions.
+  [OK]          parse          4   unknown_kind.
+  [OK]          parse          5   missing_resolved.
+  [OK]          parse          6   missing_decision.
+  [OK]          parse          7   code_fence.
+  [OK]          parse          8   decision_schema_branches.
+  [OK]          parse          9   rejects_null_optional_and_unknown_field.
+  [OK]          parse         10   rejects_lossy_collections.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-fusion-nonblank-native-msyjyv7u/candidate/_build/_tests/Judge synthesis contract'.
+Test Successful in 0.001s. 11 tests run.

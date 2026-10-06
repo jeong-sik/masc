@@ -1,6 +1,4 @@
-(** Host-owned sampling boundary. Wire preflight precedes request publication;
-    a refusal whose evidence-bearing frame cannot fit retains no request blob.
-    Retain every admitted request before invoking the host
+(** Host-owned sampling boundary. Retain a request before invoking the host
     model handler, and keep terminal evidence distinct from generated text.
     An [invoke] error is recorded as [host_error], without inferring a policy
     rejection. Invocation exceptions are [outcome_unknown]. Invalid responses

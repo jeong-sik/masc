@@ -966,118 +966,6 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   check bool "response-bound refusal preserves known finished result" true
     (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") indexes))
 
-let test_sampling_wire_frame_envelope () =
-  List.iter (fun id ->
-    List.iter (fun boundary -> with_fixture (fun env sw dir _docker ->
-      let module S = Mcp_protocol.Sampling in
-      let module J = Mcp_protocol.Jsonrpc in
-      let module Store = Masc.Lane_addon_store in
-      let module Sampling = Masc.Lane_addon_sampling in
-      let answer : S.create_message_result = {role=Assistant;
-        content=Text {type_="text";text=String.make 700 'x'};
-        model="wire-fixture";stop_reason=None;_meta=None} in
-      let placeholder = Types.evidence_to_json (Store.blob_reference "") in
-      let refs = `Assoc ["request",placeholder;"outcome",placeholder] in
-      let response = {answer with _meta=Some (`Assoc ["masc.lane_sampling",refs])} in
-      let success_size = String.length (Yojson.Safe.to_string
-        (J.message_to_yojson (J.make_response ~id ~result:(S.create_message_result_to_yojson response)))) + 1 in
-      let refusal_size = String.length (Yojson.Safe.to_string (J.message_to_yojson
-        (J.make_error ~id ~code:Mcp_protocol.Error_codes.internal_error
-          ~message:(Yojson.Safe.to_string (`Assoc ["status",`String "invalid_response";"evidence",refs])) ()))) + 1 in
-      let max_bytes = match boundary with
-        | `Exact -> success_size | `Overflow -> success_size - 1
-        | `Failure_exact -> refusal_size | `Too_small -> refusal_size - 1 in
-      let p = {(package dir "sampling") with model_access=Types.Host_sampling;
-        resources={(package dir "sampling").resources with max_reply_bytes=max_bytes}} in
-      let store = Store.create ~root:(Filename.concat dir "wire-evidence") in
-      let calls = ref 0 in
-      let broker = match Sampling.create ~store ~package:p ~instance_id:"wire" ~route:"r"
-        ~invoke:(fun ~route:_ ~request _ ->
-          let retained = match Store.read_blob store request with
-            | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
-          check string "accepted request is durable before model invocation" "model_request"
-            Yojson.Safe.Util.(member "kind" retained |> to_string);
-          incr calls; Ok answer) () with
-        | Ok broker -> broker | Error detail -> fail detail in
-      let handler = match Sampling.for_worker broker ~package:p ~instance_id:"wire" with
-        | Ok handler -> handler | Error detail -> fail detail in
-      let script = Filename.concat dir "sampling-wire.py" in
-      write script {|import json,sys
-id=json.loads(sys.argv[1])
-budget=int(sys.argv[2])
-def send(value):
-    print(json.dumps(value,ensure_ascii=False),flush=True)
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get("method")=="initialize":
-        assert "sampling" in request["params"]["capabilities"]
-        send({"jsonrpc":"2.0","id":request["id"],"result":{"protocolVersion":request["params"]["protocolVersion"],"capabilities":{"tools":{}},"serverInfo":{"name":"wire","version":"1"}}})
-    elif request.get("method")=="tools/call":
-        send({"jsonrpc":"2.0","id":id,"method":"sampling/createMessage","params":{"messages":[],"includeContext":"none","maxTokens":1}})
-        raw=sys.stdin.buffer.readline(budget+1)
-        assert len(raw)<=budget,(len(raw),budget)
-        reply=json.loads(raw)
-        assert reply["id"]==id
-        summary={"frame_bytes":len(raw),"error":"error" in reply}
-        if "error" in reply:
-            try:
-                failure=json.loads(reply["error"]["message"])
-                summary["status"]=failure["status"]
-                summary["outcome"]=failure["evidence"]["outcome"]
-            except (ValueError,KeyError):
-                summary["status"]="refused"
-        send({"jsonrpc":"2.0","id":request["id"],"result":{"content":[],"structuredContent":summary,"isError":False}})
-|};
-      let client = match Agent_core.Mcp.connect ~sw ~mgr:env#process_mgr ~command:"python3"
-        ~args:[script;Yojson.Safe.to_string (J.id_to_yojson id);string_of_int max_bytes]
-        ~env:[||] ~max_response_bytes:max_bytes ~sampling_handler:handler () with
-        | Ok client -> client | Error error -> fail (Agent_core.Error.to_string error) in
-      Fun.protect ~finally:(fun () -> Agent_core.Mcp.close client) (fun () ->
-        (match Agent_core.Mcp.initialize client with
-         | Ok () -> () | Error error -> fail (Agent_core.Error.to_string error));
-        let summary = ref `Null in
-        let observed = Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
-          ~on_error:Fun.id (fun () ->
-            let rec request remaining =
-            match Agent_core.Mcp.call_tool_full client ~name:"sample" ~arguments:(`Assoc []) with
-            | Error error -> Error (Agent_core.Error.to_string error)
-            | Ok result -> summary := Option.get result.structured_content;
-                if remaining > 1 then request (remaining - 1)
-                else Ok {Types.rows=[];coverage=[]} in
-            request (if boundary = `Too_small then 3 else 1)) in
-        check bool "actual sampling wire exchange completes" true (Result.is_ok observed);
-        let open Yojson.Safe.Util in
-        check bool "complete frame including newline stays in envelope" true
-          (member "frame_bytes" !summary |> to_int <= max_bytes);
-        match boundary with
-        | `Exact ->
-            check int "exact boundary is actually emitted" max_bytes (member "frame_bytes" !summary |> to_int);
-            check bool "exact boundary retains successful answer" false (member "error" !summary |> to_bool);
-            check int "successful wire answer invokes once" 1 !calls
-        | `Overflow | `Failure_exact ->
-            if boundary = `Failure_exact then
-              check int "failure frame exact boundary is emitted" max_bytes
-                (member "frame_bytes" !summary |> to_int);
-            check int "overflow invokes only once" 1 !calls;
-            check string "frame overflow returns indexed failure" "invalid_response"
-              (member "status" !summary |> to_string);
-            let reference = match Types.evidence_of_json (member "outcome" !summary) with
-              | Ok value -> value | Error detail -> fail detail in
-            let retained = match Store.read_blob store reference with
-              | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
-            check string "wire refusal agrees with durable terminal" "invalid_response"
-              (member "status" retained |> to_string)
-        | `Too_small ->
-            check int "unrepresentable failure frame never invokes host" 0 !calls;
-            let evidence = Filename.concat (Store.root store) "evidence" in
-            let retained = if Sys.file_exists evidence then Array.to_list (Sys.readdir evidence) else [] in
-            check int "repeated preflight refusals retain no unreachable request blobs" 0 (List.length retained);
-            let indexes = match sampling_requests store ~instance_id:"wire" with
-              | Ok rows -> rows | Error detail -> fail detail in
-            check int "preflight refusals create no request journal" 0 (List.length indexes))))
-      [`Exact;`Overflow;`Failure_exact;`Too_small])
-    [Mcp_protocol.Jsonrpc.String (String.make 64 '"' ^ "한글");Mcp_protocol.Jsonrpc.Int max_int]
-
 let test_sampling_refuses_nonfinite_evidence () = with_fixture (fun _env _sw dir _docker ->
   let module S = Mcp_protocol.Sampling in
   let module Sampling = Masc.Lane_addon_sampling in
@@ -1688,7 +1576,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
         (Result.is_ok (Store.read_blob_bounded
           ~budget:(Store.read_budget ~max_bytes:p.resources.max_reply_bytes) store request))))) [false;true]
 
-let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fun _env _sw dir _docker ->
+let test_sampling_retention_error_carries_receipt () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
   let module S = Mcp_protocol.Sampling in
@@ -1698,8 +1586,6 @@ let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fu
   let raw_receipt = Yojson.Safe.to_string (`Assoc ["status", `String "retention_error";
     "evidence", `Assoc ["request", reference; "outcome", reference]]) in
   let max_reply_bytes = String.length raw_receipt in
-  check bool "fixture distinguishes object bytes from the encoded error string" true
-    (String.length (Yojson.Safe.to_string (`String raw_receipt)) > max_reply_bytes);
   let base = package dir "sampling" in
   let p = {base with model_access=Types.Host_sampling;
     resources={base.resources with max_reply_bytes}} in
@@ -1727,8 +1613,12 @@ let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fu
   (match reply with
    | Ok _ -> fail "failed host call cannot report success"
    | Error message ->
-       check bool "MCP error string fits the package wire envelope" true
-         (String.length (Yojson.Safe.to_string (`String message)) <= max_reply_bytes));
+       let receipt = Yojson.Safe.from_string message in
+       let member key json = Yojson.Safe.Util.member key json in
+       check bool "the retention error carries the host receipt" true
+         (member "status" receipt = `String "retention_error"
+          && member "request" (member "evidence" receipt) <> `Null
+          && member "outcome" (member "evidence" receipt) <> `Null));
   let journal = Filename.concat (Store.root store)
     (Filename.concat "sampling-outcomes" (Store.digest "x")) in
   let paths = Sys.readdir journal in
@@ -2326,14 +2216,13 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling fallback rejects external hardlinks" `Quick
     (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
-  test_case "sampling retention error uses encoded wire bound" `Quick test_sampling_retention_error_uses_encoded_reply_bound;
+  test_case "sampling retention error carries the receipt" `Quick test_sampling_retention_error_carries_receipt;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
   test_case "sampling recovery reports unreadable terminal journal" `Quick test_sampling_recovery_reports_unreadable_terminal_journal;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
-  test_case "sampling bounds actual wire frames" `Quick test_sampling_wire_frame_envelope;
   test_case "sampling refuses nonfinite retained evidence" `Quick test_sampling_refuses_nonfinite_evidence;
   test_case "sampling recovery reports unreadable pending index" `Quick test_sampling_recovery_reports_unreadable_pending_index;
   test_case "pending sampling recovery syncs reopened root" `Quick test_pending_sampling_recovery_syncs_reopened_root;

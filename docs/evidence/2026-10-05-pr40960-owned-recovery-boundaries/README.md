@@ -27,10 +27,9 @@ test/test_lane_addon_worker.exe. Clean RED selected lifecycle0,1,2. Final worker
 execution used the declared test/dune env: blank MASC_BASE_PATH/ZAI_API_KEY/
 TYPESAFEAI_API_KEY, false sandbox preflight/playground, and checkout DUNE_SOURCEROOT.
 
-This is focused native proof, not full-suite/CI/production proof. Full JSON-RPC
-request-ID-aware error sizing already belongs to published downstream #40991;
-#40960 alone bounds the encoded payload and does not promise full-frame evidence
-preservation. The separate history-scan P1 and stdio readiness issue remain open.
+This is focused native proof, not full-suite/CI/production proof. #40960 bounds
+the encoded payload and does not promise full-frame evidence preservation. The
+separate history-scan P1 and stdio readiness issue remain open.
 
 ## Earlier response checkpoint
 

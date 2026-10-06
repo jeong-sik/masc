@@ -78,12 +78,12 @@ type t
 
 (** Optional host-owned model access. The subprocess sends standard MCP
     sampling requests; the host chooses credentials and model policy.
-    Actual stdio requests supply their typed [request_id], so a host can bound
-    the complete success/error frame. Omit it only for direct callback calls.
     Ordinary callback exceptions become protocol errors so the connection can
-    serve subsequent requests. Eio cancellation propagates to the caller. *)
-type sampling_handler = ?request_id:Mcp_protocol.Jsonrpc.id ->
-  Mcp_protocol.Sampling.create_message_params ->
+    serve subsequent requests. Eio cancellation propagates to the caller.
+
+    A reply frame larger than the connection's byte limit is replaced by the
+    transport with a short JSON-RPC error. *)
+type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
   (Mcp_protocol.Sampling.create_message_result, string) result
 
 (** {1 Connection lifecycle} *)

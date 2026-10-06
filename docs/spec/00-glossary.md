@@ -556,7 +556,7 @@ status: reference
     이름과 정규화된 관심사(`board_interests`)를 명시하여, 역할 본문을 state에서 제거하고 신호와 명시적 관심사로 판정한다.
   - 푸시 이벤트 다중 키퍼 배치(#40521): 새 Board 이벤트 발생 시 `Keeper_board_attention_fanout`을 통해
     후보 키퍼들을 단일 evaluate 요청에 복수 질문으로 묶어 일괄 판정한다.
-  - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
+  - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued`)도 `ask_jev`의
     첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
   - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
     재조정할 수 있는 정량적 근거를 제공한다(#40420).
@@ -694,7 +694,7 @@ status: reference
   - 상태별 건수와 뷰포트 예산: 기본 compact/results 화면은 총 대기 건수와 전달·우선 순서
     확인 상태를 한 요약 행에 표시한다. 실패와 재확인 상태는 요약에서 숨기지 않는다.
     `Tools_full`(`Ctrl-D` 두 번 또는 `/tools full`)은 `queued at Keeper`·`awaiting receipt`·
-    `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를
+    `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰를
     별도 행으로 표시한다. 각 모드는 같은 표시 행 계산으로 뷰포트 예산을 예약하며,
     큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
   - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
@@ -1816,8 +1816,8 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 9종(`HalfLifeSet`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
-    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
+    기록되는 사건은 10종(`Half_life_set`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Granted`·`Purchased`·`Equipped`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급, `Granted` 운영자 지급, `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`와 `Granted`는 금액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 지급 의무 보존(Payout Obligation Preservation)·평가 후 채무 지속성(Post-Appraisal Debt Retention):
@@ -1838,7 +1838,7 @@ status: reference
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    잔액(`Candle_balance.of_events`)은 기록된 `HalfLifeSet` 경계를 따라 정수 연산으로
+    잔액(`Candle_balance.of_events`)은 기록된 `Half_life_set` 경계를 따라 정수 연산으로
     지수 감쇠한다. `"off"`는 감쇠를 끄며, 새 설정은 권한 있는 변경 경로가 정책 사건을
     덧붙인 시점부터 적용된다. 읽기 전용 관측은 정책을 발행하지 않는다.
     감쇠량과 구매 차감은 소각량에 반영하고 발행·소각·유통량을 투영한다.
@@ -1858,7 +1858,7 @@ status: reference
 **Keeper Item & Candle Ledger Supply (키퍼 아이템과 원장 공급량 체계)**
 : 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039). 지갑 잔액은 Keeper별 지급·구매 기록과 그 지갑의 감쇠 구간을 원장 순서로 재생해 계산한다. `issued`·`burned`·`circulating`은 작업공간 전체 합계이므로 한 Keeper의 잔액을 총공급량에서 나누어 구하지 않는다.
   - 대시보드 Item 탭([`keeper-items-panel.ts`](../../dashboard/src/components/keeper-items-panel.ts)): 개별 Keeper의 권위 있는 Candle 잔액, 장신구 카탈로그 가격, 소유한 아이템 목록, 착용 중인 초상화 미리보기를 단일 읽기 표면으로 제공한다. 장신구 구매는 무료 구매 및 가격 변동 시에도 원장 관측 갱신과 함께 최신 소유권·잔액을 게시하여 동기화를 유지한다.
-  - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Purchased`·`HalfLifeSet` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
+  - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Granted`·`Purchased`·`Half_life_set` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
   - 권위 철회와 캐시 무효화(Authority Withdrawal): 서버 부팅 중, 알 수 없는 작업공간 전환, 연결 해제/재접속, 에포크 무효화(epoch invalidation), 런타임 웜업(warm-up) 시 오래된 잔액·소유권·가격·공급량 관측을 즉시 철회(`withdraw`)한다. 과거 웜업이나 실패 응답이 복구된 정상 상태를 덮어쓰지 못하도록 차단한다.
   - 단축 뷰포트 예산 보호: 15~16행의 짧거나 좁은 터미널 화면에서는 Candle 블록이 여유 행(spare rows)에만 진입하며, 화면이 혼잡할 때는 상태 이름과 요약만 남기고 전체 진단과 정확한 수량은 전역 Help/Info 시트로 접어 다른 핵심 작업(Attention, Task)의 시각 예산을 침범하지 않는다.
   → [keeper-items-panel.ts](../../dashboard/src/components/keeper-items-panel.ts) ·

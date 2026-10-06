@@ -132,6 +132,36 @@ describe('Web package on/off without deleting configuration', () => {
     expect((panel(screen).getByRole('button', { name: 'Save activity' }) as HTMLButtonElement).disabled).toBe(true)
     expect(panel(screen).queryByText(/Activity configuration saved/)).toBeNull()
   })
+  it('keeps a pending save uncertain across A-B-A rereads and refreshes inventory when it settles', async () => {
+    let finish!: (value: ReturnType<typeof receipt>) => void
+    files.saveLaneDeclaration.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const screen = render(html`<${LaneAddonsPanel} />`); await open(screen); fireEvent.click(toggle(screen)); await save(screen)
+    await panel(screen).findByRole('button', { name: 'Saving activity…' })
+    const fileReads = files.fetchLaneDeclaration.mock.calls.length
+    await act(() => workspace('/workspace-b'))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Package activity pkg' })).toBeNull())
+    await act(() => workspace('/workspace'))
+    await screen.findByRole('region', { name: 'Package activity pkg' })
+    // The reread succeeds, but it began while the save was still in flight.
+    await waitFor(() => expect(files.fetchLaneDeclaration.mock.calls.length).toBeGreaterThan(fileReads))
+    await waitFor(() => expect((panel(screen).getByRole('button', { name: 'Read current activity' }) as HTMLButtonElement).disabled).toBe(false))
+    await panel(screen).findByText(/previous save outcome is uncertain/)
+    expect((panel(screen).getByRole('button', { name: 'Save activity' }) as HTMLButtonElement).disabled).toBe(true)
+    const inventoryReads = lane.fetchLaneAddons.mock.calls.length
+    lane.fetchLaneAddons.mockResolvedValue({ ...snapshot, configuration: { ...snapshot.configuration!, declarations: [
+      { ...snapshot.configuration!.declarations[0], enabled: false, instance_id: 'still-observed' },
+    ] } })
+    await act(() => finish(receipt(`enabled = false\n${original}`)))
+    await panel(screen).findByText('Observed configuration: Off requested · worker cleanup not yet confirmed')
+    expect(lane.fetchLaneAddons.mock.calls.length).toBeGreaterThan(inventoryReads)
+    expect(panel(screen).queryByText(/Activity configuration saved/)).toBeNull()
+    expect((panel(screen).getByRole('button', { name: 'Save activity' }) as HTMLButtonElement).disabled).toBe(true)
+    // A read begun after the write settled observes it and clears the uncertainty.
+    files.fetchLaneDeclaration.mockResolvedValueOnce({ ...document, source_text: `enabled = false\n${original}`, source_revision: 'r2' })
+    fireEvent.click(panel(screen).getByRole('button', { name: 'Read current activity' }))
+    await waitFor(() => expect(panel(screen).queryByText(/previous save outcome is uncertain/)).toBeNull())
+    expect(files.saveLaneDeclaration).toHaveBeenCalledTimes(1)
+  })
   it.each(['transport', 'durability'])('requires a fresh file read after uncertain %s and does not blindly repeat the save', async kind => {
     if (kind === 'transport') files.saveLaneDeclaration.mockRejectedValueOnce(new Error('lost response'))
     else files.saveLaneDeclaration.mockImplementationOnce(async request => receipt(request.source_text, 'unconfirmed'))

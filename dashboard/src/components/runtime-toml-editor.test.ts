@@ -284,6 +284,46 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
   })
 
+  it('follows draft edits for an absent navigation target and offers it without moving the caret', async () => {
+    const target = { kind: 'browser' as const, lane: 'live' as const, workspace: '/tmp' }
+    render(html`<${RuntimeTomlEditor} navigationTarget=${target} />`, container)
+    await waitFor(() => expect(container.textContent).toContain('This target is not declared in the current draft'))
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const draft = baseConfig.source_text + '[browser.live]\nenabled = true\n'
+    fireEvent.input(textarea, { target: { value: draft } })
+    textarea.setSelectionRange(draft.length, draft.length)
+    const offer = await waitFor(() => {
+      const button = [...container.querySelectorAll('button')].find(item => item.textContent === 'Select target')
+      expect(button).toBeTruthy()
+      return button as HTMLButtonElement
+    })
+    // The notice follows the text, and the reader's caret is not taken over.
+    expect(container.textContent).not.toContain('This target is not declared in the current draft')
+    expect(textarea.selectionStart).toBe(draft.length)
+    fireEvent.click(offer)
+    expect(textarea.selectionStart).toBe(draft.indexOf('[browser.live]'))
+    expect(textarea.selectionEnd).toBeGreaterThan(textarea.selectionStart)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('returns keyboard focus to the editor when the TOML section is re-entered for a linked target', async () => {
+    const target = { kind: 'browser' as const, lane: 'live' as const, workspace: '/tmp' }
+    render(html`<${RuntimeTomlEditor} navigationTarget=${target} />`, container)
+    const textarea = await waitFor(() => {
+      const element = container.querySelector('textarea') as HTMLTextAreaElement | null
+      expect(element).not.toBeNull(); expect(document.activeElement).toBe(element)
+      return element!
+    })
+    textarea.setSelectionRange(3, 5)
+    const routing = container.querySelector('[data-testid="runtime-toml-nav-routing"]') as HTMLButtonElement
+    fireEvent.click(routing); routing.focus()
+    expect(document.activeElement).not.toBe(textarea)
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
+    await waitFor(() => expect(document.activeElement).toBe(textarea))
+    // Only focus returns; the reader's selection is not moved.
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([3, 5])
+  })
+
   it('keeps the unload guard while the dirty editor is unmounted', async () => {
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(baseConfig.source_text))
@@ -625,7 +665,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
       expect(container.textContent).toContain('Skill catalog 게시됨')
       expect(container.textContent).toContain('파일 내구성 확인됨')
     })
@@ -920,7 +960,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.keyDown(textarea, { key: 's', metaKey: true })
 
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
     })
   })
 
@@ -1244,7 +1284,7 @@ describe('RuntimeTomlEditor', () => {
 
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
     await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
     })
     expect((container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value).toBe(nextSource)
   })
@@ -1259,7 +1299,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('textarea')!, { target: { value: draft } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-conflict"]')).not.toBeNull())
-    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(draft, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
     expect(container.querySelector('textarea')?.value).toBe(draft)
     expect(container.querySelector('[aria-label="현재 서버 원문"]')?.textContent).toBe(current.source_text)
     expect(container.querySelector('[aria-label="편집 기준 원문"]')?.textContent).toBe(baseConfig.source_text)
@@ -1270,7 +1310,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('textarea')?.value).toBe(draft)
     expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(draft, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(draft, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: current.source_path })))
   })
 
   it('replaces the draft with the displayed current file only on the separate replace action', async () => {
@@ -1303,7 +1343,7 @@ describe('RuntimeTomlEditor', () => {
     const amended = `${current.source_text}# after explicit replace\n`
     fireEvent.input(container.querySelector('textarea')!, { target: { value: amended } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]')!)
-    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(amended, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenLastCalledWith(amended, current.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: current.source_path })))
   })
 
   it('reads current text for comparison without replacing a dirty draft or its save basis', async () => {
@@ -1924,7 +1964,7 @@ is-non-interactive = true
     fireEvent.click(save)
     await waitFor(() => {
       expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce()
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path }))
       expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
     })
 

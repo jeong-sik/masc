@@ -112,6 +112,8 @@ type rollup = {
   awaiting_confirmation_count : int;
   done_count : int;
   dropped_count : int;
+  paused_count : int;
+  blocked_count : int;
 }
 (** Aggregate counts produced by {!compute_rollup}. Consumed by
     [workspace_goals.ml] and the dashboard HTTP endpoint. *)
@@ -191,7 +193,7 @@ val unavailable_to_string : unavailable -> string
     is {!Goal_unavailable_envelope}. *)
 
 val list_goals_result :
-  Workspace_utils.config -> ?phase:Goal_phase.t -> unit ->
+  Workspace_utils.config -> ?phase:Goal_phase.t -> ?kind:Goal_phase.Kind.t -> unit ->
   (goal list, unavailable) result
 (** {!load_source} filtered by [phase] and sorted by
     [(priority asc, updated_at desc)]. {!Uninitialized} is [Ok []] — the one
@@ -313,7 +315,8 @@ val upsert_goal :
     before this write, read inside the write lock. The caller records what
     changed. An edit to the title, [metric] or [target_value] moves a
     [Verifying], [Awaiting_confirmation] or [Completed] goal back to
-    [Executing]. An edit to [due_date] or [priority] moves no phase.
+    [Executing]. Suspended Goals stay suspended with restore target [Executing].
+    An edit to [due_date] or [priority] moves no phase.
 
     {!Rejected}:
     - [title] required for new goals (omit / empty string on a new goal id).

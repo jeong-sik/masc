@@ -76,6 +76,14 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
     ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
     ; "exact_slot_group", string_opt_json exact_slot_group
+      (* An exact HTTP slot on this runtime would be refused on save: its
+         provider declares no exact-body-timeout-s (rule 3, #38779). The
+         lane pickers read this instead of discovering it from the 400. *)
+    ; ( "exact_body_deadline_missing"
+      , `Bool
+          (Runtime.exact_slot_lacks_body_deadline
+             ~target_source:(Runtime.exact_output_target_source ())
+             rt) )
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime_instance.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime_instance.max_output_tokens_of_runtime rt)
@@ -153,23 +161,23 @@ let resolved_assignment_json
    Duplicating that exact fallback here (rather than only reporting explicit
    assignments) is bug #14's fix — the resolved document must match what a
    turn actually dispatches to. *)
-let assignment_target (default : Runtime_instance.t option) (keeper_name : string)
+let assignment_target (snapshot : Runtime.dashboard_runtime_resolved_snapshot) (keeper_name : string)
   : string * string option
   =
-  match Runtime.runtime_id_for_keeper keeper_name with
+  match List.assoc_opt keeper_name snapshot.rs_assignments with
   | Some id when String.trim id <> "" -> "explicit", Some (String.trim id)
   | Some _ | None ->
     (* The route the default names, which is what [resolve_assignment] is given
        for a keeper with no assignment; [default] is only the runtime it enters
        on. *)
-    "default", Option.map (fun (_ : Runtime_instance.t) -> Runtime.get_default_route ()) default
+    "default", Option.bind snapshot.rs_default_runtime (fun _ -> snapshot.rs_default_route)
 ;;
 
-let assignment_json (default : Runtime_instance.t option) (keeper_name : string) : Yojson.Safe.t =
-  let assignment_source, runtime_id = assignment_target default keeper_name in
+let assignment_json (snapshot : Runtime.dashboard_runtime_resolved_snapshot) (keeper_name : string) : Yojson.Safe.t =
+  let assignment_source, runtime_id = assignment_target snapshot keeper_name in
   let resolved =
     match runtime_id with
-    | Some id -> resolved_assignment_json (Runtime.resolve_assignment id)
+    | Some id -> resolved_assignment_json (snapshot.rs_resolve_assignment id)
     | None -> `Assoc [ "kind", `String "missing"; "id", `Null ]
   in
   `Assoc
@@ -183,8 +191,8 @@ let assignment_json (default : Runtime_instance.t option) (keeper_name : string)
    an assignment can name a keeper whose directory has not materialized yet,
    and the registry can list keepers with no assignment at all (the default
    riders bug #14 is about). *)
-let all_keeper_names ~(config : Workspace.config) : string list =
-  let assigned = List.map fst (Runtime.keeper_assignments ()) in
+let all_keeper_names ~snapshot ~(config : Workspace.config) : string list =
+  let assigned = List.map fst snapshot.Runtime.rs_assignments in
   let registered =
     (match Keeper_meta_store.keeper_names_result config with
      | Ok names -> names
@@ -200,16 +208,16 @@ let all_keeper_names ~(config : Workspace.config) : string list =
    [\[runtime.lanes\]] table declares, and reporting only declared lanes would
    hide that lane's candidates from the document that is supposed to say what
    dispatch will do. *)
-let dispatchable_lanes ~keeper_names (default : Runtime_instance.t option)
+let dispatchable_lanes ~keeper_names (snapshot : Runtime.dashboard_runtime_resolved_snapshot)
   : (Runtime_lane.t * lane_origin) list
   =
-  let declared = Runtime.lanes () in
+  let declared = snapshot.rs_lanes in
   let seen = List.map Runtime_lane.id declared in
   let implicit =
     keeper_names
-    |> List.filter_map (fun keeper -> snd (assignment_target default keeper))
+    |> List.filter_map (fun keeper -> snd (assignment_target snapshot keeper))
     |> List.filter_map (fun id ->
-      match Runtime.resolve_assignment id with
+      match snapshot.rs_resolve_assignment id with
       | `Lane lane when not (List.mem (Runtime_lane.id lane) seen) -> Some lane
       | `Lane _ | `Missing | `Unavailable _ -> None)
     |> List.sort_uniq (fun a b ->
@@ -321,11 +329,14 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
      default runtime with a list that no longer holds it, and its scope with
      no label. The default is grouped too; [usage_scopes] adds a provider to a
      scope once, so it is not counted twice. *)
-  let default, runtimes = Runtime.get_default_and_runtimes () in
+  let snapshot = Runtime.dashboard_runtime_resolved_snapshot () in
+  let default_route = snapshot.rs_default_route in
+  let default = snapshot.rs_default_runtime in
+  let runtimes = snapshot.rs_runtimes in
   let scopes = usage_scopes (Option.to_list default @ runtimes) in
   (* The keeper directory is listed once too: the lanes an assignment
      implies and the assignment rows then name the same fleet. *)
-  let keeper_names = all_keeper_names ~config in
+  let keeper_names = all_keeper_names ~snapshot ~config in
   (* This document can be read without authentication in non-strict mode.
      Keep account homes and credential-file paths in typed internal scopes;
      expose only response-local, consistent join keys. Every row below is
@@ -346,7 +357,8 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
   `Assoc
     [ "generated_at_iso", `String generated_at_iso
     ; "source", `String "/api/v1/runtime/resolved"
-    ; "config_path", string_opt_json (Runtime.config_path ())
+    ; "config_path", string_opt_json snapshot.rs_config_path
+    ; "default_route", string_opt_json default_route
     ; ( "default_runtime"
       , match default with
         | Some rt -> runtime_resolution_json ~now ~scope_label rt
@@ -356,11 +368,11 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
          dispatches to it, and it has no table of its own. Keep both the active
          fleet and the file's declaration so an operator can distinguish a
          rejected entry without losing its position when rewriting the route. *)
-    ; "media_failover", Json_util.json_string_list (Runtime.media_failover ())
+    ; "media_failover", Json_util.json_string_list snapshot.rs_media_failover
     ; ( "media_failover_declared"
-      , Json_util.json_string_list (Runtime.declared_media_failover ()) )
-    ; "lanes", `List (List.map lane_json (dispatchable_lanes ~keeper_names default))
-    ; "assignments", `List (List.map (assignment_json default) keeper_names)
+      , Json_util.json_string_list snapshot.rs_declared_media_failover )
+    ; "lanes", `List (List.map lane_json (dispatchable_lanes ~keeper_names snapshot))
+    ; "assignments", `List (List.map (assignment_json snapshot) keeper_names)
     ; "provider_usage_windows_since", `Float Usage.recording_since
     ; ( "provider_usage_windows"
       , `List (List.map (usage_scope_json ~scope_label) scopes) )

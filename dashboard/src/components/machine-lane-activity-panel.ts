@@ -17,8 +17,9 @@ export function MachineLaneActivityPanel({ lane, title }: { lane: MachineActivit
     if (open && session && authority) void session.read(authority)
   }, [open, session, authority])
   if (!session || !authority || !state) return html`<p>작업공간을 확인한 뒤 활동 설정을 열 수 있습니다.</p>`
-  const busy = state.phase !== 'idle', ready = session.ready(authority)
+  const busy = state.phase !== 'idle', ready = session.ready(authority), uncertain = state.uncertain !== null
   const current = state.current ? readMachineActivity(state.current.source_text, lane) : null
+  const observed = state.observation.kind === 'observed' ? state.observation : null
   const conflict = state.draft && state.current && (state.draft.base.source_revision !== state.current.source_revision
     || state.draft.base.source_path !== state.current.source_path)
   const changedPath = state.draft && state.current && state.draft.base.source_path !== state.current.source_path
@@ -31,15 +32,15 @@ export function MachineLaneActivityPanel({ lane, title }: { lane: MachineActivit
       <p>켜도 기계를 불러오거나 checkpoint를 복구하지 않습니다.</p>
       <p role="status">${current ? `파일 설정: ${label(current.enabled)}`
         : state.phase === 'reading' ? '현재 설정을 읽고 있습니다.' : '현재 파일 설정 미확인'}</p>
-      <p role="status">서버 활동 (마지막 조회): ${state.observed
-        ? state.observed.activity === 'on' ? '켜짐' : state.observed.activity === 'off' ? '꺼짐' : '미확인'
+      <p role="status">서버 활동 (마지막 조회): ${observed
+        ? observed.activity === 'on' ? '켜짐' : observed.activity === 'off' ? '꺼짐' : '미확인'
         : '미확인'}</p>
-      ${state.observed ? html`<p>조회 시각: ${new Date(state.observed.at * 1000).toISOString()}</p>` : null}
-      ${state.observationError ? html`<p role="alert">${state.observationError}</p>` : null}
-      ${current && state.observed && state.observed.activity !== 'unobserved'
-        && current.enabled !== (state.observed.activity === 'on')
+      ${observed ? html`<p>조회 시각: ${new Date(observed.at * 1000).toISOString()}</p>` : null}
+      ${state.observation.kind === 'failed' ? html`<p role="alert">${state.observation.error}</p>` : null}
+      ${current && observed && observed.activity !== 'unobserved'
+        && current.enabled !== (observed.activity === 'on')
         ? html`<p role="status">파일 설정과 마지막 서버 활동이 다릅니다. 현재 설정 읽기로 다시 확인하세요.</p>` : null}
-      ${state.uncertain ? html`<p role="alert">이전 저장 결과는 미확정입니다. 현재 파일을 확인하고 활동 값만 다시 적용하거나 초안을 버리세요.</p>` : null}
+      ${uncertain ? html`<p role="alert">이전 저장 결과는 미확정입니다. 현재 파일을 확인하고 활동 값만 다시 적용하거나 초안을 버리세요.</p>` : null}
       ${state.draft ? html`<div class="space-y-2">
         <button type="button" class=${button} role="switch" aria-checked=${state.draft.enabled}
           aria-label=${`${title} 활동 초안`} disabled=${!ready || !!changedPath}
@@ -48,10 +49,10 @@ export function MachineLaneActivityPanel({ lane, title }: { lane: MachineActivit
         ${changedPath ? html`<p role="alert">설정 파일 경로가 바뀌었습니다. 새 파일을 편집하려면 먼저 초안을 버리세요.</p>` : null}
       </div>` : null}
       <div class="flex flex-wrap gap-2">
-        <button type="button" class=${button} disabled=${!ready || !session.modified() || !!conflict || state.uncertain}
+        <button type="button" class=${button} disabled=${!ready || !session.modified() || !!conflict || uncertain}
           onClick=${() => session.save(authority)}>${state.phase === 'saving' ? '활동 설정 저장 중…' : '활동 설정 저장'}</button>
         <button type="button" class=${button} disabled=${busy} onClick=${() => session.read(authority)}>현재 설정 읽기</button>
-        ${(conflict || state.uncertain) && !changedPath ? html`<button type="button" class=${button} disabled=${!ready}
+        ${(conflict || uncertain) && !changedPath ? html`<button type="button" class=${button} disabled=${!ready}
           onClick=${() => session.reapply(authority)}>활동 값만 다시 적용</button>` : null}
         <button type="button" class=${button} disabled=${busy || !state.draft} onClick=${() => session.discard(authority)}>초안 버리기</button>
       </div>

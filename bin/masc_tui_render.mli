@@ -89,6 +89,13 @@ type memory_state =
   | Memory_read_error
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff
+val config_models_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
+(** The models pane's scroll bound: the document it actually draws (table or
+    stacked items at the current width), not a row count. *)
+
+val config_models_stacked : Masc_tui_types.state -> bool
+(** Whether the models pane draws stacked items at the current width. *)
+
 val tools_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
 val render_tools :
   Masc_tui_types.state ->

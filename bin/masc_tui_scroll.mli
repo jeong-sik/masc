@@ -57,6 +57,12 @@ val cursor_last : count:int -> int
 (** The last row a cursor can name, and 0 for an empty list. What End lands
     on. *)
 
+val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
+(** Like {!ensure_visible} for a cursor that names a run of lines [start] to
+    [stop] (inclusive). A window that already shows some line of the run is
+    left where the reader scrolled it, so the body of a tall item can be
+    walked; the window moves only when the whole run has left it. *)
+
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
 

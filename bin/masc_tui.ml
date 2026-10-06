@@ -3448,6 +3448,25 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
         ~deliver:(fun result -> Runtime_config_view_loaded (generation, requested_model, result))
         (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
+let save_runtime_config_text state ~mailbox ~authority ~identity ~expected_source_path
+    ~expected_source_revision edited =
+  let host = server_peer_host in
+  let port = state.port in
+  let ( let* ) = Result.bind in
+  let refused result = Result.map_error (fun detail -> Masc_tui_http.Runtime_config_save_refused detail) result in
+  let* () = refused (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()) in
+  let* preview = refused (Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited) in
+  let* preview = refused (Masc_tui_runtime_config_receipt.decode_preview preview) in
+  match preview with
+  | Masc_tui_runtime_config_receipt.Cannot_save reason ->
+    Error (Masc_tui_http.Runtime_config_save_refused ("Preview rejected the edit: " ^ reason))
+  | Masc_tui_runtime_config_receipt.Can_save ->
+    let* () = refused (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()) in
+    let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
+      ~source_text:edited ~expected_source_path ~expected_source_revision in
+    launch_runtime_config_load ~force:true state ~mailbox;
+    Ok receipt
+
 let launch_runtime_params_load state ~mailbox =
   state.runtime_params_loading <- true;
   let host = server_peer_host in
@@ -5017,6 +5036,55 @@ let launch_lanes_reread state ~mailbox =
   if state.standalone_lanes_inflight
   then state.standalone_lanes_reread_pending <- true
   else launch_lanes_load state ~mailbox
+
+let launch_exact_activity_read state ~mailbox owner =
+  match Masc_tui_types.exact_activity_session state owner with
+  | None -> ()
+  | Some session ->
+    state.exact_activity_generation <- state.exact_activity_generation + 1;
+    (match Masc_tui_exact_activity.start_read ~generation:state.exact_activity_generation session with
+     | None -> ()
+     | Some (session, request) ->
+       Masc_tui_types.put_exact_activity state session;
+       let host = server_peer_host and port = state.port in
+       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+         ~deliver:(fun result -> Exact_activity_read (request,result)) (fun () ->
+           Masc_tui_loader.load_runtime_config_view ~host ~port
+           |> Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
+             {Masc_tui_runtime_config_edit.path=reading.path;source_text=reading.source_text;
+              source_revision=reading.metadata.source_revision})))
+
+let launch_exact_activity_save state ~mailbox session =
+  let module Activity = Masc_tui_exact_activity in
+  state.exact_activity_generation <- state.exact_activity_generation + 1;
+  match Activity.start_save ~generation:state.exact_activity_generation session with
+  | Error detail -> report_action state "error" detail
+  | Ok (session,request,write) ->
+    Masc_tui_types.put_exact_activity state session;
+    let authority=state.workspace_authority and identity=state.server_identity in
+    launch_workspace_request state ~mailbox
+      ~boundary_error:(fun detail -> Masc_tui_http.Runtime_config_save_refused detail)
+      ~deliver:(fun result ->
+        let result = match result with
+          | Ok receipt -> Activity.Saved receipt
+          | Error (Masc_tui_http.Runtime_config_conflict current) -> Activity.Conflict current
+          | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
+          | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
+        Exact_activity_saved (request,result))
+      (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
+        ~expected_source_path:write.expected_source_path
+        ~expected_source_revision:write.expected_source_revision write.source_text)
+
+let open_exact_activity state ~mailbox lane =
+  match Masc_tui_types.runtime_config_workspace state with
+  | None -> report_action state "error" "Verify the workspace before editing Lane activity."
+  | Some workspace ->
+    let owner = {Masc_tui_exact_activity.workspace;lane} in
+    if Masc_tui_types.exact_activity_session state owner=None then
+      Masc_tui_types.put_exact_activity state (Masc_tui_exact_activity.create owner);
+    state.exact_activity_open <- Some owner;
+    state.lane_run_detail_scroll <- 0;
+    launch_exact_activity_read state ~mailbox owner
 
 let launch_clients_load state ~mailbox =
   if state.clients_surface_inflight then ()
@@ -10180,6 +10248,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.task_detail_scroll <- 0;
   state.task_history <- None;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+  state.exact_activity_open <- None;
+  state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend state.exact_activity_sessions;
   state.runtime_config_view <- None;
   state.runtime_config_generation <- state.runtime_config_generation + 1;
   state.runtime_config_read <- `Idle;
@@ -14454,6 +14524,22 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
            state.runtime_params_notice <- Some (true, notice);
            launch_runtime_params_load state ~mailbox)
+  | Exact_activity_read (request,result) ->
+      Option.iter (fun session ->
+        Masc_tui_types.put_exact_activity state (Masc_tui_exact_activity.finish_read request result session))
+        (Masc_tui_types.exact_activity_session state (Masc_tui_exact_activity.request_owner request))
+  | Exact_activity_saved (request,result) ->
+      let module Activity = Masc_tui_exact_activity in
+      let owner = Activity.request_owner request in
+      (match Masc_tui_types.exact_activity_session state owner with
+       | Some session when Activity.matches request session ->
+         Masc_tui_types.put_exact_activity state (Activity.finish_save request result session);
+         (match result with
+          | Activity.Saved _ ->
+            launch_exact_activity_read state ~mailbox owner;
+            launch_lanes_reread state ~mailbox
+          | Activity.Conflict _ | Activity.Refused _ | Activity.Unconfirmed _ -> ())
+       | None | Some _ -> ())
   | Runtime_config_view_loaded (generation, requested_model, result) -> (
       if generation = state.runtime_config_generation then
       let pending = match state.runtime_config_read with
@@ -17796,24 +17882,7 @@ let main
   in
   (* The raw editor and account form share preview and guarded commit. Each
      caller keeps the revision from the same read as the text it edits. *)
-  let save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision edited =
-    let host = server_peer_host in
-    let port = state.port in
-    let ( let* ) = Result.bind in
-    let refused result = Result.map_error (fun detail -> Masc_tui_http.Runtime_config_save_refused detail) result in
-    let* () = refused (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ()) in
-    let* preview = refused (Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited) in
-    let* preview = refused (Masc_tui_runtime_config_receipt.decode_preview preview) in
-    match preview with
-    | Masc_tui_runtime_config_receipt.Cannot_save reason ->
-      Error (Masc_tui_http.Runtime_config_save_refused ("Preview rejected the edit: " ^ reason))
-    | Masc_tui_runtime_config_receipt.Can_save ->
-      let* () = refused (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ()) in
-      let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
-        ~source_text:edited ~expected_source_path ~expected_source_revision in
-      launch_runtime_config_load ~force:true state ~mailbox:async_messages;
-      Ok receipt
-  in
+  let save_runtime_config_text = save_runtime_config_text state ~mailbox:async_messages in
   let save_runtime_config_edit_session ~workspace session =
     let module Edit = Masc_tui_runtime_config_edit in
     let authority = state.workspace_authority in
@@ -19236,6 +19305,14 @@ and is loaded on demand through keeper_skill.
          each did. *)
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
+      let exact_activity_on_screen () =
+        state.view = Lanes && Option.is_some state.exact_activity_open
+        && not state.help_open
+        && (let terminal_rows, _ = get_terminal_size () in
+            match Masc_tui_render.frame_choice state ~terminal_rows with
+            | `Surface | `Too_small _ -> true
+            | _ -> false)
+      in
       (* What a press lands on in the frame on screen. Only marks the
          terminal was shown can answer, and for a frame drawn over a surface
          [render] keeps only the presses that act inside the overlay, so a
@@ -19259,6 +19336,7 @@ and is loaded on demand through keeper_skill.
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
+       | Some (Pasted _) when exact_activity_on_screen () -> ()
        | Some (Pasted paste) when Option.is_some state.lane_addons && not state.palette_open ->
            (match state.lane_addons with
             | Some ({installer=Some installer;_} as view) ->
@@ -19675,6 +19753,26 @@ and is loaded on demand through keeper_skill.
               if not compact_viewport || key="esc" then
                 launch_account_login_action state ~mailbox:async_messages view (Masc_tui_account_login.key view key)
             | None -> ())
+       | Some key when exact_activity_on_screen () ->
+           (match Masc_tui_types.shown_exact_activity state with
+            | None -> state.exact_activity_open <- None
+            | Some session ->
+              let set session = Masc_tui_types.put_exact_activity state session in
+              (match key with
+               | "esc" | "q" | "Q" -> state.exact_activity_open <- None; state.quit_armed <- false
+               | "?" -> state.help_open <- true; state.help_scroll <- 0
+               | " " | "space" -> if not compact_viewport then set (Masc_tui_exact_activity.toggle session)
+               | "s" | "S" -> if not compact_viewport then launch_exact_activity_save state ~mailbox:async_messages session
+               | "r" -> launch_exact_activity_read state ~mailbox:async_messages (Masc_tui_exact_activity.owner session)
+               | "u" -> if not compact_viewport then set (Masc_tui_exact_activity.reapply session)
+               | "x" -> if not compact_viewport then set (Masc_tui_exact_activity.discard session)
+               | "j" | "down" | "wheel-down" -> state.lane_run_detail_scroll <- Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:1
+               | "k" | "up" | "wheel-up" -> state.lane_run_detail_scroll <- max 0 (state.lane_run_detail_scroll-1)
+               | "pageup" -> state.lane_run_detail_scroll <- max 0 (state.lane_run_detail_scroll - Masc_tui_scroll.page_step ~height:state.lane_run_detail_content_height)
+               | "pagedown" -> state.lane_run_detail_scroll <- Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:(Masc_tui_scroll.page_step ~height:state.lane_run_detail_content_height)
+               | "g" | "home" -> state.lane_run_detail_scroll <- 0
+               | "G" | "end" -> state.lane_run_detail_scroll <- Masc_tui_types.clamped_scroll_end
+               | _ -> ()))
        | Some _ when composer_claimed -> ()
        | Some _ when Option.is_some accepted_unbind_offer ->
            Option.iter handle_connector_unbind_offer_accept accepted_unbind_offer
@@ -21578,6 +21676,11 @@ and is loaded on demand through keeper_skill.
                   (handle_slot_edit state ~mailbox:async_messages)
                   (Masc_tui_types.slot_edit_of_key k)
             | Some _, None -> ())
+       | Some (" " | "space") when state.view=Lanes && state.lanes_mode=Lanes_overview
+           && Option.is_none state.runtime_lane_pick && Option.is_none state.slot_editor ->
+           (match selected_standalone_lane state with
+            | Some lane -> open_exact_activity state ~mailbox:async_messages lane.Tui_decode.sl_lane
+            | None -> show_lanes_action_error state "Select an Exact Lane to change activity.")
        | Some "s"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview

@@ -1,0 +1,39 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/machine-lane-activity-panel.test.ts -t 'retains a known no-write raw refusal'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+
+ ❯ src/components/machine-lane-activity-panel.test.ts (49 tests | 1 failed | 48 skipped) 9ms
+   ❯ Machine activity operator flow (16)
+     × retains a known no-write raw refusal and allows an explicit corrected retry 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > retains a known no-write raw refusal and allows an explicit corrected retry
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:176:43
+    174|     api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlSav…
+    175|     expect(await session.save(authority)).toBe(false)
+    176|     expect(session.state.value.uncertain).toBe(false)
+       |                                           ^
+    177|     expect(session.state.value.draft).toEqual(before.draft)
+    178|     expect(session.state.value.current).toEqual(before.current)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 48 skipped (49)
+   Start at  04:18:16
+   Duration  1.60s (import 40%, transform 34%, environment 13%, setup 12%, tests 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.

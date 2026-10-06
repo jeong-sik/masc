@@ -1,0 +1,247 @@
+{
+  "scope": "Actual inventory source and production decoder/type extracts; namespace aliases only. Not a full Masc/TUI link or native backend run.",
+  "sources": {
+    "standalone_lane.ml": {
+      "source": "lib/runtime/standalone_lane.ml",
+      "sha256": "a9348100abefa1e10a42f0f59d56b3a9a11537c64ac322317f5cfdce6f34d658"
+    },
+    "machine_lane.ml": {
+      "source": "lib/lane_registry/machine_lane.ml",
+      "sha256": "ecf71076228ccb7444d295c276092804484e0575ac8af699c6210d265815067d"
+    },
+    "browser_lane_name.ml": {
+      "source": "lib/browser_lane/browser_lane_name.ml",
+      "sha256": "935d6490b0270ca5948471c7e80a71fbcd4162e89a4e8b0a93161801a7eec663"
+    },
+    "declaration_file.ml": {
+      "source": "lib/lane_registry/declaration_file.ml",
+      "sha256": "8d2cac6376d0ca44385baf94ad475a5465d08d5237005eac281a85b434199782"
+    },
+    "lane_id.ml": {
+      "source": "lib/lane_registry/lane_id.ml",
+      "sha256": "8bb9c1db33254d4ac4ae5901c60183c261721133f6d60cb0a431bfcced933c30"
+    },
+    "json_kind.ml": {
+      "source": "lib/shared_types/json_kind.ml",
+      "sha256": "da7b24b5e91dca844f1cfcc39ab588c0fc0a7fad864b578352e7bd762a6c1fe9"
+    },
+    "json_util.ml": {
+      "source": "lib/core/json_util.ml",
+      "sha256": "09b75b064c41ed6d561942e3dfaa059e021ec0a80738ff1dfe69a538c21feae6"
+    },
+    "tui_decode_fields.ml": {
+      "source": "lib/tui_decode_fields.ml",
+      "sha256": "64b91d9a228b48cefd7f87abccde0c14cb3e721675b85ec99974b05f8195388b"
+    },
+    "tui_decode_lane_inventory.ml": {
+      "source": "lib/tui_decode_lane_inventory.ml",
+      "sha256": "4927b20f18952377dea45442d2ff3d114cac1521141b555ee8dcab2ac26963a7"
+    },
+    "tui_decode_lane_inventory.mli": {
+      "source": "lib/tui_decode_lane_inventory.mli",
+      "sha256": "c0c6c4f11054223f96aaef6f921819abdca77c17d96467d1237a0f7049c612ad"
+    },
+    "masc_tui_lane_inventory.ml": {
+      "source": "bin/masc_tui_lane_inventory.ml",
+      "sha256": "2513fa1f85f0c222c716a5b709015ee9850a79fc201e968c3cbd53570972eed1"
+    },
+    "masc_tui_lane_inventory.mli": {
+      "source": "bin/masc_tui_lane_inventory.mli",
+      "sha256": "fc68c154fca3103abf44054ec32839548a515a2007c52616597c22ef43e8d00d"
+    },
+    "test_tui_lane_inventory.ml": {
+      "source": "test/test_tui_lane_inventory.ml",
+      "sha256": "e94fc8dc108fcf014924230a892e6b930fe9f30f74698b6f89678834425cf8df"
+    },
+    "tui_decode.ml": {
+      "source": "lib/tui_decode.ml",
+      "scope": "production decoder/type and phase blocks extracted by exact source markers",
+      "source_sha256": "df8618b7957e9197c511f5ee05f2368d9bad1897a757df0ccacf03ceb3d603b6",
+      "extracted_sha256": "ca6006d8e3e1cf3420c95990c4c6a3af738133f91e1ec69adde2ccaa16db6971"
+    },
+    "lane_addon_types.ml": {
+      "source": "lib/lane_addon/lane_addon_types.ml",
+      "scope": "production decoder/type and phase blocks extracted by exact source markers",
+      "source_sha256": "3e6cc8c1ba5262c25a2c537e4679500ade3a76768f0233a8ba2f281cf27f33e8",
+      "extracted_sha256": "33124bca7a5d34101aa85cafd8f987b607d05fb041536866e320dd8db0d5a9cf"
+    }
+  },
+  "commands": [
+    [
+      "ocamlc",
+      "-version"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "standalone_lane.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "machine_lane.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "browser_lane_name.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "browser_lane.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "declaration_file.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "lane_id.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "json_kind.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "shared_types.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "json_util.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "tui_decode_fields.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "tui_decode.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "lane_addon_types.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "tui_decode_lane_inventory.mli"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "tui_decode_lane_inventory.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "masc.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "masc_tui_lane_inventory.mli"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "masc_tui_lane_inventory.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-c",
+      "test_tui_lane_inventory.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,ppx_enumerate",
+      "-linkpkg",
+      "standalone_lane.cmo",
+      "machine_lane.cmo",
+      "browser_lane_name.cmo",
+      "browser_lane.cmo",
+      "declaration_file.cmo",
+      "lane_id.cmo",
+      "json_kind.cmo",
+      "shared_types.cmo",
+      "json_util.cmo",
+      "tui_decode_fields.cmo",
+      "tui_decode.cmo",
+      "lane_addon_types.cmo",
+      "tui_decode_lane_inventory.cmo",
+      "masc.cmo",
+      "masc_tui_lane_inventory.cmo",
+      "test_tui_lane_inventory.cmo",
+      "-o",
+      "test.exe"
+    ],
+    [
+      "./test.exe"
+    ]
+  ]
+}

@@ -446,16 +446,19 @@ let test_an_empty_tree_is_one_headline () =
     (draw empty)
 
 let test_an_unknown_phase_is_refused () =
+  (* #41151 restored paused/blocked as suspended phases, so "paused" is no
+     longer unknown: it is refused for its missing resume_phase instead.
+     The fixture needs a phase name no Goal_phase.Kind spells. *)
   let json =
     Yojson.Safe.from_string
-      {|{"tree":[{"id":"goal-x","title":"x","phase":"paused","priority":1,
+      {|{"tree":[{"id":"goal-x","title":"x","phase":"hibernating","priority":1,
           "due_date":null,"task_count":0,"task_done_count":0,
           "stagnation_seconds":null,"tasks":[],"children":[]}]}|}
   in
   match Tui_decode.decode_overview_goals json with
   | Error (Tui_decode.Overview_goal_phase_unknown { goal_id; phase }) ->
       check string "the refused goal" "goal-x" goal_id;
-      check string "the refused phase" "paused" phase
+      check string "the refused phase" "hibernating" phase
   | Error other ->
       failf "refused for another reason: %s"
         (Tui_decode.overview_goals_error_to_string other)

@@ -1,0 +1,24 @@
+{
+  "published_head": "310140627887ac46bd91404528f80242a7c7a7df",
+  "pending_parent": "27db044ee65dda7dbc347c813f05a62351263218",
+  "tested_code_tree": "2571a10aeff63de66b25485df4b8e516f7f44afd",
+  "results": {
+    "red_new_failed": 2,
+    "red_existing_passed": 38,
+    "green": 224,
+    "suites": 4,
+    "tsc": 0,
+    "eslint": 0
+  },
+  "source_sha256": {
+    "dashboard/src/lib/browser-lane-activity-session.ts": "95f110775e6f3e6169eeea4b45c3bcc703de9e6deaf07db30484dfe2a5b8df2c",
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "e1f81069ec084c339c85c7d00b3616112c35149b692f847d605f27dee9443ebb"
+  },
+  "logs_sha256": {
+    "red.log": "68cbeeb20fea7ee6bfcfe16baf2c0845584d0ddf9395b57703393d705b8c7a37",
+    "green.log": "681d443fe362c46382d04595d97d21cdaba40b720e53ed881c23389048263b29",
+    "typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "install.log": "6d6b5d005aa172bd342afae396545045e6b0cc27ed8526f3f72434943a36fecf"
+  }
+}

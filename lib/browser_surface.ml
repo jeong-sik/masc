@@ -34,7 +34,7 @@ let parse_request = function
   | _ -> Error "body must be a JSON object"
 type failure = Unselected of Browser_lane.selection_error | Unobserved of string
 let failure_message = function
-  | Unselected error -> Browser_lane.selection_error_code error
+  | Unselected error -> Browser_lane.selection_error_message error
   | Unobserved detail -> detail
 let unobserved result = Result.map_error (fun detail -> Unobserved detail) result
 let decode_answer ~lane = function
@@ -70,8 +70,9 @@ let selection_json = function
   | Requested _ -> `String "requested" | Active _ -> `String "active" | None_active -> `String "none_active"
 (* One exchange with the resolved browser: a browser that left after it was
    resolved is a selection failure, not an unreadable answer. *)
-let exchange ~target ~verb =
-  match Browser_lane.issue_for ~target ~verb ~timeout_sec:20. with
+let exchange ~admission ~command =
+  let target = Browser_lane.Read_admission.target admission in
+  match Browser_lane.Read_admission.issue admission command ~timeout_sec:20. with
   | Error error -> Error (Unselected error)
   | Ok answer -> decode_answer ~lane:(Browser_lane.target_lane target) answer |> unobserved
 let client_id_json target = match Browser_lane.target_client_id target with
@@ -79,10 +80,11 @@ let client_id_json target = match Browser_lane.target_client_id target with
 let read request =
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.route in
-  let* target = Browser_lane.resolve_target request.route
+  let* admission = Browser_lane.Read_admission.acquire request.route
     |> Result.map_error (fun error -> Unselected error) in
-  let issue verb = exchange ~target ~verb in
-  let* raw_tabs = issue Browser_lane.Tabs_list in
+  let target = Browser_lane.Read_admission.target admission in
+  let issue command = exchange ~admission ~command in
+  let* raw_tabs = issue Browser_lane.Read_admission.Tabs in
   let* tabs = unobserved (match raw_tabs with
     | `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list") in
   (* Without a requested tab and without an active tab no page is read: the
@@ -92,7 +94,7 @@ let read request =
   let* page = match selection with
     | None_active -> Ok `Null
     | Requested tab | Active tab ->
-      let* data = issue (Browser_lane.Page_read {tab_id=Some tab.id;max_chars=Some Browser_page_script.default_text_chars}) in
+      let* data = issue (Browser_lane.Read_admission.Page {tab_id=tab.id;max_chars=Some Browser_page_script.default_text_chars}) in
       (match field "url" data, field "title" data, field "text" data,
              field "chars" data, field "truncated" data with
        | Some (`String url), Some (`String title), Some (`String text),
@@ -119,9 +121,10 @@ let capture request =
     | Some id -> Ok id | None -> Error (Unobserved "tabId is required for a screenshot") in
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.route in
-  let* target = Browser_lane.resolve_target request.route
+  let* admission = Browser_lane.Read_admission.acquire request.route
     |> Result.map_error (fun error -> Unselected error) in
-  let* data = exchange ~target ~verb:(Browser_lane.Page_capture {tab_id}) in
+  let target = Browser_lane.Read_admission.target admission in
+  let* data = exchange ~admission ~command:(Browser_lane.Read_admission.Capture {tab_id}) in
   unobserved @@
   match field "tabId" data, field "url" data, field "title" data,
         field "mimeType" data, field "data" data with

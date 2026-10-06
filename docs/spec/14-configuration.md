@@ -6,6 +6,11 @@ status: reference
 
 > Part of: [SPEC-INDEX](./SPEC-INDEX.md)
 
+For Dashboard editing, draft retention, revision conflicts and workspace changes,
+see [runtime.toml drafts](../guides/runtime-toml-drafts.md).
+For configuration-preserving Exact Lane activity and its Required/Optional
+boundary, see [Exact Lane activity](../guides/exact-lane-activity.md).
+
 ## 1. SSOT and path boundary
 
 Configuration is loaded from the selected `BasePath` and decoded into a typed,

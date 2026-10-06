@@ -1,0 +1,9 @@
+# Browser inventory and TUI comment repair propagation
+
+The reviewed #41185 owner79c591a53dc5b8bfbe85d0931bd01d1ce05dbdb7 and #41187 owner e8bfa9a8c61f9ddfdfc20f1aa508c0e72414a75a were combined owner-first and propagated through13 current ordinary PRs, ending at #41210. Fresh OPEN metadata established actual branch relationships; no #41211 descendant was present in that snapshot. All original author heads and every new parent are ancestors of their prepared commits.
+
+The sole conflict was adjacent native test registrations in #41199. Both the Machine activity/publication serializer regression and the new Browser configuration-snapshot regression remain registered. The associated functions and Machine production projection remain intact. Other merges were clean. Every PR's dashboard source remains byte-identical to its original head; no Web qualification is inferred or rerun.
+
+On composed leaf149e60ea8420f8a7785f17203a02a17f95d65300 the resource-limited wrapper built only test_server_lane_inventory, test_browser_activity, test_browser_lane and test_tui_browser_activity. Each executable ran from test/ with a separately captured exit code:10+15+8+17=50 cases PASS. Command: `DUNE_JOBS=2 opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_server_lane_inventory.exe test/test_browser_activity.exe test/test_browser_lane.exe test/test_tui_browser_activity.exe`. Build83566 and tests68891 both completed0. These are focused native/fixture checks, not full suite, browser automation, provider work, CI, Full RC or TerminalBench.
+
+The #41187 owner evidence's four source, four raw and one binary hash were independently read back before integration. Owner RED evidence remains historical at its named source; this directory adds only final composed execution. Current ten source, six raw and four binary hashes are recorded in checks.json; raw outputs are byte-exact. Publication remains root-owned.

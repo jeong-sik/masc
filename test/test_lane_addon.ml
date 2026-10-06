@@ -498,9 +498,12 @@ let test_human_press_wakes_machine_watchers_once () =
   with_held_second_observation (fun env _sw config dir _state ~entered ~release ->
     let clock = Eio.Stdenv.clock env in
     let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
-    ignore (msx (Msx_lane.load ~ledger_dir:(Filename.concat dir "machine") ~roms_dir:None
-      ~cart_path:None ~disk_path:None));
-    Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+    Fun.protect ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
+      ignore (Msx_lane.eject ())) (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      ignore (msx (Msx_lane.load ~ledger_dir:(Filename.concat dir "machine") ~roms_dir:None
+        ~cart_path:None ~disk_path:None));
       let id = attach_machine_watcher config dir in
       let sequence () = int "observation_seq" (instance config id) in
       await clock (fun () -> sequence () = 1);
@@ -521,7 +524,10 @@ let test_human_load_wakes_machine_watchers_once () =
   with_held_second_observation (fun env _sw config dir _state ~entered ~release ->
     let clock = Eio.Stdenv.clock env in
     ignore (Msx_lane.eject ());
-    Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+    Fun.protect ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
+      ignore (Msx_lane.eject ())) (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       let id = attach_machine_watcher config dir in
       let sequence () = int "observation_seq" (instance config id) in
       await clock (fun () -> sequence () = 1);

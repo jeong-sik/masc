@@ -1,0 +1,26 @@
+{
+  "error": "TimeoutError: locator.selectOption: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('region', { name: 'Package installer', exact: true }).getByLabel('binding.enabled *', { exact: true })\u001b[22m\n",
+  "checks": [
+    "catalog metadata/issues and fresh preview through actual API decoders"
+  ],
+  "reads": [
+    {
+      "path": "/api/v1/lane-addons",
+      "query": "",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons/package-catalog",
+      "query": "",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons/package-preview",
+      "query": "?manifest_path=%2Fworkspace%2Fpackages%2Freport%2Flane.toml",
+      "workspace": "/workspace"
+    }
+  ],
+  "mutations": [],
+  "errors": [],
+  "unexpected": []
+}

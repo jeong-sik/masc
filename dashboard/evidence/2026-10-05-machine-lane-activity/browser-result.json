@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-04T17:13:45.906Z",
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status, inventory decoder and styled rendering with synthetic HTTP. No machine owner, Runtime publication, on/off editor, native TUI or deployment execution.",
+  "checks": [
+    "MSX off retains a stable screen observation",
+    "readout provides policy guidance without an activity toggle",
+    "DOS unobserved activity is separate from its running publication",
+    "missing activity rejects the complete new inventory and labels the retained reading",
+    "explicit refresh recovers current activity without changing the publication",
+    "mobile readout has no page-wide horizontal overflow",
+    "zero writes, page errors and unexpected API routes"
+  ],
+  "reads": 3,
+  "errors": [],
+  "writes": [],
+  "unexpected": []
+}

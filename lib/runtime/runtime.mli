@@ -623,25 +623,30 @@ val verifier_exact_lane_resolution : unit -> (verifier_exact_lane_slots, string)
     registry carries the ids verbatim because only this module holds the
     runtime table that answers admission. *)
 
-val verifier_exact_lane_slot_ids : unit -> (string list, string) result
-(** The slot ids this lane can judge through, catalog first then official
+val verifier_exact_lane_slots : unit -> ((string * Types_core.verifier_slot_kind) list, string) result
+(** Acquire slot ids with their immutable admission kind, catalog first then official
     clients, in declaration order — the single provider-selection SSOT for
     completion-authority judgement calls. [Error] names why the lane cannot
     judge (registry not published, lane unconfigured, or every declared slot
-    rejected); there is no fallback to another route. *)
+    rejected); there is no fallback to another route. New acquisitions remain
+    fenced during publication. The acquired kind survives later activity or
+    declaration changes; it does not freeze the runtime execution binding. *)
 
 val verifier_exact_lane_readiness : unit -> (verifier_slot_rejection list, string) result
 (** Whether the [verifier_exact] lane has a slot that can be dispatched now,
     for a caller that reports authority readiness rather than walking the lane.
     [Ok] carries the declared slots the lane cannot judge through, so a short
     lane says why it is short; [Error] names every rejection. This answers from
-    the same admission as {!verifier_exact_lane_slot_ids}: the two used to
+    the same admission as {!verifier_exact_lane_slots}: the two used to
     apply different predicates to catalog slots, and that disagreement let the
     authority start on a lane that refused every review (#37382). *)
 
-val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
+val verifier_exact_slot_admission : candidate_kind:Types_core.verifier_slot_kind -> runtime_id:string -> (unit, string) result
 (** Validate one configured direct slot. A declared CLI slot retains its
-    execution-kind constraint; a replacing registry cannot grant admission. *)
+    execution-kind constraint, including when the lane is off. New implicit
+    reviews acquire the lane through [verifier_exact_lane_slots] first; this
+    candidate check does not revoke an already acquired review when activity
+    changes. Explicit single-runtime overrides remain independent of lane activity. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the
@@ -658,6 +663,15 @@ val declared_media_failover : unit -> string list
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
     an ordered list of runtime ids validated at load. *)
+
+val browser_configuration : unit -> Browser_configuration.t option
+(** Published Browser configuration. [None] means the runtime configuration
+    is unavailable. Activity follows this snapshot immediately; backend paths
+    are consumed when the server installs its executors. *)
+
+val machine_configuration : unit -> Machine_configuration.t option
+(** Activity from the same atomic published configuration as Runtime. [None]
+    means no valid configuration is currently published. *)
 
 val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
 (** [\[lsp.servers\]] applied over the client's own table: the command that

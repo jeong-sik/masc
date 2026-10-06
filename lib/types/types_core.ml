@@ -1,3 +1,6 @@
+type verifier_slot_kind = Catalog_slot | Cli_slot | Explicit_runtime
+(** A completion review retains this admission kind while its acquired lane runs. *)
+
 (** MASC MCP Types - Domain Model *)
 
 (* Newtypes are in ids.ml *)

@@ -1,5 +1,7 @@
 # TOML로 Lane Add-on 설치하기
 
+Web의 패키지 선택·필드 입력·초안 저장은 [Web 설치 안내](web-lane-addons.md)를 참고한다.
+
 Lane Add-on은 패키지를 파일로 설치·변경·제거하는 경로다. 기존 MSX 머신,
 Browser 세션, Keeper의 실행과 도구를 재사용한다. 패키지 하나가 여러 관측·관계 Lane을
 제공할 수 있다. MCP는 worker와 통신하는 규약이며, 설치 단위의 의미는 패키지가 제공하는

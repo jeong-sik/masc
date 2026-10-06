@@ -40,6 +40,8 @@ def main(executable: str) -> None:
         return 200, {"instances": [], "rows": [], "coverage": [], "configuration": {
             "directory": state["directory"], "complete": True, "issues": [],
             "declarations": [] if doc is None else [{"id": "terminal-layer", "source_path": doc["source_path"],
+                "source_revision": doc["source_revision"],
+                "application": {"kind": "starting" if tomllib.loads(doc["source_text"]).get("enabled", True) else "inactive"},
                 "enabled": tomllib.loads(doc["source_text"]).get("enabled", True), "desired_revision": "desired-1", "applied_revision": None, "instance_id": None}]}}
 
     def declaration(body: bytes) -> tuple[int, dict]:

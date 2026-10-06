@@ -78,7 +78,7 @@ type preset_sink =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int }
+type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.
@@ -112,15 +112,20 @@ type currency_authority_request = {
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
+  | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
+  | Lane_application_loaded of Masc_tui_lane_application.ticket
+      * (Masc_tui_lane_addons.configuration, string) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
-      * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
+      * (Masc_tui_msx_tick.response, string) result
+  | Msx_activity_loaded of msx_poll_request
+      * (Masc_tui_msx_tick.activity * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result, string) result
   | Msx_live_loaded of machine_live_request
       * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   | Dos_live_loaded of machine_live_request
@@ -448,6 +453,12 @@ type async_msg =
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
+  | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result
+  | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
+  | Browser_activity_read of Masc_tui_browser_activity.request * (Masc_tui_browser_activity.document, string) result
+  | Browser_activity_saved of Masc_tui_browser_activity.request * Masc_tui_browser_activity.write_result
+  | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
+  | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
   | Runtime_config_view_loaded of
       int * string option
       * (Masc_tui_runtime_config_view.reading, string) result

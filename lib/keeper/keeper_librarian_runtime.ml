@@ -825,6 +825,8 @@ let with_cli_failure prior_error = function
 ;;
 
 let execute_answer
+      ~selected_slots
+      ~cli_slots
       ~requirement
       ~validate
       ?cli_runner
@@ -836,7 +838,6 @@ let execute_answer
       ()
   =
   let open Result.Syntax in
-  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
   match selected_slots with
   | [] ->
     (* Registry publication rejects a lane with neither transport, and lane
@@ -972,7 +973,9 @@ let execute_exact_output_classified
       ~messages
       ()
   =
-  execute_answer
+  let open Result.Syntax in
+  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  execute_answer ~selected_slots ~cli_slots
     ~requirement:(output_requirement_of_pass (Memory_pass continuity))
     ~validate:(validate_selection ?continuity selected_input)
     ?cli_runner ~clock ~net ~base_path ~keeper_id ~messages ()
@@ -1203,6 +1206,17 @@ let run_best_effort
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
+        (* Admission owns the whole pass, including a JEV NoChange shortcut.
+           Retain its slots across preflight: turning the lane off after this
+           point must not revoke accepted work or make its HTTP/CLI fallback
+           re-acquire from a different publication. *)
+        let acquired = resolve_librarian_slots ~base_path ~keeper_id in
+        (match acquired with
+         | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
+           let detail = "Librarian is off; pending input remains unconsumed" in
+           on_not_committed {detail; walk_shows_size=false};
+           Log.Keeper.info ~keeper_name:keeper_id "%s" detail
+         | Ok _ | Error _ ->
         let registry = Exact_lane_run_registry.global () in
         let run_id = Random_id.prefixed ~prefix:"librarian-exact-" ~bytes:16 in
         let started_at = Time_compat.now () in
@@ -1383,6 +1397,7 @@ let run_best_effort
         (try
            let result =
              let open Result.Syntax in
+             let* selected_slots, cli_slots = acquired in
              let* prompt =
                prompt_material
                |> Result.map (fun material -> material.rendered)
@@ -1405,7 +1420,7 @@ let run_best_effort
                observed_preflight := Some observation;
                let execute_full () =
                  full_lane_entered := true;
-                 execute_answer
+                 execute_answer ~selected_slots ~cli_slots
                    ~requirement:(output_requirement_of_pass pass)
                    ~validate:(validate_answer pass prompt_input)
                    ?cli_runner ~clock ~net ~base_path ~keeper_id
@@ -1819,7 +1834,7 @@ let run_best_effort
                 ; detail = "Librarian raised: " ^ Printexc.to_string exn
                 })
              (failed_output !observed_absorb_gate);
-           raise exn)
+           raise exn))
       (* Missing Eio context is a failed pass like any other: the keeper's
          memory does not advance. It was previously a bare WARN with no record,
          which hid a restart-shaped outage behind the same silence as a healthy

@@ -243,6 +243,7 @@ val run_llm_reviewer_fn
   :  (base_path:string
       -> ?sw:Eio.Switch.t
       -> evaluator_runtime:string
+      -> candidate_kind:Types_core.verifier_slot_kind
       -> prompt:string
       -> ?goal_blocks:Agent_core.Types.content_block list
       -> report_tool_schema:Types_core.tool_schema

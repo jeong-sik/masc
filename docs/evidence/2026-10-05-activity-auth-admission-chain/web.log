@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41204-browser-parser-integration-20261005/dashboard
+
+
+ Test Files  5 passed (5)
+      Tests  259 passed (259)
+   Start at  05:54:04
+   Duration  7.77s (tests 41%, import 26%, transform 15%, environment 9%, setup 8%)
+
+    Isolate  5 workers spawned · ~233ms startup each (spawn + environment, per file)
+             at least ~930ms faster with isolate: false — reuses workers across files instead of one per file
+

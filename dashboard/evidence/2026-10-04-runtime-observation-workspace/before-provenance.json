@@ -1,0 +1,22 @@
+{
+  "source_head": "70a3abb094378f7cf7f28468be3ba5c966ad703d",
+  "checked_at": "2026-10-04T13:49:14.019280+00:00",
+  "files": {
+    "dashboard/src/components/overview/runtime-stats.ts": "5532302358c9db462676a965769a954c5559c6416a8bbf0c3af224233ea59b6d",
+    "dashboard/src/components/tools/config-resolution-panel.ts": "f8c738c211384fd875a92254d0da9fa4b3b05afbdac89d00e51cf8a55522f8f6"
+  },
+  "test_sha256": "7b4a6578c31b9a5f62951873945fb49de6261c4f6aedbc0dfe96db06325f8d3e",
+  "command": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "vitest.config.ts",
+    "--no-file-parallelism",
+    "--maxWorkers=1",
+    "--reporter=verbose",
+    "src/components/runtime-observation-workspace.test.ts"
+  ],
+  "exit_code": 1,
+  "scope": "Parent product with new regression tests. Temporary product replacement restored in finally; API responses mocked."
+}

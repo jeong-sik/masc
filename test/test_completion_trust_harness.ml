@@ -25,7 +25,7 @@ let reviewer_response = ref (Reviewer_verdict (AR.Approve ""))
 let reviewer_calls = ref []
 let submitted_verifications = ref []
 
-let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
+let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
   reviewer_calls := !reviewer_response :: !reviewer_calls;
   match !reviewer_response with
   | Reviewer_verdict verdict -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some verdict}
@@ -445,7 +445,7 @@ let test_rendered_image_reaches_verifier_http_request () =
       Eio.Fiber.fork_daemon ~sw (fun () ->
         Cohttp_eio.Server.run socket server ~on_error:raise);
       let previous = Atomic.get AR.run_llm_reviewer_fn in
-      let http_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_
+      let http_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
           ?goal_blocks ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
           ~on_runtime_attempt_error:_ () =
         match goal_blocks with
@@ -739,8 +739,8 @@ let () =
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
   (* RFC-0361 D7(a): completion review resolves only the verifier_exact lane. *)
   Atomic.set
-    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
-    (fun () -> Ok [ "test-evaluator-runtime" ]);
+    Workspace_hooks.get_verifier_exact_lane_slots_fn
+    (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-evaluator-runtime" ]));
   Atomic.set AR.run_llm_reviewer_fn reviewer;
   run "Completion_trust_harness"
     [ ( "completion_trust_dispatch_oracle"

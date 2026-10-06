@@ -1,0 +1,416 @@
+{
+  "checked_at": "2026-10-04T14:49:35.671191+00:00",
+  "passed": true,
+  "source_root": "/Users/dancer/me/workspace/yousleepwhen/masc-browser-lane-activity-20261004",
+  "base": "ebe561e53aaa922b10c0041db785b6bc66d3bcba",
+  "scope": "Browser parser and actual admission leaf sources compiled/linked/executed; injected activity/executors. No full Runtime publication, server startup, real browser sessions, TUI, CI or deployment. No stub product modules.",
+  "scratch": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-activity-audit-gwbhnlzv",
+  "sources": {
+    "lib/browser_lane/browser_action.ml": "580d65c052bc9499147adf1b4630d5ad391bc9869b9111fcc41772722776f7cd",
+    "lib/browser_lane/browser_action.mli": "ea68d58e1e901cd3c0d3378d0710e33bc15f23edf56f4c3543bd9c8b8633095b",
+    "lib/browser_lane/browser_document.ml": "9c0c310a42c7c67677cbff33b9fe74a3ffcf9bada12a19cc2db94921d322c36a",
+    "lib/browser_lane/browser_lane.ml": "efa22910357b29fe420b7f449a97f52e3346f1a6640350687f85f70b07ca8be9",
+    "lib/browser_lane/browser_lane_name.ml": "935d6490b0270ca5948471c7e80a71fbcd4162e89a4e8b0a93161801a7eec663",
+    "lib/browser_lane/browser_lane_name.mli": "60f38997fd1fe90cd05795f7365026657d34567235326a7179e2c9f26f068896",
+    "lib/browser_lane/browser_pointer.ml": "8f6d885f593f4257e7d315c1cf233ea4caa31ccae610d16395be814735f6f692",
+    "lib/browser_lane/browser_pointer.mli": "2ff8a186637f374397027a6d19ff0f09caf3dc1450f548d8f00ecc46121c6104",
+    "lib/browser_lane/browser_upload_lease.ml": "7837839577a87e2335f6f1d8424bd2683b059f5547f61d739f3f8fc57752763b",
+    "lib/browser_lane/browser_upload_lease.mli": "32f7533840e876d38cd7f6834f1e078ef2798c92bb8e7e4abcf7e16620c1daf1",
+    "lib/browser_configuration/browser_configuration.ml": "4c971d4ec539fb8ec66ae0fce46c70bd3fa489d348b8508e637a2ae29e6450cd",
+    "lib/browser_configuration/browser_configuration.mli": "42ae69ddce5e692f6808c38bebd9fe34f9035cca92faf5d0bb8e47c0a606add5",
+    "lib/runtime_toml_namespace/runtime_toml_namespace.ml": "f29dc9604363581834bcbf526577d0f47daf99fbcecc506760dbfa3dd50b7d5a",
+    "lib/runtime_toml_namespace/runtime_toml_namespace.mli": "b242f7233792640ef9157798eea883e7e5b8e40db2e377f6b9bd8f28afff7cf4",
+    "lib/time_compat/time_compat.ml": "302ce315d41cf190079307b4214383e5a73d0dec449a4ad1a4a276bec01ac0be",
+    "lib/time_compat/time_compat.mli": "ba98e154ef933fcaef1e9572826e865715f27e96f5f9df848eab162a478d7689",
+    "lib/monotonic_deadline/monotonic_deadline.ml": "aec5d95aea6edcf00c87778c1194744cfe15b1db976676a88c53a08eb64f096e",
+    "lib/monotonic_deadline/monotonic_deadline.mli": "8ec92665cbb0dcec99a8485bc23afb8fb6faefc3aa73423572e2382f0d6b9df8",
+    "lib/watched_work/watched_work.ml": "95e183d96012424eb9e596d958e788e7af0c6a5af4d174ea551376e315a1975e",
+    "lib/watched_work/watched_work.mli": "d1708d4fccd67e1417ee586c4e4cf0316b4a2220374bc3f5de9dac88f9da0837",
+    "test/test_browser_activity.ml": "7eba453f35a6e54370bc7678722d8ecb3a12d1544ebfcbb298d8e8a2bc8b1d4d"
+  },
+  "commands": [
+    {
+      "command": [
+        "ocamlc",
+        "-version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamldep",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-sort",
+        "browser_action.ml",
+        "browser_action.mli",
+        "browser_configuration.ml",
+        "browser_configuration.mli",
+        "browser_document.ml",
+        "browser_lane.ml",
+        "browser_lane_name.ml",
+        "browser_lane_name.mli",
+        "browser_pointer.ml",
+        "browser_pointer.mli",
+        "browser_upload_lease.ml",
+        "browser_upload_lease.mli",
+        "monotonic_deadline.ml",
+        "monotonic_deadline.mli",
+        "runtime_toml_namespace.ml",
+        "runtime_toml_namespace.mli",
+        "test_browser_activity.ml",
+        "time_compat.ml",
+        "time_compat.mli",
+        "watched_work.ml",
+        "watched_work.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_action.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_configuration.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_document.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_lane_name.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_pointer.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_upload_lease.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "monotonic_deadline.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "runtime_toml_namespace.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "time_compat.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "watched_work.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "watched_work.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "time_compat.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "runtime_toml_namespace.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "monotonic_deadline.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_upload_lease.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_pointer.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_lane_name.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_configuration.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_action.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "browser_lane.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-c",
+        "test_browser_activity.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "alcotest,eio,eio_main,yojson,uuidm,unix,mtime.clock.os,mcp_protocol.eio,otoml,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq",
+        "-linkpkg",
+        "browser_document.cmo",
+        "watched_work.cmo",
+        "time_compat.cmo",
+        "runtime_toml_namespace.cmo",
+        "monotonic_deadline.cmo",
+        "browser_upload_lease.cmo",
+        "browser_pointer.cmo",
+        "browser_lane_name.cmo",
+        "browser_configuration.cmo",
+        "browser_action.cmo",
+        "browser_lane.cmo",
+        "test_browser_activity.cmo",
+        "-o",
+        "test.exe"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "./test.exe"
+      ],
+      "exit_code": 0
+    }
+  ]
+}

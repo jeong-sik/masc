@@ -135,4 +135,6 @@ Models pane 이 착지시킨 방식(#41213, `Masc_tui_model_runtime_table.stacke
   새로 생기면 이 테스트가 먼저 빨간다.
 - 경계: `test_floor_is_where_the_drops_stop`(test_tui_table.ml) — 바닥에서 `fit` 의
   유지 집합이 정확히 필수 행임을, 위아래 한 칸씩 못박는다.
-- 실기: 70칸 PTY 에서 TUI 가 뜨고 프레임을 그리는 영수증(이 RFC 의 첫 PR 본문).
+- 실기: `test_tui_narrow70_pty.py`(test/) — 70칸 PTY 에서 Dashboard·Keepers·Board 를
+  그리고 그려진 모든 행이 pane 셀 폭 안에 드는지 단정하는 영수증 시나리오. dune
+  `runtest-test_tui_narrow70_pty` 로 돈다.

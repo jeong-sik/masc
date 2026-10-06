@@ -3838,6 +3838,7 @@
   (setenv MASC_TUI_FRAME_TIMING ""
    (run %{test}))))
 
+(include stanzas/test_tui_narrow70_pty.inc)
 (include stanzas/test_tui_present_timing_pty.inc)
 (include stanzas/test_tui_region_baseline_pty.inc)
 

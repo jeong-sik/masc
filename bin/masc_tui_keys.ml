@@ -71,21 +71,6 @@ let config_bindings =
        80 cells, the only other thing the pane does. A reader left with
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
-  ; b Act "S" "save draft"
-      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
-      Some [ Config_runtime ]
-  ; b Act "C" "compare file"
-      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
-      Some [ Config_runtime ]
-  ; b Act "u" "adopt revision"
-      ~help:"runtime.toml: keep the draft and adopt the displayed current file revision; S saves",
-      Some [ Config_runtime ]
-  ; b Act "U" "use current text"
-      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
-      Some [ Config_runtime ]
-  ; b Act "X" "discard draft"
-      ~help:"runtime.toml: discard only the local draft and read the current file",
-      Some [ Config_runtime ]
   ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
   ; b Act "m" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
@@ -112,9 +97,6 @@ let config_bindings =
   ; b Act "n" "new"
       ~help:"on presets, name a preset holding the configuration as it stands",
       Some [ Config_presets ]
-  ; b Act "u" "restore"
-      ~help:"on presets, put the selected one back; press twice to confirm",
-      Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
   ; b Act "a" "fragments / voice / account"
@@ -124,6 +106,26 @@ let config_bindings =
              declare one more Claude Code, Codex or Antigravity account by \
              copying a provider the file declares",
       Some [ Config_runtime; Config_prompts; Config_voice ]
+    (* [u] and the retained-draft keys come after [a]: a cut row drops them
+       first, and while a draft is retained the runtime.toml pane names them
+       in its own heading. *)
+  ; b Act "u" "restore / adopt revision"
+      ~help:"on presets, put the selected one back; press twice to confirm; \
+             on runtime.toml, keep the draft and adopt the displayed current \
+             file revision; S saves",
+      Some [ Config_presets; Config_runtime ]
+  ; b Act "S" "save draft"
+      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
+      Some [ Config_runtime ]
+  ; b Act "C" "compare file"
+      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
+      Some [ Config_runtime ]
+  ; b Act "U" "use current text"
+      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
+      Some [ Config_runtime ]
+  ; b Act "X" "discard draft"
+      ~help:"runtime.toml: discard only the local draft and read the current file",
+      Some [ Config_runtime ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",

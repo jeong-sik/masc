@@ -6043,7 +6043,14 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
        launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
    | Schedules -> launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
    | Verification -> launch_verification_load state ~mailbox
-   | Planning -> launch_verification_load state ~mailbox
+   | Planning ->
+       (* Work opens on its Goals. The task list is a focus taken with [t],
+          or by a jump to one task, which sets it after this returns.
+          Inheriting it made every later Tab into Work show only Tasks. *)
+       state.task_detail_id <- None;
+       state.task_detail_scroll <- 0;
+       state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+       launch_verification_load state ~mailbox
    | Harness -> launch_harness_load state ~mailbox
    | Fusion ->
        launch_fusion_runs_load state ~mailbox;

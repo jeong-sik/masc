@@ -17,7 +17,6 @@ module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
 module Message_layout = Masc_tui_message_layout
 module Tool_detail = Masc_tui_tool_detail
-module Lane_table = Masc_tui_lane_table
 module Retained_view = Masc_tui_retained_view
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
@@ -3083,113 +3082,6 @@ let render_keeper_list (state : state) =
   finish_surface state ~clamped:(Keeper_list_scroll scroll_offset)
     ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
 
-(* Through the semantic names, not the colour names. A raw [Ansi.red] is the
-   terminal's red whatever the page behind it is; [Theme.bad ()] is the same
-   reading lifted until it clears the readable floor on the scheme in force.
-   These four are states, so they are what the rule is about. *)
-let standalone_lane_status_style = function
-  | Tui_decode.Standalone_running -> (Theme.warn ())
-  | Tui_decode.Standalone_idle -> (Theme.ok ())
-  | Tui_decode.Standalone_degraded
-  | Tui_decode.Standalone_unavailable -> (Theme.bad ())
-  | Tui_decode.Standalone_no_retained_observation -> (Theme.muted ())
-
-(* The cell itself is [Lane_table.slots_text], beside the widths it sets.
-   CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a cli
-   suffix declared, an empty catalog list is a shape, not a failure. *)
-let standalone_lane_slots_text (lane : Tui_decode.standalone_lane) =
-  Lane_table.slots_text ~admitted:lane.sl_admitted_slots
-    ~cli:lane.sl_cli_slots ~dropped:lane.sl_dropped_slots
-    ~admission_failed:(Option.is_some lane.sl_admission_error)
-
-(* What one lane contributes to the table's measurement. Fit for a terminal
-   line here, once, so the width a column is measured at is the width the row
-   draws. *)
-let standalone_lane_reading (lane : Tui_decode.standalone_lane) =
-  { Lane_table.label = Terminal_text.single_line lane.sl_label
-  ; slots = Terminal_text.single_line (standalone_lane_slots_text lane)
-  }
-
-let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
-    (lane : Tui_decode.standalone_lane) =
-  let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
-  (* A lane that is running says so twice and neither says for how long: the
-     word "running", and a count of how many. The server has sent the start
-     of the newest run all along and the decoder threw it away under an
-     underscore, so the one fact an operator weighs -- is this a lane doing
-     work or a lane stuck -- was decoded and dropped one layer from the
-     screen.
-
-     Same treatment as a keeper mid-turn: the mark moves while it runs, and
-     the word carries the elapsed. A lane with no start recorded keeps the
-     still mark rather than inventing an age. *)
-  let mark, status =
-    match lane.sl_status, lane.sl_last_started_at with
-    | Tui_decode.Standalone_running, Some started_at ->
-      ( Masc_tui_answering.running_glyph ~frame
-      , status ^ " " ^ Masc_tui_answering.elapsed_text ~now started_at )
-    (* One mark per colour class, so a reader who cannot tell the colours
-       apart gets the split the colours make. Four states shared a single
-       [\xe2\x97\x8f] while the style beside them was green, red or grey: on
-       a column of identical marks, the lane failing 133 of 1095 runs looked
-       exactly like the four that were fine.
-
-       This says what the style says and no more -- the mapping is the same
-       three-way split, not a second opinion about severity. *)
-    | (Tui_decode.Standalone_idle | Tui_decode.Standalone_running), _ ->
-      ("\xe2\x97\x8f", status)
-    | ( (Tui_decode.Standalone_degraded | Tui_decode.Standalone_unavailable)
-      , _ ) ->
-      ("\xe2\x9c\x97", status)
-    | Tui_decode.Standalone_no_retained_observation, _ -> ("\xc2\xb7", status)
-  in
-  let slots = standalone_lane_slots_text lane in
-  let observed_slots =
-    match lane.sl_selected_slots with
-    | [] -> "none"
-    | slots ->
-        slots
-        |> List.map (fun slot ->
-          Printf.sprintf "%s×%d" slot.slsc_slot_id slot.slsc_count)
-        |> String.concat ","
-  in
-  let p50 =
-    match lane.sl_p50_elapsed_s with
-    | None -> Masc_tui_theme.Glyph.no_value
-    | Some seconds -> (
-        match Message_layout.elapsed_text seconds with
-        | Some text -> text
-        | None -> Masc_tui_theme.Glyph.no_value)
-  in
-  let prefix = standalone_lane_status_style lane.sl_status in
-  let line =
-    Printf.sprintf "  %s%s %s  %s%s  %s  %s  %s  %s%s"
-      prefix mark
-      (fit_width (Terminal_text.single_line lane.sl_label) columns.label_cells)
-      (fit_width status Lane_table.status_cells)
-      Ansi.reset
-      (Lane_table.pad_left
-         (string_of_int lane.sl_running_count)
-         Lane_table.active_cells)
-      (Lane_table.pad_left
-         (string_of_int lane.sl_retained_run_count)
-         Lane_table.runs_cells)
-      (fit_width
-         (Printf.sprintf "%d/%d/%d" lane.sl_succeeded_count lane.sl_failed_count
-            lane.sl_cancelled_count)
-         Lane_table.ok_fail_cancel_cells)
-      (fit_width p50 Lane_table.p50_cells)
-      (Lane_table.tail columns
-         ~slots:(Terminal_text.single_line slots)
-         ~observed:(Terminal_text.single_line observed_slots))
-  in
-  fit_width line width
-
-(* The row is deliberately dense for comparison, but it cannot also carry
-   full slot ids, the consumer contract, and the fallback rule without
-   clipping. Keep those facts in a wrapped selected-row block underneath the
-   four-row matrix. The order is the execution contract: admitted catalog
-   slots first, official-client runtimes only after catalog exhaustion. *)
 (* A refusal is bad news about the key pressed; a pending write is a warning
    about what the screen shows, as is a list that may be stale
    ([Masc_tui_types.runtime_lane_stale_lines], drawn in warn). *)
@@ -3276,6 +3168,13 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
            "JEV CONFIGURED \xc2\xb7 %s"
            (Terminal_text.single_line (String.concat ", " (List.map named destinations))))
   in
+  let activity =
+    let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
+    match lane.sl_status, lane.sl_last_started_at with
+    | Tui_decode.Standalone_running, Some started ->
+        Printf.sprintf "Activity: %d running · latest started %s ago"
+          lane.sl_running_count (Masc_tui_answering.elapsed_text ~now started)
+    | _ -> "Activity: " ^ status in
   let run_stats =
     let total = lane.sl_retained_run_count in
     if total > 0 then
@@ -3283,11 +3182,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
       in
       let p50_str =
-        (* The P50 column above draws the same [sl_p50_elapsed_s] through
-           the same ladder. The two used to differ -- "8.0s" in the row,
-           "8.00s" here -- which left the reader deciding whether they were
-           one figure. A reading the ladder has no spelling for leaves the
-           clause out, as a missing one does. *)
+        (* Use the shared elapsed-time formatting for this observation. *)
         match lane.sl_p50_elapsed_s with
         | Some s -> (
             match Message_layout.elapsed_text s with
@@ -3333,6 +3228,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
          (Standalone_lane.to_id lane.sl_lane))
   @ jev_lines
+  @ wrap Ansi.reset activity
   @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
       run_stats
   @ slot_distribution
@@ -3621,12 +3517,8 @@ let render_lanes_overview (state : state) =
           string_of_int (List.length snapshot.rss_resolved.rrs_runtimes))
         state.runtime_surface
     in
-    let standalone_count =
-      match state.standalone_lanes with
-      | Some snapshot -> List.length snapshot.sls_lanes
-      | None -> 0
-    in
-    match state.standalone_lanes with
+    let lane_count = lanes_inventory_count state in
+    match state.lane_inventory with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
           (screen_title " MASC Lanes") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
@@ -3640,7 +3532,7 @@ let render_lanes_overview (state : state) =
                   ~before:(screen_title " MASC Lanes" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
              ~press:pressable
-             [ ( tab_entry_label "Runtime lanes" lane_reading
+             [ ( tab_entry_label "Candidate orders" lane_reading
                , false
                , Press_runtime_mode Masc_tui_types.Runtime_lanes )
              ; ( tab_entry_label "All runtimes" all_reading
@@ -3648,7 +3540,7 @@ let render_lanes_overview (state : state) =
                , Press_runtime_mode Masc_tui_types.Runtime_all )
              ; ( tab_entry_label "Lanes"
                    (Some
-                      (Masc_tui_message_layout.count_noun standalone_count "lane"))
+                      (Masc_tui_message_layout.count_noun lane_count "lane"))
                , true
                , Press_standalone_lanes )
              ])
@@ -3657,113 +3549,58 @@ let render_lanes_overview (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  (* The two key hints this heading carried -- "o / A:Lane Add-ons" and
-     "a:append slot" -- were the key table's own words, byte for byte
-     ([b Navigate "o / A" "Lane Add-ons"] and [b Act "a" "append slot"] in
-     masc_tui_keys.ml), so the footer and the [?] sheet were already saying
-     them. They cost 32 cells of a row whose own fact is when the standalone
-     snapshot was read, and the frame cuts from the tail: at 80 columns the
-     row read "observed 16:4", at 72 "obser", and at 66 the fact was gone
-     while both copies stood. What the footer may drop and the sheet still
-     answers does not get to push a reading off the row that carries it. *)
-  let standalone_heading =
-    match state.standalone_lanes with
-    | None -> "  Lanes"
+  let observed_heading = match state.lane_inventory with
+    | None -> "  All lanes"
     | Some snapshot ->
-        let observed = Unix.localtime snapshot.sls_observed_at_unix in
-        Printf.sprintf
-          "  Lanes · observed %02d:%02d:%02d"
-          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
-  in
-  box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
-  (* The standalone rows are drawn directly rather than through a row list
-     because the selection band has to land on a lane row, not on the
-     windowed/stale notes that follow them. *)
-  (* Declarations can remain when image inspection or reconciliation failed.
-     Their count is not the count of workers the operator can use. *)
+        let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
+        Printf.sprintf "  All lanes · observed %02d:%02d:%02d"
+          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec in
+  box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) observed_heading;
+  List.iter (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
+    (Masc_tui_types.lane_inventory_notice_lines ~cols state);
+  let inventory = lane_inventory_rows state in
+  let layout = Masc_tui_types.lanes_scrolled ~cols state in
+  let height = Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row in
+  let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll
+    |> Masc_tui_scroll.ensure_visible ~cursor:state.lanes_cursor ~height in
+  let summary row = Terminal_text.single_line (match state.lane_inventory with
+    | Some snapshot -> Masc_tui_lane_inventory.row_summary_in snapshot row
+    | None -> Masc_tui_lane_inventory.row_summary row) in
+  let status_width = List.fold_left (fun width row -> max width
+      (Message_layout.display_width (summary row))) (String.length "STATE") inventory
+    |> min (max 1 (inner / 2)) in
+  let label_width = max 1 (inner - status_width - 2) in
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  Lane Add-ons: "
-    ^
-    let view =
-      Option.value ~default:state.lane_addons_cached state.lane_addons
-    in
-    match Masc_tui_lane_addons.installation_reading view with
-    | Masc_tui_lane_addons.Not_read ->
-        (* Behind "Lane Add-ons:", which is the label this pair of words
-           would otherwise repeat in brackets. *)
-        field_missing_reading
-          ~error:view.Masc_tui_lane_addons.snapshot_read_error
-    | Masc_tui_lane_addons.Observed reading ->
-        let base =
-          Printf.sprintf "%d declared · %d active"
-            reading.declared reading.active in
-        let issues =
-          (if reading.configuration_issues = 0 then ""
-           else Printf.sprintf " · %d config issues" reading.configuration_issues)
-          ^ (if reading.failed_workers = 0 then ""
-             else Printf.sprintf " · %d failed workers" reading.failed_workers) in
-        (match reading.freshness with
-         | Masc_tui_lane_addons.Current -> ""
-         | Masc_tui_lane_addons.Stale _ -> "STALE · ")
-        ^ base ^ issues
-        ^ (if reading.complete then "" else " · inventory partial"));
-  (match state.standalone_lanes with
-   | Some snapshot ->
-       let columns =
-         Lane_table.columns ~inner
-           (List.map standalone_lane_reading snapshot.Tui_decode.sls_lanes)
-       in
-       if snapshot.sls_lanes <> [] then
-         box_line_styled buf cols ~style:(Theme.recede ())
-           (Lane_table.header columns inner);
-       List.iteri
-         (fun index (lane : Tui_decode.standalone_lane) ->
-           let row =
-             standalone_lane_row ~now:(Unix.gettimeofday ())
-               ~frame:state.activity_frame ~columns inner lane
-           in
-           if
-             index = state.lanes_standalone_cursor
-           then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
-           else box_line buf cols row)
-         snapshot.Tui_decode.sls_lanes;
-       if snapshot.sls_lanes = [] then
-         box_line_styled buf cols ~style:(Theme.recede ())
-           "  (no lane observations)";
-       if snapshot.sls_exact_run_projection_truncated then
-         box_line buf cols
-           (Printf.sprintf
-              "%s  WINDOWED · exact runs %d/%d; counts and p50 use newest bounded window%s"
-              (Theme.warn ()) snapshot.sls_exact_run_projection_count
-              snapshot.sls_exact_run_source_total Ansi.reset);
-       (match state.standalone_lanes_error with
-        | None -> ()
-        | Some detail ->
-            box_line buf cols
-              ((Theme.warn ()) ^ "  STALE · "
-               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset))
-   | None ->
-       box_line buf cols
-         (match state.standalone_lanes_error with
-          | None -> Ansi.dim ^ "  loading lane observations…" ^ Ansi.reset
-          | Some detail ->
-              (* The lane-read boundary already names the subject and verdict --
-                 "lanes load failed: <reason>" -- so the sentence
-                 that stood here said "standalone lane" a second time and
-                 put an unavailable verdict beside the read error's own, and
-                 pushed the reason
-                 twenty-two cells right, past the pane edge. Fourteen other
-                 surfaces draw the loader's message and nothing in front of
-                 it; the one row that does add words, "lane write refused",
-                 names an action the message does not. *)
-              (Theme.bad ()) ^ "  "
-              ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
-  (* Use only the body's remaining rows. At small terminal heights the matrix
-     stays complete and the detail truncates explicitly; at ordinary heights
-     the wrapped block shows every slot id without the row's [fit_width]. *)
-  (match selected_standalone_lane state with
+    (fit_width "LANE" label_width ^ "  " ^ fit_width "STATE" status_width);
+  let window = Rows.of_list ~first:scroll ~height inventory in
+  for offset = 0 to height - 1 do
+    let index = scroll + offset in
+    match Rows.at window index with
+    | None when offset = 0 && Option.is_none state.lane_inventory ->
+        box_line_styled buf cols ~style:(Theme.recede ())
+          (if Option.is_some state.standalone_lanes_error then "  r: retry inventory"
+           else "  reading all lanes…")
+    | None -> box_empty buf cols
+    | Some row ->
+        let label = Masc_tui_lane_inventory.family_label row.selection ^ " · " ^ row.label
+          |> Terminal_text.single_line in
+        let text = fit_width label label_width ^ "  " ^ fit_width (summary row) status_width in
+        (* The final frame owns click geometry, including narrow terminals and
+           scrolling. A retained mark names an identity, never a former index. *)
+        let marked = pressable (Press_lane_row row.id) (fit_width text inner) in
+        if index = state.lanes_cursor then box_line_selected buf cols marked
+        else box_line buf cols marked
+  done;
+  (match Masc_tui_scroll.position_row ~scroll ~height (List.length inventory) with
    | None -> ()
-   | Some lane ->
+   | Some text -> box_line_styled buf cols ~style:(Theme.recede ()) text);
+  (* The selected row gets the remaining preview space; the list scrolls
+     independently and Enter opens the full existing management surface. *)
+  (match selected_inventory_lane state with
+   | None -> ()
+   | Some inventory_row ->
        let action_error_rows =
          (match state.lanes_action_error with
           | None -> 0
@@ -3789,9 +3626,13 @@ let render_lanes_overview (state : state) =
        in
        if available > 0 then begin
          box_divider buf cols;
-         let detail =
-           standalone_lane_detail_lines ~now:(Unix.gettimeofday ())
-             ~width:inner lane
+         let detail = match selected_standalone_lane state with
+           | Some lane -> standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width:inner lane
+           | None -> Masc_tui_lane_inventory.detail_lines inventory_row
+               |> List.concat_map (fun line ->
+                    Terminal_text.single_line line
+                    |> Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+                    |> List.map (fun line -> Theme.recede (), "  " ^ line))
          in
          let shown = take_rows available [] detail in
          let shown =
@@ -3800,7 +3641,7 @@ let render_lanes_overview (state : state) =
              match List.rev shown with
              | [] -> []
              | _ :: rest ->
-               List.rev ((Theme.warn (), "  … more; enlarge the terminal") :: rest)
+               List.rev ((Theme.warn (), "  … d: full reading") :: rest)
          in
          List.iter
            (fun (style, line) -> box_line_styled buf cols ~style line)
@@ -4705,7 +4546,7 @@ let render_lane_run_detail (state : state) ~run_id =
   let buf = Buffer.create 8192 in
   let measurement = match state.lanes_mode with
     | Lanes_measurement_detail _ -> true
-    | Lanes_overview | Lanes_run_list _ | Lanes_run_detail _ -> false in
+    | Lanes_overview | Lanes_run_list _ | Lanes_run_detail _ | Lanes_inventory_detail _ -> false in
   let detail =
     if measurement then Option.map (fun report -> Inspection_measurement (run_id, report)) state.measurement_report
     else match state.lane_run_detail with
@@ -5074,9 +4915,57 @@ let render_clients (state : state) =
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;
 
+let render_lane_inventory_detail (state : state) target =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let content = match state.lane_inventory with
+    | None -> ["Lane inventory has not been read. r: refresh"]
+    | Some snapshot ->
+        (match target with
+         | None -> "Inventory diagnostics" :: (match Masc_tui_lane_inventory.snapshot_notices snapshot with
+             | [] -> ["No inventory read issues observed."]
+             | notices -> notices)
+         | Some id ->
+             (match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) -> String.equal row.id id) snapshot.rows with
+              | None -> ["This Lane is absent from the current reading. Esc returns to the inventory."]
+              | Some row ->
+                  (match row.Masc.Tui_decode_lane_inventory.selection with
+                   | Exact lane ->
+                       (match List.find_opt (fun (item : Tui_decode.standalone_lane) ->
+                            Standalone_lane.equal item.sl_lane lane) snapshot.exact_snapshot.sls_lanes with
+                        | Some item -> standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width item
+                            |> List.map (fun (_,line) -> Masc_tui_theme.strip_sgr line)
+                        | None -> Masc_tui_lane_inventory.detail_lines row)
+                   | Browser _ | Machine _ | Declaration _ | Manual_instance _ ->
+                       Masc_tui_lane_inventory.detail_lines row))) in
+  let content = (match state.standalone_lanes_error with
+    | None -> [] | Some detail -> ["STALE · " ^ detail]) @ content in
+  let lines = content |> List.concat_map (fun text -> Terminal_text.single_line text
+    |> Message_layout.wrap_words ~max_cells:width) in
+  let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.lane_run_detail_scroll in
+  let window = Rows.of_list ~first:scroll ~height lines in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Lane reading" ^ "  " ^ connection_badge state);
+  box_divider buf cols;
+  for offset = 0 to height - 1 do
+    match Rows.at window (scroll + offset) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols ("  " ^ line)
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length lines))
+    ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  r:refresh  Esc/Left:inventory");
+  finish_surface state ~clamped:(Lane_run_detail_scroll {scroll;content_height=height})
+    ~surface_key:"lane-inventory-detail" ~rows:terminal_rows ~cols buf
+
 let render_lanes (state : state) =
   match state.lanes_mode with
   | Lanes_overview -> render_lanes_overview state
+  | Lanes_inventory_detail target -> render_lane_inventory_detail state target
   | Lanes_run_list lane -> render_lane_run_list state ~lane
   | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
   | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
@@ -9820,7 +9709,7 @@ let render_runtime (state : state) =
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
              ~press:pressable
-             [ ( tab_entry_label "Runtime lanes"
+             [ ( tab_entry_label "Candidate orders"
                    (Some
                       (Printf.sprintf "%s, %s"
                          (Masc_tui_message_layout.count_noun lane_count "lane")

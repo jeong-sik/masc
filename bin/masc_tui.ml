@@ -2597,7 +2597,20 @@ let launch_voice_config_load state ~mailbox =
          , None ))
 ;;
 
+let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
+  let request = { live_view = !msx_poll_view; live_port = state.port } in
+  state.msx_live_in_flight <- Some request;
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Msx_live_loaded (request, result))
+    (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
+      ~port:request.live_port Masc.Machine_lane.Msx ~since:None)
+;;
+
 let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
+  match state.msx_live, state.msx_live_in_flight with
+  | _, Some _ | Masc_tui_machine_live.Unread, None -> ()
+  | Failed _, None -> launch_msx_live_read state ~mailbox
+  | (Not_loaded | Showing _), None ->
   match !msx_pending_poll with
   | Poll_pending _ | Poll_failed -> ()
   | Poll_idle ->
@@ -2621,6 +2634,7 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
        | exn -> enqueue_async mailbox
            (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
 ;;
+
 
 let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
   let current_view = !msx_poll_view in
@@ -3988,12 +4002,23 @@ let launch_lane_package_preview state ~mailbox path =
       (fun () -> Masc_tui_http.get_json ~host ~port
         ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)))
 
+let lane_draft_directory (view : Masc_tui_lane_addons.t) =
+  Option.bind view.snapshot (fun snapshot ->
+    Option.map (fun (config : Masc_tui_lane_addons.configuration) -> config.directory)
+      snapshot.configuration)
+
 let launch_lane_declaration state ~mailbox ~edit request =
   let module Document = Masc_tui_lane_declaration in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  let create_directory = lane_draft_directory view in
   if view.loading then
     map_lane_addons state (fun view -> {view with error=lane_addons_input_failure "A request is pending; drafts remain editable"})
-  else (
+  else match (match request with
+    | Document.Read path -> Result.map (fun _ -> ()) (Document.find_for_path ?create_directory ~path view.documents)
+    | Document.Save _ -> Ok ()) with
+  | Error detail -> state.lane_addons <- Some {view with document_key=None;
+      editor_ready=false; scroll=0; error=lane_addons_input_failure detail}
+  | Ok () -> (
     state.lane_addons_generation <- state.lane_addons_generation + 1;
     let generation = state.lane_addons_generation in
     let document_key = Some (match request with Document.Read path -> Filename.basename path | Document.Save session -> session.file_name) in
@@ -4009,7 +4034,7 @@ let launch_lane_declaration state ~mailbox ~edit request =
             ~body:(Yojson.Safe.to_string (Document.write_json session)) in
       Document.decode_response request ~status ~body in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, result))
+      ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, create_directory, result))
       perform)
 
 let launch_lane_subscriptions state ~mailbox request =
@@ -4078,7 +4103,21 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
     match request with
     | Addons.Inspect ->
         let* snapshot = inventory_result (inspect ()) in
-        Ok (reply ~snapshot ~inventory_read:`Read ())
+        let retained = Option.bind initial_detail (fun (id, incarnation) ->
+          List.find_opt (fun (item : Addons.instance) ->
+            item.id = id && item.incarnation = incarnation
+            && item.runtime_presence = Addons.Retained_binding) snapshot.instances) in
+        (match retained with
+         | None -> Ok (reply ~snapshot ~inventory_read:`Read ())
+         | Some item ->
+             let history = Result.bind
+               (get_json ~path:("/api/v1/lane-addons/slice?run_id="
+                 ^ Masc_tui_http.percent_encode_query_value item.run_id))
+               (Addons.decode_slice ~snapshot) in
+             (match history with
+              | Ok snapshot -> Ok (reply ~snapshot ~inventory_read:`Read ())
+              | Error detail -> Ok (reply ~snapshot ~inventory_read:`Read
+                  ~diagnostic:(Addons.Detail_read_failure detail) ())))
     | Addons.Subscriptions args ->
         let* json=request_result (post_json
           ~path:"/api/v1/lane-addons/subscriptions"
@@ -4962,9 +5001,9 @@ let launch_lanes_load state ~mailbox =
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Standalone_lanes_loaded (standalone_generation,
+      ~deliver:(fun result -> Lane_inventory_loaded (standalone_generation,
         Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes result))
-      (fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
+      (fun () -> Masc_tui_loader.load_lane_inventory ~host ~port)
   end
 
 (* A re-read that has to happen: a write's read-back, or the operator's [r].
@@ -5204,14 +5243,16 @@ let row_list (state : state) : row_list option =
            let runs = List.length (Option.value state.lane_runs ~default:[]) in
            windowed ~count:runs ~cursor:state.lane_runs_cursor (fun index ->
              state.lane_runs_cursor <- index)
-       | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
+       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
        | Lanes_overview ->
            of_counted (fun count ->
-               windowed ~count ~cursor:state.lanes_standalone_cursor
-                 (fun index ->
-                   if index <> state.lanes_standalone_cursor then
+               scrolling ~count ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
+                 ~set_cursor:(fun index ->
+                   if index <> state.lanes_cursor then
                      Masc_tui_types.dismiss_runtime_lane_notice state;
-                   state.lanes_standalone_cursor <- index)))
+                   state.lanes_action_error <- None;
+                   state.lanes_cursor <- index)
+                 ~set_scroll:(fun scroll -> state.lanes_scroll <- scroll)))
   | Clients ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.clients_surface_cursor
@@ -5509,7 +5550,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
        | None -> None)
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ | Lanes_measurement_detail _ ->
+       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
            pane (fun scroll ->
              Lane_run_detail_scroll
                { scroll; content_height = state.lane_run_detail_content_height })
@@ -7883,6 +7924,28 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
      the read is in flight, and redraw its watch row when it arrives. *)
   launch_dos_live_poll state ~mailbox
 
+(* An inventory row names the shared machine itself. Opening it observes the
+   current screen; the separate [&] door keeps the media selection menu. *)
+let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
+  invalidate_msx_poll ();
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_msx.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
+  state.machine_source <- Masc.Machine_lane.Msx;
+  state.msx_open <- true;
+  state.msx_menu_open <- false;
+  state.msx_live <- Masc_tui_machine_live.Unread;
+  state.msx_frame <- None;
+  msx_surface_frame := None;
+  state.msx_notice <- None;
+  state.msx_last_poll_ns <- 0L;
+  render_spectator state;
+  launch_msx_live_read state ~mailbox
+
 (* DOS has a spectator of its own. Enter it directly from the palette; the
    MSX media picker is only for choosing MSX media. No key from this view is
    forwarded to DOS, whose input and controller remain server-owned. *)
@@ -10155,6 +10218,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   Masc_tui_types.withdraw_fusion_workspace state;
   state.dos_live <- Masc_tui_machine_live.Unread;
   state.dos_activity <- [];
+  state.msx_live_in_flight <- None;
   state.dos_live_in_flight <- None;
   state.board_vote_armed <- None;
   state.board_compose_armed <- false;
@@ -10173,6 +10237,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.goal_confirmation <- Goal_confirmation.Inspecting Goal_confirmation_read.initial;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
+  state.lane_inventory <- None;
+  state.lanes_cursor <- 0;
+  state.lanes_scroll <- 0;
   state.standalone_lanes <- None;
   state.standalone_lanes_error <- None;
   state.standalone_lanes_inflight <- false;
@@ -10949,6 +11016,55 @@ let choose_keeper_row state ~base_path index =
   | None -> ()
 ;;
 
+let open_lane_inventory_selection state ~mailbox =
+  let module Inventory = Masc.Tui_decode_lane_inventory in
+  let module Addons = Masc_tui_lane_addons in
+  let open_addon open_view =
+    let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+    if view.loading then
+      state.lane_addons <- Some {view with scroll=0;
+        error=lane_addons_input_failure "A Lane request is pending; the current draft and request are retained"}
+    else open_view view in
+  match selected_inventory_lane state with
+  | None -> show_lanes_action_error state "Read the Lane inventory before opening a row"
+  | Some row ->
+      state.lanes_action_error <- None;
+      match row.Inventory.selection with
+      | Inventory.Exact _ ->
+          (match selected_standalone_lane state with
+           | Some lane -> open_lane_run_list state ~mailbox lane
+           | None -> show_lanes_action_error state "The exact Lane detail is absent from this inventory; r reads again")
+      | Browser lane ->
+          show_browser_lane state;
+          state.browser_lane <- Option.map (fun view ->
+            if view.Browser_lane_view.source = lane then view
+            else Browser_lane_view.switch_source lane view) state.browser_lane;
+          release_composer_for_browser_reader state;
+          refresh_browser_lane state ~mailbox
+      | Machine Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
+      | Machine Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
+      | Declaration path -> open_addon (fun view ->
+          let view = {view with screen=Addons.Overview; focus=Addons.Configurations;
+            current_selection=Addons.Selection (Addons.Declaration_anchor path);
+            scroll=0; error=None; editor_ready=false; presentation=Addons.Technical} in
+          state.lane_addons <- Some view;
+          (* Reopen a local draft before issuing another read. Enter inspects;
+             E is the explicit external-editor action, s is the only save. *)
+          match Masc_tui_lane_declaration.find_for_path ~path view.documents with
+          | Ok (Some draft) -> state.lane_addons <- Some (Addons.put_document view draft)
+          | Ok None -> launch_lane_declaration state ~mailbox ~edit:false
+              (Masc_tui_lane_declaration.Read path)
+          | Error detail -> state.lane_addons <- Some {view with document_key=None;
+              error=lane_addons_input_failure detail})
+      | Manual_instance {instance_id;incarnation} -> open_addon (fun view ->
+          state.lane_addons <- Some {view with screen=Addons.Detail (instance_id,incarnation);
+            focus=Addons.Timeline; row_cursor = -1; scroll=0; selected=[];
+            document_key=None; presentation=Addons.Summary; error=None};
+          (* Inspect first even for a retained worker: its identity must exist
+             in the fresh snapshot before a history slice can join it. *)
+          launch_lane_addons ~initial_detail:(instance_id,incarnation)
+            state ~mailbox Addons.Inspect)
+
 (* What a press on marked text does: the same move the key for that place
    makes. A press on the tab or pane already open does nothing -- it is where
    the reader already is, and re-entering would reset its scroll and cursor. A
@@ -10984,6 +11100,15 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
   (* The row is found by name in the roster as it is now. A first press
      chooses it and a press on the chosen row opens it, as Enter does; a
      Keeper that left the roster after the frame was drawn is not pressed. *)
+  | Press_lane_row id ->
+      if state.view = Lanes && state.lanes_mode = Lanes_overview
+          && Option.is_none state.slot_editor then
+        (match List.find_index (fun (row : Masc.Tui_decode_lane_inventory.row) ->
+             String.equal row.id id) (lane_inventory_rows state) with
+         | None -> ()
+         | Some index when index = state.lanes_cursor ->
+             open_lane_inventory_selection state ~mailbox
+         | Some index -> Option.iter (fun list -> list.rl_place index) (row_list state))
   | Press_keeper_row name -> (
       match
         List.find_index
@@ -11000,34 +11125,6 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
             (List.nth_opt state.keepers index)
       | Some index -> choose_keeper_row state ~base_path index)
 ;;
-
-(* Enter on a Lanes overview row, shared with the mouse: a press on the row
-   already selected is Enter, so both paths open through the same two
-   helpers. *)
-let open_lanes_standalone_selection state ~mailbox =
-  match selected_standalone_lane state with
-  | Some (lane : Tui_decode.standalone_lane) ->
-      state.lanes_action_error <- None;
-      open_lane_run_list state ~mailbox lane
-  | None ->
-      show_lanes_action_error state
-        "Cannot open runs: lane observation is unavailable"
-
-(* A left press on the Lanes overview is the cursor keys by another hand: the
-   first press lands the selection on the row under it (exactly where j/k
-   would put it), and a press on the row already selected is Enter. *)
-let handle_lanes_overview_click state ~base_path:_ ~mailbox ~terminal_rows ~row =
-  match lanes_overview_hit state ~terminal_rows ~row with
-  | Lanes_hit_none -> ()
-  | Lanes_hit_standalone index ->
-      if
-        state.lanes_standalone_cursor = index
-      then open_lanes_standalone_selection state ~mailbox
-      else begin
-        state.lanes_action_error <- None;
-        Masc_tui_types.dismiss_runtime_lane_notice state;
-        state.lanes_standalone_cursor <- index
-      end
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
@@ -13100,7 +13197,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               && Option.is_none view.evidence_prompt ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
-  | Lane_declaration_loaded (generation, request, edit, result) ->
+  | Lane_declaration_loaded (generation, request, edit, create_directory, result) ->
       let module Addons = Masc_tui_lane_addons in
       let module Document = Masc_tui_lane_declaration in
       let visible = Option.is_some state.lane_addons in
@@ -13115,7 +13212,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Ok response ->
             let key = match request with Document.Read path -> Filename.basename path
               | Document.Save session -> session.file_name in
-            let existing = List.find_opt (fun (s : Document.session) -> s.file_name=key) view.documents in
+            let existing = match request with
+              | Document.Read path -> Document.find_for_path ?create_directory ~path view.documents
+              | Document.Save _ -> Ok (List.find_opt (fun (s : Document.session) -> s.file_name=key) view.documents) in
+            match existing with
+            | Error detail -> {view with document_key=None;editor_ready=false;scroll=0;
+                error=lane_addons_input_failure detail}
+            | Ok existing ->
             let session = match existing, response with
               | Some session, _ -> Some (Document.after_response session response)
               | None, Document.Read_document document -> Some (Document.from_document document)
@@ -14976,6 +15079,28 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   render_spectator state
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
+  | Msx_live_loaded (request, result) ->
+      (match state.msx_live_in_flight with
+       | Some pending when pending == request ->
+           state.msx_live_in_flight <- None;
+           if request.live_view == !msx_poll_view && request.live_port = state.port
+              && state.msx_open && not state.msx_menu_open
+              && state.machine_source = Masc.Machine_lane.Msx then begin
+             (match Masc_tui_machine_live.advance state.msx_live (Result.map fst result) with
+              | None -> ()
+              | Some live ->
+                  let live, frame = msx_frame_of_live ~previous_live:state.msx_live
+                    ~previous_frame:state.msx_frame live in
+                  state.msx_live <- live;
+                  state.msx_frame <- frame;
+                  msx_surface_frame := frame);
+             (match !msx_pending_poll with
+              | Poll_failed when Option.is_some state.msx_frame -> msx_pending_poll := Poll_idle
+              | Poll_idle | Poll_pending _ | Poll_failed -> ());
+             state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+             render_spectator state
+           end
+       | Some _ | None -> ())
   | Dos_live_loaded (request, result) ->
       (match state.dos_live_in_flight with
        | Some pending when pending == request ->
@@ -16147,12 +16272,21 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                reading. *)
             state.lanes_error <- Some detail)
       end
-  | Standalone_lanes_loaded (generation, result) ->
+  | Lane_inventory_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;
       if generation = state.standalone_lanes_generation then (
         match result with
         | Ok snapshot ->
-            state.standalone_lanes <- Some snapshot;
+            let previous = Option.map (fun (row : Masc.Tui_decode_lane_inventory.row) -> row.id)
+              (selected_inventory_lane state) in
+            state.lane_inventory <- Some snapshot;
+            state.standalone_lanes <- Some snapshot.exact_snapshot;
+            state.lanes_cursor <- (match previous with
+              | Some id -> (match List.find_index (fun (row : Masc.Tui_decode_lane_inventory.row) ->
+                    String.equal row.id id) snapshot.rows with
+                  | Some index -> index
+                  | None -> Masc_tui_scroll.cursor_move ~count:(List.length snapshot.rows) ~delta:0 state.lanes_cursor)
+              | None -> Masc_tui_scroll.cursor_move ~count:(List.length snapshot.rows) ~delta:0 state.lanes_cursor);
             (match state.runtime_lane_write with
              | Masc_tui_types.Lane_write_rereading (Masc_tui_types.Standalone_lanes_list, answered_at, _receipt)
                when generation > answered_at ->
@@ -16165,13 +16299,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              | _ -> ());
             Masc_tui_types.reconcile_slot_editor_selection state;
             state.standalone_lanes_error <- None;
-            (* A refresh may shrink the matrix; the cursor has to stay a valid
-               row of the snapshot now in state. The matrix rows never scroll,
-               so there is no window to follow. *)
-            state.lanes_standalone_cursor <-
-              max 0
-                (min state.lanes_standalone_cursor
-                   (List.length snapshot.Tui_decode.sls_lanes - 1));
+            (* Reuse the same geometry as key movement after identity retention. *)
+            (match row_list state with
+             | Some list when state.view = Lanes && state.lanes_mode = Lanes_overview -> list.rl_place state.lanes_cursor
+             | Some _ | None -> ());
             Masc_tui_types.runtime_lane_list_reread state
               ~list:Masc_tui_types.Standalone_lanes_list ~generation (Ok ())
         | Error detail ->
@@ -16224,7 +16355,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 (* A failed page retains both the rows and its retry cursor.
                    Refresh supersedes every older response by generation. *)
                 state.lane_runs_error <- Some detail)
-       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ -> ())
+       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ())
   | Lane_run_detail_loaded (run_id, generation, result) ->
       (match state.lanes_mode with
        | Lanes_run_detail (_, open_run)
@@ -16238,7 +16369,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 state.lane_run_detail_error <-
                   Some "lane run detail response does not match the requested run"
             | Error detail -> state.lane_run_detail_error <- Some detail)
-       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_overview | Lanes_run_list _ -> ())
+       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Measurement_artifact_loaded (sha256, generation, result) ->
       accept_measurement_artifact state ~sha256 ~generation result
   | Harness_loaded result ->
@@ -17653,9 +17784,11 @@ let main
     match path with
     | None -> state.lane_addons <- Some {view with error=lane_addons_input_failure "Choose a current declaration .toml file; directory issues have no file to edit"}
     | Some path ->
-        (match List.find_opt (fun (s : Masc_tui_lane_declaration.session) -> s.file_name=Filename.basename path) view.documents with
-         | Some session -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
-         | None -> launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path))
+        (match Masc_tui_lane_declaration.find_for_path ~path view.documents with
+         | Ok (Some session) -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
+         | Ok None -> launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path)
+         | Error detail -> state.lane_addons <- Some {view with document_key=None;
+             editor_ready=false;scroll=0;error=lane_addons_input_failure detail})
   in
   (* The raw editor and account form share preview and guarded commit. Each
      caller keeps the revision from the same read as the text it edits. *)
@@ -19338,21 +19471,6 @@ and is loaded on demand through keeper_skill.
                launch_keeper_chat_tool_details_load ~force:true state
                  ~mailbox:async_messages ~keeper_name)
              state.msg_target_keeper_name
-       (* A left press on the Lanes overview moves the row cursor (and opens
-          the row it already named). The modals above the surface -- help,
-          agenda, palette, search -- keep the press from reaching rows they
-          cover, exactly like a key. *)
-       | Some (Mouse_left_press (row, _column))
-         when state.view = Lanes
-              && state.lanes_mode = Lanes_overview
-              && (not dismissed_image)
-              && (not compact_viewport)
-              && (not (modal_owns_keys state))
-              && (not state.palette_open)
-              && Option.is_none state.search ->
-           let terminal_rows, _ = get_terminal_size () in
-           handle_lanes_overview_click state ~base_path ~mailbox:async_messages
-             ~terminal_rows ~row
        (* A graphics reply is read and dropped. Nothing asks for one outside
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
@@ -19491,6 +19609,12 @@ and is loaded on demand through keeper_skill.
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
+        (* The inventory owns inspection while the composer is unfocused.
+           A focused composer still owns every typed character. *)
+        && not ((not state.composer_focused)
+          && state.view = Lanes && state.lanes_mode = Lanes_overview
+          && Option.is_none state.slot_editor && Option.is_none state.runtime_lane_pick
+          && (match key with Some ("d" | "i") -> true | Some _ | None -> false))
         && (not (modal_owns_keys state))
         (* Any open field takes the key before the composer does. This was six
            conditions naming six fields, and the ones added later were not in
@@ -22755,6 +22879,14 @@ and is loaded on demand through keeper_skill.
            (* Start with the scheduled rows. A target is selected explicitly
               with j/k, and Enter opens only a marked row in the window. *)
            state.agenda_selected <- Masc_tui_agenda.Nowhere
+       | Some ("d" | "i" as key)
+         when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_none state.slot_editor && Option.is_none state.runtime_lane_pick ->
+           let target = if key = "i" then None else
+             Option.map (fun (row : Masc.Tui_decode_lane_inventory.row) -> row.id)
+               (selected_inventory_lane state) in
+           state.lanes_mode <- Lanes_inventory_detail target;
+           state.lane_run_detail_scroll <- 0
        | Some "i" when state.view = Overview ->
            goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        | Some "i"
@@ -23569,7 +23701,7 @@ and is loaded on demand through keeper_skill.
                  state.clients_surface_scroll <- scroll
              | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_detail _ | Lanes_measurement_detail _ ->
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
                      let page =
                        Masc_tui_scroll.page_step
                          ~height:state.lane_run_detail_content_height
@@ -23761,7 +23893,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_measurement_detail sha256 ->
                      launch_measurement_artifact_load state ~mailbox:async_messages
                        ~sha256
-                 | Lanes_overview -> ())
+                 | Lanes_overview | Lanes_inventory_detail _ -> ())
             | Harness -> launch_harness_load state ~mailbox:async_messages
             | Fusion ->
                 launch_fusion_runs_load state ~mailbox:async_messages;
@@ -23979,7 +24111,7 @@ and is loaded on demand through keeper_skill.
              | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
-                 | Lanes_measurement_detail _ ->
+                 | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
                      state.lanes_mode <- Lanes_overview;
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
@@ -24159,7 +24291,7 @@ and is loaded on demand through keeper_skill.
                 (* Left closes a drill-down level but never leaves the surface;
                    Esc owns leaving it. *)
                 (match state.lanes_mode with
-                 | Lanes_measurement_detail _ ->
+                 | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
                      state.lanes_mode <- Lanes_overview;
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
@@ -24417,7 +24549,7 @@ and is loaded on demand through keeper_skill.
                 state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_detail _ | Lanes_measurement_detail _ ->
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
                      state.lane_run_detail_scroll <-
                        Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:1
                  | Lanes_run_list _ ->
@@ -24429,13 +24561,7 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_cursor <- cursor;
                      state.lane_runs_scroll <- scroll)
                  | Lanes_overview ->
-                     let count = lanes_standalone_count state in
-                     state.lanes_action_error <- None;
-                     Masc_tui_types.dismiss_runtime_lane_notice state;
-                     state.lanes_standalone_cursor <-
-                       max 0
-                         (min (count - 1)
-                            (state.lanes_standalone_cursor + 1)))
+                     move_list_by_rows state ~delta:1)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <- Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:1
@@ -24771,7 +24897,7 @@ and is loaded on demand through keeper_skill.
                 state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_detail _ | Lanes_measurement_detail _ ->
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
                      state.lane_run_detail_scroll <-
                        max 0 (state.lane_run_detail_scroll - 1)
                  | Lanes_run_list _ ->
@@ -24783,10 +24909,7 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_cursor <- cursor;
                      state.lane_runs_scroll <- scroll)
                  | Lanes_overview ->
-                     state.lanes_action_error <- None;
-                     Masc_tui_types.dismiss_runtime_lane_notice state;
-                     state.lanes_standalone_cursor <-
-                       max 0 (state.lanes_standalone_cursor - 1))
+                     move_list_by_rows state ~delta:(-1))
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
@@ -25071,13 +25194,13 @@ and is loaded on demand through keeper_skill.
                                  ~run_id:run.lrs_run_id
                            | None -> ())
                       | None -> ())
-                 | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ()
                  | Lanes_overview ->
                      (match state.slot_editor, state.runtime_lane_pick with
                       | Some _, None -> open_selected_slot_config ()
                       | Some _, Some _ -> ()
                       | None, (None | Some _) ->
-                        open_lanes_standalone_selection state
+                        open_lane_inventory_selection state
                           ~mailbox:async_messages))
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
@@ -25803,7 +25926,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
+                 | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ()
                  | Lanes_overview ->
                      show_lanes_action_error state
                        "Cannot open chat: These lanes have no Keeper; use Keepers")
@@ -26161,7 +26284,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview, None ->
                    show_lanes_action_error state
                      "Cannot open config: no standalone lane is selected"
-                 | (Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _), _ -> ())
+                 | (Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _), _ -> ())
             | Config ->
                 (match state.config_pane with
                  | Config_prompts ->

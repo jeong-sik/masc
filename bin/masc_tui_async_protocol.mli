@@ -116,11 +116,13 @@ type async_msg =
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
-  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
+  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
+  | Msx_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   | Dos_live_loaded of machine_live_request
       * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
@@ -213,8 +215,8 @@ type async_msg =
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
-  | Standalone_lanes_loaded of
-      int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
+  | Lane_inventory_loaded of
+      int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
   | Clients_loaded of
       int * (Masc.Tui_decode.clients_snapshot, string) result
   (* Keyed by the lane / run they answer for: an answer that lands after the

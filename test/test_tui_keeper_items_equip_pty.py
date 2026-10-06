@@ -50,36 +50,71 @@ def run(executable: str) -> None:
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", CURRENT + b"Info")
         h.send_and_wait(process, master_fd, output, b"]", CURRENT + b"Items")
+        # The account fetch is async; wait for its data, not the tab chrome.
+        h.wait_for_output(
+            process, master_fd, output, b"Balance 1.500 Candle",
+            start=0, timeout=10.0)
         h.drain_until_quiet(process, master_fd, output)
-        rows = h.screen_rows(
-            bytes(output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
 
-        def find_row(needle: bytes) -> bytes:
+        def screen():
+            return h.screen_rows(
+                bytes(output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
+
+        def screen_text(rows) -> bytes:
+            return b"\n".join(text for _, text in sorted(rows.items()))
+
+        def find_row(rows, needle: bytes) -> bytes:
             matches = [text for _, text in sorted(rows.items()) if needle in text]
-            # Exactly the item row: the Selected line carries facts only.
+            # Exactly the item row: the Selected line carries no item id.
             item_rows = [row for row in matches if b"Selected:" not in row]
             if len(item_rows) != 1:
                 raise AssertionError(
                     f"expected one {needle!r} item row, got {len(item_rows)}: {matches!r}")
             return item_rows[0]
 
-        glasses = find_row(b"glasses")
+        rows = screen()
+        glasses = find_row(rows, b"glasses")
         if b"0.200" not in glasses:
             raise AssertionError(
                 f"account facts are hidden; widen the frame: {glasses!r}")
         if b"equipped" not in glasses or b"owned" in glasses:
             raise AssertionError(
                 f"worn row must read equipped, not owned: {glasses!r}")
-        shades = find_row(b"shades")
+        shades = find_row(rows, b"shades")
         if b"owned" not in shades or b"equipped" in shades:
             raise AssertionError(
                 f"unworn owned row must read owned, not equipped: {shades!r}")
+        # Cursor starts at item 0 (glasses): the Selected line pins the
+        # same exclusive words outside the row list.
+        if b"Selected: 0.200  equipped" not in screen_text(rows):
+            raise AssertionError("Selected line must mark the worn item")
+        h.send_and_wait(process, master_fd, output, b"j", b"Items 2/18")
+        h.drain_until_quiet(process, master_fd, output)
+        moved = screen_text(screen())
+        if b"Selected: 0.200 owned" not in moved:
+            raise AssertionError("Selected line must mark the unworn owned item")
+        if b"Selected: 0.200 owned  equipped" in moved:
+            raise AssertionError("Selected line must not join both words")
+        # Narrow frames hide account facts; the worn suffix must survive.
+        h.resize_and_wait(
+            process, master_fd, output, rows=32, columns=80,
+            needle=CURRENT + b"Items")
+        h.drain_until_quiet(process, master_fd, output)
+        narrow_glasses = find_row(screen(), b"glasses")
+        if b"equipped" not in narrow_glasses or b"owned" in narrow_glasses:
+            raise AssertionError(
+                f"narrow worn row must keep equipped only: {narrow_glasses!r}")
         os.write(master_fd, b"q")
 
     fixtures = h.keeper_runtime_http_fixtures()
     status, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
     roster = copy.deepcopy(roster)
+    # Ready items pair with a candle-less roster (item_roster_fixtures);
+    # a candle-off roster answering Ready items is incoherent.
+    roster.pop("candle", None)
     for keeper in roster["keepers"]:
+        keeper.pop("candle_balance_milli", None)
+        keeper.pop("candle_account_revision", None)
         if keeper["name"] == "alpha":
             keeper["portrait"] = {
                 "state": "ready",

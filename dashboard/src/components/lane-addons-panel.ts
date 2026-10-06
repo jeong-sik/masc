@@ -27,6 +27,7 @@ const currentAuthority = (authority: ExecutionWorkspaceAuthority | null): author
 const sameWorkspace = (left: ExecutionWorkspaceAuthority, right: ExecutionWorkspaceAuthority) =>
   left.workspaceRoot === right.workspaceRoot && left.epoch === right.epoch
 type Owned<T> = { authority: ExecutionWorkspaceAuthority; value: T }
+type ReadState = { pending: boolean; error: string | null }
 
 function rawFieldsText(fields: Record<string, unknown>): string {
   try {
@@ -236,7 +237,12 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   }
   const [receivedReceipt, setReceivedReceipt] = useState<Owned<unknown> | null>(null)
   const receipt = receivedReceipt?.authority === authority ? receivedReceipt.value : null
-  const [reading, setReading] = useState(false)
+  const [inventoryRead, setInventoryRead] = useState<Owned<ReadState> | null>(null)
+  const [sliceRead, setSliceRead] = useState<Owned<ReadState> | null>(null)
+  const reading = inventoryRead?.authority === authority && inventoryRead.value.pending
+  const inventoryError = inventoryRead?.authority === authority ? inventoryRead.value.error : null
+  const readingSlice = sliceRead?.authority === authority && sliceRead.value.pending
+  const sliceError = sliceRead?.authority === authority ? sliceRead.value.error : null
   const [manifest, setManifest] = useState('')
   const [run, setRun] = useState('')
   const [binding, setBinding] = useState('{}')
@@ -258,7 +264,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
     setEvidenceAuthority(authority)
     setReceivedSlice(null); setInstance(''); setFocusedRow(null); setSelected([]); setReceivedReceipt(null)
   }, [authority])
-  const reads = useRef<AbortController | null>(null)
+  const inventoryReads = useRef<AbortController | null>(null)
+  const sliceReads = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   const activityRevision = lanePackageActivityObservationRevision(authority)
   const lastActivityRead = useRef({ authority, revision: activityRevision })
@@ -267,30 +274,36 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
     if (!mounted.current || !currentAuthority(authority)) return
     const requestedAuthority = authority
     const requestedTarget = currentNavigation.current.target
-    reads.current?.abort()
+    inventoryReads.current?.abort()
     const controller = new AbortController()
-    reads.current = controller
-    setReading(true)
-    setError(null)
+    inventoryReads.current = controller
+    setInventoryRead({ authority, value: { pending: true, error: null } })
     try {
       const result = await fetchLaneAddons(controller.signal)
       if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) {
         setReceived({ authority: requestedAuthority, value: result })
+        setInventoryRead({ authority, value: { pending: false, error: null } })
         setInventoryTarget(requestedTarget)
       }
     } catch (err) {
-      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setError(message(err))
+      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) {
+        setInventoryRead({ authority, value: { pending: false, error: message(err) } })
+      }
     } finally {
-      if (!controller.signal.aborted && mounted.current && executionWorkspaceAuthority.peek() === requestedAuthority) setReading(false)
+      if (inventoryReads.current === controller) inventoryReads.current = null
     }
   }
   useEffect(() => {
     mounted.current = true
-    setReading(false); setError(null); setAuthorityError(null)
+    setInventoryRead(null); setSliceRead(null); setError(null); setAuthorityError(null)
     setInstance(''); setSelected([]); setFocusedRow(null)
     setManifest(''); setRun(''); setBinding('{}'); setLane(''); setSince(''); setUntil(''); setKeeper('')
     void refresh()
-    return () => { mounted.current = false; reads.current?.abort() }
+    return () => {
+      mounted.current = false
+      inventoryReads.current?.abort(); inventoryReads.current = null
+      sliceReads.current?.abort(); sliceReads.current = null
+    }
   }, [authority])
 
   useEffect(() => {
@@ -326,27 +339,29 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   }
   async function query() {
     if (!mounted.current || !currentAuthority(authority)) return
+    sliceReads.current?.abort(); sliceReads.current = null
     const from = since === '' ? undefined : Number(since)
     const to = until === '' ? undefined : Number(until)
     if ((from !== undefined && !Number.isFinite(from)) || (to !== undefined && !Number.isFinite(to))
       || (from !== undefined && to !== undefined && from > to)) {
-      setError('Use finite Unix seconds with since ≤ until.')
+      setSliceRead({ authority, value: { pending: false, error: 'Use finite Unix seconds with since ≤ until.' } })
       return
     }
-    reads.current?.abort()
     const controller = new AbortController()
-    reads.current = controller
-    setReading(true)
-    setError(null)
+    sliceReads.current = controller
+    setSliceRead({ authority, value: { pending: true, error: null } })
     try {
       const result = await fetchLaneAddonSlice({ run_id: run, lane_id: lane, since: from, until: to }, controller.signal)
       if (!controller.signal.aborted && mounted.current && currentAuthority(authority)) {
         setReceivedSlice({ authority, value: result }); setSelected([])
+        setSliceRead({ authority, value: { pending: false, error: null } })
       }
     } catch (err) {
-      if (!controller.signal.aborted && mounted.current && currentAuthority(authority)) setError(message(err))
+      if (!controller.signal.aborted && mounted.current && currentAuthority(authority)) {
+        setSliceRead({ authority, value: { pending: false, error: message(err) } })
+      }
     } finally {
-      if (!controller.signal.aborted && mounted.current && currentAuthority(authority)) setReading(false)
+      if (sliceReads.current === controller) sliceReads.current = null
     }
   }
   const configuration = snapshot?.configuration ?? null
@@ -431,7 +446,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const coverage = slice?.coverage ?? snapshot?.coverage ?? []
   if (navigationTarget && targetError) return html`<${LaneNavigationNotice} message=${targetError} onRetry=${retryTarget} />`
   if (navigationTarget && (!snapshot || targetPending)) return html`<${LaneNavigationNotice}
-    message=${error ?? 'Reading the selected Lane target in the current workspace…'}
+    message=${inventoryError ?? 'Reading the selected Lane target in the current workspace…'}
     onRetry=${reading || targetDraft && targetDraft.phase !== 'idle' ? undefined : retryTarget} />`
   return html`<section class="space-y-4 p-4" aria-label="Lane Add-ons">
     ${navigationTarget && html`<p role="status" class="break-all">Selected: ${laneTargetLabel(navigationTarget)}</p>`}
@@ -442,9 +457,12 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       <button class=${buttonClass} disabled=${authority === null} onClick=${refresh}>Refresh</button></div>
     </header>
     ${reading && html`<p role="status">Reading retained observations…</p>`}
-    ${error && html`<p role="alert" class="text-red-400">${error}</p>`}
+    ${inventoryError && html`<div aria-label="Inventory read failure">
+      <p role="alert" class="text-red-400">${inventoryError}</p>
+      ${snapshot && html`<p role="status">Showing retained data after a failed request; current state is unverified.</p>`}
+    </div>`}
+    ${error && html`<div aria-label="Lane action failure"><p role="alert" class="text-red-400">${error}</p></div>`}
     ${slice && html`<p role="status">Frozen slice: Refresh updates installation status only. Use Slice to query again, or Clear slice to show the latest snapshot.</p>`}
-    ${error && snapshot && html`<p role="status">Showing retained data after a failed request; current state is unverified.</p>`}
     ${snapshot !== null || slice !== null ? html`<${LaneAddonsTimeline} rows=${rows} instances=${snapshot?.instances ?? []} selectedId=${focused?.id}
       onSelect=${(row: { id: string }) => setFocusedRow(row.id)}
       onWindow=${(from: number, to: number) => { setSince(String(from)); setUntil(String(to)) }} />`
@@ -571,8 +589,16 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       <label>Since (Unix seconds) <input class=${inputClass} value=${since} onInput=${(e: Event) => setSince((e.target as HTMLInputElement).value)} /></label>
       <label>Until (Unix seconds) <input class=${inputClass} value=${until} onInput=${(e: Event) => setUntil((e.target as HTMLInputElement).value)} /></label>
       <button type="submit" class=${buttonClass} disabled=${authority === null}>Slice</button>
-      <button type="button" class=${buttonClass} onClick=${() => { reads.current?.abort(); setReading(false); setReceivedSlice(null); setSelected([]) }}>Clear slice</button>
+      <button type="button" class=${buttonClass} onClick=${() => {
+        sliceReads.current?.abort(); sliceReads.current = null
+        setSliceRead(null); setReceivedSlice(null); setSelected([])
+      }}>Clear slice</button>
     </form>
+    ${readingSlice && html`<p role="status">Reading requested slice…</p>`}
+    ${sliceError && html`<div aria-label="Slice read failure">
+      <p role="alert" class="text-red-400">${sliceError}</p>
+      <p role="status">${slice ? 'The previous slice remains visible.' : snapshot ? 'The latest loaded inventory remains visible.' : 'No observations have been loaded.'} Retry Slice or Clear slice to reset the query.</p>
+    </div>`}
     <div aria-label="Source coverage">${coverage.map(source => html`<p key=${`${source.source_id}:${source.incarnation}`}>
       ${source.source_id} · ${source.incarnation} · cursor ${source.cursor ?? 'unknown'} · ${source.complete ? 'complete' : 'partial'} ${source.detail ?? ''}
     </p>`)}${slice && html`<p>Slice: ${slice.complete ? 'complete within reported coverage' : 'partial'}</p>`}</div>

@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-const lane = vi.hoisted(() => ({ fetchLaneAddons: vi.fn(), detachLaneAddon: vi.fn() }))
+const lane = vi.hoisted(() => ({ fetchLaneAddons: vi.fn(), fetchLaneAddonSlice: vi.fn(), detachLaneAddon: vi.fn() }))
 const files = vi.hoisted(() => ({ fetchLaneDeclaration: vi.fn(), saveLaneDeclaration: vi.fn() }))
 vi.mock('../api/lane-addons', async original => ({ ...await original<typeof import('../api/lane-addons')>(), ...lane }))
 vi.mock('../api/lane-declarations', async original => ({ ...await original<typeof import('../api/lane-declarations')>(), ...files }))
@@ -46,6 +46,23 @@ async function save(screen: Screen) {
   fireEvent.click(panel(screen).getByRole('button', { name: 'Save activity' }))
 }
 describe('Web package on/off without deleting configuration', () => {
+  it('keeps a pending Slice when saving activity triggers an inventory refresh', async () => {
+    let finishSlice!: (value: { complete: boolean; rows: []; coverage: [] }) => void
+    lane.fetchLaneAddonSlice.mockReturnValue(new Promise(resolve => { finishSlice = resolve }))
+    const screen = render(html`<${LaneAddonsPanel} />`); await open(screen)
+    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    const signal = lane.fetchLaneAddonSlice.mock.calls[0]![1] as AbortSignal
+    const reads = lane.fetchLaneAddons.mock.calls.length
+    fireEvent.click(toggle(screen)); await save(screen)
+    await panel(screen).findByText(/Activity configuration saved/)
+    await waitFor(() => expect(lane.fetchLaneAddons.mock.calls.length).toBeGreaterThan(reads))
+    expect(signal.aborted).toBe(false)
+    expect(screen.getByText('Reading requested slice…')).toBeTruthy()
+    await act(async () => { finishSlice({ complete: true, rows: [], coverage: [] }); await Promise.resolve() })
+    await screen.findByText(/Frozen slice:/)
+    expect(screen.queryByText('Reading requested slice…')).toBeNull()
+    expect(files.saveLaneDeclaration).toHaveBeenCalledTimes(1)
+  })
   it('refreshes a remounted inventory when its retained pending save completes', async () => {
     let finish!: (value: ReturnType<typeof receipt>) => void
     files.saveLaneDeclaration.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))

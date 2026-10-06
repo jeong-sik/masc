@@ -3636,7 +3636,8 @@ let render_lanes_overview (state : state) =
            | None ->
                ((match inventory_row.Masc.Tui_decode_lane_inventory.selection with
                  | Browser _ -> ["Space: activity · Enter: browser"]
-                 | Exact _ | Machine _ | Declaration _ | Manual_instance _ -> [])
+                 | Machine _ -> ["Space: activity · Enter: spectate"]
+                 | Exact _ | Declaration _ | Manual_instance _ -> [])
                 @ Masc_tui_lane_inventory.detail_lines inventory_row)
                |> List.concat_map (fun line ->
                     Terminal_text.single_line line
@@ -4971,6 +4972,32 @@ let render_lane_inventory_detail (state : state) target =
   finish_surface state ~clamped:(Lane_run_detail_scroll {scroll;content_height=height})
     ~surface_key:"lane-inventory-detail" ~rows:terminal_rows ~cols buf
 
+let render_machine_activity (state : state) session =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let lines = Masc_tui_machine_activity.lines session
+    |> List.concat_map (fun text -> Terminal_text.single_line text
+      |> Message_layout.wrap_words ~max_cells:width) in
+  let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.lane_run_detail_scroll in
+  let window = Rows.of_list ~first:scroll ~height lines in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Machine activity" ^ "  " ^ connection_badge state);
+  box_divider buf cols;
+  for offset = 0 to height - 1 do
+    match Rows.at window (scroll + offset) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols ("  " ^ line)
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length lines))
+    ~hints:"Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back");
+  finish_surface state ~clamped:(Lane_run_detail_scroll {scroll;content_height=height})
+    ~surface_key:"machine-activity" ~rows:terminal_rows ~cols buf
+
 let render_browser_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -5024,7 +5051,9 @@ let render_exact_activity (state : state) session =
     ~surface_key:"exact-activity" ~rows:terminal_rows ~cols buf
 
 let render_lanes (state : state) =
-  match Masc_tui_types.shown_browser_activity state with
+  match Masc_tui_types.shown_machine_activity state with
+  | Some session -> render_machine_activity state session
+  | None -> match Masc_tui_types.shown_browser_activity state with
   | Some session -> render_browser_activity state session
   | None -> match Masc_tui_types.shown_exact_activity state with
   | Some session -> render_exact_activity state session

@@ -594,8 +594,8 @@ let for_surface = function
           ~help:"open exact runs, the selected Browser or machine, or a package configuration/instance"
       ; b Act "a" "exact: add slot"
           ~help:"add a candidate to the selected exact-output lane's walk order"
-      ; b Act "Space" "exact/browser: activity"
-          ~help:"open activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
+      ; b Act "Space" "activity"
+          ~help:"open Exact, Browser or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
       ; b Act "s" "exact: models"
           ~help:"edit the model order: r replaces the selected model/effort, \
                  a adds a fallback, 1 makes it first within its HTTP/CLI group, \
@@ -1902,6 +1902,8 @@ let help_sections_for_state (state : state) =
       Some ("Exact activity", exact_activity_bindings)
     else if state.view = Lanes && Option.is_some state.browser_activity_open then
       Some ("Browser activity", exact_activity_bindings)
+    else if state.view = Lanes && Option.is_some state.machine_activity_open then
+      Some ("Machine activity", exact_activity_bindings)
     else if Option.is_some state.voice_agent_voices then
       let bindings =
         match state.voice_agent_voices with

@@ -236,3 +236,9 @@ Keeper 11개, `.masc` 하나. 그 런타임을 설명할 뿐이고 다른 환경
 전역 `autonomous.enabled`는 자동 시작과 자발적 작업을 제어합니다.
 실제 주기 설정은 `keeper.keepalive_interval_sec`입니다. 기상 힌트만으로 작업을
 생성하거나 다음 주기 실행 시각을 다시 미루지 않습니다.
+
+## Goal 일시정지와 재개
+
+[Goal 상태 제어](guides/GOAL-LIFECYCLE.md)에서 Pause/Resume과 Block/Unblock을
+설명합니다. Goal 진행과 새 검증 작업의 진입을 중단하며, 연결된 Task와 다른
+Keeper 턴은 각자의 상태에 따라 계속 진행됩니다.

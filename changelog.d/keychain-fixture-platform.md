@@ -1,3 +1,0 @@
-### Fixed
-
-- Keep macOS Keychain fixture C sources out of Linux compilation while retaining the native Keychain integration test.

@@ -1,6 +1,10 @@
 (** Server-owned changed-fact curation into the durable workspace ledger.
     A configured exact-output lane is required. *)
 val start : sw:Eio.Switch.t -> base_path:string -> unit
+(** Retained facts are reconsidered when this lane's publication changes,
+    including an enabled declaration published after this owner parked, and
+    when a replacement fence that turned this owner away closes. Off remains a
+    new-work refusal; already accepted work can finish. *)
 
 (** Wake an existing owner, including after an explicit lane configuration
     change. This performs no storage or provider work in the caller. *)

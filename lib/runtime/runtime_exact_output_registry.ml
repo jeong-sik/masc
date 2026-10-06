@@ -152,6 +152,11 @@ let published : t option Atomic.t = Atomic.make None
 let publication_mutex = Mutex.create ()
 let active_reservation : reservation option ref = ref None
 
+(* Whether [current] turned a reader away with [Publication_busy] while the
+   active fence stood. Such a reader parked work it could not admit, and the
+   fence's end is what lets it in again, whatever the write's outcome. *)
+let busy_reader_refused = ref false
+
 type lane_subscription = { lane_id : string; wake : unit -> unit }
 let lane_subscriptions : lane_subscription list ref = ref []
 
@@ -433,7 +438,9 @@ let current () =
   with_publication_lock
   @@ fun () ->
   match !active_reservation with
-  | Some _ -> Error Publication_busy
+  | Some _ ->
+    busy_reader_refused := true;
+    Error Publication_busy
   | None ->
     (match Atomic.get published with
      | Some registry -> Ok registry
@@ -443,6 +450,7 @@ let current () =
 let reserve candidate =
   let reservation = { identity = ref (); candidate } in
   active_reservation := Some reservation;
+  busy_reader_refused := false;
   Ok reservation
 ;;
 
@@ -515,19 +523,30 @@ let reserve_replacement prepared =
 
 let same_reservation left right = left.identity == right.identity
 
+(* The subscribers to wake as a fence closes: those whose lane the commit
+   changed, or every subscriber when a reader was refused during the fence,
+   since [current] cannot say which lane that reader asked about. Called under
+   the publication lock; it reads and resets the refusal. *)
+let fence_close_subscribers changed =
+  let refused = !busy_reader_refused in
+  busy_reader_refused := false;
+  if refused then !lane_subscriptions else changed
+;;
+
 let close_private_transaction reservation ~publish =
   let subscriptions = with_publication_lock (fun () ->
   (* [reservation] never leaves [transact_replacement]'s closure. Other
      publication operations can only observe the active fence, so no external
      caller can consume or replace this exact token while [apply_write] runs. *)
   active_reservation := None;
-  if not publish then []
-  else match reservation.candidate with
-    | None -> []
-    | Some registry ->
-      let previous = Atomic.get published in
-      Atomic.set published (Some registry);
-      changed_subscribers ~previous ~current:(Some registry)) in
+  fence_close_subscribers
+    (if not publish then []
+     else match reservation.candidate with
+       | None -> []
+       | Some registry ->
+         let previous = Atomic.get published in
+         Atomic.set published (Some registry);
+         changed_subscribers ~previous ~current:(Some registry))) in
   notify_lane_changes subscriptions
 ;;
 
@@ -553,20 +572,21 @@ let finish_replacement reservation =
     active_reservation := None;
     let previous = Atomic.get published in
     Option.iter (fun registry -> Atomic.set published (Some registry)) active.candidate;
-    Ok (changed_subscribers ~previous ~current:(Atomic.get published))
+    Ok (fence_close_subscribers (changed_subscribers ~previous ~current:(Atomic.get published)))
   | Some _ | None -> Error Reservation_inactive) in
   notify_lane_changes subscriptions;
   Ok ()
 ;;
 
 let abort_replacement reservation =
-  with_publication_lock
-  @@ fun () ->
+  let* subscriptions = with_publication_lock (fun () ->
   match !active_reservation with
   | Some active when same_reservation active reservation ->
     active_reservation := None;
-    Ok ()
-  | Some _ | None -> Error Reservation_inactive
+    Ok (fence_close_subscribers [])
+  | Some _ | None -> Error Reservation_inactive) in
+  notify_lane_changes subscriptions;
+  Ok ()
 ;;
 let rejected_slots registry = registry.rejected_slots
 

@@ -118,6 +118,12 @@ val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
     are isolated from the already-committed publication result.
     The returned function unsubscribes the consumer.
 
+    Closing a replacement fence also wakes every consumer when {!current}
+    refused a reader with [Publication_busy] while the fence stood, whether
+    the write committed, failed or kept the previous registry: that reader
+    parked work only the fence's end can admit. A fence that refused no
+    reader wakes only the consumers its commit changed.
+
     Credential values are absent from admitted target identities; changing
     only a credential value, or an external provider recovering, is not an
     event from this subscription. *)

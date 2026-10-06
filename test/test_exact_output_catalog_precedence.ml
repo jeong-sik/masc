@@ -1287,6 +1287,8 @@ let () =
             "closed registry transaction publishes final generation and lane"
             `Quick
             test_closed_registry_transaction
+        ; Alcotest.test_case "fence exits wake subscribers only after turning a reader away" `Quick
+            test_registry_availability_wakes
 ; Alcotest.test_case
     "captured publication remains stable across global generation swap"
     `Quick

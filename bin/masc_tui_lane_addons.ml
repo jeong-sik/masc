@@ -49,6 +49,7 @@ type evidence_prompt = {
 }
 type t = {
   installer : Masc_tui_lane_installer.t option;
+  package_directory : string option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
   pending_broadcasts : (Yojson.Safe.t * string) list;
@@ -62,7 +63,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
+let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -1427,11 +1428,10 @@ let flow_lines ?(embedded=false) view =
 let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.installer with
   | Some installer ->
-      ((if view.loading then ["Reading package and image state · Esc:cancel"] else [])
-       @ diagnostic_lines view
-       @ Masc_tui_lane_installer.lines installer)
-      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-        (Masc.Tui_terminal_text.sanitize_terminal_text line))
+      let render line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+        (Masc.Tui_terminal_text.sanitize_terminal_text line) in
+      let diagnostics = List.concat_map render (diagnostic_lines view) in
+      diagnostics @ Masc_tui_lane_installer.lines ~height:(max 1 (height - List.length diagnostics)) ~render installer
   | None -> match view.evidence_prompt with
   | Some prompt ->
       (diagnostic_lines view @ evidence_lines prompt)

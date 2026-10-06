@@ -490,10 +490,16 @@
  (libraries masc yojson))
 
 (library
+ (name masc_tui_package_browser)
+ (wrapped false)
+ (modules masc_tui_package_browser)
+ (libraries masc yojson))
+
+(library
  (name masc_tui_lane_installer)
  (wrapped false)
  (modules masc_tui_lane_installer)
- (libraries masc_tui_schema_form masc_tui_lane_declaration yojson otoml))
+ (libraries masc_tui_package_browser masc_tui_schema_form masc_tui_lane_declaration yojson otoml))
 
 (library
  (name masc_tui_lane_subscriptions)

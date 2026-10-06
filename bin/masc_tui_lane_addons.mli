@@ -46,6 +46,7 @@ type evidence_prompt = {
     only; [choice] n sends the reference to the n-th Keeper of [keepers]. *)
 type t = {
   installer : Masc_tui_lane_installer.t option;
+  package_directory : string option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
   pending_broadcasts : (Yojson.Safe.t * string) list;

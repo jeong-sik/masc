@@ -104,8 +104,10 @@ Existing running guests take the default on their next safe volume mount;
 merging a change does not change their active mount. This cleaner
 does not stop a Keeper or mount its live volume in a second VM to force trimming.
 
-The helper image needs `/usr/bin/findmnt`, `/usr/sbin/tune2fs`,
-`/usr/bin/mount` and `/usr/sbin/fstrim`. A missing utility reports a reclaim failure; existing runtime
+The helper image needs `/usr/bin/findmnt`, `/usr/sbin/tune2fs` and
+`/usr/sbin/fstrim`. `/usr/bin/mount` is optional: without it the helper says
+the remount was refused and removes build output with `discard` still on,
+which is slower but frees the same blocks. A missing utility reports a reclaim failure; existing runtime
 policy permits boot only after helper removal has been confirmed.
 
 Source contracts: [ext4 persistent discard default](https://kernel.org/doc/html/next/filesystems/ext4/super.html),

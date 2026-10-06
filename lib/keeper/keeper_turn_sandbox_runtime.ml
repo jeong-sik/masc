@@ -1085,8 +1085,13 @@ let prepare_microvm_shim_dir (t : t) =
 
 (** Return the host blocks the work volume's guest freed, before a fresh boot
     attaches it. Only [Boot] reaches here, after the name's old guest was
-    deleted, so no guest holds the volume. A failed trim permits boot only
-    after the named trim container is confirmed absent. *)
+    deleted, so no guest holds the volume. A stale guest of another network
+    mode whose removal failed would still hold it, and then the helper does
+    not start at all: Virtualization.framework refuses a second attachment of
+    the same image (measured 2026-10-06 on container 1.3.1, "The storage
+    device attachment is invalid"), so the helper never mounts, or removes
+    build output from, a volume a guest has mounted. A failed trim permits
+    boot only after the named trim container is confirmed absent. *)
 let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout_sec =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()

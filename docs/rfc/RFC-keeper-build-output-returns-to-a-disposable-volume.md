@@ -217,8 +217,8 @@ the name's old guest is force-deleted, so no guest holds the work volume
 there. On `Apple_container` it runs
 `Keeper_sandbox_microvm.apple_work_volume_trim_argv` before `container run`:
 the keeper's own image, `--rm`, the volume's stable `-trim` container name,
-`--user 0`, `--cap-add CAP_SYS_ADMIN` and no
-other capability, the volume at `/masc-trim`. Its script sets the volume's
+`--user 0`, `--cap-drop ALL` then `--cap-add CAP_SYS_ADMIN` and
+`--cap-add CAP_DAC_OVERRIDE` (the latter for §B), the volume at `/masc-trim`. Its script sets the volume's
 ext4 `discard` default (`tune2fs -o discard`, #40734), so every later guest
 mount discards a deleted file's blocks as it goes; drops `discard` for its
 own mount only; removes real build output (§B); and runs
@@ -325,7 +325,9 @@ Its script, in order:
    `dune-project` is removed with `rm -rf`. The keeper root itself and
    `.git` are skipped, as the scan skips them. `find` without `-L` never
    follows a symlinked `_build`, and `-type d` does not match one, so a
-   link and its build volume target are untouched. A checkout holding
+   link and its build volume target are untouched. Paths reach `rm` as
+   `-exec` arguments, never as lines of output, so a directory name holding
+   a newline cannot split into another checkout's path. A checkout holding
    `.masc-keep-build` keeps its output — the same marker the guest's idle
    build cleanup (`config/scripts/keeper-build-cleanup.py`) already skips.
    One line per removal goes to the trim log; a failed removal is printed
@@ -333,7 +335,19 @@ Its script, in order:
 4. `fstrim -v /masc-trim` (unchanged).
 
 No guest holds the volume at that point, so no build can be using the
-output; the scan inside a live guest still never deletes (§A). The guest
+output; the scan inside a live guest still never deletes (§A). A stale
+guest of another network mode whose removal failed cannot change that:
+Virtualization.framework refuses to attach an image a running VM holds
+(measured 2026-10-06, "The storage device attachment is invalid"), so the
+helper then fails to start and the boot goes on without reclaim.
+
+The tree belongs to the server's uid with mode 0755, and uid 0 with
+`CAP_SYS_ADMIN` alone gets only the "other" bits — measured 2026-10-06 on a
+`_build` made as 502:20 under umask 022, `rm` answered "Permission denied"
+and freed nothing. The helper therefore also holds `CAP_DAC_OVERRIDE`
+(`CapEff` 0000000000200002), which reaches nothing new: its root is
+read-only, its network is off, and its one writable mount is this keeper's
+own work volume. The guest
 that boots next finds those checkouts without `_build`, and §A links them.
 
 Step 2 decides where the time goes, not how much. Measured 2026-10-06 on
@@ -383,16 +397,21 @@ lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
   (and one whose path has a space), keeps the keeper root's own, one deeper
   than the scan looks, one holding `.masc-keep-build`, one inside `.git`,
   one with no `dune-project`, and a symlinked one with its target. Six
-  mutants (each guard removed in turn) all fail it. The same script, run in
+  mutants (each guard removed in turn) all fail it. A second test puts a
+  checkout named `a<newline>z` beside `a` and checks both keep their sources;
+  the line-reading loop this replaced removed all of `a`. The same script, run in
   `masc-sandbox:general` and `masc-sandbox-ocaml` (dash, GNU find 4.9.0),
   gave the same result as macOS `sh`.
 - Helper end to end (§B, 2026-10-06): the generated script under the
-  production flags (`--user 0`, `--cap-drop ALL --cap-add CAP_SYS_ADMIN`,
-  `--network none`, `--read-only`) on a scratch volume with a 4.7 GB
-  `_build` and a marked one: exit 0 in 5 s, the unmarked `_build` gone, the
-  marked one and `dune-project` kept, `volume.img` 4.7 GB → 5.4 MB.
+  production flags (`--user 0`, `--cap-drop ALL`, `--cap-add CAP_SYS_ADMIN`,
+  `--cap-add CAP_DAC_OVERRIDE`, `--network none`, `--read-only`), in both
+  fleet images, on a scratch volume whose tree was written as 502:20 under
+  umask 022: five checkouts with a 50 MB `_build` each, one named
+  `a<newline>z` beside `a`, one holding `.masc-keep-build`. Exit 0 in 1–6 s;
+  four `_build` gone, the marked one kept, every `src/` file kept,
+  `volume.img` 253 MB → 53 MB.
 - Missing (open): the first fleet boot after §B is deployed, recording each
-  keeper's `volume.img` before and after and the trim log's removal lines.
+  keeper's `volume.img` before and after.
 
 ## Alternatives, and why they are not this
 

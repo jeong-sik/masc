@@ -1756,6 +1756,16 @@ let test_build_link_refusal_message_names_the_checkout () =
 (* The boot helper's removal runs against a real tree: which directories it
    deletes is decided by find, test and rm, so only running the script shows
    it. *)
+let run_build_output_removal ~keeper_root =
+  let ic =
+    Unix.open_process_args_in
+      "/bin/sh"
+      [| "/bin/sh"; "-eu"; "-c"; M.build_output_removal_script ~keeper_root |]
+  in
+  let out = In_channel.input_all ic in
+  Unix.close_process_in ic, out
+;;
+
 let test_build_output_removal_script_removes_only_unkept_dune_output () =
   let root = temp_dir "build_output_removal_" in
   let keeper_root = Filename.concat root "k" in
@@ -1794,13 +1804,8 @@ let test_build_output_removal_script_removes_only_unkept_dune_output () =
   touch (Filename.concat elsewhere "f");
   touch (under (Filename.concat "linked" M.build_root_marker));
   Unix.symlink elsewhere (build "linked");
-  let ic =
-    Unix.open_process_args_in
-      "/bin/sh"
-      [| "/bin/sh"; "-eu"; "-c"; M.build_output_removal_script ~keeper_root |]
-  in
-  let out = In_channel.input_all ic in
-  Alcotest.(check bool) "script exits 0" true (Unix.close_process_in ic = Unix.WEXITED 0);
+  let status, out = run_build_output_removal ~keeper_root in
+  Alcotest.(check bool) "script exits 0" true (status = Unix.WEXITED 0);
   List.iter
     (fun rel -> Alcotest.(check bool) (rel ^ " build output removed") false (exists (build rel)))
     [ "masc"; "masc/.worktrees/task-1"; "my repo" ];
@@ -1832,18 +1837,40 @@ let test_build_output_removal_script_removes_only_unkept_dune_output () =
 
 let test_build_output_removal_script_skips_a_missing_keeper_root () =
   let root = temp_dir "build_output_removal_absent_" in
-  let ic =
-    Unix.open_process_args_in
-      "/bin/sh"
-      [| "/bin/sh"
-       ; "-eu"
-       ; "-c"
-       ; M.build_output_removal_script ~keeper_root:(Filename.concat root "never-booted")
-      |]
+  let status, out =
+    run_build_output_removal ~keeper_root:(Filename.concat root "never-booted")
   in
-  let out = In_channel.input_all ic in
-  Alcotest.(check bool) "script exits 0" true (Unix.close_process_in ic = Unix.WEXITED 0);
+  Alcotest.(check bool) "script exits 0" true (status = Unix.WEXITED 0);
   Alcotest.(check string) "nothing to report" "" out
+;;
+
+(* find prints one path per line, so reading its output line by line would
+   turn a directory named "a<newline>z" into the checkout "a" and remove all
+   of it. The removal takes paths as -exec arguments instead. *)
+let test_build_output_removal_script_keeps_a_checkout_named_by_a_newline () =
+  let keeper_root = Filename.concat (temp_dir "build_output_removal_newline_") "k" in
+  let write path = Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "x") in
+  let checkouts = [ "a"; "a\nz" ] in
+  Unix.mkdir keeper_root 0o755;
+  List.iter
+    (fun name ->
+      let checkout = Filename.concat keeper_root name in
+      Unix.mkdir checkout 0o755;
+      write (Filename.concat checkout M.build_root_marker);
+      Unix.mkdir (Filename.concat checkout "src") 0o755;
+      write (Filename.concat checkout "src/precious.ml");
+      Unix.mkdir (Filename.concat checkout M.build_output_dir_name) 0o755)
+    checkouts;
+  let status, _ = run_build_output_removal ~keeper_root in
+  Alcotest.(check bool) "script exits 0" true (status = Unix.WEXITED 0);
+  List.iter
+    (fun name ->
+      let checkout = Filename.concat keeper_root name in
+      Alcotest.(check bool) (String.escaped name ^ " source kept") true
+        (Sys.file_exists (Filename.concat checkout "src/precious.ml"));
+      Alcotest.(check bool) (String.escaped name ^ " build output removed") false
+        (Sys.file_exists (Filename.concat checkout M.build_output_dir_name)))
+    checkouts
 ;;
 
 let test_build_link_actions_only_includes_create_and_retarget () =
@@ -1963,7 +1990,7 @@ let test_volume_create_argv_carries_a_size () =
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
 ;;
 
-let test_work_volume_trim_argv_grants_one_capability () =
+let test_work_volume_trim_argv_grants_only_its_capabilities () =
   let argv =
     M.apple_work_volume_trim_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
   in
@@ -1988,9 +2015,12 @@ let test_work_volume_trim_argv_grants_one_capability () =
      dropped first, spelled the way the keeper guest's boot spells it. *)
   Alcotest.(check bool) "drops every capability first" true
     (contains_run (spelled Backend.Drop_all_capabilities) argv);
-  Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
+  (* SYS_ADMIN for tune2fs, the remount and FITRIM; DAC_OVERRIDE so root can
+     unlink inside the keeper-owned tree. Nothing else. *)
+  Alcotest.(check bool) "only CAP_SYS_ADMIN and CAP_DAC_OVERRIDE are added" true
     (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
-     && List.length (List.filter (String.equal "--cap-add") argv) = 1);
+     && adjacent ~flag:"--cap-add" ~value:"CAP_DAC_OVERRIDE" argv
+     && List.length (List.filter (String.equal "--cap-add") argv) = 2);
   Alcotest.(check bool) "read-only root" true (contains_run (spelled Backend.Read_only_rootfs) argv);
   Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
   Alcotest.(check bool) "fixed script entrypoint, not the image's own" true
@@ -3335,8 +3365,8 @@ let () =
             test_work_volume_is_named_and_mounted_at_its_root
         ; Alcotest.test_case "create argv carries a size" `Quick
             test_volume_create_argv_carries_a_size
-        ; Alcotest.test_case "work volume trim grants one capability" `Quick
-            test_work_volume_trim_argv_grants_one_capability
+        ; Alcotest.test_case "work volume trim grants only its capabilities" `Quick
+            test_work_volume_trim_argv_grants_only_its_capabilities
         ; Alcotest.test_case "work volume trim proves cleanup before boot" `Quick
             test_work_volume_trim_confirms_cleanup
         ; Alcotest.test_case "trim names preserve existing helpers and bound long names" `Quick
@@ -3413,6 +3443,8 @@ let () =
             test_build_output_removal_script_removes_only_unkept_dune_output
         ; Alcotest.test_case "boot removal skips a keeper root that does not exist" `Quick
             test_build_output_removal_script_skips_a_missing_keeper_root
+        ; Alcotest.test_case "boot removal keeps a checkout named by a newline" `Quick
+            test_build_output_removal_script_keeps_a_checkout_named_by_a_newline
         ; Alcotest.test_case "build link actions only includes create and retarget" `Quick
             test_build_link_actions_only_includes_create_and_retarget
         ; Alcotest.test_case "build link targets include already-correct links" `Quick

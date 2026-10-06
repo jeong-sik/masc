@@ -339,7 +339,9 @@ val work_volume_trim_name : keeper_name:string -> string
 val apple_work_volume_trim_argv :
   keeper_name:string -> volume_name:string -> image:string -> string list
 (** [container run --rm] of [image] as root with every capability dropped
-    and [CAP_SYS_ADMIN] added back, no network, a read-only root, and
+    and [CAP_SYS_ADMIN] and [CAP_DAC_OVERRIDE] added back (the latter so the
+    removal can unlink inside the keeper-owned tree), no network, a
+    read-only root, and
     a fixed shell script as entrypoint, setting persistent ext4 discard,
     removing the keeper's real build output ({!build_output_removal_script})
     and trimming the work volume so the host gets back the blocks a guest freed.

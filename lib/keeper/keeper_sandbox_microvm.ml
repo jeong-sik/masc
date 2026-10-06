@@ -1059,7 +1059,7 @@ let build_output_dir_name = "_build"
 let build_keep_marker = ".masc-keep-build"
 
 let trim_guest_root = "/masc-trim"
-let trim_capability = "CAP_SYS_ADMIN"
+let trim_capabilities = [ "CAP_SYS_ADMIN"; "CAP_DAC_OVERRIDE" ]
 let work_volume_trim_name ~keeper_name =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Micro_vm_work_volume_trim { keeper_name })
@@ -1079,26 +1079,27 @@ let mount_guest_path = "/usr/bin/mount"
     it, so without this its output stays on the work volume for good. The
     helper runs it before the guest boots, so no process can hold the
     output. [find] without [-L] never follows a symlinked [_build], and
-    [-type d] does not match one. A checkout holding {!build_keep_marker}
-    keeps its output. A failed removal is printed and does not stop the
-    trim that follows. *)
+    [-type d] does not match one. Paths reach the removal as [-exec]
+    arguments, never as lines, so a directory name holding a newline cannot
+    split into the path of another checkout. A checkout holding
+    {!build_keep_marker} keeps its output. A failed [cd], [find] or removal
+    is printed and does not stop the trim that follows. *)
 let build_output_removal_script ~keeper_root =
   let root = Filename.quote keeper_root in
   Printf.sprintf
-    {sh|if [ -d %s ]; then
-  cd %s
-  find . -maxdepth %d \( -name .git -prune \) -o \( -name %s -type d -prune -print \) |
-  while IFS= read -r b; do
-    c=${b%%/%s}
-    [ "$c" != . ] || continue
-    [ -e "$c/%s" ] || continue
-    [ ! -e "$c/%s" ] || continue
-    if rm -rf -- "$b"; then
-      printf 'build output removed: %%s\n' "${b#./}"
-    else
-      printf 'build output not removed: %%s\n' "${b#./}"
-    fi
-  done
+    {sh|if [ -d %s ] && cd %s; then
+  find . -maxdepth %d \( -name .git -prune \) -o \( -name %s -type d -prune -exec sh -c '
+for b do
+  c=${b%%/%s}
+  [ "$c" != . ] || continue
+  [ -e "$c/%s" ] || continue
+  [ ! -e "$c/%s" ] || continue
+  if rm -rf -- "$b"; then
+    printf "build output removed: %%s\n" "${b#./}"
+  else
+    printf "build output not removed: %%s\n" "${b#./}"
+  fi
+done' sh {} + \) || echo 'build output scan failed'
 fi|sh}
     root
     root
@@ -1157,12 +1158,23 @@ let work_volume_reclaim_script ~keeper_name =
     removes the keeper's real build output ({!build_output_removal_script})
     and runs [fstrim] by absolute path, so the image's
     own entrypoint ([opam] on the ocaml image) never runs with the
-    capability. *)
+    capabilities.
+
+    [CAP_DAC_OVERRIDE] is what lets the removal unlink inside the keeper's
+    tree: the tree belongs to the server's uid with mode 0755, and uid 0
+    without the capability gets only the "other" bits. Measured 2026-10-06
+    on container 1.3.1 with a [_build] made as 502:20 under umask 022: with
+    SYS_ADMIN alone [rm] answered "Permission denied" and nothing was freed;
+    with DAC_OVERRIDE added ([CapEff] 0000000000200002) it was removed and the
+    host image went from 103 MB to 2.6 MB. The capability reaches nothing
+    new: the root is read-only, the network is off, and the one writable
+    mount is this keeper's own work volume. *)
 let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
   command_argv_for Backend.Apple_container
   @ [ "run"; "--rm"; "--name"; work_volume_trim_name ~keeper_name
-    ; "--user"; "0"; "--cap-drop"; "ALL"; "--cap-add"; trim_capability
-    ; "--network"; "none"; "--read-only"
+    ; "--user"; "0"; "--cap-drop"; "ALL" ]
+  @ List.concat_map (fun capability -> [ "--cap-add"; capability ]) trim_capabilities
+  @ [ "--network"; "none"; "--read-only"
     ; "--entrypoint"; "/bin/sh"
     ; "--volume"; volume_name ^ ":" ^ trim_guest_root
     ; image; "-eu"; "-c"; work_volume_reclaim_script ~keeper_name ]

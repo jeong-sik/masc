@@ -12,7 +12,9 @@ import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 import { LaneAddonReadings } from './lane-addon-readings'
 import { LaneDeclarationEditor } from './lane-declaration-editor'
 import { LanePackageInstaller } from './lane-package-installer'
+import { LanePackageActivityPanel } from './lane-package-activity-panel'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
+import { lanePackageActivityObservationRevision } from '../lib/lane-package-activity-session'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
@@ -86,6 +88,7 @@ function LaneAddonActions({ instances, authority }: {
   const submitting = useRef(new Set<ExecutionWorkspaceAuthority>())
   const statusReads = useRef(new Map<string, AbortController>())
   const mounted = useRef(true)
+
   useEffect(() => {
     mounted.current = true
     const reads = statusReads.current
@@ -100,6 +103,7 @@ function LaneAddonActions({ instances, authority }: {
       ? { ...item, checking: false } : item))
     setBinding(''); setInput('{}'); setError(null)
   }, [authority])
+
   const visibleRequests = authority === null ? [] : requests.filter(item => sameWorkspace(item.authority, authority))
   const capable = instances.filter(item => item.action_schema !== null)
   const draftCurrent = inputAuthority.current === authority
@@ -237,6 +241,8 @@ export function LaneAddonsPanel() {
   }, [authority])
   const reads = useRef<AbortController | null>(null)
   const mounted = useRef(true)
+  const activityRevision = lanePackageActivityObservationRevision(authority)
+  const lastActivityRead = useRef({ authority, revision: activityRevision })
 
   async function refresh() {
     if (!mounted.current || !currentAuthority(authority)) return
@@ -265,6 +271,14 @@ export function LaneAddonsPanel() {
     void refresh()
     return () => { mounted.current = false; reads.current?.abort() }
   }, [authority])
+
+  useEffect(() => {
+    const before = lastActivityRead.current
+    lastActivityRead.current = { authority, revision: activityRevision }
+    // Authority changes already trigger the mount read above. A completed
+    // activity save only refreshes observations; selections and forms survive.
+    if (before.authority === authority && before.revision !== activityRevision) void refresh()
+  }, [authority, activityRevision])
 
   async function recoverAuthority() {
     if (recoveringAuthority) return
@@ -371,7 +385,10 @@ export function LaneAddonsPanel() {
             <th>Declaration / file</th><th>Desired revision</th><th>Applied revision / instance</th><th>Configuration status</th>
           </tr></thead><tbody>${configuration.declarations.map(declaration => html`<tr key=${declaration.id}>
             <td>${declaration.id}<div class="break-all">${declaration.source_path}</div>
-              <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button></td>
+              <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button>
+              <button type="button" class=${buttonClass} disabled=${session === null || authority === null}
+                onClick=${() => { if (session && authority) session.openActivity(declaration.source_path, declaration.id, authority) }}
+                aria-label=${`Configure activity for ${declaration.id}`}>On / off</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
             <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
             <td>${!declaration.enabled
@@ -389,6 +406,10 @@ export function LaneAddonsPanel() {
     </div>` : session === null && html`<p role="status">${reading
       ? 'Reading the current workspace’s TOML configuration before opening retained drafts…'
       : 'Current workspace TOML configuration is unavailable. Refresh to retry; your retained drafts are unchanged.'}</p>`}
+    ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageActivityPanel}
+      documents=${session} authority=${authority} snapshot=${snapshot} onRefresh=${() => {
+        if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
+      }} />`}
     ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
       key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
       authority=${authority} documents=${session} snapshot=${snapshot} />`}

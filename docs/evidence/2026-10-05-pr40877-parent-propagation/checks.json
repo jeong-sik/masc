@@ -1,0 +1,22 @@
+{
+  "head": "cb18346728b6938b64b8c2eac4cb40a3e0d858c9",
+  "parent": "e523092316176bcd3d82755bccdb9b4615b865bd",
+  "tested_tree": "4413779607da87950522adb6d605cfd721afc7b6",
+  "tests": 46,
+  "ruff_errors": 0,
+  "pyright_errors": 0,
+  "source_sha256": {
+    "test/test_librarian_preflight_report.py": "7301f80b5e05ce218839f508aeb3618e10c9c17b11eb10e715a8b4a4c3f18588",
+    "scripts/librarian/compare-preflight.py": "6a1ce0b2865096c579f4df06018eb2acb5ad1d41c2f21f61afe513086d1b13d4"
+  },
+  "logs_sha256": {
+    "tests.log": "b0f4bb05f9431224caebf24e1c5cdc94fea6da03e87071babba888ed8d67ac35",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pyright.json": "5f705cf40a075f84569fa744605fcfac6e6b2aabb226f162def4ccac2eaf6e35"
+  },
+  "commands": [
+    "python3 test/test_librarian_preflight_report.py",
+    "ruff check test/test_librarian_preflight_report.py",
+    "pyright --outputjson test/test_librarian_preflight_report.py"
+  ]
+}

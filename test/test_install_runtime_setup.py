@@ -1981,7 +1981,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 budget = dict(max_output_tokens=8192)
                 self.assertEqual(librarian(runtime), dict(slots=[http_id], cli_slots=[], **budget))
                 client = spec('claude_code')
-                client_id = SETUP.render(client, BINARY)[0]
+                client_id = SETUP.render(client, BINARY, base_path=base)[0]
                 SETUP.configure(BINARY, base, client)
                 self.assertEqual(librarian(runtime), dict(slots=[], cli_slots=[client_id], **budget))
             with tempfile.TemporaryDirectory(prefix='runtime-seed-two-') as tmp:

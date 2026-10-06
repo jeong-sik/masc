@@ -500,9 +500,11 @@ class BuildDeckTest(unittest.TestCase):
     """The deck builder's entrance check (code-reviewer on #38433)."""
 
     def build(self, quote, answer):
-        import importlib.util, tempfile
+        import importlib.util
+        import tempfile
         path = ADDONS / "quiz-questions" / "skills" / "quiz-deck" / "scripts" / "build_deck.py"
         spec = importlib.util.spec_from_file_location("build_deck", path)
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as tmp:

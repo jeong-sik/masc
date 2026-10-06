@@ -151,7 +151,68 @@ type reservation_error = Reservation_inactive
 let published : t option Atomic.t = Atomic.make None
 let publication_mutex = Mutex.create ()
 let active_reservation : reservation option ref = ref None
-let availability_change = ref (Eio.Promise.create ())
+
+(* Whether [current] turned a reader away with [Publication_busy] while the
+   active fence stood. Such a reader parked work it could not admit, and the
+   fence's end is what lets it in again, whatever the write's outcome. *)
+let busy_reader_refused = ref false
+
+type lane_subscription = { lane_id : string; wake : unit -> unit }
+let lane_subscriptions : lane_subscription list ref = ref []
+
+let subscribe_lane_changes ~lane_id wake =
+  let subscription = { lane_id; wake } in
+  Mutex.protect publication_mutex (fun () ->
+    lane_subscriptions := subscription :: !lane_subscriptions);
+  fun () -> Mutex.protect publication_mutex (fun () ->
+    lane_subscriptions := List.filter (fun current -> current != subscription) !lane_subscriptions)
+;;
+
+let lane_publication registry lane_id =
+  match registry with
+  | None -> None, []
+  | Some registry ->
+    let declaration = List.find_opt
+        (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id lane_id)
+        registry.declared_lanes in
+    let targets = match List.find_opt
+        (fun (lane : admitted_lane) -> String.equal lane.id lane_id)
+        registry.exact_output_lanes with
+      | None -> []
+      | Some lane -> List.map (fun (slot : admitted_slot) ->
+          slot.slot_id,
+          (Exact_output.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
+           |> Result.map (fun (candidate : Exact_output.flow_candidate) ->
+             Exact_output.target_identity_fingerprint
+               (Exact_output.flow_candidate_identity candidate).target_identity))) lane.slots in
+    declaration, targets
+;;
+
+(* Capture subscribers with the committed transition under the publication
+   lock; invoke them only after releasing it. Comparing lane-local identities
+   avoids waking a refused consumer for unrelated catalog publications. *)
+let changed_subscribers ~previous ~current =
+  List.filter (fun subscription ->
+    let before, before_targets = lane_publication previous subscription.lane_id in
+    let after, after_targets = lane_publication current subscription.lane_id in
+    let same_declaration = match before, after with
+      | None, None -> true
+      | Some before, Some after -> Runtime_schema.equal_exact_output_lane_decl before after
+      | None, Some _ | Some _, None -> false in
+    not same_declaration || before_targets <> after_targets) !lane_subscriptions
+;;
+
+let notify_lane_changes subscriptions =
+  (* Publication is already committed. A wake callback's cancellation is a
+     subscriber failure, not cancellation of the preceding write: propagating
+     it would hide the committed receipt from the runtime-config caller.
+     Callbacks only signal work; cancellation from [apply_write] still escapes
+     through [transact_replacement]'s pre-publication exception path. *)
+  List.iter (fun subscription ->
+    try subscription.wake () with
+    | exn -> Log.Misc.warn "exact-output lane publication subscriber failed lane=%s: %s"
+        subscription.lane_id (Printexc.to_string exn)) subscriptions
+;;
 
 let ( let* ) = Result.bind
 
@@ -307,27 +368,6 @@ let with_publication_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
 ;;
 
-let next_availability_change () =
-  with_publication_lock (fun () -> fst !availability_change)
-;;
-
-(* Each mutation takes exactly one resolver under the publication lock. No
-   caller callback or waiter runs here; resolution only enqueues waiting fibers
-   after the lock is released, on their own schedulers. *)
-let rotate_availability_change () =
-  let _, resolver = !availability_change in
-  availability_change := Eio.Promise.create ();
-  resolver
-;;
-
-let with_changed_publication f =
-  let* value, resolver = with_publication_lock (fun () ->
-    let* value = f () in
-    Ok (value, rotate_availability_change ())) in
-  Eio.Promise.resolve resolver ();
-  Ok value
-;;
-
 (* A required lane rule 3 emptied is excused at this one publication: it is
    unavailable alone and every other lane still publishes. The registry keeps
    the full required list, so the next publication requires the lane again
@@ -364,8 +404,7 @@ let check_publication ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes 
 ;;
 
 let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
-  with_changed_publication
-  @@ fun () ->
+  let* registry, subscriptions = with_publication_lock (fun () ->
   match !active_reservation with
   | Some _ -> Error Publication_busy
   | None ->
@@ -381,12 +420,15 @@ let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(excused_lan
       ; required_lane_ids
       }
     in
+    let previous = Atomic.get published in
     Atomic.set published (Some registry);
-    Ok registry
+    Ok (registry, changed_subscribers ~previous ~current:(Some registry))) in
+  notify_lane_changes subscriptions;
+  Ok registry
 ;;
 
 let unpublish () =
-  with_changed_publication (fun () ->
+  with_publication_lock (fun () ->
     match !active_reservation with
     | Some _ -> Error Publication_busy
     | None -> Atomic.set published None; Ok ())
@@ -396,7 +438,9 @@ let current () =
   with_publication_lock
   @@ fun () ->
   match !active_reservation with
-  | Some _ -> Error Publication_busy
+  | Some _ ->
+    busy_reader_refused := true;
+    Error Publication_busy
   | None ->
     (match Atomic.get published with
      | Some registry -> Ok registry
@@ -406,6 +450,7 @@ let current () =
 let reserve candidate =
   let reservation = { identity = ref (); candidate } in
   active_reservation := Some reservation;
+  busy_reader_refused := false;
   Ok reservation
 ;;
 
@@ -478,19 +523,31 @@ let reserve_replacement prepared =
 
 let same_reservation left right = left.identity == right.identity
 
+(* The subscribers to wake as a fence closes: those whose lane the commit
+   changed, or every subscriber when a reader was refused during the fence,
+   since [current] cannot say which lane that reader asked about. Called under
+   the publication lock; it reads and resets the refusal. *)
+let fence_close_subscribers changed =
+  let refused = !busy_reader_refused in
+  busy_reader_refused := false;
+  if refused then !lane_subscriptions else changed
+;;
+
 let close_private_transaction reservation ~publish =
-  let resolver = with_publication_lock (fun () ->
-    (* [reservation] never leaves [transact_replacement]'s closure. Other
-       publication operations can only observe the active fence, so no external
-       caller can consume or replace this exact token while [apply_write] runs. *)
-    active_reservation := None;
-    if publish
-    then
-      Option.iter
-        (fun registry -> Atomic.set published (Some registry))
-        reservation.candidate;
-    rotate_availability_change ()) in
-  Eio.Promise.resolve resolver ()
+  let subscriptions = with_publication_lock (fun () ->
+  (* [reservation] never leaves [transact_replacement]'s closure. Other
+     publication operations can only observe the active fence, so no external
+     caller can consume or replace this exact token while [apply_write] runs. *)
+  active_reservation := None;
+  fence_close_subscribers
+    (if not publish then []
+     else match reservation.candidate with
+       | None -> []
+       | Some registry ->
+         let previous = Atomic.get published in
+         Atomic.set published (Some registry);
+         changed_subscribers ~previous ~current:(Some registry))) in
+  notify_lane_changes subscriptions
 ;;
 
 let transact_replacement prepared ~apply_write =
@@ -509,26 +566,27 @@ let transact_replacement prepared ~apply_write =
 ;;
 
 let finish_replacement reservation =
-  with_changed_publication
-  @@ fun () ->
+  let* subscriptions = with_publication_lock (fun () ->
   match !active_reservation with
   | Some active when same_reservation active reservation ->
     active_reservation := None;
-    Option.iter
-      (fun registry -> Atomic.set published (Some registry))
-      active.candidate;
-    Ok ()
-  | Some _ | None -> Error Reservation_inactive
+    let previous = Atomic.get published in
+    Option.iter (fun registry -> Atomic.set published (Some registry)) active.candidate;
+    Ok (fence_close_subscribers (changed_subscribers ~previous ~current:(Atomic.get published)))
+  | Some _ | None -> Error Reservation_inactive) in
+  notify_lane_changes subscriptions;
+  Ok ()
 ;;
 
 let abort_replacement reservation =
-  with_changed_publication
-  @@ fun () ->
+  let* subscriptions = with_publication_lock (fun () ->
   match !active_reservation with
   | Some active when same_reservation active reservation ->
     active_reservation := None;
-    Ok ()
-  | Some _ | None -> Error Reservation_inactive
+    Ok (fence_close_subscribers [])
+  | Some _ | None -> Error Reservation_inactive) in
+  notify_lane_changes subscriptions;
+  Ok ()
 ;;
 let rejected_slots registry = registry.rejected_slots
 

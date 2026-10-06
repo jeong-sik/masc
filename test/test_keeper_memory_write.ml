@@ -505,6 +505,85 @@ let test_write_comes_back_through_recall () =
     (fact.Masc.Keeper_memory_os_types.first_seen > 0.0)
 ;;
 
+(* Keeper sangsu, 2026-10-06: one turn wrote 1,579 times, 1,085 of them claims
+   it had already written in that turn. Each re-observation answered with a
+   new snapshot revision and stamp, so no two receipts matched and the
+   repeated-call yield, which needs an unchanged output, never fired. The
+   receipts go through the fingerprint and the detector the turn uses. *)
+let test_a_repeated_identical_write_returns_one_receipt () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "repeat-write" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let args = make_args ~title:"" ~content:"the same fact card, written again" in
+  let write () =
+    (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
+      .Masc.Keeper_tool_execution.raw_output
+  in
+  let inserted = write () in
+  let reobserved = [ write (); write (); write () ] in
+  let first_repeat = List.hd reobserved in
+  Alcotest.(check string)
+    "the first write inserts"
+    "inserted"
+    (string_field "identity_disposition" (Yojson.Safe.from_string inserted));
+  List.iteri
+    (fun index receipt ->
+       Alcotest.(check string)
+         (Printf.sprintf "re-observation %d returns the same bytes" (index + 1))
+         first_repeat
+         receipt)
+    reobserved;
+  let response = Yojson.Safe.from_string first_repeat in
+  Alcotest.(check string)
+    "the repeat re-observes"
+    "reobserved"
+    (string_field "identity_disposition" response);
+  Alcotest.(check bool)
+    "a re-observation names no revision"
+    false
+    (match response with
+     | `Assoc fields -> List.mem_assoc "revision" fields
+     | _ -> true);
+  (match current_facts ~keepers_dir ~keeper_id:meta.name with
+   | [ fact ] ->
+     Alcotest.(check string)
+       "recorded_at is when the fact was first recorded"
+       (Masc_domain.iso8601_of_unix_seconds fact.Masc.Keeper_memory_os_types.first_seen)
+       (string_field "recorded_at" response)
+   | facts -> Alcotest.failf "expected one stored fact, got %d" (List.length facts));
+  let detail output_text : Masc.Keeper_agent_result.tool_call_detail =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"keeper_memory_write"
+        ~input:args
+        ~output_text
+    with
+    | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
+      { tool_name = "keeper_memory_write"
+      ; provider = "fixture"
+      ; execution_outcome = Tool_result.Ok
+      ; typed_outcome = None
+      ; latency_ms = 1.
+      ; task_id = None
+      ; route_evidence = None
+      ; input_fingerprint = Some input_fingerprint
+      ; output_fingerprint = Some output_fingerprint
+      }
+    | None -> Alcotest.fail "digest_tool_io refused the receipt"
+  in
+  (* Newest first, as the turn hands them over. 3 is
+     [Keeper_agent_run.repeated_tool_call_yield_threshold]. *)
+  let calls = List.rev_map detail (inserted :: reobserved) in
+  Alcotest.(check (option (pair string int)))
+    "the third identical re-observation yields the turn"
+    (Some ("keeper_memory_write", 3))
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3 calls)
+;;
+
 let test_retract_cascades_through_public_tool_and_journals_reason () =
   with_temp_dir
   @@ fun base_path ->
@@ -3593,6 +3672,10 @@ let () =
             "write comes back through recall"
             `Quick
             test_write_comes_back_through_recall
+        ; Alcotest.test_case
+            "a repeated identical write returns one receipt"
+            `Quick
+            test_a_repeated_identical_write_returns_one_receipt
         ; Alcotest.test_case
             "derived write uses exact premise receipt"
             `Quick

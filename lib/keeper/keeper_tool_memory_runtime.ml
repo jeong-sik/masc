@@ -1756,6 +1756,33 @@ let memory_write_identity_receipt = function
     ; "what_committed", `String "The existing current fact was re-observed; its observation or support was refreshed. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
 ;;
 
+(* [recorded_at] echoes a persisted stamp rather than reading a second clock:
+   the receipt and the stored fact cannot disagree, and the authoring model
+   gets an authoritative UTC time at the exact moment it writes prose claims —
+   hand-typed timestamps in claims have drifted by whole hours (lane-smith,
+   2026-09-01: a 02:42Z event recorded as "03:42Z").
+
+   A re-observation answers the same claim bytes with the same receipt. The
+   snapshot revision and stamp it bumps tell the model nothing it can act on,
+   and a receipt that moves on every identical write hides a write loop from
+   [Keeper_agent_run.repeated_exact_tool_call], which reads an unchanged
+   output as the proof that nothing advanced. Keeper sangsu, 2026-10-06: one
+   turn wrote 1,579 times, 1,085 of them claims it had already written in that
+   turn, and nothing stopped it. So a re-observation reports when the fact was
+   first recorded, which re-upserting preserves, and no revision. *)
+let memory_write_commit_stamp disposition
+      ~(snapshot : Keeper_memory_os_current.t)
+      ~(fact : Keeper_memory_os_types.fact)
+  =
+  match disposition with
+  | Inserted ->
+    [ "revision", `Int snapshot.revision
+    ; "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at)
+    ]
+  | Reobserved ->
+    [ "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen) ]
+;;
+
 let keeper_memory_write_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -1902,23 +1929,16 @@ let keeper_memory_write_with_outcome
                  (Keeper_memory_os_events.Revised { superseded_by = written_memory_id })
                [ superseded_memory_id ]
            | No_supersedes | Target_already_dropped _ -> ());
+          let disposition =
+            memory_write_identity_disposition ~snapshot ~fact:written_fact
+          in
           respond
             ~ok:true
             ~error_kind:No_memory_write_error
-            (memory_write_identity_receipt
-               (memory_write_identity_disposition ~snapshot ~fact:written_fact)
-             @ [ "rows_written", `Int 1
-            ; "revision", `Int snapshot.revision
-              (* [recorded_at] echoes the persisted snapshot stamp rather than
-                 reading a second clock: the receipt and the stored fact cannot
-                 disagree, and the authoring model gets an authoritative UTC
-                 time at the exact moment it writes prose claims — hand-typed
-                 timestamps in claims have drifted by whole hours (lane-smith,
-                 2026-09-01: a 02:42Z event recorded as "03:42Z"). *)
-            ; ( "recorded_at"
-              , `String
-                  (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-            ; "outcome", `String "persisted_current_snapshot"
+            (memory_write_identity_receipt disposition
+             @ [ "rows_written", `Int 1 ]
+             @ memory_write_commit_stamp disposition ~snapshot ~fact:written_fact
+             @ [ "outcome", `String "persisted_current_snapshot"
             ; "store", `String "current_memory_snapshot"
             ; "memory_id", `String written_memory_id
             ; "basis", memory_write_basis_receipt written_fact.basis

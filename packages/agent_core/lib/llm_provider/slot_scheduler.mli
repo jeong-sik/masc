@@ -26,9 +26,10 @@ type t
     @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
 val create : max_slots:int -> priority_run_limit:int option -> t
 
-(** Run [f] with a permit. If all slots are in use, the request joins the
-    queue of [admission_class]. Raises the original exception if [f] fails;
-    the permit is still released. *)
+(** Run [f] with a permit. If all slots are in use, the request queues as
+    [admission_class] (one shared queue when the scheduler has no run
+    limit). Raises the original exception if [f] fails; the permit is still
+    released. *)
 val with_permit : admission_class:Admission_class.t -> t -> (unit -> 'a) -> 'a
 
 (** A bounded wait for a slot as its caller sees it. The caller owns the

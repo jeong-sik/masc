@@ -277,8 +277,8 @@ val complete_serialized
 
     It starts once the endpoint's admission permit is held, not when [complete]
     is called. When [config.max_concurrent_requests] is declared and the
-    endpoint is saturated, the wait for a permit is FIFO queueing and is
-    unbounded by this value, so a caller that sets 30 seconds can still wait
+    endpoint is saturated, the wait for a permit is queueing (see
+    {!Provider_admission}) and is unbounded by this value, so a caller that sets 30 seconds can still wait
     longer than that in total.
 
     [permit_wait] is the caller's cell a bounded wait for the admission
@@ -292,7 +292,7 @@ val complete_serialized
     admission permit and the round trip after it. It must be finite and
     greater than zero and requires [clock]. When the permit is not granted in
     time the result is [Error (TimeoutError { phase = Queue; _ })], no request
-    was sent, and the waiter has left the FIFO. After the permit the round
+    was sent, and the waiter has left its queue. After the permit the round
     trip runs under what the wait left and ends as
     [Error (TimeoutError { phase = Non_streaming_body; _ })]. A declared
     [body_timeout_s] still arms inside it, so whichever bound is narrower

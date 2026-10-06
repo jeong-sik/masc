@@ -32,9 +32,9 @@
 
 (** [with_admission ~config f] runs [f] under the endpoint's concurrency
     permit when [config.max_concurrent_requests] is declared, and directly
-    otherwise. Waiting joins the queue of [config.admission_class];
-    cancellation while waiting does not
-    leak a permit (see {!Slot_scheduler.with_permit}).
+    otherwise. A waiting request queues as [config.admission_class] (one
+    shared queue when the endpoint declares no run limit); cancellation
+    while waiting does not leak a permit (see {!Slot_scheduler.with_permit}).
 
     Two configs naming the same endpoint identity with different allowances
     ([max_concurrent_requests] or [admission_priority_run_limit]) raise

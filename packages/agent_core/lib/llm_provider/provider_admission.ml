@@ -32,12 +32,6 @@ let resolve_existing ~key ~allowance =
       Some resolution)
 ;;
 
-(* Two configs naming the same endpoint identity with different allowances
-   have no precedence between them: whichever dispatched first won, so the
-   effective limit was a function of runtime order. Warning about it left
-   both callers believing their own number. This is a configuration error and
-   it is raised here, which is before the permit is taken and therefore
-   before any provider I/O. *)
 let allowance_to_string (allowance : State.allowance) =
   match allowance.priority_run_limit with
   | None -> Printf.sprintf "max_concurrent_requests=%d" allowance.max
@@ -48,6 +42,10 @@ let allowance_to_string (allowance : State.allowance) =
       limit
 ;;
 
+(* Two configs naming the same endpoint identity with different allowances
+   have no precedence between them, so neither may run under the other's.
+   The disagreement is a configuration error, raised here: before the permit
+   is taken and therefore before any provider I/O. *)
 let reject_conflict = function
   | None -> ()
   | Some (conflict : State.conflict) ->

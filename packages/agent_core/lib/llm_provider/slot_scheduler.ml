@@ -58,7 +58,7 @@ type t =
   ; mutable standard : waiter_queue
   ; mutable priority_run : int
         (** Slots handed to [Priority] in a row while a [Standard] waiter
-            was queued. *)
+            was queued. Back to 0 whenever no [Standard] waiter is queued. *)
   ; mutex : Eio.Mutex.t
   }
 
@@ -177,6 +177,7 @@ let release_slot t =
                Some waiter.resolver
              | None, rest ->
                t.standard <- rest;
+               t.priority_run <- 0;
                hand_over ()))
       in
       hand_over ())
@@ -201,7 +202,9 @@ let leave_or_own t waiter =
       Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
         match waiter.queue with
         | Priority -> t.priority <- remove_waiter waiter t.priority
-        | Standard -> t.standard <- remove_waiter waiter t.standard));
+        | Standard ->
+          t.standard <- remove_waiter waiter t.standard;
+          if t.standard.length = 0 then t.priority_run <- 0));
     `Left_queue)
   else (
     match Atomic.get waiter.state with

@@ -515,9 +515,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ~on_stream_event:(function
            | Runtime_muse_serve.Usage_reported {usage; _} -> on_usage (muse_usage usage)
            | Runtime_muse_serve.Subscription_usage_observed usage ->
-             Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
-               ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
-               (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
+             Runtime_muse_usage.observe ~scope:quota_scope Runtime_muse_usage.Usage_changed usage
            | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
            | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
            | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _

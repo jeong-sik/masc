@@ -53,10 +53,12 @@ val handle_goal_measure
     when restoring [Verifying]. These decisions and their audit intents hold
     the Goal lock. Linked Tasks and Keeper turns are unaffected.
 
-    [drop] decides against the current Goal under its store lock and commits
-    the phase and audit intent together. A committed cancellation remains a
-    success when effect delivery is deferred; [effect_delivery] reports that
-    separately. A repeated drop preserves the original Goal and drains the
+    [drop] is refused unless [note] says why, after trimming. The note
+    becomes the Goal's review note and the reason each cancelled Task's
+    author is told. It decides against the current Goal under its store lock
+    and commits the phase and audit intent together. A committed cancellation
+    remains a success when effect delivery is deferred; [effect_delivery]
+    reports that separately. A repeated drop preserves the original Goal and drains the
     pending outbox without duplicating its event or verifier cancellation. *)
 val handle_goal_transition
   :  tool_name:string

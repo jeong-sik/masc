@@ -148,6 +148,10 @@ let create_goal ctx title =
   json_state created [ "goal_id" ]
 ;;
 let transition ctx goal_id ?note ?evidence action =
+  (* A drop must say why; a test that does not care gets this sentence. *)
+  let note = match note with
+    | None when String.equal action "drop" -> Some "scenario no longer needs this Goal"
+    | Some _ | None -> note in
   let args =
     [ "goal_id", `String goal_id; "action", `String action ]
     @ (match note with

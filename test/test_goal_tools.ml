@@ -190,7 +190,7 @@ let test_goal_transition_unavailable_store () =
   let before = goal_files config in
   let result = Tool_workspace.dispatch (workspace_ctx config)
       ~name:"masc_goal_transition"
-      ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "drop" ]) in
+      ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "drop"; "note", `String "scenario no longer needs this Goal" ]) in
   check_unavailable_envelope config ~reason:"schema_rejected"
     ~field:(`String "criterion_revision") ~mirror_status:"mirror_rejected"
     ~mirror_goal_count:`Null ~reset_step:"repair_field" (expect_unavailable result);
@@ -206,7 +206,7 @@ let test_goal_transition_unknown_goal_not_found () =
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let error = expect_error (Tool_workspace.dispatch (workspace_ctx config)
       ~name:"masc_goal_transition"
-      ~args:(`Assoc [ "goal_id", `String "goal-does-not-exist"; "action", `String "drop" ])) in
+      ~args:(`Assoc [ "goal_id", `String "goal-does-not-exist"; "action", `String "drop"; "note", `String "scenario no longer needs this Goal" ])) in
   check string "unknown id on a readable store" "not_found" (get_string_field error "error_code");
   check string "no envelope fields on not_found" "null"
     (Yojson.Safe.to_string (Yojson.Safe.Util.member "reason" error))
@@ -565,7 +565,7 @@ let test_metadata_edit_survives_event_recording_failure () =
     (match phase with
      | `Executing -> ()
      | `Dropped -> ignore (call "masc_goal_transition"
-         [ "goal_id", `String goal_id; "action", `String "drop" ]));
+         [ "goal_id", `String goal_id; "action", `String "drop"; "note", `String "scenario no longer needs this Goal" ]));
     let expected_phase = match phase with `Executing -> "executing" | `Dropped -> "dropped" in
     let path, saved, before = block_goal_event_path config in
     let updated = call "masc_goal_upsert"

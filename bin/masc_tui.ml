@@ -10163,7 +10163,7 @@ let apply_planning_load state = function
       state.planning_error <- None;
       (match navigation with
        | Planning_selection.List_cursor cursor ->
-           state.goal_action_armed <- None;
+           state.goal_action_pending <- None;
            state.planning_cursor <- cursor;
            state.planning_mode <- Planning_list;
            state.planning_scroll <- 0
@@ -10171,7 +10171,7 @@ let apply_planning_load state = function
            state.planning_cursor <- cursor;
            state.planning_mode <- Planning_detail goal_id)
   | Error err ->
-      state.goal_action_armed <- None;
+      state.goal_action_pending <- None;
       state.planning <- None;
       state.planning_mode <- Planning_list;
       state.planning_scroll <- 0;
@@ -10501,7 +10501,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_list_reading <- Board_list_unread;
   state.board_list_error <- None;
   state.board_mode <- Board_list;
-  state.goal_action_armed <- None;
+  state.goal_action_pending <- None;
   state.goal_action_error <- None;
   state.planning <- None;
   state.planning_baseline <- None;
@@ -10815,7 +10815,7 @@ let apply_server_identity_reading state reading =
     Masc_tui_types.workspace_identity_of_refresh
       ~local_base_path:state.local_base_path reading;
   if state.workspace_identity <> Workspace_identity_match then begin
-    state.goal_action_armed <- None;
+    state.goal_action_pending <- None;
     (* Withdraw decision authority even when this refresh did not ask for
        Home. A later matching Metrics read cannot revive foreign/stale tokens. *)
     let reason = "workspace identity is unverified; decisions require a fresh matching read" in
@@ -12315,7 +12315,7 @@ let split_board_draft (text : string) : string * string =
 (* Request a goal lifecycle change through the tools route. Runs in a fiber
    like the other writes; the outcome lands in the shared mailbox and the
    server's phase rules decide, so the TUI never pre-guesses a transition. *)
-let start_goal_transition state ~mailbox ~(goal_id : string)
+let start_goal_transition ?note state ~mailbox ~(goal_id : string)
     ~(action : Goal_phase.Public_action.t) =
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot change goal: workspace identity is unverified"
@@ -12332,7 +12332,7 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
     (fun () ->
       match
         Masc_tui_http.post_goal_transition ~host ~port ~goal_id ~action
-          ~note:None
+          ~note
       with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
@@ -12348,7 +12348,7 @@ let handle_goal_confirmation_key state ~mailbox =
   | Planning_list -> ()
   | Planning_detail goal_id ->
       let host = server_peer_host and port = state.port in
-      state.goal_action_armed <- None;
+      state.goal_action_pending <- None;
       (match state.goal_confirmation with
        | Goal_confirmation.Submitting _ -> ()
        | Goal_confirmation.Inspecting read ->
@@ -12397,19 +12397,25 @@ let handle_goal_confirmation_key state ~mailbox =
                   )))
 
 (* The lifecycle keys on a goal detail. The first press names the action, the
-   same press again submits it, and any other key disarms. *)
+   same press again submits it, and any other key disarms. A drop opens its
+   reason instead: the Server refuses a drop that does not say why. *)
 let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
     =
   match state.planning_mode with
+  | Planning_detail goal_id when action = Goal_phase.Public_action.Drop ->
+      state.goal_action_pending <- Some (Goal_drop_reason { goal_id; reason = "" });
+      state.goal_action_error <- None;
+      report_action state "system"
+        (Printf.sprintf "type why goal %s is dropped" goal_id)
   | Planning_detail goal_id -> (
-      match state.goal_action_armed with
-      | Some (armed_goal, armed_action)
-        when String.equal armed_goal goal_id
-             && armed_action = action ->
-          state.goal_action_armed <- None;
+      match state.goal_action_pending with
+      | Some (Goal_action_armed armed)
+        when String.equal armed.goal_id goal_id
+             && armed.action = action ->
+          state.goal_action_pending <- None;
           start_goal_transition state ~mailbox ~goal_id ~action
-      | Some _ | None ->
-          state.goal_action_armed <- Some (goal_id, action);
+      | Some (Goal_action_armed _ | Goal_drop_reason _) | None ->
+          state.goal_action_pending <- Some (Goal_action_armed { goal_id; action });
           state.goal_action_error <- None;
           report_action state "system"
             (Printf.sprintf "press %s again to %s goal %s"
@@ -14260,7 +14266,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | _ -> ());
       match result with
       | Ok message ->
-          state.goal_action_armed <- None;
+          state.goal_action_pending <- None;
           state.goal_action_error <- None;
           report_action state "system" ("Goal: " ^ message);
           (* The phase shown is the half the periodic refresh has not fetched
@@ -14272,7 +14278,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox
       | Error err ->
-          state.goal_action_armed <- None;
+          state.goal_action_pending <- None;
           state.goal_action_error <- Some err;
           report_action state "error" ("Goal: " ^ err))
   | Goal_confirmation_loaded (request, result) ->
@@ -19709,6 +19715,12 @@ and is loaded on demand through keeper_skill.
                 state.preset_save_draft <-
                   Some
                     (Option.value state.preset_save_draft ~default:"" ^ text)
+            | Some Text_goal_drop_reason ->
+                (match state.goal_action_pending with
+                 | Some (Goal_drop_reason entry) ->
+                     state.goal_action_pending <-
+                       Some (Goal_drop_reason { entry with reason = entry.reason ^ text })
+                 | Some (Goal_action_armed _) | None -> ())
             | Some Text_runtime_lane_name ->
                 state.runtime_lane_name_draft <-
                   Option.map
@@ -19952,8 +19964,15 @@ and is loaded on demand through keeper_skill.
               then state.keeper_action_pending <- None)
        | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
        | Planning ->
-           if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
-             state.goal_action_armed <- None;
+           (* A drop reason is a field, not an armed key: its own Esc and
+              Enter end it, and every other key is a letter of the reason.
+              A compact frame does not draw the field, so there the reason
+              ends on the next key like any armed action. *)
+           (match state.goal_action_pending with
+            | Some (Goal_drop_reason _) when not compact_viewport -> ()
+            | Some (Goal_action_armed _ | Goal_drop_reason _) | None ->
+                if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
+                  state.goal_action_pending <- None);
            (* Scrolling reads the exact proof; leaving it invalidates pending
               reads as well as an already displayed confirmation binding. *)
            if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
@@ -20489,6 +20508,36 @@ and is loaded on demand through keeper_skill.
                | s when String.length s = 1 && Char.code s.[0] >= 32 ->
                  state.preset_save_draft <- Some (draft ^ s)
                | _ -> ()))
+       (* Typing why a goal is dropped. Enter sends the drop with that
+          reason; a blank reason stays open with the refusal on it, because
+          the Server refuses a drop that does not say why. *)
+       | Some k
+         when text_input_target state ~compact_viewport
+              = Some Text_goal_drop_reason ->
+           (match state.goal_action_pending with
+            | Some (Goal_drop_reason entry) ->
+              let set reason =
+                state.goal_action_pending <- Some (Goal_drop_reason { entry with reason })
+              in
+              (match k with
+               | "esc" ->
+                 state.goal_action_pending <- None;
+                 state.goal_action_error <- None
+               | "\r" | "\n" | "enter" ->
+                 let reason = String.trim entry.reason in
+                 if String.equal reason "" then
+                   state.goal_action_error <- Some "A drop needs a reason; type why, or Esc to cancel"
+                 else begin
+                   state.goal_action_pending <- None;
+                   state.goal_action_error <- None;
+                   start_goal_transition state ~mailbox:async_messages ~note:reason
+                     ~goal_id:entry.goal_id ~action:Goal_phase.Public_action.Drop
+                 end
+               | "\127" | "\b" | "backspace" ->
+                 set (Masc_tui_message_layout.drop_last_utf8_scalar entry.reason)
+               | s when Masc_tui_message_layout.is_printable_utf8_scalar s -> set (entry.reason ^ s)
+               | _ -> ())
+            | Some (Goal_action_armed _) | None -> ())
        (* Typing a new lane's name. Enter opens the failover picker on the
           name, and the first runtime picked there declares the lane: a lane
           is its candidates, so it comes to exist with one rather than empty.

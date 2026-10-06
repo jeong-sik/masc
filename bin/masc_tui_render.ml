@@ -1076,26 +1076,23 @@ let render_planning_list (state : state) =
           since the baseline. Wrapped physical rows share the list budget. *)
        let backlog_visible = cards_fit || add_summary_if_fits backlog_summary in
        let trend = Buffer.create 256 in
-       wrap_summary trend ~style:(Theme.info ())
-         (match state.planning_baseline with
-          | None -> "  Trend: waiting for the first successful reading"
-          | Some first ->
-              (* How long the reading has been running, not the clock it
-                 started at. The baseline is the first successful read of
-                 this process and is never replaced, so on a screen left open
-                 overnight "since 09:31:39" named a moment on a day the
-                 reader had no way to identify.
-
-                 The sentence names where the span starts, because the span
-                 is not a window anyone chose: "over the last 1d21h" reads
-                 like a day-and-a-half report, when what it measures is how
-                 long this screen has been open. *)
-              Printf.sprintf
-                "  Net change since this TUI's first reading %s ago: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
-                (Masc_tui_wire_age.text ~now:now_unix first.pl_generated_at)
-                (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
-                (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
-                (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
+       (match state.planning_baseline with
+        | None ->
+            wrap_summary trend ~style:(Theme.info ())
+              "  Change: waiting for the first successful snapshot"
+        | Some first ->
+            (* Baseline and current are server snapshot generation times,
+               not the time this TUI received them or the process age. *)
+            wrap_summary trend ~style:(Theme.recede ())
+              ("  Baseline snapshot: " ^ Terminal_text.single_line first.pl_generated_at);
+            wrap_summary trend ~style:(Theme.recede ())
+              ("  Current snapshot: " ^ Terminal_text.single_line p.pl_generated_at);
+            wrap_summary trend ~style:(Theme.info ())
+              (Printf.sprintf
+                 "  Change from baseline: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
+                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
+                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
+                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)));
        if backlog_visible then ignore (add_summary_if_fits trend);
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)

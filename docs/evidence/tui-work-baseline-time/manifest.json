@@ -1,0 +1,28 @@
+{
+  "captured_at": "2026-10-03T07:15:41.276265+00:00",
+  "provenance": "local candidate fixture PTY and exact browser row replay",
+  "base_sha": "7516d1be91ec5e7e6607d3bb0da90197995554a4",
+  "source_sha256": {
+    "bin/masc_tui_render.ml": "63ae6e7ddf7fdf614318a6a730eb0133301eda47c1f9515d9a946aced4510ae0",
+    "bin/masc_tui.ml": "4b9952ef7d4a51b8e4b0d380784e63d7f66462bc722e4d24e15bebff6edb1566",
+    "test/test_tui_surface_studio_pty.py": "4b456dd2440bcabc5ae947781e2eb2b9adf03e7eab960e76c6e6da2040ad39be",
+    "test/test_tui_keyboard_board_terminal_pty.py": "ee7a85eb2e4e290a5db301fd2602ae3ccb8d2b68b9c4b664491e98bfc874b308",
+    "test/test_tui_acting_pane_floor_pty.py": "1d2b3269468edc3b186b07266b0011d88f27163659336b583de18a918a1ef3e8"
+  },
+  "candidate_binary_sha256": "38465a4d882b985f15e374de260dfef6ab292cf59c883cc75246317792e0fc1d",
+  "frames": [
+    "work-narrow",
+    "work-short",
+    "work-baseline-refresh"
+  ],
+  "surface_journeys": 3,
+  "captures": 35,
+  "refresh_values": {
+    "baseline": "2026-08-22T00:00:00Z",
+    "current": "2026-08-23T01:02:03Z",
+    "goals_done_delta": 2,
+    "tasks_done_delta": 3,
+    "reviews_pending_delta": 1
+  },
+  "production_verified": false
+}

@@ -1,5 +1,6 @@
 """Work, Workspace and System responsive panels from the CI fixture PTY."""
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -86,6 +87,13 @@ def run(executable, no_color=False):
             if needle not in narrow:
                 raise AssertionError(f"Narrow Work omitted {needle!r}")
         joined = _keyboard_chat.unwrapped(narrow)
+        snapshot_time = planning["generated_at"]
+        assert isinstance(snapshot_time, str)
+        for label in (b"Baseline snapshot: ", b"Current snapshot: "):
+            if label + snapshot_time.encode() not in joined:
+                raise AssertionError(f"Work source time missing: {label!r}")
+        if b"this TUI's first reading" in joined:
+            raise AssertionError("server snapshot time was labeled as process age")
         for needle in (b"Goals done +0", b"Tasks done +0", b"Goal reviews pending +0"):
             if needle not in joined:
                 raise AssertionError(f"Narrow Work omitted baseline change {needle!r}")
@@ -213,6 +221,48 @@ def run(executable, no_color=False):
         interact=interact,http_fixtures=fixtures,workspace="Surface fixture",
         extra_env={"NO_COLOR":"1"} if no_color else None)
 
+
+def baseline_refresh(executable):
+    fixtures = _keyboard_harness.planning_selection_http_fixtures()
+    response = fixtures[_keyboard_harness.PLANNING_PATH]
+    assert isinstance(response, tuple) and isinstance(response[1], dict)
+    initial = copy.deepcopy(response[1])
+    initial["generated_at"] = "2026-08-22T00:00:00Z"
+    initial["task_backlog"]["done"] = 31
+    updated = copy.deepcopy(initial)
+    updated["generated_at"] = "2026-08-23T01:02:03Z"
+    updated["task_backlog"]["done"] = 34
+    updated["rollup"]["done_count"] += 2
+    updated["rollup"]["verifying_count"] += 1
+    refreshed = False
+    def planning_response():
+        return 200, updated if refreshed else initial
+    fixtures[_keyboard_harness.PLANNING_PATH] = planning_response
+    def interact(process, fd, _slave, output, _base):
+        nonlocal refreshed
+        _keyboard_harness.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=10)
+        _keyboard_harness.palette_go(process, fd, output, b"go Work", b"MASC Work")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Baseline snapshot:", start=0, timeout=5)
+        refreshed = True
+        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"2026-08-23T01:02:03Z")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=121,
+                         needle=b"2026-08-23T01:02:03Z", controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+        frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=120,
+                                 needle=b"2026-08-23T01:02:03Z", controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+        plain = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(frame))
+        for text in (b"Baseline snapshot: 2026-08-22T00:00:00Z",
+                     b"Current snapshot: 2026-08-23T01:02:03Z",
+                     b"Goals done +2", b"Tasks done +3", b"Goal reviews pending +1"):
+            assert text in plain, f"baseline refresh lost evidence: {text!r}"
+        assert b"this TUI's first reading" not in plain
+        print("STUDIO_CAPTURE=" + json.dumps({"name": "work-baseline-refresh", "rows": 30, "columns": 120,
+              "provenance": "local candidate fixture PTY", "frame_b64": base64.b64encode(frame).decode(),
+              "screen": b"\n".join(_keyboard_harness.screen_rows(frame).get(row, b"") for row in range(1, 31)).decode(errors="replace")}), flush=True)
+        os.write(fd, b"q")
+    _keyboard_harness.run_terminal_scenario(executable, description="Work baseline persists while current snapshot advances",
+                            interact=interact, http_fixtures=fixtures)
+
 def run_summary_priority(executable, no_color=False):
     fixtures = _keyboard_harness.planning_selection_http_fixtures()
     response = fixtures[_keyboard_harness.PLANNING_PATH]
@@ -234,7 +284,10 @@ def run_summary_priority(executable, no_color=False):
             visible = b"\n".join(rows.get(row, b"") for row in range(1, 20))
             print("SUMMARY_PRIORITY=" + json.dumps({"columns": columns, "no_color": no_color,
                 "screen": visible.decode(errors="replace")}), flush=True)
-            if b"Backlog:" not in visible and (b"Net change" in visible or b"Trend:" in visible):
+            if b"Backlog:" not in visible and any(label in visible for label in (
+                b"Baseline snapshot:", b"Current snapshot:", b"Change from baseline:",
+                b"Change: waiting for the first successful snapshot",
+            )):
                 raise AssertionError("Work displayed optional trend while the current backlog did not fit")
             for needle in (b"goal-a-29424", b"Right / Enter:detail"):
                 if needle not in visible:
@@ -257,4 +310,5 @@ if __name__ == "__main__":
     run_summary_priority(executable,True)
     run(executable)
     run(executable,True)
+    baseline_refresh(executable)
     print("tui surface studio PTY: PASS",flush=True)

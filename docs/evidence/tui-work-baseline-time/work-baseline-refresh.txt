@@ -1,0 +1,30 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Work  ▸Goals·1  Task Review  Task Verdicts  16:05:27  HTTP [connected]                                          
+    sort:phase/P1-P5  filter:active                                                                                     
+    No longer listed: 1                                                                                                 
+    earlier-plan-29424 24.0h                                                                                            
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+  ┌ Goals · measured outcomes                             ┐  ┌ Tasks · Backlog:                                      ┐  
+  │ Goals: 6 [██░░░░░░] 33% (2/6)  │  ◐ Exec: 3  ◆ Ver: 1 │  │ ○ todo=0 · ◐ claimed=0 · ◐ in_progress=0 · ◐          │  
+  │ ● Done: 2                                             │  │ awaiting_verification=0 · ● done=34 · × cancelled=0   │  
+  └───────────────────────────────────────────────────────┘  └───────────────────────────────────────────────────────┘  
+  Baseline snapshot: 2026-08-22T00:00:00Z                                                                               
+  Current snapshot: 2026-08-23T01:02:03Z                                                                                
+  Change from baseline: Goals done +2 · Tasks done +3 · Goal reviews pending +1                                         
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    PHASE        JUDGE PRI OPEN             TITLE                                                       AGE DUE         
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+  > [executing]        P1                   plan-alpha-29424                                                            
+    [executing]        P1                   plan-beta-29424                                                             
+    [executing]        P1                   plan-charlie-29424                                                          
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+    goal-a-29424 · metric: metric-goal-a-29424 → 100%                                                                   
+
+  j/k:move  t:Goals / Tasks  p:Approvals  v:next Work tab  f:filter  Right / Enter:detail  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              

@@ -71,6 +71,7 @@ let navigation () =
   check bool "issue is not installable" true (Result.is_error (Browser.handle ~key:"enter" bad));
   check bool "manual path remains available" true (Browser.handle ~key:"p" state = Ok Browser.Manual);
   check bool "directory jump available" true (Browser.handle ~key:"g" state = Ok Browser.Jump);
+  check bool "n opens the raw TOML declaration editor" true (Browser.handle ~key:"n" state = Ok Browser.Declare);
   check bool "unknown response does not fabricate entries" true (Result.is_error (Browser.receive (`Assoc []) state))
 
 let reachable_large_list () =
@@ -81,8 +82,24 @@ let reachable_large_list () =
   (match Browser.handle ~key:"enter" state |> ok with Browse (Some path) -> check string "last folder opens" "/workspace/folder-099" path | _ -> fail "last row unreachable");
   check bool "root cannot navigate above workspace" true (match Browser.handle ~key:"left" state |> ok with Updated _ -> true | _ -> false)
 
+let unread_remembered_folder () =
+  let remembered=Browser.create ~directory:"/workspace/removed" () in
+  (match Browser.handle ~key:"left" remembered |> ok with
+   | Browse None -> () | _ -> fail "an unread remembered folder must reach the workspace root");
+  check bool "reload still retries the remembered folder" true
+    (Browser.handle ~key:"r" remembered = Ok (Browser.Browse (Some "/workspace/removed")));
+  check string "footer names the root fallback"
+    "j/k:select  Enter:open  Left:workspace root  Right:folder  g:directory  p:manifest  n:new TOML  PgUp/PgDn:details  Esc:cancel"
+    (Browser.hints remembered);
+  check bool "details name the root fallback" true
+    (List.mem "No folder read yet. Left:workspace root · g:directory · p:manifest"
+      (Browser.lines ~height:12 ~render:(fun s->[s]) remembered));
+  check bool "an unread workspace root has nothing above it" true
+    (match Browser.handle ~key:"left" (Browser.create ()) |> ok with Updated _ -> true | _ -> false)
+
 let () = run "Local package discovery and selection" ["journeys",[
   test_case "discover actual directory with explicit loader outcomes" `Quick discover_workspace;
   test_case "never load manifests outside workspace" `Quick containment;
   test_case "folder to package selection and existing preview handoff" `Quick navigation;
-  test_case "all entries reachable in a short terminal" `Quick reachable_large_list]]
+  test_case "all entries reachable in a short terminal" `Quick reachable_large_list;
+  test_case "an unread remembered folder still reaches the workspace root" `Quick unread_remembered_folder]]

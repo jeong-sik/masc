@@ -112,6 +112,42 @@ describe('Web package discovery to explicit declaration save', () => {
     expect(state.selected).toBe(key)
     expect(state.drafts.get(key)!.previewAuthority).toBeNull()
   })
+  it('refuses the retained preview after a failed recheck through an alias no preview has named', async () => {
+    const screen = render(html`<${LaneAddonsPanel} />`); await choose(screen); fill(screen)
+    api.fetchLanePackagePreview.mockRejectedValueOnce(new Error('manifest missing'))
+    fireEvent.click(screen.getByText('Enter a manifest path directly'))
+    input(screen, 'Package manifest path', './packages/report/lane.toml')
+    fireEvent.click(screen.getByRole('button', { name: 'Read package preview' }))
+    await screen.findByText('manifest missing')
+    const retained = screen.getByLabelText('Retained package inputs') as HTMLSelectElement
+    fireEvent.change(retained, { target: { value: (within(retained).getByRole('option', { name: /new-report/ }) as HTMLOptionElement).value } })
+    await screen.findByText(/A fresh package preview is required/)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare TOML draft' }))
+    await screen.findByText(/Recheck this package in the current workspace/)
+    expect(screen.queryByLabelText('TOML source')).toBeNull()
+    expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+  })
+  it('suspends every preview while an unseen path is read and restores the ones its reply proves unrelated', async () => {
+    const authority = executionWorkspaceAuthority.peek()!
+    const owner = lanePackageInstallationFor(authority, directory)
+    await owner.preview(preview.manifest_path, authority)
+    const report = owner.state.peek().selected!
+    const other = { ...preview, manifest_path: '/workspace/packages/other/lane.toml', package: { ...preview.package, title: 'Other package' } }
+    let finish!: (value: unknown) => void
+    api.fetchLanePackagePreview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const reading = owner.preview('packages/other/lane.toml', authority)
+    expect(owner.state.peek().drafts.get(report)!.previewAuthority).toBeNull()
+    finish(other); await reading
+    const otherKey = owner.state.peek().selected!
+    expect(owner.state.peek().drafts.get(otherKey)!.preview.manifest_path).toBe(other.manifest_path)
+    expect(owner.state.peek().drafts.get(report)!.previewAuthority).toBe(authority)
+    api.fetchLanePackagePreview.mockRejectedValueOnce(new Error('manifest missing'))
+    await owner.preview('./packages/report/lane.toml', authority)
+    const state = owner.state.peek()
+    expect(state.selected).toBeNull()
+    expect(state.drafts.get(report)!.previewAuthority).toBeNull()
+    expect(state.drafts.get(otherKey)!.previewAuthority).toBeNull()
+  })
   it('edits schema alternatives and optional enums without JSON textareas or lost branch inputs', async () => {
     const alternatives = { type: 'object', oneOf: [
       object({ kind: { type: 'string', const: 'file' }, path: { type: 'string', minLength: 1 } }),

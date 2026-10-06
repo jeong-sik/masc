@@ -15,13 +15,13 @@ implementation_prs: []
 
 ## 1. 문제
 
-매니페스트의 `max_reply_bytes` 하나가 서로 다른 일을 11가지나 한다. 이름은 "worker 응답 한도"인데,
+매니페스트의 `max_reply_bytes` 하나가 서로 다른 일을 7가지나 한다. 이름은 "worker 응답 한도"인데,
 README(`addons/README.md`)는 그중 3가지만 적어 두었다. 아래는 코드를 읽어서 정리한 것이고, 실행해서 잰 값은 아니다.
 
 | # | 쓰이는 곳 | 막는 것 | 맞는 쓰임인가 |
 |---|---|---|---|
 | 1 | `lane_addon_worker.ml` → `Mcp.connect ~max_response_bytes` | worker 가 보낸 메시지 읽기, host 가 worker 에게 보내는 응답 프레임 | 맞다. 이름이 뜻하는 일이다 |
-| 2 | `lane_addon_store.ml` `retained_read_limit` (`2*max + 24`) | 저장된 관측 기록을 다시 읽을 때 | 맞다. 입력 한도와 출력 한도의 합에서 나온다 |
+| 2 | `lane_addon_store.ml` `retained_read_limit` (`2*max + 22`) | 저장된 관측 기록을 다시 읽을 때 | 맞다. 입력 한도와 출력 한도의 합에 레코드 봉투 22바이트(`{"sources":…,"output":…}`)가 더해진다 |
 | 3 | `lane_addon_runtime.ml` 의 action 입력 검사 | host 가 worker 에게 주는 action 입력. 같은 입력이 영수증으로 디스크에 저장된다 | 아니다. 보내는 쪽에 받는 쪽 한도를 쓴다. 저장 크기는 HTTP 본문 한도가 이미 제한한다 |
 | 4 | `lane_addon_sources.ml` 의 소스 수집 예산 | host 가 worker 에게 주는 입력 | 아니다 |
 | 5 | `lane_addon_sampling.ml` 의 요청·결과 blob | host 가 직접 저장하는 모델 요청과 결과 | 아니다. worker 에게 보내는 응답이 아니다 |
@@ -29,8 +29,8 @@ README(`addons/README.md`)는 그중 3가지만 적어 두었다. 아래는 코�
 | 7 | `lane_addon_worker.ml` 의 Docker `inspect`·`create` 출력 | host 가 실행한 docker CLI 출력 | 아니다. 값이 작으면 `create` 가 실패한다 |
 
 7번은 실제 버그다. 코드 주석(`lane_addon_worker.ml` 약 293행)이 "create 가 효과를 내고 나서 stdout 을 못 받을 수 있다"고
-적었고, 이 상황을 치우려고 `recover_stop` 이 따로 있다. 한 값이 11가지 일을 하면, 그 값을 한 번 올릴 때
-나머지 10가지의 노출도 같이 커진다. `fusion-report` 가 8 MiB 로 올린 이유가 보고서 크기인데, 그 값이
+적었고, 이 상황을 치우려고 `recover_stop` 이 따로 있다. 한 값이 7가지 일을 하면, 그 값을 한 번 올릴 때
+나머지 6가지의 노출도 같이 커진다. `fusion-report` 가 8 MiB 로 올린 이유가 보고서 크기인데, 그 값이
 입력·저장·Docker 출력에도 똑같이 적용된다.
 
 ## 2. 다른 제품은 어떻게 하나
@@ -74,7 +74,7 @@ masc 에 쓸 만한 것은 값이 아니라 모양이다.
 
 - 한도 하나가 한 가지만 막는다. 명령 출력, 파일 읽기, MCP 결과, 이미지가 각자 이름을 가진다.
 - 컨테이너 자원은 제품 전체의 기본값이다. 패키지마다 적지 않는다. OpenClaw 는 에이전트별 덮어쓰기를 허용한다.
-  masc 는 `cpus`, `memory_bytes`, `pids` 를 11개 매니페스트에 모두 적게 하고, 그중 10개가 같은 값이다.
+  masc 는 `cpus`, `memory_bytes`, `pids` 를 12개 매니페스트에 모두 적게 하고, 그중 11개가 같은 값이다(dos-world 만 1 CPU·512 MB·pids 64 로 다르다).
 - 한도를 넘으면 거절하지 않고 줄이거나 따로 둔다(앞뒤만 남기기, 파일로 spillover). 이 점은 masc 에 그대로 쓸 수 없다.
   masc 는 결과를 증거로 남기고 다른 패키지가 그 증거를 검증한다. 일부만 남기면 증거가 바뀐다. 줄이는 쪽이 아니라
   "거절하거나 별도 증거 blob 으로 두는" 쪽이 맞다(열린 질문 5).

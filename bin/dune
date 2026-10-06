@@ -1475,6 +1475,12 @@
  (libraries masc_tui_composer masc_tui_types))
 
 (library
+ (name masc_tui_approvals_window)
+ (wrapped false)
+ (modules masc_tui_approvals_window)
+ (libraries masc_tui_scroll))
+
+(library
  (name masc_tui_approvals_model)
  (wrapped false)
  (modules masc_tui_approvals_model)
@@ -1877,7 +1883,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_approvals_window masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle

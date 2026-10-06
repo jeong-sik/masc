@@ -553,34 +553,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
   String.concat "\n" metadata_rows, payload_line
 ;;
 
-(* The queue's window. The rows the surface leaves it are [body_rows]; a queue
-   longer than that draws one row less and spends the freed row on a line that
-   says which rows these are. With one row left there is nothing to spend, so
-   the window keeps its row and [list_window_hides_rows] tells the row to carry
-   its own position instead. *)
-let list_window_overflows ~body_rows ~total = body_rows > 1 && total > body_rows
-let list_window_hides_rows ~body_rows ~total = total > body_rows
-
-let list_window_rows ~body_rows ~total =
-  if list_window_overflows ~body_rows ~total then body_rows - 1 else body_rows
-;;
-
-(* Where the window stands and how to reach the rest: the window text every
-   scrolled list on this screen uses, and how many rows lie each way. *)
-let list_window_note ~scroll ~height ~total =
-  let above = max 0 scroll in
-  let below = max 0 (total - (scroll + height)) in
-  let reach =
-    match above, below with
-    | 0, 0 -> ""
-    | above, 0 -> Printf.sprintf "%d more above" above
-    | 0, below -> Printf.sprintf "%d more below" below
-    | above, below -> Printf.sprintf "%d above \xc2\xb7 %d below" above below
-  in
-  Printf.sprintf "[approvals %s]  %s -- j/k to reach"
-    (Masc_tui_scroll.window_text ~scroll ~height total)
-    reach
-;;
+module Window = Masc_tui_approvals_window
 
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -816,8 +789,8 @@ let render_approvals (state : state) =
        said so -- an operator on a short frame could read the first screen,
        believe it whole, and decide against a queue they had not seen. *)
     let approval_total = List.length approvals in
-    let overflowing = list_window_overflows ~body_rows:approval_body_rows ~total:approval_total in
-    let content_height = list_window_rows ~body_rows:approval_body_rows ~total:approval_total in
+    let overflowing = Window.overflows ~body_rows:approval_body_rows ~total:approval_total in
+    let content_height = Window.rows ~body_rows:approval_body_rows ~total:approval_total in
     let scroll_offset =
       if content_height > 0 && state.approval_cursor >= content_height then
         state.approval_cursor - content_height + 1
@@ -923,7 +896,7 @@ let render_approvals (state : state) =
         (* One row and more rows than it: no room for the window line, so the
            row says where it sits in the queue itself. *)
         let line =
-          if list_window_hides_rows ~body_rows:approval_body_rows ~total:approval_total
+          if Window.hides_rows ~body_rows:approval_body_rows ~total:approval_total
              && not overflowing
           then Printf.sprintf "%s[%d/%d]%s %s" Ansi.dim (idx + 1) approval_total Ansi.reset line
           else line
@@ -939,7 +912,7 @@ let render_approvals (state : state) =
     if overflowing then
       box_line_styled buf cols ~style:(Theme.recede ())
         ("  "
-         ^ list_window_note ~scroll:scroll_offset ~height:content_height
+         ^ Window.note ~scroll:scroll_offset ~height:content_height
              ~total:approval_total)
   end;
 

@@ -387,9 +387,10 @@ describe('Machine activity operator flow', () => {
   it('requires a read after an unanswered write and does not blindly repeat it', async () => {
     const { session, authority } = await draft()
     api.saveRuntimeTomlConfig.mockImplementationOnce(async text => { stored = text; throw new Error('connection lost') })
-    expect(await session.save(authority)).toBe(false); expect(session.state.value.current?.source_text).toBe(off)
+    expect(await session.save(authority)).toBe(false); expect(session.state.value.current).toBeNull()
     expect(await session.save(authority)).toBe(false); expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
-    await session.read(authority); session.reapply(authority)
+    await session.read(authority)
+    expect(session.state.value.uncertain).toBeNull(); expect(session.state.value.notice).toMatch(/반영된 것을 확인/)
     expect(await session.save(authority)).toBe(false); expect(session.modified()).toBe(false)
     expect(stored).toBe(off)
   })
@@ -413,8 +414,8 @@ describe('Machine activity operator flow', () => {
   })
   it('rejects a mismatched receipt without claiming a saved setting', async () => {
     const { session, authority } = await draft(); api.saveRuntimeTomlConfig.mockResolvedValueOnce(receipt(source))
-    expect(await session.save(authority)).toBe(false); expect(session.state.value.current?.source_text).toBe(source)
-    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.uncertain).not.toBeNull()
+    expect(await session.save(authority)).toBe(false); expect(session.state.value.current).toBeNull()
+    expect(session.state.value.receipt).toBeNull(); expect(session.state.value.uncertain?.stage).toBe('answered')
   })
 })
 
@@ -489,15 +490,18 @@ describe('Machine inventory and backend isolation', () => {
     await view.findByText('서버 활동 (마지막 조회): 미확인')
     expect(view.queryByText(/파일 설정과 마지막 서버 활동이 다릅니다/)).toBeNull()
   })
-  it('retains uncertainty even when readback finds the old revision; explicit reapply enables retry', async () => {
+  it('settles an unanswered write as unwritten when an explicit read finds the old revision', async () => {
     const { session, authority } = await draft()
     api.saveRuntimeTomlConfig.mockRejectedValueOnce(new Error('lost before reply'))
     expect(await session.save(authority)).toBe(false)
-    expect(session.state.value.current?.source_text).toBe(source)
-    expect(session.state.value.uncertain).not.toBeNull()
+    expect(session.state.value.current).toBeNull()
+    expect(session.state.value.uncertain?.stage).toBe('answered')
     expect(await session.save(authority)).toBe(false)
     expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
-    session.reapply(authority); expect(await session.save(authority)).toBe(true)
+    await session.read(authority)
+    expect(session.state.value.current?.source_text).toBe(source)
+    expect(session.state.value.uncertain).toBeNull(); expect(session.state.value.notice).toMatch(/파일을 바꾸지 않았습니다/)
+    expect(await session.save(authority)).toBe(true); expect(stored).toBe(off)
   })
   it('keeps a saved receipt when file readback fails, and recovers on explicit read', async () => {
     const { session, authority } = await draft()

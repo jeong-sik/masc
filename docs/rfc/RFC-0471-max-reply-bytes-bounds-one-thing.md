@@ -22,7 +22,7 @@ README(`addons/README.md`)는 그중 3가지만 적어 두었다. 아래는 코�
 |---|---|---|---|
 | 1 | `lane_addon_worker.ml` → `Mcp.connect ~max_response_bytes` | worker 가 보낸 메시지 읽기, host 가 worker 에게 보내는 응답 프레임 | 맞다. 이름이 뜻하는 일이다 |
 | 2 | `lane_addon_store.ml` `retained_read_limit` (`2*max + 24`) | 저장된 관측 기록을 다시 읽을 때 | 맞다. 입력 한도와 출력 한도의 합에서 나온다 |
-| 3 | `lane_addon_runtime.ml` 의 action 입력 검사 | host 가 worker 에게 주는 action 입력. 같은 입력이 영수증으로 디스크에 저장된다 | 절반만 맞다. 보내는 쪽 한도로는 아니지만, 보관 한도의 구실은 있다 |
+| 3 | `lane_addon_runtime.ml` 의 action 입력 검사 | host 가 worker 에게 주는 action 입력. 같은 입력이 영수증으로 디스크에 저장된다 | 아니다. 보내는 쪽에 받는 쪽 한도를 쓴다. 저장 크기는 HTTP 본문 한도가 이미 제한한다 |
 | 4 | `lane_addon_sources.ml` 의 소스 수집 예산 | host 가 worker 에게 주는 입력 | 아니다 |
 | 5 | `lane_addon_sampling.ml` 의 요청·결과 blob | host 가 직접 저장하는 모델 요청과 결과 | 아니다. worker 에게 보내는 응답이 아니다 |
 | 6 | `lane_addon_sampling.ml` `with_observation` 의 읽기 예산 | 한 관측에 붙은 증거 blob 전체를 다시 읽는 합계 | 아니다. 소스 스냅샷과 모델 요청이 합쳐서 한도를 넘으면, 문제가 없는데도 관측 전체가 실패할 수 있다. 코드를 읽고 추정한 것이고 재현하지는 못했다 |
@@ -89,7 +89,7 @@ masc 에 쓸 만한 것은 값이 아니라 모양이다.
 
 | 쓰이는 곳 | 바꾼 뒤 |
 |---|---|
-| 3. action 입력 | worker 에게 보내는 쪽 한도로는 쓰지 않는다. 다만 입력 전체가 `receipt.action` 으로 호스트 디스크에 저장되므로(`lane_addon_action.ml` 의 `receipt`) 보관 한도는 필요하다. 이름이 막는 대상을 말하는 호스트 설정 하나(열린 질문 1 의 안전선과 같은 종류)로 옮긴다. 입력 검증은 package 가 선언한 스키마가 계속 맡고, worker 메모리는 `memory_bytes` 가 지킨다 |
+| 3. action 입력 | 이 한도를 쓰지 않는다(#41287 에서 처리). 입력은 들어오는 곳의 HTTP 본문 한도(`Http_server_eio.max_body_bytes`, 기본 20 MiB)가 막고, 입력 전체가 `receipt.action` 으로 디스크에 저장되는 크기도 그 한도가 제한한다. 모양은 package 가 선언한 스키마가, worker 메모리는 `memory_bytes` 가 지킨다. 새 호스트 한도는 만들지 않는다 |
 | 4. 소스 수집 | 같다. 소스마다 "수집 못 함" 항목을 남기는 동작은 그대로 둔다 |
 | 5. 모델 요청·결과 blob | 이 한도를 쓰지 않는다. 텍스트 응답은 `maxTokens` 가 이미 상한이다. 이미지 응답을 얼마나 남길지는 아래 열린 질문 |
 | 6. 증거 읽기 합계 | 디스크에서 다시 읽어 대조하지 않는다. 한 관측 안에서 broker 가 발급한 요청 참조를 메모리에 두고 대조한다 |

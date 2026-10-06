@@ -1,0 +1,480 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-browser-lane-activity-20261004/dashboard
+
+ × src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows browser off and unavailable without losing executor or live observations 33ms
+   → Found multiple elements with the role "button" and name "Inspect Browser Stagehand"
+
+Here are the matching elements:
+
+Ignored nodes: comments, script, style
+[36m<button[39m
+  [33maria-pressed[39m=[32m"false"[39m
+  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+[36m>[39m
+  [0mInspect [0m
+  [0mBrowser Stagehand[0m
+[36m</button>[39m
+
+Ignored nodes: comments, script, style
+[36m<button[39m
+  [33maria-pressed[39m=[32m"false"[39m
+  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+[36m>[39m
+  [0mInspect [0m
+  [0mBrowser Stagehand[0m
+[36m</button>[39m
+
+(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"All Lanes"[39m
+      [33mclass[39m=[32m"space-y-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-xl font-semibold"[39m
+          [36m>[39m
+            [0mAll Lanes[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mBuilt-in Lane kinds, package declarations and manual workers.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+        [36m>[39m
+          [0mRefresh Lanes[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m>[39m
+        [36m<p>[39m
+          [0mObserved [0m
+          [0m2026-08-24T07:47:49.715Z[0m
+          [0m · [0m
+          [0m12[0m
+          [0m inventory rows[0m
+        [36m</p>[39m
+        [36m<p>[39m
+          [0mPackage read: [0m
+          [0mcomplete[0m
+          [0m · [0m
+          [0mmanager present[0m
+        [36m</p>[39m
+        [36m<p>[39m
+          [0mExact run reading: [0m
+          [0m60[0m
+          [0m of [0m
+          [0m60[0m
+          [0m[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<label[39m
+        [33mclass[39m=[32m"block"[39m
+      [36m>[39m
+        [0mFind a Lane[0m
+        [36m<input[39m
+          [33mclass[39m=[32m"block w-full rounded border bg-transparent p-2"[39m
+          [33mtype[39m=[32m"search"[39m
+        [36m/>[39m
+      [36m</label>[39m
+      [36m<div[39m
+        [33mtabindex[39m=[32m"-1"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"Details for Browser automation"[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-4 space-y-3"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mBrowser automation[0m
+          [36m</h3>[39m
+          [36m<p>[39m
+            [0mBrowser backend observation.[0m
+          [36m</p>[39m
+          [36m<code[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mbrowser/automation[0m
+          [36m</code>[39m
+          [36m<p>[39m
+            [0mOff · configuration and sessions retained[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mExecutor registered · session activity unverified[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mStatus and close remain available while off. Executable and profile paths apply at server startup.[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mManage this [0m
+            [0mBrowser backend[0m
+            [0m through its TUI detail or operator tools.[0m
+          [36m</p>[39m
+          [36m<details>[39m
+            [36m<summary>[39m
+              [0mObserved configuration and worker details[0m
+            [36m</summary>[39m
+            [36m<pre[39m
+              [33mclass[39m=[32m"whitespace-pre-wrap break-all"[39m
+            [36m>[39m
+              [0m{
+  "kind": "browser_executor",
+  "activity": "off",
+  "registered": true
+}[0m
+            [36m</pre>[39m
+          [36m</details>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"[39m
+      [36m>[39m
+        [36m<article[39m
+          [33mclass[39m=[32m"min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mBoard Attention[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mexact/board_attention_exact[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mJudges one durable Board candidate for Keeper attention.[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0m1 HTTP · 0 CLI admitted[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mrunning · 1 running · 12 retained runs[0m
+          [36m</p>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [36m>[39m
+            [0mInspect [0m
+            [0mBoard Attention[0m
+          [36m</button>[39m
+        [36m</article>[39m
+        [36m<article[39m
+          [33mclass[39m=[32m"min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mHITL Auto Judge[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mexact/hitl_auto_judge[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mProduces the structured judgment for one held approval.[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0m1 HTTP · 0 CLI admitted[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0midle · 0 running · 12 retained runs[0m
+          [36m</p>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [36m>[39m
+            [0mInspect [0m
+            [0mHITL Auto Judge[0m
+          [36m</button>[39m
+        [36m</article>[39m
+        [36m<article[39m
+          [33mclass[39m=[32m"min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mLibrarian[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mexact/librarian_exact[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mSelects the next Memory OS snapshot from immutable Keeper history.[0m
+          [36m</p>[39m
+          [36m<p[...
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > searches all families and offers existing owner destinations without inventing controls 14ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows off with retained candidates and work finishing independently 12ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > labels the retained reading after refresh fails and retries on demand 12ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > does not accept late rows from another workspace or retain its visible rows 12ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > does not read or keep rows while workspace authority is unknown 11ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > preserves browser activity independently of registration and requires an explicit observation 9ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > reads the actual TUI fixture contract with every built-in and exact observation 1ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > keeps disabled candidates and running observations, rejecting contradictory activity 1ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > rejects mismatched families, duplicate identities, missing builtins and conflicting exact readings 1ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > keeps off intent and unfinished retained cleanup, rejecting nonboolean flags 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows browser off and unavailable without losing executor or live observations
+TestingLibraryElementError: Found multiple elements with the role "button" and name "Inspect Browser Stagehand"
+
+Here are the matching elements:
+
+Ignored nodes: comments, script, style
+[36m<button[39m
+  [33maria-pressed[39m=[32m"false"[39m
+  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+[36m>[39m
+  [0mInspect [0m
+  [0mBrowser Stagehand[0m
+[36m</button>[39m
+
+Ignored nodes: comments, script, style
+[36m<button[39m
+  [33maria-pressed[39m=[32m"false"[39m
+  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+[36m>[39m
+  [0mInspect [0m
+  [0mBrowser Stagehand[0m
+[36m</button>[39m
+
+(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"All Lanes"[39m
+      [33mclass[39m=[32m"space-y-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-xl font-semibold"[39m
+          [36m>[39m
+            [0mAll Lanes[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mBuilt-in Lane kinds, package declarations and manual workers.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+        [36m>[39m
+          [0mRefresh Lanes[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m>[39m
+        [36m<p>[39m
+          [0mObserved [0m
+          [0m2026-08-24T07:47:49.715Z[0m
+          [0m · [0m
+          [0m12[0m
+          [0m inventory rows[0m
+        [36m</p>[39m
+        [36m<p>[39m
+          [0mPackage read: [0m
+          [0mcomplete[0m
+          [0m · [0m
+          [0mmanager present[0m
+        [36m</p>[39m
+        [36m<p>[39m
+          [0mExact run reading: [0m
+          [0m60[0m
+          [0m of [0m
+          [0m60[0m
+          [0m[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<label[39m
+        [33mclass[39m=[32m"block"[39m
+      [36m>[39m
+        [0mFind a Lane[0m
+        [36m<input[39m
+          [33mclass[39m=[32m"block w-full rounded border bg-transparent p-2"[39m
+          [33mtype[39m=[32m"search"[39m
+        [36m/>[39m
+      [36m</label>[39m
+      [36m<div[39m
+        [33mtabindex[39m=[32m"-1"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"Details for Browser automation"[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-4 space-y-3"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mBrowser automation[0m
+          [36m</h3>[39m
+          [36m<p>[39m
+            [0mBrowser backend observation.[0m
+          [36m</p>[39m
+          [36m<code[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mbrowser/automation[0m
+          [36m</code>[39m
+          [36m<p>[39m
+            [0mOff · configuration and sessions retained[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mExecutor registered · session activity unverified[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mStatus and close remain available while off. Executable and profile paths apply at server startup.[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mManage this [0m
+            [0mBrowser backend[0m
+            [0m through its TUI detail or operator tools.[0m
+          [36m</p>[39m
+          [36m<details>[39m
+            [36m<summary>[39m
+              [0mObserved configuration and worker details[0m
+            [36m</summary>[39m
+            [36m<pre[39m
+              [33mclass[39m=[32m"whitespace-pre-wrap break-all"[39m
+            [36m>[39m
+              [0m{
+  "kind": "browser_executor",
+  "activity": "off",
+  "registered": true
+}[0m
+            [36m</pre>[39m
+          [36m</details>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"[39m
+      [36m>[39m
+        [36m<article[39m
+          [33mclass[39m=[32m"min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mBoard Attention[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mexact/board_attention_exact[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mJudges one durable Board candidate for Keeper attention.[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0m1 HTTP · 0 CLI admitted[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mrunning · 1 running · 12 retained runs[0m
+          [36m</p>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [36m>[39m
+            [0mInspect [0m
+            [0mBoard Attention[0m
+          [36m</button>[39m
+        [36m</article>[39m
+        [36m<article[39m
+          [33mclass[39m=[32m"min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mHITL Auto Judge[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mexact/hitl_auto_judge[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mProduces the structured judgment for one held approval.[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0m1 HTTP · 0 CLI admitted[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0midle · 0 running · 12 retained runs[0m
+          [36m</p>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [36m>[39m
+            [0mInspect [0m
+            [0mHITL Auto Judge[0m
+          [36m</button>[39m
+        [36m</article>[39m
+        [36m<article[39m
+          [33mclass[39m=[32m"min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mLibrarian[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mexact/librarian_exact[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mSelects the next Memory OS snapshot from immutable Keeper history.[0m
+          [36m</p>[39m
+          [36m<p[...
+ ❯ Object.getElementError ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ getElementError ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:20:35
+ ❯ getMultipleElementsFoundError ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:23:10
+ ❯ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:55:13
+ ❯ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/lane-inventory-panel.test.ts:33:28
+     31|     expect(screen.getAllByText('Executor registered · session activity…
+     32|     expect(screen.getAllByText(/Status and close remain available whil…
+     33|     fireEvent.click(screen.getByRole('button', { name: `Inspect ${stag…
+       |                            ^
+     34|     expect(screen.getAllByText('Activity configuration unavailable').l…
+     35|     fireEvent.click(screen.getByRole('button', { name: `Inspect ${live…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 10 passed (11)
+   Start at  23:47:16
+   Duration  2.05s (import 40%, transform 23%, environment 16%, setup 14%, tests 6%)

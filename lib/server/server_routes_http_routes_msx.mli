@@ -16,12 +16,15 @@ val press_default_step_frames : int
 
 val press_response :
   config:Workspace.config -> who:string -> body:string ->
-  [ `OK | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
+  [ `OK | `Conflict | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
 (** Authenticated press body handling under [who], the actor the route's
     [with_tool_actor_auth] resolved. [keys] must be an array of strings naming
     at least one key; [hold_frames] and [frames] must be positive integers and
     [sequence] a boolean when present, each defaulting when absent. A field of
     the wrong type is a [`Bad_request] naming the field, and nothing is pressed.
+    A press while the machine's activity is off or unobserved is a [`Conflict]
+    carrying the same [code] the tick route sends ([activity_disabled] or
+    [activity_unobserved]), so a client reads one protocol on both routes.
     An accepted press wakes the [config] workspace's Lane instances bound to the
     machine once, with [Machine_changed Msx]; a refused one wakes nothing. The wake is
     cancellation-protected, so the call must run in an Eio fiber. *)
@@ -46,14 +49,20 @@ val msx_tick_default_frames : int
 
 val tick_response :
   body:string ->
-  [ `OK | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+  [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
 (** Authenticated tick body handling. An optional integer [frames] controls
     advancement. [pixel_response="retained"] requests an inline/retained pixel
     response; optional [known_pixels={revision,width,height}] advertises the
     client's exact retained pixels. Duplicate and unknown fields are refused before
     mutation. Accepted frame counts are clamped to the lane's per-call range.
     Stepping and atomic frame/ledger capture run once on the shared executor pool;
-    an unavailable pool refuses the tick without running it inline. *)
+    an unavailable pool refuses the tick without running it inline.
+    Activity refusal is HTTP 409 with [ok=false] and a closed [code] of
+    [activity_disabled] or [activity_unobserved], before execution starts. *)
+
+val activity_json : unit -> Yojson.Safe.t
+(** Read the published MSX activity only. No machine is started or advanced.
+    Also served by the public-read GET [/api/v1/msx/activity]. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 

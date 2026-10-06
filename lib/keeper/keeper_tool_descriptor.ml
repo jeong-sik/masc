@@ -1805,11 +1805,13 @@ let goal_list_output_schema =
               ; "verifying_count", `Assoc [ "type", `String "integer" ]
               ; "awaiting_confirmation_count", `Assoc [ "type", `String "integer" ]
               ; "done_count", `Assoc [ "type", `String "integer" ]
+              ; "paused_count", `Assoc [ "type", `String "integer" ]
+              ; "blocked_count", `Assoc [ "type", `String "integer" ]
               ; "dropped_count", `Assoc [ "type", `String "integer" ]
               ]
             ~required:
               [ "active_count"; "verifying_count"; "awaiting_confirmation_count"; "done_count"
-              ; "dropped_count" ] )
+              ; "paused_count"; "blocked_count"; "dropped_count" ] )
       ]
     ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
 ;;

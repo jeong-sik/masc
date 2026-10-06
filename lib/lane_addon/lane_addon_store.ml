@@ -23,6 +23,11 @@ let protect f =
 let sync_parent_directory parent =
   let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+let rec sync_existing_parent ~sync_parent directory =
+  try sync_parent directory with
+  | Unix.Unix_error (Unix.ENOENT, _, _) as exn ->
+      let parent = Filename.dirname directory in
+      if parent=directory then raise exn else sync_existing_parent ~sync_parent parent
 let rec durable_directory t ~sync_parent directory =
   let parent = Filename.dirname directory in
   if directory = t.root then (
@@ -235,10 +240,16 @@ let read_jsonl t reference =
   Ok (String.concat "" records)
 let binding_path instance_id = Filename.concat "bindings" (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
-let remove_binding t ~instance_id = protect (fun () ->
-  (try Unix.unlink (Filename.concat t.root (binding_path instance_id))
+let remove_binding_with ~sync_parent t ~instance_id = protect (fun () ->
+  let path = Filename.concat t.root (binding_path instance_id) in
+  (try Unix.unlink path
    with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+  (* A previous unlink may have succeeded before its directory sync failed.
+     Missing ancestor directories are also removals; sync the first surviving
+     parent rather than creating directories just to report absence. *)
+  sync_existing_parent ~sync_parent (Filename.dirname path);
   Ok ())
+let remove_binding = remove_binding_with ~sync_parent:sync_parent_directory
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun () ->
@@ -279,7 +290,7 @@ type binding_inventory = {
   issues : (string * string) list;
   complete : bool;
 }
-let binding_inventory ~root =
+let binding_inventory_with ~sync_parent ~root =
   let directory = Filename.concat root "bindings" in
   let listed = protect (fun () ->
     match Fs_compat.exact_path_kind directory with
@@ -302,7 +313,16 @@ let binding_inventory ~root =
           match read with
           | Ok value -> (path,value)::records,issues
           | Error detail -> records,(path,detail)::issues) ([],[]) names in
+      (* A prior process may have renamed a terminal binding or unlinked it,
+         then failed its parent sync. Reestablish that publication before a
+         caller treats Detached or absence as completed cleanup. Binding
+         writers sync file contents before rename. No record is rewritten. *)
+      let issues = match protect (fun () ->
+        sync_existing_parent ~sync_parent directory; Ok ()) with
+        | Ok () -> issues
+        | Error detail -> (directory,detail)::issues in
       { records=List.rev records; issues=List.rev issues; complete=issues=[] }
+let binding_inventory = binding_inventory_with ~sync_parent:sync_parent_directory
 let sampling_directory instance_id = Filename.concat "sampling" (digest instance_id)
 let save_sampling_request t ~instance_id ~request_id json =
   write t (Filename.concat (sampling_directory instance_id) (digest request_id ^ ".json"))
@@ -493,6 +513,10 @@ let highwater t instance_id = protect (fun () ->
    sequence for every retained reader; reads still verify the exact record. *)
 let bindings t =
   let* values = read_directory t "bindings" in
+  (* This reading also authorizes reconciliation. On a cold process, confirm
+     the publication of terminal records/absence before admitting replacement. *)
+  let* () = protect (fun () ->
+    sync_existing_parent ~sync_parent:sync_parent_directory (Filename.concat t.root "bindings"); Ok ()) in
   let rec reconcile = function
     | [] -> Ok []
     | `Assoc fields :: rest ->
@@ -763,6 +787,8 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let remove_binding = remove_binding_with
+  let binding_inventory = binding_inventory_with
   let write = write_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with

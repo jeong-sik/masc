@@ -1,15 +1,16 @@
-let load ~base_path =
-  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
-  let path = Filename.concat resolution.Config_dir_resolver.config_root.path
-      Config_dir_resolver.runtime_toml_filename in
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Browser_configuration.none
-  | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
-  | _ ->
-    match Safe_ops.read_file_safe path with
-    | Error detail -> Error detail
-    | Ok text ->
-      match Otoml.Parser.from_string_result text with
-      | Error detail -> Error detail
-      | Ok toml -> Browser_configuration.parse toml
-;;
+let activity_snapshot () =
+  let config = Runtime.browser_configuration () in
+  fun lane ->
+    match config with
+    | None -> Browser_lane.Unobserved
+    | Some config ->
+      let enabled = match lane with
+        | Browser_lane.Lane_name.Live -> config.Browser_configuration.live_enabled
+        | Automation -> config.automation_enabled
+        | Stagehand -> config.stagehand_enabled
+      in
+      if enabled then Browser_lane.Enabled else Browser_lane.Disabled
+
+let install_activity_observer ~sw =
+  Browser_lane.install_activity_observer (Some (fun lane -> activity_snapshot () lane));
+  Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None)

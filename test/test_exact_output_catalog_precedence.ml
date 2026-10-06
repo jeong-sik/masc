@@ -427,6 +427,7 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
   in
   let lanes : Runtime_schema.exact_output_lane_decl list =
     [ { id = "mixed-credentials"
+      ; enabled = true
       ; slot_ids =
           [ "credential-missing"
           ; "credential-available"
@@ -437,6 +438,7 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
       ; max_output_tokens = Some 4_096; thinking = None
       }
     ; { id = "credential-constrained"
+      ; enabled = true
       ; slot_ids = credential_constrained
       ; cli_slot_ids = []
       ; max_output_tokens = Some 4_096; thinking = None
@@ -489,6 +491,64 @@ default = "official.verifier"
     f ())
 ;;
 
+let test_lane_activity_publication_preserves_acquired_work () =
+  with_configured_verifier_cli @@ fun () ->
+  let snapshot = load_control_snapshot (Exact_output.Full_replacement
+      {source="activity";contents=replacement_catalog}) in
+  let lane : Runtime_schema.exact_output_lane_decl =
+    {id="verifier_exact";enabled=true;slot_ids=[replacement_target];
+     cli_slot_ids=["official.verifier"];max_output_tokens=None;thinking=None} in
+  let unwrap = function Ok value -> value
+    | Error error -> Alcotest.fail (Registry.publication_error_to_string error) in
+  let original = unwrap (Registry.publish ~lanes:[lane] snapshot) in
+  let accepted = match Runtime.verifier_exact_lane_slots () with
+    | Ok slots -> slots | Error error -> Alcotest.fail error in
+  let off = {lane with enabled=false} in
+  let replace value =
+    let prepared = unwrap (Registry.prepare_replacement ~runtime_observations:[]
+      ~lanes:[value] ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
+    ignore (unwrap (Registry.transact_replacement prepared
+      ~apply_write:(fun () ->
+        Alcotest.(check bool) "new acquisitions stay fenced during the write" true
+          (Result.is_error (Runtime.verifier_exact_lane_slots ()));
+        List.iter (fun (runtime_id, candidate_kind) ->
+          if candidate_kind = Types_core.Cli_slot then
+            Alcotest.(check bool) "accepted CLI candidate survives the write fence" true
+              (Result.is_ok (Runtime.verifier_exact_slot_admission ~candidate_kind ~runtime_id))) accepted;
+        Registry.Committed ()))) in
+  replace off;
+  let current = unwrap (Registry.current ()) in
+  (match Registry.resolve_lane current ~lane_id:lane.id with
+   | Error (Registry.Exact_lane_off _) -> ()
+   | Error error -> Alcotest.fail (Registry.lane_resolution_error_to_string error)
+   | Ok _ -> Alcotest.fail "disabled lane accepted new work");
+  Alcotest.(check bool) "implicit verifier refuses a new review" true
+    (Result.is_error (Runtime.verifier_exact_lane_slots ()));
+  Alcotest.(check bool) "accepted review had a CLI candidate" true (List.mem ("official.verifier", Types_core.Cli_slot) accepted);
+  Alcotest.(check bool) "accepted CLI candidate retains its execution constraint" true
+    (Result.is_ok (Runtime.verifier_exact_slot_admission ~candidate_kind:Types_core.Cli_slot ~runtime_id:"official.verifier"));
+  require_lane_slots "previous acquired snapshot remains usable" ~lane_id:lane.id
+    ~expected:lane.slot_ids original;
+  Alcotest.(check bool) "all configured candidates remain stored" true
+    (Registry.declared_lane current ~lane_id:lane.id = Some off);
+  replace {off with cli_slot_ids=[]};
+  let runtime_id, candidate_kind = List.find (fun (id, _) -> id = "official.verifier") accepted in
+  Alcotest.(check bool) "accepted CLI kind survives completed declaration replacement" true
+    (candidate_kind = Types_core.Cli_slot &&
+     Result.is_ok (Runtime.verifier_exact_slot_admission ~candidate_kind ~runtime_id));
+  replace lane;
+  require_lane_slots "enable restores candidates in order" ~lane_id:lane.id
+    ~expected:lane.slot_ids (unwrap (Registry.current ()));
+  let required = unwrap (Registry.publish ~required_lane_ids:[lane.id] ~lanes:[lane] snapshot) in
+  (match Registry.prepare_replacement ~runtime_observations:[] ~lanes:[off]
+    ~excused_lane_ids:[lane.id] ~load_resolver_snapshot:(fun () -> Ok snapshot) with
+   | Error (Registry.Required_lane_disabled _) -> ()
+   | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+   | Ok _ -> Alcotest.fail "required lane was disabled, even through an excuse");
+  Alcotest.(check bool) "refused replacement leaves registry intact" true
+    (unwrap (Registry.current ()) == required)
+;;
+
 let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
   with_configured_verifier_cli @@ fun () ->
   let snapshot =
@@ -498,7 +558,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
   in
   let cli = [ "official.verifier" ] in
   (match Registry.publish
-     ~lanes:[{id="mixed-kind-duplicate";slot_ids=[replacement_target];cli_slot_ids=[replacement_target];max_output_tokens=Some 4_096; thinking = None}]
+     ~lanes:[{id="mixed-kind-duplicate";enabled = true; slot_ids=[replacement_target];cli_slot_ids=[replacement_target];max_output_tokens=Some 4_096; thinking = None}]
      snapshot with
    | Error (Registry.Duplicate_lane_slot {slot_id; _}) ->
      Alcotest.(check string) "API/CLI occurrences cannot lose their kind" replacement_target slot_id
@@ -506,7 +566,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
    | Ok _ -> Alcotest.fail "cross-kind duplicate was admitted");
   (match
      Registry.publish
-       ~lanes:[ { id = "mixed"; slot_ids = [ replacement_target ]; cli_slot_ids = cli; max_output_tokens = Some 4_096; thinking = None } ]
+       ~lanes:[ { id = "mixed"; enabled = true; slot_ids = [ replacement_target ]; cli_slot_ids = cli; max_output_tokens = Some 4_096; thinking = None } ]
        snapshot
    with
    | Error error ->
@@ -529,7 +589,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
           (Registry.lane_resolution_error_to_string error)));
   (match Registry.publish
       ~required_lane_ids:[ "cli-required" ]
-      ~lanes:[ { id = "cli-required"; slot_ids = []; cli_slot_ids = cli; max_output_tokens = None; thinking = None } ]
+      ~lanes:[ { id = "cli-required"; enabled = true; slot_ids = []; cli_slot_ids = cli; max_output_tokens = None; thinking = None } ]
       snapshot with
    | Error error -> Alcotest.failf "CLI-only required lane must publish: %s"
        (Registry.publication_error_to_string error)
@@ -540,13 +600,13 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
       | _ -> Alcotest.fail "required CLI-only lane must resolve"));
   (match Registry.publish
       ~required_lane_ids:[ "verifier_exact" ]
-      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = cli; max_output_tokens = None; thinking = None } ]
+      ~lanes:[ { id = "verifier_exact"; enabled = true; slot_ids = []; cli_slot_ids = cli; max_output_tokens = None; thinking = None } ]
       snapshot with
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
    | Ok _ ->
-     (match Runtime.verifier_exact_lane_slot_ids () with
+     (match Runtime.verifier_exact_lane_slots () with
       | Ok slots -> Alcotest.(check (list string))
-          "completion authority retains configured official clients" cli slots
+          "completion authority retains configured official clients" cli (List.map fst slots)
       | Error detail -> Alcotest.fail detail);
      (* Carrying the id and being able to judge with it are different answers,
         and the server reports exact_output_authority_available from the
@@ -563,7 +623,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
   let unmaterialized = "official.unmaterialized" in
   (match Registry.publish
       ~required_lane_ids:[ "verifier_exact" ]
-      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = [ unmaterialized ]; max_output_tokens = None; thinking = None } ]
+      ~lanes:[ { id = "verifier_exact"; enabled = true; slot_ids = []; cli_slot_ids = [ unmaterialized ]; max_output_tokens = None; thinking = None } ]
       snapshot with
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
    | Ok _ ->
@@ -576,13 +636,13 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
       | Ok _ ->
         Alcotest.fail "readiness accepted a cli slot with no materialized runtime"));
   (match Registry.publish
-      ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = []; max_output_tokens = None; thinking = None } ] snapshot with
+      ~lanes:[ { id = "empty"; enabled = true; slot_ids = []; cli_slot_ids = []; max_output_tokens = None; thinking = None } ] snapshot with
    | Error (Registry.Empty_lane _) -> ()
    | _ -> Alcotest.fail "a lane with neither transport must remain invalid");
   match
     Registry.publish
       ~lanes:
-        [ { id = "cli-only"; slot_ids = [ "not-in-frozen-catalog" ]; cli_slot_ids = cli; max_output_tokens = Some 4_096; thinking = None } ]
+        [ { id = "cli-only"; enabled = true; slot_ids = [ "not-in-frozen-catalog" ]; cli_slot_ids = cli; max_output_tokens = Some 4_096; thinking = None } ]
       snapshot
   with
   | Error error ->
@@ -616,7 +676,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   let optional_registry =
     match
       Registry.publish
-        ~lanes:[ { id = optional_lane; slot_ids = [ unknown_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
+        ~lanes:[ { id = optional_lane; enabled = true; slot_ids = [ unknown_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
         snapshot
     with
     | Ok registry -> registry
@@ -645,7 +705,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
     match
       Registry.publish
         ~required_lane_ids:[ required_lane ]
-        ~lanes:[ { id = required_lane; slot_ids = [ replacement_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
+        ~lanes:[ { id = required_lane; enabled = true; slot_ids = [ replacement_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
         snapshot
     with
     | Ok registry -> registry
@@ -658,7 +718,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   (match
      Registry.publish
        ~required_lane_ids:[ required_lane ]
-       ~lanes:[ { id = required_lane; slot_ids = [ unknown_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
+       ~lanes:[ { id = required_lane; enabled = true; slot_ids = [ unknown_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
        snapshot
    with
    | Error (Registry.Required_lane_unavailable { lane_id }) ->
@@ -902,7 +962,7 @@ require_lane_slots
         | _, Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
         | _, Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
             (Registry.lane_resolution_error_to_string error));
-       (match protocol, Runtime.verifier_exact_lane_slot_ids () with
+       (match protocol, Runtime.verifier_exact_lane_slots () with
         | "codex-app-server", Error detail ->
           Alcotest.(check string) "an unwritten verifier lane reads as unconfigured"
             (Registry.lane_resolution_error_to_string
@@ -911,7 +971,7 @@ require_lane_slots
         | "codex-app-server", Ok _ -> Alcotest.fail "unsafe Codex verifier was admitted"
         | _, Error detail -> Alcotest.fail detail
         | _, Ok slots -> Alcotest.(check (list string))
-            "configured Claude direct binding supplies completion authority" [runtime_id] slots))
+            "configured Claude direct binding supplies completion authority" [runtime_id] (List.map fst slots)))
     [ "codex-app-server", "codex"; "claude-code", "claude" ]
 ;;
 
@@ -925,7 +985,7 @@ let test_published_registry_value_is_generation_stable () =
   let publish slot_ids =
     match
       Runtime.publish_exact_output_registry
-        ~lanes:[ Runtime_schema.{ id = lane_id; slot_ids; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
+        ~lanes:[ Runtime_schema.{ id = lane_id; enabled = true; slot_ids; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None } ]
         resolver_snapshot
     with
     | Ok registry -> registry
@@ -1153,6 +1213,7 @@ let test_lane_output_budget_is_optional_and_never_the_catalog_ceiling () =
           ~lanes:
             [ Runtime_schema.
                 { id = lane_id
+                ; enabled = true
                 ; slot_ids = [ replacement_target ]
                 ; cli_slot_ids = []
                 ; max_output_tokens; thinking = None
@@ -1226,6 +1287,8 @@ let () =
             "closed registry transaction publishes final generation and lane"
             `Quick
             test_closed_registry_transaction
+        ; Alcotest.test_case "fence exits wake subscribers only after turning a reader away" `Quick
+            test_registry_availability_wakes
 ; Alcotest.test_case
     "captured publication remains stable across global generation swap"
     `Quick
@@ -1243,6 +1306,8 @@ let () =
             "cli slots survive resolution and keep a lane alive"
             `Quick
             test_cli_slots_survive_resolution_and_keep_a_lane_alive
+        ; Alcotest.test_case "activity publication preserves acquired work" `Quick
+            test_lane_activity_publication_preserves_acquired_work
         ; Alcotest.test_case
             "an append keeps a slot the registry dropped"
             `Quick

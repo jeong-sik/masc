@@ -1,0 +1,3 @@
+# PR #41145 reviewed parent propagation
+
+Clean real merge of local #41135 candidate `78caa40b4707d0ebf1951ce47632c8ab72eecf88` into published #41145 `562142b1f8705f57dfa73877d4fc26a669215908`. All eight own Web source/test/fixture blobs are byte-identical to the previous head. Native bin/lib/test are byte-identical to the new parent; no native rerun is warranted here. The immediate child #41153 will execute the combined affected Web scopes and TypeScript once. No independent source changes or remote metadata changes; absent REST stack key remains unknown membership. Prior execution evidence is historical.

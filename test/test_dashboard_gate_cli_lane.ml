@@ -48,6 +48,7 @@ let project lanes =
 
 let lane slot_ids cli_slot_ids : Runtime_schema.exact_output_lane_decl =
   { id = Masc.Hitl_summary_worker.lane_id
+  ; enabled = true
   ; slot_ids
   ; cli_slot_ids
   ; max_output_tokens = Some 4_096; thinking = None

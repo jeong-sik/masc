@@ -6,6 +6,29 @@
 `Lanes`는 Exact·Browser·기계·패키지를 한 목록에서 읽는다. Add-ons를 먼저 열지 않아도 선언과 설정 오류가 나온다. 선언 행 Enter는 원문을 표시하고 `E`로 편집한다. 수동 설치 행 Enter는 해당 인스턴스를 연다. Add-ons는 패키지 설치·연결·관측·이력의 상세 관리를 담당한다.
 `Lanes`의 `d`는 선택한 행의 전체 읽기, `i`는 목록 조회 진단이다. Add-ons 안에서 `i`를 누르면 패키지 설치기를 연다.
 
+## 목록에서 패키지 설치하기
+
+Add-ons의 `i`는 연결된 workspace의 로컬 패키지 탐색기를 연다. `j/k`로 선택하고
+Enter로 폴더를 열거나 패키지를 고른다. 현재 폴더와 바로 아래 폴더의 `lane.toml`을
+실제 manifest loader로 읽어 제목·revision·설명을 표시한다. 전체 디스크나 원격
+레지스트리를 검색하는 카탈로그는 아니다. 읽을 수 없거나 잘못된 manifest는 Issue로 남는다.
+
+Left는 상위 폴더, Right는 선택한 패키지의 폴더, `g`는 폴더 경로 입력,
+`p`는 기존 manifest 경로 직접 입력, `n`은 원문 TOML 선언 작성, `r`은 다시 읽기다.
+같은 workspace에서는 마지막 성공한 폴더를 기억하며 workspace가 바뀌면 초기화한다.
+기억한 폴더를 읽지 못하면 Left가 workspace 최상위 폴더를 연다. 긴 목록의 선택 행은 화면 안에
+유지하고, 선택 항목의 전체 경로·설명은 PgUp/PgDn으로 읽는다.
+
+패키지를 선택하면 manifest와 image 상태를 다시 읽는다. 이때부터 기존 schema 입력 폼을
+사용하며, 검토 후 Enter는 로컬 TOML 초안만 만든다. `s`를 눌러야 저장·적용을 요청한다.
+탐색과 미리보기는 image를 pull/build하거나 worker를 시작하지 않는다. image 검사 실패는
+unverified로 표시한다. binding schema가 없는 패키지는 탐색기에서 `n`을 눌러 원문 TOML
+선언을 쓴다. manifest 경로를 직접 입력했다면 Esc로 Add-ons 목록에 돌아가 `n`을 누른다.
+
+탐색은 읽는 시점의 경로와 symlink가 workspace 안에 있는지 확인한다. 기존 미리보기와
+같이 경로 확인 후 manifest를 여는 방식이므로, 동시에 파일·상위 폴더를 교체하는 writer를
+격리하는 원자적 filesystem sandbox는 아니다.
+
 ## 설정을 남기고 켜기/끄기
 
 선언 TOML 초안을 연 뒤 `Space`로 활성화 값을 바꾸고 `s`로 저장한다.
@@ -15,6 +38,7 @@ Esc로 초안을 닫아 설치 목록을 본다. 끄기 요청 중인 worker나 
 계속 표시한다. 다시 켜면 이전 worker 정리가 확인된 뒤 새 worker가 붙는다.
 선언 파일과 보존 관측은 남으며 기존 제거 동작과 구별된다.
 [활성화 계약과 부분 읽기](lane-package-activity.md)를 참고한다.
+MSX·DOS는 별도의 [기계 활동 설정](machine-activity.md)을 사용한다.
 
 ## 설치 목록
 
@@ -169,3 +193,17 @@ TOML 관리 설치라면 일치하는 설치 선언 파일도 디스크에서 �
 그 사이 변경된 선언은 거절하고, 다른 인스턴스가 이어받은 선언은 보존한다. DOS 설치 제거는 그 DOS 머신도 종료한다.
 통계·관측 패키지를 제거해도 별도 생산자는 계속 진행하며 과거 관측·근거는 남는다. `Esc`·`q`는 화면만 닫고, 기존 owner 작업 취소나 Keeper 필수 검토를 추가하지 않는다.
 목록에 없는 실행을 붙일 때는 `A`에서 `attach {"manifest_path":…,"run_id":…,"binding":…}`를 입력해 선언 없이도 붙일 수 있다.
+
+## Saved configuration and application
+
+The declaration editor keeps the accepted file separate from your draft. The
+application line follows that accepted file through startup, old-worker cleanup,
+applied, off, failure or unknown. Changing the draft with Space or E does not
+change that target until you explicitly save. A comparison read (`l`) keeps the
+previous target until you adopt the current revision (`u` or `U`).
+
+Application reads follow the existing refresh cadence while the panel is visible.
+Press `r` in the TOML view to request a read immediately. This read leaves your
+draft, save receipt and save errors intact and does not occupy the save request.
+A different reconciled source or worker-input revision is shown as unconfirmed;
+missing workers alone do not confirm Off.

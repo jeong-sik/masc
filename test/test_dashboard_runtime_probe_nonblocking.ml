@@ -325,7 +325,7 @@ let fanout_runtimes () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
+    ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }

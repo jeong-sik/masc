@@ -66,8 +66,7 @@ let decode_confirmation ~goal_id json =
     if id = `String goal_id && proof_goal = `String goal_id then Ok ()
     else Error "goal confirmation: goal identity mismatch"
   in
-  let* phase_json = field "phase" goal in
-  let* phase = Goal_phase.of_yojson phase_json in
+  let* phase = Goal_phase.of_fields goal in
   let* completion = field "completion" verification in
   let* completion = Goal_verification.completion_state_of_yojson completion in
   let* verdict =

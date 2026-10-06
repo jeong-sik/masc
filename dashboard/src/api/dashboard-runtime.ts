@@ -2396,14 +2396,14 @@ export type RuntimeRoutingLane =
 
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
-  runtimeId: string | null,
+  routeId: string | null,
   options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
   options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
-    runtime_id: runtimeId,
+    runtime_id: routeId,
   }).then(decodeCommittedRuntimeTomlConfig)
 }
 

@@ -86,6 +86,12 @@ def in_use_refusal(lane_id: str, keepers: list[str]) -> str:
     return f'lane "{lane_id}" is in use by {sites}'
 
 
+def typed_lane_ids(lane: dict[str, object]) -> list[str]:
+    ids = lane["runtime_ids"]
+    assert isinstance(ids, list)
+    return [runtime_id for runtime_id in ids if isinstance(runtime_id, str)]
+
+
 class LaneStore:
     """A stand-in for the routing API's writer, Runtime's lane functions over
     runtime.toml. It applies a post to the lanes the next /resolved read
@@ -110,14 +116,38 @@ class LaneStore:
 
     def __init__(self) -> None:
         _status, body = _keyboard_runtime.runtime_resolved_response()
-        self.body = body
-        self.lanes = [dict(lane) for lane in body["lanes"]]
+        assert isinstance(body, dict)
+        runtimes = body["runtimes"]
+        assignments = body["assignments"]
+        lanes = body["lanes"]
+        assert isinstance(runtimes, list)
+        assert isinstance(assignments, list)
+        assert isinstance(lanes, list)
+        # Typed views over the served body. The narrowings hold for every
+        # row these fixtures build; the asserts fail loudly the day a
+        # producer adds a non-dict row instead of letting Pyright go blind.
+        self.runtimes: list[dict[str, object]] = [
+            row for row in runtimes if isinstance(row, dict)
+        ]
+        self.assignments: list[dict[str, object]] = [
+            row for row in assignments if isinstance(row, dict)
+        ]
+        self.lanes: list[dict[str, object]] = [
+            dict(lane) for lane in lanes if isinstance(lane, dict)
+        ]
+        body["runtimes"] = self.runtimes
+        body["assignments"] = self.assignments
+        self.body: dict[str, object] = body
         self.revision = 1
         self.lock = threading.Lock()
         self.held: tuple[threading.Event, threading.Event] | None = None
         self.fail_next_resolved = False
+        # When set, an exact-lane append answers with this message instead of
+        # committing: the server's own multi-line refusal, line breaks and all.
+        self.exact_refusal: str | None = None
         _status, standalone = _keyboard_keepers.standalone_lanes_response()
-        self.standalone = standalone
+        assert isinstance(standalone, dict)
+        self.standalone: dict[str, object] = standalone
         self.standalone_held: tuple[threading.Event, threading.Event] | None = None
         exact = self.exact_lane(EXACT_LANE)
         exact["dropped_slots"] = [DROPPED_SLOT]
@@ -127,8 +157,15 @@ class LaneStore:
         # lists; the fixture serves the one it tracks.
         exact["declared_slots"] = list(self.exact_declared[EXACT_LANE])
 
+    def standalone_lane_rows(self) -> list[dict[str, object]]:
+        """Typed view over the standalone body's lanes; rows are references,
+        so a mutation through this view is served with the next response."""
+        lanes = self.standalone["lanes"]
+        assert isinstance(lanes, list)
+        return [lane for lane in lanes if isinstance(lane, dict)]
+
     def exact_lane(self, name: str) -> dict:
-        return next(lane for lane in self.standalone["lanes"] if lane["lane_id"] == name)
+        return next(lane for lane in self.standalone_lane_rows() if lane["lane_id"] == name)
 
     def resolved(self) -> _keyboard_harness.HttpResponse:
         with self.lock:
@@ -138,7 +175,7 @@ class LaneStore:
             lanes = [
                 {
                     "id": lane["id"],
-                    "runtime_ids": list(lane["runtime_ids"]),
+                    "runtime_ids": list(typed_lane_ids(lane)),
                     # Every lane this fixture serves is one its file declares;
                     # the assignment-made singleton has no row here.
                     "declared": True,
@@ -197,7 +234,7 @@ class LaneStore:
     def lane_candidates(self, lane_id: str) -> list[str]:
         with self.lock:
             lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
-            return list(lane["runtime_ids"])
+            return list(typed_lane_ids(lane))
 
     def route(self, raw: bytes) -> _keyboard_harness.HttpResponse:
         with self.lock:
@@ -211,12 +248,26 @@ class LaneStore:
         lane_id = request["lane"]
         action = request.get("action", "set")
         with self.lock:
-            if action == "set" and not lane_id.startswith("exact/"):
+            if action == "set" and lane_id != "default" and not lane_id.startswith("exact/"):
                 if request.get("expected_source_revision") != f"{self.revision:064x}":
                     return 409, {"error": "runtime config source revision changed"}
+            if lane_id == "default":
+                route_id = request["runtime_id"]
+                route = next((lane for lane in self.lanes if lane["id"] == route_id), None)
+                entry_id = route["runtime_ids"][0] if route else route_id
+                entry = next((runtime for runtime in self.body["runtimes"]
+                              if runtime["id"] == entry_id), None)
+                if entry is None:
+                    return 400, {"error": "default route is unavailable"}
+                self.body["default_route"] = route_id
+                self.body["default_runtime"] = entry
+                self.revision += 1
+                return 200, commit_receipt()
             if lane_id.startswith("exact/"):
                 name = lane_id[len("exact/"):]
                 slot = request["runtime_id"]
+                if self.exact_refusal is not None and action == "append":
+                    return 400, {"error": self.exact_refusal}
                 lane = self.exact_lane(name)
                 declared = self.exact_declared.setdefault(name, list(lane["declared_slots"]))
                 declared_cli = self.exact_declared_cli.setdefault(
@@ -226,7 +277,7 @@ class LaneStore:
                     if slot in declared or slot in declared_cli:
                         return 400, {"error": f"{slot} is already a slot of {name}"}
                     runtime = next(
-                        (row for row in self.body["runtimes"] if row["id"] == slot), None
+                        (row for row in self.runtimes if row["id"] == slot), None
                     )
                     if runtime is not None and runtime["exact_slot_group"] == "cli_slots":
                         declared_cli.append(slot)
@@ -274,9 +325,11 @@ class LaneStore:
                 declared[0]["runtime_ids"] = list(request["runtime_ids"])
             elif action == "remove":
                 assigned = [
-                    assignment["keeper"]
-                    for assignment in self.body["assignments"]
+                    keeper
+                    for assignment in self.assignments
                     if assignment["resolved"] == {"kind": "lane", "id": lane_id}
+                       and isinstance(assignment["keeper"], str)
+                    for keeper in [assignment["keeper"]]
                 ]
                 if assigned or lane_id in FUSION_SEATS:
                     return 400, {"error": in_use_refusal(lane_id, assigned)}
@@ -298,7 +351,7 @@ def without_checked_revision(posted: list[dict]) -> list[dict]:
     result = []
     for request in posted:
         request = dict(request)
-        if request.get("action", "set") == "set" and not request["lane"].startswith("exact/"):
+        if request.get("action", "set") == "set" and request["lane"] != "default" and not request["lane"].startswith("exact/"):
             revision = request.pop("expected_source_revision", None)
             if not isinstance(revision, str) or len(revision) != 64:
                 raise AssertionError(f"named lane write lacked a source revision: {request!r}")
@@ -325,9 +378,9 @@ def run(executable: str) -> None:
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
-    recorded_at = datetime.fromisoformat(
-        store.body["generated_at_iso"].replace("Z", "+00:00")
-    )
+    generated_at = store.body["generated_at_iso"]
+    assert isinstance(generated_at, str)
+    recorded_at = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
     reading_time = f"reading {recorded_at.astimezone().strftime('%H:%M:%S')}".encode()
 
     def interact(process, fd, _slave, output, _base):
@@ -484,7 +537,9 @@ def run(executable: str) -> None:
             if len(posted) >= len(expected) or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        if without_checked_revision(posted) != expected:
+        typed_posts = [post for post in posted if isinstance(post, dict)]
+        assert len(typed_posts) == len(posted), f"non-object routing post: {posted!r}"
+        if without_checked_revision(typed_posts) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         primary = store.lane_candidates("primary")
         if primary != ["runtime-b"]:
@@ -506,6 +561,31 @@ EXACT_LANE = "board_attention_exact"
 # Declared on the lane and dropped by the registry: the standalone lanes read
 # lists it under dropped_slots, never among the admitted slots the picker sees.
 DROPPED_SLOT = "retired-catalog.slot"
+# The server's refusal to add an exact slot on a provider that declares no
+# exact-body-timeout-s (Runtime_config_text, rule 3). It is two lines: the
+# sentence naming the missing key, then the fix. The lane editor must draw
+# both, so the operator can read what to declare. The first line is longer
+# than the frame and is cut at its tail; the fix line is what the operator
+# needs and must be whole.
+#
+# The text is the server's own [Runtime_config_error.Exact_slot_body_deadlines_absent]
+# rendering (lib/runtime/runtime_config_error.ml): the long first line names the
+# count and the key, and the second line names the lane, slot and provider and
+# says which key to add to which table. The fixture keeps that shape so the
+# scenario exercises the message the server really sends.
+EXACT_REFUSAL_LINES = (
+    b"lane write refused: HTTP 400:",
+    b"exact-body-timeout-s = 1200.0 to [providers.openrouter]",
+)
+EXACT_REFUSAL = (
+    "/Users/dancer/me/.masc/config/runtime.toml: this change adds 1 exact-output "
+    "slot(s) on a provider that declares no exact-body-timeout-s. connect-timeout-s "
+    "ends when the response headers arrive and does not bound the response body, so "
+    "exact-body-timeout-s is the only deadline on the whole request:\n"
+    "  [runtime.exact_output_lanes.board_attention_exact] slot "
+    "\"openrouter.openrouter-deepseek-v4-1-flash\" runs on provider \"openrouter\"; "
+    "add exact-body-timeout-s = 1200.0 to [providers.openrouter]"
+)
 
 
 def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
@@ -573,10 +653,12 @@ def run_exact(executable: str) -> None:
         _keyboard_harness.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
         # The second picker is built from that list, so runtime-a is no
-        # longer offered and the cursor opens on runtime-b.
+        # longer offered and the cursor opens on runtime-b. The lanes picker
+        # leads a row with the model title, not the runtime id (the id is on
+        # the row's detail line), so the row reads "> model-b default".
         mark = mark_output(fd, output)
         _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
-        _keyboard_harness.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-b default", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
         # A pick sends only the slot it adds. A whole order built from the
@@ -585,7 +667,9 @@ def run_exact(executable: str) -> None:
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-a"},
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-b"},
         ]
-        if without_checked_revision(posted) != expected:
+        typed_posts = [post for post in posted if isinstance(post, dict)]
+        assert len(typed_posts) == len(posted), f"non-object routing post: {posted!r}"
+        if without_checked_revision(typed_posts) != expected:
             raise AssertionError(f"exact posts: {posted!r}, expected {expected!r}")
         declared = store.exact_declared[EXACT_LANE]
         if declared != [DROPPED_SLOT, "glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]:
@@ -602,11 +686,212 @@ def run_exact(executable: str) -> None:
     )
 
 
+def run_exact_refusal(executable: str) -> None:
+    """The exact-slot save refusal is the server's own message and carries its
+    line breaks: it names the missing key on one line and the fix on the next.
+    The lane editor must draw every line, so the operator can read what to
+    declare instead of only the first line. This is the flow the operator hit
+    (board p-70f480b8754a23c9aacc144a4c77b935): pick a candidate, press Enter,
+    and the write is refused."""
+    store = LaneStore()
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+    store.exact_refusal = EXACT_REFUSAL
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-a default", start=mark, timeout=5.0)
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"lane write refused: HTTP 400", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        for needle in EXACT_REFUSAL_LINES:
+            if needle not in screen:
+                raise AssertionError(
+                    f"the refusal lost {needle!r}; screen tail={screen[-1600:]!r}"
+                )
+        # A multi-line refusal spends one row per line. If the picker's row
+        # budget still counted it as one, the extra lines would push the footer
+        # off the frame. The footer's own [q:quit] is the cheapest proof it
+        # stayed on screen.
+        if b"q:quit" not in screen:
+            raise AssertionError(
+                f"the footer left the frame under a multi-line refusal; screen tail={screen[-1600:]!r}"
+            )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
+        # A refused write leaves the picker open so another candidate can be
+        # picked; close it before quitting.
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="A multi-line exact-slot refusal is drawn whole",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
+def run_exact_refusal_crowded(executable: str) -> None:
+    """The same multi-line refusal, but with a catalogue that fills the picker's
+    page. The picker reserves rows for the refusal before it decides how many
+    candidates fit; if it counts the refusal's server lines instead of the rows
+    they wrap to, the extra rows push the footer off the frame. Twelve
+    candidates at 80 columns is the shape the operator's real catalogue has, and
+    the frame is small enough that the page is bounded by the frame rather than
+    by the candidate count -- which is what makes the row budget bind. The frame
+    is 30 rows, not 24: at 24 the refusal is bounded to one row and the
+    actionable tail cannot share the frame with the footer, so the guard would
+    test the bound rather than the count."""
+    store = LaneStore()
+    for index in range(12):
+        store.body["runtimes"].append(
+            _keyboard_runtime.runtime_resolved_runtime(
+                f"crowd-{index}", f"Crowd {index}", f"model-crowd-{index}"
+            )
+        )
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+    store.exact_refusal = EXACT_REFUSAL
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(process, fd, output, b"> model-crowd-0 default", start=mark, timeout=5.0)
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"lane write refused: HTTP 400", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        for needle in EXACT_REFUSAL_LINES:
+            if needle not in screen:
+                raise AssertionError(
+                    f"the refusal lost {needle!r}; screen tail={screen[-1600:]!r}"
+                )
+        # The picker's page is bounded by the frame here, so the rows it
+        # reserved for the refusal decide whether the footer survives. Counting
+        # the refusal's server lines instead of the rows they wrap to leaves the
+        # extra rows to push [q:quit] off the frame.
+        if b"q:quit" not in screen:
+            raise AssertionError(
+                f"the footer left the frame under a crowded multi-line refusal; screen tail={screen[-1600:]!r}"
+            )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE (80x30 crowded) =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="A crowded picker keeps the footer under a multi-line refusal",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+        terminal_cols=80,
+        terminal_rows=30,
+    )
+
+
+def run_exact_picker_refusal(executable: str) -> None:
+    """The candidate picker refuses a candidate the save would refuse: its
+    provider declares no exact-body-timeout-s (Runtime_config_text rule 3,
+    #38779). The row carries the reason before Enter, so the operator does not
+    learn it from a 400 after the write. This is the picker half of the same
+    operator report as run_exact_refusal."""
+    store = LaneStore()
+    for runtime in store.body["runtimes"]:
+        runtime["exact_body_deadline_missing"] = True
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: _keyboard_harness.HttpRequests = []
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        mark = mark_output(fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", picker)
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"no exact-body-timeout-s", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if b"no exact-body-timeout-s" not in screen:
+            raise AssertionError(
+                f"the picker did not refuse the candidate; screen tail={screen[-1600:]!r}"
+            )
+        # Enter on the refused row draws the sentence that names the table and
+        # the key, so the operator knows what to declare.
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        _keyboard_harness.wait_for_output(
+            process, fd, output, b"needs exact-body-timeout-s for exact lanes", start=mark, timeout=5.0
+        )
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if b"needs exact-body-timeout-s for exact lanes" not in screen:
+            raise AssertionError(
+                f"the picker did not say why; screen tail={screen[-1600:]!r}"
+            )
+        if os.environ.get("MASC_CAPTURE_REFUSAL"):
+            print("===== PLAINTEXT CAPTURE =====")
+            print(screen.decode("utf-8", "replace"))
+            print("===== END CAPTURE =====")
+        os.write(fd, b"\x1b")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description="The exact-slot picker refuses a candidate the save would refuse",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 def run_cli_editor(executable: str) -> None:
     """The Librarian editor reaches both arrays and explains their boundary."""
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
@@ -707,7 +992,7 @@ def run_empty_cli_group(executable: str) -> None:
     and j then reaches it."""
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
@@ -765,11 +1050,11 @@ def run_curator_takes_cli(executable: str) -> None:
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
     schema_less = "aaa_muse.fixture"
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
-    store.body["runtimes"].append({
+    store.runtimes.append({
         **_keyboard_runtime.runtime_resolved_runtime(schema_less, "Schema-less client", "model"),
         "exact_slot_group": None,
     })
@@ -834,7 +1119,10 @@ def run_curator_takes_cli(executable: str) -> None:
 
 def model_settings_config(*, cli_context=272000):
     status, config = _keyboard_keepers.standalone_lane_runtime_config_response()
-    return status, {**config, "source_text": config["source_text"] + '\n'.join([
+    assert isinstance(config, dict)
+    source_text = config["source_text"]
+    assert isinstance(source_text, str)
+    return status, {**config, "source_text": source_text + '\n'.join([
         "", '[providers."glm-coding"] # request window',
         'protocol = "openai-compatible-http"', 'kind = "openai_compat"',
         'endpoint = "https://usage.invalid/v1"', 'exact-body-timeout-s = 1200.0',
@@ -862,7 +1150,7 @@ def run_provider_jump(executable: str) -> None:
     The picker retains focus until closed; cancelling the form writes nothing."""
     store = LaneStore()
     slot = "glm-coding.glm-5-turbo"
-    store.body["runtimes"].append(
+    store.runtimes.append(
         _keyboard_runtime.runtime_resolved_runtime(slot, "GLM Coding", "glm-5-turbo",
                                    provider_id="glm-coding")
     )
@@ -1197,7 +1485,9 @@ def run_filter(executable: str) -> None:
             if len(posted) >= len(expected) or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        if without_checked_revision(posted) != expected:
+        typed_posts = [post for post in posted if isinstance(post, dict)]
+        assert len(typed_posts) == len(posted), f"non-object routing post: {posted!r}"
+        if without_checked_revision(typed_posts) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         # [e] opens the picker for the lane under the list's cursor: still
         # primary, so no wheel notch moved it while the picker was open.
@@ -1214,6 +1504,38 @@ def run_filter(executable: str) -> None:
         http_fixtures=fixtures,
         http_requests=requests,
     )
+
+
+def run_default_route(executable: str) -> None:
+    """The default route picker can keep a declared failover lane intact."""
+    store = LaneStore()
+    store.body["default_route"] = "primary"
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
+    requests: _keyboard_harness.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC System", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"f", b"primary   lane")
+        frame = _keyboard_harness.screen_text(bytes(output))
+        assert b"Enter replace" in frame, frame
+        assert b"primary   lane" in frame, frame
+        os.write(fd, b"\r")
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+            lambda: any(path == ROUTING_PATH for path, _ in requests), timeout=3)
+        posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+        assert posted == [{"lane": "default", "runtime_id": "primary"}], posted
+        assert store.body["default_route"] == "primary"
+        assert store.body["default_runtime"]["id"] == "runtime-a"
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(executable,
+        description="Runtime default route picker preserves a declared lane",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
 def run_replace_and_promote(executable: str) -> None:
@@ -1406,10 +1728,14 @@ def run_replace_and_promote(executable: str) -> None:
     )
 
 
+
 if __name__ == "__main__":
     run_replace_and_promote(os.path.abspath(sys.argv[1]))
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
+    run_exact_refusal(os.path.abspath(sys.argv[1]))
+    run_exact_refusal_crowded(os.path.abspath(sys.argv[1]))
+    run_exact_picker_refusal(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))
     run_empty_cli_group(os.path.abspath(sys.argv[1]))
     run_curator_takes_cli(os.path.abspath(sys.argv[1]))
@@ -1418,6 +1744,7 @@ if __name__ == "__main__":
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))
+    run_default_route(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]), missing_binding=True)
     run_model_settings_read_isolation(os.path.abspath(sys.argv[1]), old_fails=False)
     run_model_settings_read_isolation(os.path.abspath(sys.argv[1]), old_fails=True)

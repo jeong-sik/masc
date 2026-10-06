@@ -204,6 +204,17 @@ val connector_attention_waiting
     snapshot. *)
 
 
+module For_testing : sig
+  val autonomous_yield_probe
+    :  wake:Keeper_registry.wake_reason
+    -> base_path:string
+    -> keeper_name:string
+    -> (unit -> (Keeper_agent_run.yield_request option, string) result)
+       * (unit -> int)
+  (** The production source-turn callback plus its actual attention batch-read
+      count. The counter observes reads; it cannot change cache decisions. *)
+end
+
 val continuation_channel_of_wake :
   Keeper_registry.wake_reason -> Keeper_continuation_channel.t option
 (** The channel a turn woken by [wake] continues on: a single payload's

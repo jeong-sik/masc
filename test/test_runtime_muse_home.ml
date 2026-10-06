@@ -103,6 +103,9 @@ let test_missing_signin_refuses () = with_fixture (fun root ->
   | Error error -> fail (Home.error_to_string error)
   | Ok _ -> fail "missing selected account fell back to ambient credentials")
 
+let auth_with_storage storage = Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1;
+  "providers", `Assoc [ "meta", `Assoc [ "mechanism", `String "oauth"; "storage", storage ] ] ])
+
 (* Settings that name the safe profile but leave the host's observers on. *)
 let observers_left_on_settings =
   {|{"schema_version":1,"permissions":{"schema_version":1,"default_profile":":ask-me"}}|}
@@ -138,15 +141,22 @@ let test_other_settings_are_replaced_by_a_generation_carrying_the_sign_in () = w
     (Home.account_revision edited <> Home.account_revision missing);
   check string "every replacement carries the same sign-in" refreshed
     (Fs_compat.load_file (managed_auth missing));
+  let store = Filename.dirname (Home.config_home missing) in
+  let record_path = Filename.concat store "current.json" in
+  let record = Fs_compat.load_file record_path in
   write (managed_settings missing) observers_left_on_settings;
+  write (managed_auth missing) (auth_with_storage (`String "keychain"));
+  (match Home.prepare ~account_home:selected with
+   | Error (Home.Sign_in_required Home.Keychain_sign_in) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "a Keychain-held sign-in was carried into a replacement");
+  check string "a refused replacement publishes nothing" record (Fs_compat.load_file record_path);
   Sys.remove (managed_auth missing);
-  match Home.prepare ~account_home:selected with
-  | Error (Home.Sign_in_required Home.No_file_sign_in) -> ()
-  | Error error -> fail (Home.error_to_string error)
-  | Ok _ -> fail "a generation without its sign-in was replaced from the source copy")
-
-let auth_with_storage storage = Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1;
-  "providers", `Assoc [ "meta", `Assoc [ "mechanism", `String "oauth"; "storage", storage ] ] ])
+  (match Home.prepare ~account_home:selected with
+   | Error (Home.Sign_in_required Home.No_file_sign_in) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "a generation without its sign-in was replaced from the source copy");
+  check string "a missing sign-in publishes nothing" record (Fs_compat.load_file record_path))
 
 let test_only_a_sign_in_held_in_auth_json_is_admitted () = with_fixture (fun root ->
   let file_backed = account root "file-backed" in

@@ -1073,7 +1073,7 @@ status: reference
   읽고, 각 가족은 따로 읽히므로 이 목록은 가족을 가로지르는 원자적 트랜잭션이 아니다
   (`docs/guides/lane-inventory.md`). 위의 **Lane**(고정 실행 경로)이나 **Standalone Lane**
   (그 경로의 관찰)과 다른 층이다 — 이쪽은 운영자 목록의 행 분류다.
-  → [Lane_id](../../lib/lane_registry/lane_id.mli) · [lane-inventory guide](../guides/lane-inventory.md)
+  → [Lane_id](../../lib/lane_registry/lane_id.ml) · [lane-inventory guide](../guides/lane-inventory.md)
 
 **Chat Lane (채팅 레인)**
 : Keeper에게 대화 메시지가 들어오고 결과가 배달되는 표면. dashboard·커넥터

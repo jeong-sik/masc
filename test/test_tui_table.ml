@@ -307,6 +307,31 @@ let test_fit_refuses_a_flexible_column_listed_twice () =
         (Table.fit ~inner_width:30 ~width:probe_width ~flex:Flex
            ~drop_order:[ C; A ] [ A; Flex; B; Flex ]))
 
+(* [floor] names the exact width the drops stop at. Above it [fit] stops
+   dropping once the row fits; below it [fit] arrives at the mandatory row
+   still not fitting, which is the frame's cut. The probe's mandatory row is
+   Flex at 4 plus B at 5 plus their gap: 10. One either side of it, the two
+   behaviours meet, so a narrow mode can read the threshold from the table
+   instead of copying it (task-2025). *)
+let test_floor_is_where_the_drops_stop () =
+  check int "the probe's mandatory row" 10
+    (Table.floor ~width:probe_width ~flex:Flex ~drop_order:[ C; A ]
+       [ A; Flex; B; C ]);
+  let fits_at w = (probe_fit w).Table.shown in
+  let needs = probe_needs in
+  (* At the floor and above, the kept set is the mandatory row: exactly the
+     columns a narrow mode may promise. *)
+  check bool "at the floor the drops have stopped" true
+    (fits_at 10 = [ Flex; B ]);
+  check bool "above the floor the row fits" true (needs (probe_fit 11) <= 11);
+  check bool "far above, dropped columns return in order" true
+    (fits_at 20 = [ A; Flex; B ]);
+  (* Below the floor, no state fits: the same mandatory row is what is left
+     wider than the space. *)
+  check bool "below the floor the drops have run out" true
+    (fits_at 9 = [ Flex; B ]);
+  check bool "and the row is past the pane" true (needs (probe_fit 9) > 9)
+
 let () =
   run "tui table"
     [ ( "layout"
@@ -350,5 +375,7 @@ let () =
             test_fit_refuses_a_flexible_column_it_does_not_carry
         ; test_case "a flexible column listed twice is refused" `Quick
             test_fit_refuses_a_flexible_column_listed_twice
+        ; test_case "the floor is where the drops stop" `Quick
+            test_floor_is_where_the_drops_stop
         ] )
     ]

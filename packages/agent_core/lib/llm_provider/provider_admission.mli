@@ -45,6 +45,38 @@
     declare. *)
 val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
 
+(** {2 Queued requests}
+
+    A request that finds every permit of its endpoint held joins the queue.
+    When that wait ends, the request reports one {!wait} to the observer the
+    consumer installed. A request granted a permit at once reports nothing,
+    so the reports are exactly the requests that met a full endpoint. *)
+
+(** How a wait ended. [Wait_expired] comes only from a bounded wait
+    ({!with_admission_until} and its variants). A cancelled wait reports
+    nothing. *)
+type wait_outcome = Slot_scheduler.wait_end =
+  | Wait_granted
+  | Wait_expired
+
+type wait =
+  { kind : string  (** {!Provider_config.string_of_provider_kind} *)
+  ; provider_id : string option  (** The config's [provider_id], as declared. *)
+  ; model_id : string
+  ; admission_class : Admission_class.t
+  ; waited_ms : float option
+      (** From joining the queue to [outcome]: on the bounded wait's clock,
+          otherwise the monotonic clock. [None] when no clock could be read. *)
+  ; outcome : wait_outcome
+  }
+
+(** Install ([Some]) or remove ([None]) the process-wide observer queued
+    requests report to. With none installed, nothing is timed. The observer
+    runs on the requesting fiber when the wait ends: a granted request
+    reports before it is sent. It must not block. A raise from it fails that
+    request but leaves no permit held. *)
+val set_wait_observer : (wait -> unit) option -> unit
+
 (** The allowance this process already admits for [config]'s endpoint
     identity, when [config] declares a different one: [authoritative] is the
     admitted allowance and [declared] is [config]'s. The registry keeps an

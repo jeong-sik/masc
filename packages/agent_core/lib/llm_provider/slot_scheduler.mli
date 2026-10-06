@@ -26,11 +26,28 @@ type t
     @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
 val create : max_slots:int -> priority_run_limit:int option -> t
 
+(** How a wait for a slot ended. *)
+type wait_end =
+  | Wait_granted
+  | Wait_expired  (** Only a bounded wait ({!with_permit_until}) expires. *)
+
 (** Run [f] with a permit. If all slots are in use, the request queues as
     [admission_class] (one shared queue when the scheduler has no run
     limit). Raises the original exception if [f] fails; the permit is still
-    released. *)
-val with_permit : admission_class:Admission_class.t -> t -> (unit -> 'a) -> 'a
+    released.
+
+    [on_queue] watches waits: it runs when the request joins the queue, and
+    the function it returns runs once when that wait is granted (before [f])
+    or, for {!with_permit_until}, expires. A slot granted at once calls
+    neither, and a cancelled wait does not call the returned function. Both
+    run on the requesting fiber. A raise from either leaves no slot held or
+    waiter queued. *)
+val with_permit
+  :  ?on_queue:(unit -> wait_end -> unit)
+  -> admission_class:Admission_class.t
+  -> t
+  -> (unit -> 'a)
+  -> 'a
 
 (** A bounded wait for a slot as its caller sees it. The caller owns the
     cell and starts it at [Before_any_wait]; the wait writes
@@ -56,6 +73,7 @@ type permit_wait =
     it. *)
 val with_permit_until
   :  ?wait:permit_wait Atomic.t
+  -> ?on_queue:(unit -> wait_end -> unit)
   -> clock:_ Eio.Time.clock
   -> deadline_at:float
   -> admission_class:Admission_class.t

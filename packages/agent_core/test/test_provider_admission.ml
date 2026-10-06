@@ -243,6 +243,90 @@ let test_admitted_allowance_change_reports_what_admission_would_refuse () =
     ]
 ;;
 
+(* A request that meets a full endpoint reports its wait once, with the
+   config's identity and class; one granted at once reports nothing, and
+   nothing is reported once the observer is removed. *)
+let test_a_queued_request_reports_its_wait () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base_url = "http://queued-wait.test:1" in
+  let config ?(admission_class = Admission_class.Standard) () =
+    { (make_config ~base_url ~max_concurrent_requests:1 ()) with
+      provider_id = Some "queued-wait-provider"
+    ; admission_class
+    }
+  in
+  let reports = ref [] in
+  Fun.protect
+    ~finally:(fun () -> Provider_admission.set_wait_observer None)
+    (fun () ->
+       Provider_admission.set_wait_observer
+         (Some (fun (wait : Provider_admission.wait) -> reports := wait :: !reports));
+       Provider_admission.with_admission ~config:(config ()) (fun () -> ());
+       check int "a permit granted at once reports nothing" 0 (List.length !reports);
+       let occupied, occupied_resolver = Eio.Promise.create () in
+       let release, release_resolver = Eio.Promise.create () in
+       Eio.Fiber.all
+         [ (fun () ->
+             Provider_admission.with_admission ~config:(config ()) (fun () ->
+               Eio.Promise.resolve occupied_resolver ();
+               Eio.Promise.await release))
+         ; (fun () ->
+             Eio.Promise.await occupied;
+             Provider_admission.with_admission
+               ~config:(config ~admission_class:Priority ())
+               (fun () -> ()))
+         ; (fun () ->
+             Eio.Promise.await occupied;
+             (match
+                Provider_admission.with_admission_until
+                  ~clock
+                  ~deadline_at:(Eio.Time.now clock +. 0.05)
+                  ~config:(config ())
+                  (fun () -> ())
+              with
+              | Ok () -> fail "the bounded wait should expire while the permit is held"
+              | Error `Permit_wait_expired -> ());
+             Eio.Promise.resolve release_resolver ())
+         ];
+       let summary (wait : Provider_admission.wait) =
+         ( Admission_class.to_string wait.admission_class
+         , (match wait.outcome with
+            | Wait_granted -> "granted"
+            | Wait_expired -> "expired")
+         , Option.is_some wait.waited_ms )
+       in
+       check
+         (list (triple string string bool))
+         "the expired standard wait, then the granted priority wait"
+         [ "standard", "expired", true; "priority", "granted", true ]
+         (List.rev_map summary !reports);
+       List.iter
+         (fun (wait : Provider_admission.wait) ->
+            check (option string) "provider id" (Some "queued-wait-provider") wait.provider_id;
+            check string "model" "admission-model" wait.model_id;
+            check string "kind" "openai_compat" wait.kind)
+         !reports;
+       Provider_admission.set_wait_observer None;
+       reports := [];
+       let occupied, occupied_resolver = Eio.Promise.create () in
+       let release, release_resolver = Eio.Promise.create () in
+       Eio.Fiber.both
+         (fun () ->
+            Provider_admission.with_admission ~config:(config ()) (fun () ->
+              Eio.Promise.resolve occupied_resolver ();
+              Eio.Promise.await release))
+         (fun () ->
+            Eio.Promise.await occupied;
+            Eio.Fiber.both
+              (fun () -> Provider_admission.with_admission ~config:(config ()) (fun () -> ()))
+              (fun () ->
+                 Eio.Time.sleep clock 0.02;
+                 Eio.Promise.resolve release_resolver ()));
+       check int "no observer, no report" 0 (List.length !reports))
+;;
+
 let reject_dispatch_transport : Llm_transport.t =
   { complete_sync = (fun _ -> fail "invalid declaration must never dispatch")
   ; complete_stream =
@@ -820,6 +904,10 @@ let () =
             "admitted allowance change reports what admission would refuse"
             `Quick
             test_admitted_allowance_change_reports_what_admission_would_refuse
+        ; test_case
+            "a queued request reports its wait"
+            `Quick
+            test_a_queued_request_reports_its_wait
         ; test_case
             "zero declaration rejected before dispatch"
             `Quick

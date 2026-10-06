@@ -8108,6 +8108,11 @@
  (libraries masc_test_deps eio eio_main yojson unix))
 
 (test
+ (name test_provider_admission_events)
+ (modules test_provider_admission_events)
+ (libraries masc_test_deps eio eio_main yojson))
+
+(test
  (name test_runtime_setup_spec)
  (modules test_runtime_setup_spec)
  (libraries alcotest otoml unix yojson masc.agent_core.llm_provider masc.runtime masc.string_util)

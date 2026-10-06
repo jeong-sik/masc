@@ -172,7 +172,8 @@ admission-priority-run-limit = 3
 
 ### 4.3 운영 측정
 
-등급별 대기 시간을 기록해야 효과를 잴 수 있다. 허가를 받을 때 등급과 기다린 시간을 `agent-core-events` 에 남긴다.
+등급별 대기 시간을 기록해야 효과를 잴 수 있다. 계정의 칸이 다 차서 줄을 선 요청은, 기다림이 끝날 때 `masc.provider_admission.waited` 이벤트를 하나 남긴다. 이벤트에는 provider, 모델, 등급, 기다린 시간, 결과(받음/마감)가 들어간다. 바로 칸을 받은 요청은 남기지 않는다. 그래서 이 기록이 곧 "칸이 다 찼을 때의 대기"다.
+이벤트는 MASC 버스를 거쳐 `agent-core-events` 에 남는다. agent_core 는 기록 방식을 모르고, masc 가 서버를 시작할 때 관찰자를 설치한다. 집계는 `docs/evidence/judgment-lane-admission-20261006/admission_waits.py` 로 한다.
 이 기록은 효과를 확인하는 수단이고, 이것만으로 고쳐지는 것은 없다.
 
 배포 전후로 같은 스크립트를 돌려 비교한다.
@@ -180,7 +181,7 @@ admission-priority-run-limit = 3
 | 항목 | 지금 | 목표 |
 |---|---|---|
 | verifier 단계 간격 p50 (glm) | 110초 | 40초 이하 |
-| `Priority` 허가 대기 p50 (4칸이 찬 시간대) | 재지 못함 | 10초 이하 |
+| `Priority` 허가 대기 p50 (줄을 선 요청) | 재지 못함 | 10초 이하 |
 | `Standard` 허가 대기 증가 | 재지 못함 | 10% 이하 |
 
 ## 5. 고려한 다른 방법

@@ -544,6 +544,11 @@
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
 
 (test
+ (name test_slot_scheduler_queue_watch)
+ (modules test_slot_scheduler_queue_watch)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
+(test
  (name test_under_deadline)
  (modules test_under_deadline)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))

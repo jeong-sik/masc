@@ -213,11 +213,22 @@ let leave_or_own t waiter =
     | Waiting -> invalid_arg "Slot_scheduler: invalid waiter state transition")
 ;;
 
-let acquire t ~admission_class =
+type wait_end =
+  | Wait_granted
+  | Wait_expired
+
+(* [on_queue] runs inside the arm that leaves the queue on any exception, so
+   a raising observer cannot strand the waiter. The finisher it returns is
+   handed back for [with_permit] to run under the slot's release. *)
+let acquire ?on_queue t ~admission_class =
   match request_slot t ~admission_class with
-  | `Got_slot -> ()
+  | `Got_slot -> None
   | `Wait (promise, waiter) ->
-    (try Eio.Promise.await promise with
+    (try
+       let finish = Option.map (fun on_queue -> on_queue ()) on_queue in
+       Eio.Promise.await promise;
+       finish
+     with
      | exn ->
        (match leave_or_own t waiter with
         | `Left_queue -> ()
@@ -239,30 +250,37 @@ type permit_wait =
    with the instant it ended on [clock]; a slot granted at once is no wait
    and writes nothing. An [Atomic.set] neither raises nor blocks, so the
    caller's cell cannot cost the wait its slot or its place in the queue. *)
-let acquire_until ?wait ~clock ~deadline_at ~admission_class t =
+let acquire_until ?wait ?on_queue ~clock ~deadline_at ~admission_class t =
   let remaining = deadline_at -. Eio.Time.now clock in
   if Float.compare remaining 0.0 <= 0
   then Error `Permit_wait_expired
   else (
     match request_slot t ~admission_class with
-    | `Got_slot -> Ok ()
+    | `Got_slot -> Ok None
     | `Wait (promise, waiter) ->
       let note state = Option.iter (fun cell -> Atomic.set cell state) wait in
       note Waiting_for_permit;
+      (* Set inside the bounded wait, so a raising [on_queue] reaches the arm
+         that leaves the queue; an expiry still finds the finisher here. *)
+      let finish = ref None in
       Fun.protect
         ~finally:(fun () -> note (Wait_settled_at (Eio.Time.now clock)))
         (fun () ->
            match
-             Eio.Time.with_timeout clock remaining (fun () -> Ok (Eio.Promise.await promise))
+             Eio.Time.with_timeout clock remaining (fun () ->
+               finish := Option.map (fun on_queue -> on_queue ()) on_queue;
+               Ok (Eio.Promise.await promise))
            with
-           | Ok () -> Ok ()
+           | Ok () -> Ok !finish
            | Error `Timeout ->
              (match leave_or_own t waiter with
-              | `Left_queue -> Error `Permit_wait_expired
+              | `Left_queue ->
+                Option.iter (fun finish -> finish Wait_expired) !finish;
+                Error `Permit_wait_expired
               | `Owns_slot ->
                 (* Granted as the deadline passed: the wait this deadline bounded
                    is over and the slot is this caller's. *)
-                Ok ())
+                Ok !finish)
            | exception exn ->
              (match leave_or_own t waiter with
               | `Left_queue -> ()
@@ -281,15 +299,22 @@ let release_after t f =
   Fun.protect f ~finally:(fun () -> Eio.Cancel.protect (fun () -> release_slot t))
 ;;
 
-let with_permit ~admission_class t f =
-  acquire t ~admission_class;
-  release_after t f
+(* A granted wait's finisher runs under the release, so one that raises
+   still gives the slot back. *)
+let run_granted finish f () =
+  Option.iter (fun finish -> finish Wait_granted) finish;
+  f ()
 ;;
 
-let with_permit_until ?wait ~clock ~deadline_at ~admission_class t f =
-  match acquire_until ?wait ~clock ~deadline_at ~admission_class t with
+let with_permit ?on_queue ~admission_class t f =
+  let finish = acquire ?on_queue t ~admission_class in
+  release_after t (run_granted finish f)
+;;
+
+let with_permit_until ?wait ?on_queue ~clock ~deadline_at ~admission_class t f =
+  match acquire_until ?wait ?on_queue ~clock ~deadline_at ~admission_class t with
   | Error `Permit_wait_expired as expired -> expired
-  | Ok () -> Ok (release_after t f)
+  | Ok finish -> Ok (release_after t (run_granted finish f))
 ;;
 
 let queue_length t = Eio.Mutex.use_ro t.mutex (fun () -> queued t)

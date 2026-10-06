@@ -107,6 +107,42 @@ let admitted_allowance_change ~(config : Provider_config.t) =
       | Some ((_ : Slot_scheduler.t State.t), resolution) -> resolution.conflict)
 ;;
 
+type wait_outcome = Slot_scheduler.wait_end =
+  | Wait_granted
+  | Wait_expired
+
+type wait =
+  { kind : string
+  ; provider_id : string option
+  ; model_id : string
+  ; admission_class : Admission_class.t
+  ; waited_ms : float option
+  ; outcome : wait_outcome
+  }
+
+let wait_observer : (wait -> unit) option Atomic.t = Atomic.make None
+let set_wait_observer observer = Atomic.set wait_observer observer
+
+(* The observer is read once, as the request is admitted: with none
+   installed the scheduler is handed no callback and nothing is timed. *)
+let on_queue_for ?clock (config : Provider_config.t) =
+  match Atomic.get wait_observer with
+  | None -> None
+  | Some observe ->
+    Some
+      (fun () ->
+        let latency = Complete_common.start_latency_counter ?clock () in
+        fun outcome ->
+          observe
+            { kind = Provider_config.string_of_provider_kind config.kind
+            ; provider_id = config.provider_id
+            ; model_id = config.model_id
+            ; admission_class = config.admission_class
+            ; waited_ms = Complete_common.latency_ms_float latency
+            ; outcome
+            })
+;;
+
 let with_admission ~(config : Provider_config.t) f =
   match config.max_concurrent_requests with
   | None -> f ()
@@ -114,7 +150,11 @@ let with_admission ~(config : Provider_config.t) f =
     let scheduler =
       entry_for ~key:(key_of_config config) ~allowance:(allowance_of_config config ~max)
     in
-    Slot_scheduler.with_permit ~admission_class:config.admission_class scheduler f
+    Slot_scheduler.with_permit
+      ?on_queue:(on_queue_for config)
+      ~admission_class:config.admission_class
+      scheduler
+      f
 ;;
 
 type permit_wait = Slot_scheduler.permit_wait =
@@ -131,6 +171,7 @@ let with_admission_until ?wait ~clock ~deadline_at ~(config : Provider_config.t)
     in
     Slot_scheduler.with_permit_until
       ?wait
+      ?on_queue:(on_queue_for ~clock config)
       ~clock
       ~deadline_at
       ~admission_class:config.admission_class

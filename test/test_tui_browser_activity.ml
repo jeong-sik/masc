@@ -97,6 +97,35 @@ let uncertain_drafts_require_explicit_reapply () =
      A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending;
      A.suspend pending]
 
+(* A reread that already shows the desired activity leaves nothing for s to
+   save, so reapply must not promise a save. *)
+let reapply_onto_desired_activity_promises_no_save () =
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let session=A.finish_save request (A.Unconfirmed "connection lost") pending in
+  let satisfied=A.reapply (read ~generation:3 (doc ~revision:"observed" off) session) in
+  shows "Current settings already have this activity. Nothing to save." satisfied;
+  Alcotest.(check bool) "no save promised" false (has "s saves" (A.lines satisfied));
+  rejected (A.start_save ~generation:4 satisfied);
+  let pending=A.reapply (read ~generation:3 (doc ~revision:"concurrent" (source ^ "other = 1\n")) session) in
+  shows "Activity reapplied to current settings. s saves explicitly." pending;
+  let _,_,write=A.start_save ~generation:4 pending |> ok in
+  same "concurrent" write.expected_source_revision
+
+(* An unconfirmed receipt belongs to the first attempt. A retry that is
+   refused or conflicts must not show it as its own. *)
+let retry_save_drops_previous_receipt () =
+  let first="File written; durability unconfirmed" in
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let session=A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending in
+  shows first session;
+  let reapplied=A.reapply (read ~generation:3 (doc ~revision:"concurrent" (source ^ "other = 1\n")) session) in
+  shows first reapplied;
+  let retry,request,_=A.start_save ~generation:4 reapplied |> ok in
+  let absent label session = Alcotest.(check bool) label false (has first (A.lines session)) in
+  absent "pending retry" retry;
+  absent "refused retry" (A.finish_save request (A.Refused "preview failed") retry);
+  absent "conflicting retry" (A.finish_save request (A.Conflict (doc ~revision:"third" source)) retry)
+
 (* An operator note on an enabled flag stays on that line when the flag is
    toggled in an ordinary Browser table. *)
 let enabled_comment_survives_toggle () =
@@ -284,6 +313,8 @@ let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.ma
    "clean draft preserves latest unrelated edits",clean_read_follows_unrelated_edit;
    "durable draft follows next file while receipt stays",durable_save_follows_next_file_without_losing_receipt;
    "uncertain drafts need explicit reapply",uncertain_drafts_require_explicit_reapply;
+   "reapply onto the desired activity promises no save",reapply_onto_desired_activity_promises_no_save;
+   "retry save drops the previous receipt",retry_save_drops_previous_receipt;
    "enabled flag keeps its inline comment",enabled_comment_survives_toggle;
    "clean draft keeps changed-path boundary",clean_draft_does_not_adopt_different_path;
    "backend flags and flat automation migration",backend_flags_and_flat_paths;

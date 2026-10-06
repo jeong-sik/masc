@@ -324,8 +324,7 @@ let log_event = function
   | Session.Connection_ended reason -> Log.Server.info "browser-lane stagehand: connection ended: %s" reason
 ;;
 
-let prepare_start ~cleanup ~sw ~env ~base_path =
-  let configuration = Runtime.browser_configuration () in
+let prepare_start ~cleanup ~sw ~env ~base_path ~configuration =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   (fun () ->
     cleanup ~clock:(Eio.Stdenv.clock env) ~masc_root;
@@ -358,11 +357,12 @@ let prepare_start ~cleanup ~sw ~env ~base_path =
       Log.Server.info "browser-lane: stagehand serves with %s" config.Browser_configuration.chrome)
 ;;
 
-let start ~sw ~env ~base_path =
-  let worker = prepare_start ~cleanup:stop_left_behind ~sw ~env ~base_path in
+let start ~sw ~env ~base_path ~configuration =
+  let worker = prepare_start ~cleanup:stop_left_behind ~sw ~env ~base_path ~configuration in
   Eio.Fiber.fork ~sw worker
 module For_testing = struct
-  let start_with_cleanup ~cleanup ~sw ~env ~base_path =
-    let worker = prepare_start ~sw ~env ~base_path ~cleanup:(fun ~clock:_ ~masc_root:_ -> cleanup ()) in
+  let start_with_cleanup ~cleanup ~sw ~env ~base_path ~configuration =
+    let worker = prepare_start ~sw ~env ~base_path ~configuration
+        ~cleanup:(fun ~clock:_ ~masc_root:_ -> cleanup ()) in
     Eio.Fiber.fork_promise ~sw worker
 end

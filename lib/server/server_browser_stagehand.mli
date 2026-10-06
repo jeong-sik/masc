@@ -41,14 +41,18 @@ val attach_error_message : Browser_stagehand_session.attach_error -> string
 (** One server log line for each session event. *)
 val log_event : Browser_stagehand_session.event -> unit
 
-(** Stops a Chromium a previous server left, then, when [runtime.toml] has
+(** Stops a Chromium a previous server left, then, when [configuration] has
     [\[browser.stagehand\]], installs the Stagehand lane's backend on [sw]
     (RFC-browser-lane-stagehand §3.4). No browser starts until a
-    [Session_open]. Backend paths are captured before asynchronous cleanup;
-    later Runtime publication does not replace this process's backend. *)
-val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> base_path:string -> unit
+    [Session_open]. [configuration] is the snapshot the server took before it
+    accepted any config save; later Runtime publication does not replace this
+    process's backend. *)
+val start :
+  sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> base_path:string ->
+  configuration:Browser_configuration.t option -> unit
 
 module For_testing : sig
   val start_with_cleanup : cleanup:(unit -> unit) -> sw:Eio.Switch.t ->
-    env:Eio_unix.Stdenv.base -> base_path:string -> (unit, exn) result Eio.Promise.t
+    env:Eio_unix.Stdenv.base -> base_path:string ->
+    configuration:Browser_configuration.t option -> (unit, exn) result Eio.Promise.t
 end

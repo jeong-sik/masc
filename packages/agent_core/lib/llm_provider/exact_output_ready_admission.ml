@@ -303,6 +303,7 @@ let exact_config (target : request_target) response_format =
   ; internal_model_rotation_count = None
   ; previous_response_id = None
   ; max_concurrent_requests = None
+  ; admission_priority_run_limit = None
   ; model_capabilities_override = Some target.capabilities
   }
 ;;

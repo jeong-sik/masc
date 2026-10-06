@@ -816,10 +816,11 @@ let load_resolver_snapshot
          let* () =
            validate_model_path ~target_ref:target.target_ref kind target.model_id
          in
-         let max_concurrent_requests =
+         let max_concurrent_requests, admission_priority_run_limit =
            match target.wire with
-           | Catalog_provider_wire -> None
-           | Binding_wire { config = binding; _ } -> binding.PC.max_concurrent_requests
+           | Catalog_provider_wire -> None, None
+           | Binding_wire { config = binding; _ } ->
+             binding.PC.max_concurrent_requests, binding.PC.admission_priority_run_limit
          in
          let projection_config =
            PC.make
@@ -837,6 +838,7 @@ let load_resolver_snapshot
              ~reasoning_uncontrolled
              ?connect_timeout_s:target.connect_timeout_s
              ?max_concurrent_requests
+             ?admission_priority_run_limit
              ()
          in
          let codec =

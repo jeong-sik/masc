@@ -225,7 +225,9 @@ status: reference
 : 소비자가 `max_concurrent_requests`를 선언한 제공자 계정의 동시 완료 요청 수를
   제한하는 Agent Core의 진입 절차. 같은 `kind`·`base_url`·API 키 식별자를 쓰는
   Keeper turn과 Exact-output route의 발송이 프로세스 전체에서 허용량을 공유한다.
-  자리가 차면 FIFO 순서로 허가를 기다리고, 선언이 없으면 이 절차를 적용하지 않는다.
+  자리가 차면 도착 순서로 허가를 기다리고, 선언이 없으면 이 절차를 적용하지 않는다.
+  계정이 `admission_priority_run_limit`도 선언하면 `Priority` 요청이 `Standard` 요청보다
+  먼저 허가를 받되, `Standard`가 기다리는 동안에는 그 수만큼만 연달아 받는다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
   `Binding Admission`과 다른 단계다.
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·

@@ -3652,6 +3652,13 @@ let test_a_working_state_that_displaces_nothing_goes () =
 ;;
 
 let () =
+  (* Pin the prompt directory explicitly. Under dune the registry falls back to
+     [DUNE_SOURCEROOT], but a test executable run directly has neither that
+     variable nor a [config/prompts] under its cwd; the unified autonomous
+     cycle then dies in setup with "missing prompt keeper.worldview", which
+     reads like a lifecycle regression and has already been misattributed as
+     one. Sibling keeper suites pin the same directory the same way. *)
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
     [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )

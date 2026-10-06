@@ -28,13 +28,14 @@ type resolution_failure =
   ; declared_drop : drop_reason option
   ; runtime_count : int
   }
-(* One exact-output lane slot whose HTTP provider declares no
-   [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
+
 type admitted_allowance_change =
   { runtime_id : string
   ; change : Llm_provider.Provider_admission_state.conflict
   }
 
+(* One exact-output lane slot whose HTTP provider declares no
+   [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
 type exact_slot_body_deadline_gap =
   { lane_id : string
   ; slot_id : string
@@ -165,6 +166,8 @@ let exact_slot_body_deadline_gap_to_yojson (gap : exact_slot_body_deadline_gap) 
     ]
 ;;
 
+let max_concurrent_key = "max-concurrent"
+
 let to_diagnostic_text ~(config_path : string) : load_failure -> string = function
   | Toml_unparsable errors ->
     let detail =
@@ -249,6 +252,17 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       (Runtime_muse_prompt_capacity.error_to_string
          (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
   | Admitted_allowances_changed changes ->
+    let allowance_text (allowance : Llm_provider.Provider_admission_state.allowance) =
+      match allowance.priority_run_limit with
+      | None -> Printf.sprintf "%s = %d" max_concurrent_key allowance.max
+      | Some limit ->
+        Printf.sprintf
+          "%s = %d, %s = %d"
+          max_concurrent_key
+          allowance.max
+          Runtime_schema.admission_priority_run_limit_key
+          limit
+    in
     Printf.sprintf
       "%s: this change gives %d runtime(s) an admission allowance their account \
        is not running under. The server keeps an account's first %s and %s \
@@ -257,14 +271,15 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
        and start it again:\n%s"
       config_path
       (List.length changes)
-      "max-concurrent"
+      max_concurrent_key
       Runtime_schema.admission_priority_run_limit_key
       (changes
        |> List.map (fun { runtime_id; change } ->
          Printf.sprintf
-           "  %s: %s"
+           "  %s: the server runs this account under %s; this change declares %s"
            runtime_id
-           (Llm_provider.Provider_admission.admitted_allowance_change_to_string change))
+           (allowance_text change.authoritative)
+           (allowance_text change.declared))
        |> String.concat "\n")
   | Exact_slot_body_deadlines_absent gaps ->
     Printf.sprintf

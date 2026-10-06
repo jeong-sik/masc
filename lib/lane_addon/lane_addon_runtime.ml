@@ -1308,8 +1308,9 @@ let enqueue_action ?caller m args =
         let* name, schema = match e.package.action_tool, c.action_schema () with
           | Some name, Some schema -> Ok (name, schema)
           | _ -> Error (Request_rejected "worker has no available advertised action port") in
-        let* () = if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then Ok ()
-          else Error (Request_rejected "action input exceeds the package message envelope") in
+        (* The input is bounded where it enters (the HTTP body limit), by the
+           package's declared action schema, and by the worker's memory limit.
+           The package's reply bound measures what a worker sends back. *)
         let* () = runtime_result (Lane_addon_action.validate_schema schema) in
         let* _ = request_result (Lane_addon_action.validate_input ~schema ~name arguments) in
         let receipt : Lane_addon_action.receipt = {instance_id; incarnation; request_id; requester;

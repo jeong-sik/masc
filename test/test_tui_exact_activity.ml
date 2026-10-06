@@ -135,6 +135,14 @@ let receipt_keeps_application_failure () =
   let session=read ~generation:3 (doc ~revision:"saved" off) session in
   shows "registry refused" session; shows "Current file: Off" session
 
+(* An operator note on an enabled flag stays on that line through a toggle
+   and the save it prepares. *)
+let enabled_comment_survives_toggle () =
+  let table="[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\"]\n" in
+  let annotated=table ^ "enabled = true # temporary during rollout\n" in
+  let _,_,write=A.start_save ~generation:2 (A.toggle (loaded (doc annotated))) |> ok in
+  same (table ^ "enabled = false # temporary during rollout\n") write.source_text
+
 let () = Alcotest.run "Exact activity draft and save" ["operator flow",List.map (fun (name,f)->Alcotest.test_case name `Quick f)
   ["explicit save preserves candidates and other source",draft_and_save;
    "conflict reapplies activity only",conflict_reapply;
@@ -145,4 +153,5 @@ let () = Alcotest.run "Exact activity draft and save" ["operator flow",List.map 
    "unconfirmed write and preview refusal",ambiguous_write_and_refusal;
    "changed file path needs discard",changed_path;
    "quoted and multiline table shapes",table_shapes;
-   "stored setting does not hide application failure",receipt_keeps_application_failure]]
+   "stored setting does not hide application failure",receipt_keeps_application_failure;
+   "enabled flag keeps its inline comment",enabled_comment_survives_toggle]]

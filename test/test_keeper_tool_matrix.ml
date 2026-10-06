@@ -265,28 +265,30 @@ let run_tool_case_process tool_name =
       cleanup_dir tmp_root)
     (fun () ->
       let status = run_capture_process ~env ~out_file ~err_file prog argv in
-      let stderr = read_file err_file in
-      let output =
-        String.concat "\n" [ read_file out_file; stderr ]
+      let child_stderr = read_file err_file in
+      let stdout_content = read_file out_file in
+      let combined_output =
+        String.concat "\n" [ stdout_content; child_stderr ]
       in
-      let parsed = parse_case_result ~tool_name output in
+      let parsed = parse_case_result ~tool_name stdout_content in
       (match parsed.base_path with
       | Some path when path <> tmp_root -> cleanup_dir path
       | Some _ | None -> ());
       match status with
-      | 0 -> with_runner_diagnostics ~stderr parsed.outcome
+      | 0 -> with_runner_diagnostics ~stderr:child_stderr parsed.outcome
       | 124 ->
           Error
             (Printf.sprintf "%s timed out after %ds\n%s" tool_name
-               (tool_case_timeout_sec ()) output)
+               (tool_case_timeout_sec ()) combined_output)
       | _ -> (
           match parsed.outcome with
           | Ok () ->
               Error
                 (Printf.sprintf
                    "%s exited nonzero without failure payload\n%s"
-                   tool_name output)
-          | Error message -> with_runner_diagnostics ~stderr (Error message)))
+                   tool_name combined_output)
+          | Error message ->
+              with_runner_diagnostics ~stderr:child_stderr (Error message)))
 
 let test_keeper_inventory_is_unique () =
   let names = Cases.all_keeper_tool_names in

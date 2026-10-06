@@ -420,8 +420,7 @@ let observe t ~binding ~sources =
               | None -> Error (Invalid_observation "lane_observe must return structuredContent")
               | Some json ->
                   Eio_unix.run_in_systhread (fun () ->
-                    Lane_addon_packet.decode ?store:t.artifact_store
-                      ~max_bytes:t.package.resources.max_reply_bytes json)
+                    Lane_addon_packet.decode ?store:t.artifact_store json)
                   |> Result.map_error (fun detail -> Invalid_observation detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
@@ -456,7 +455,7 @@ let act t ~arguments =
           (match result.structured_content with
            | None -> Error (Protocol_failed "action tool must return structuredContent")
            | Some json -> Eio_unix.run_in_systhread (fun () ->
-               Lane_addon_action.decode_result ~store ~max_bytes:t.package.resources.max_reply_bytes json)
+               Lane_addon_action.decode_result ~store json)
                |> Result.map_error (fun detail -> Protocol_failed detail))
     with
     | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn

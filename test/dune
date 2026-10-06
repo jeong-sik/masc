@@ -6392,6 +6392,7 @@
 (include stanzas/test_tui_keeper_schedule_error_once.inc)
 (include stanzas/test_tui_keeper_automation_rows.inc)
 (include stanzas/test_tui_approvals_window_pty.inc)
+(include stanzas/test_tui_approvals_list_window.inc)
 (include stanzas/test_tui_schedule_wake_error_once.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)

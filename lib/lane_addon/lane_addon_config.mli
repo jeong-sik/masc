@@ -9,6 +9,9 @@ type declaration = {
   package : Lane_addon_types.package;
   binding : Yojson.Safe.t;
   revision : string;
+  source_revision : string;
+  (** SHA-256 of the exact declaration bytes, including enabled and comments.
+      Matches the declaration editor's source_revision; never a worker key. *)
   source_path : string;
 }
 

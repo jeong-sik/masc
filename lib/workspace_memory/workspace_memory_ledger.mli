@@ -68,7 +68,9 @@ val digest_line_max_bytes : int
 val digest_budget_bytes : int
 (** Total byte cap for the [claims_digest] list an observation carries. The
     digest holds a prefix of the claims in [claim_id] order, never a
-    relevance selection. *)
+    relevance selection. A non-empty ledger always yields at least one line,
+    so a single digest line may exceed the cap on its own; the cap bounds
+    the accumulation from the second line on. *)
 
 type observation =
   | Missing

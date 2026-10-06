@@ -1203,7 +1203,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   ; "verifying_count", `Int 0
                   ; "awaiting_confirmation_count", `Int 0
                   ; "done_count", `Int 0
-                  ; "dropped_count", `Int 0
+                  ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 0
                   ] )
             ; ( "task_backlog"
               , `Assoc
@@ -1355,7 +1355,7 @@ let test_planning_goal_without_the_verifier_field_is_refused () =
         , `Assoc
             [ "active_count", `Int 0; "verifying_count", `Int 1
             ; "awaiting_confirmation_count", `Int 0; "done_count", `Int 0
-            ; "dropped_count", `Int 0 ] )
+            ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 0 ] )
       ; ( "task_backlog"
         , `Assoc
             [ "todo", `Int 0; "claimed", `Int 0; "in_progress", `Int 0
@@ -1418,7 +1418,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           ; "verifying_count", `Int 3
           ; "awaiting_confirmation_count", `Int 0
           ; "done_count", `Int 4
-          ; "dropped_count", `Int 5
+          ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 5
           ] )
     ; ( "task_backlog"
       , `Assoc
@@ -8420,6 +8420,7 @@ let runtime_resolved_json =
     [ ("generated_at_iso", `String "2026-08-24T10:20:02Z")
     ; ("source", `String "/api/v1/runtime/resolved")
     ; ("config_path", `String "/workspace/config/runtime.toml")
+    ; ("default_route", `String "ollama_cloud.deepseek")
     ; ("default_runtime", picker_default_runtime)
     ; "media_failover", `List []
     ; "media_failover_declared", `List []
@@ -8581,6 +8582,39 @@ let test_exact_slot_group_is_typed () =
     (Result.is_error
        (Tui_decode.decode_runtime_resolved
           (change_second_runtime (`String "other") runtime_resolved_json)))
+
+(* The listing's rule-3 flag is optional: an older server's rows lack it
+   and read as no gap, a present flag is kept, and a mistyped one refuses
+   the catalog rather than guessing. *)
+let test_exact_body_deadline_flag_is_optional () =
+  let mark value = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, v) ->
+              match key, v with
+              | "runtimes", `List [ first; `Assoc second ] ->
+                key, `List [ first; `Assoc (("exact_body_deadline_missing", value) :: second) ]
+              | _ -> key, v)
+           fields)
+    | json -> json
+  in
+  (match Tui_decode.decode_runtime_resolved runtime_resolved_json with
+   | Ok (runtimes, _) ->
+     List.iter
+       (fun (r : Tui_decode.runtime_option) ->
+          Alcotest.(check bool) "an older server's row reads as no gap" false
+            r.ro_exact_body_deadline_missing)
+       runtimes
+   | Error detail -> Alcotest.fail detail);
+  (match Tui_decode.decode_runtime_resolved (mark (`Bool true) runtime_resolved_json) with
+   | Ok ([ _; marked ], _) ->
+     Alcotest.(check bool) "the listed gap is kept" true marked.ro_exact_body_deadline_missing
+   | Ok _ -> Alcotest.fail "expected two runtimes"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "a mistyped flag refuses the catalog" true
+    (Result.is_error
+       (Tui_decode.decode_runtime_resolved (mark (`String "yes") runtime_resolved_json)))
 
 (* [declared] tells a lane a table declares from the single candidate an
    assignment naming a runtime rests on. The two are the same shape otherwise,
@@ -8772,6 +8806,7 @@ let runtime_resolved_surface_json () =
     [ "generated_at_iso", `String "2026-08-24T10:20:02Z"
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", `String "/workspace/config/runtime.toml"
+    ; "default_route", `String "primary"
     ; "default_runtime", runtime_a
     ; "media_failover", `List []
     ; "media_failover_declared", `List []
@@ -9086,12 +9121,29 @@ let test_runtime_default_limits_must_match_listed_row () =
      "declared_reasoning_effort", `String "low";
      "is_local", `Bool true]
 
+let test_default_route_must_enter_the_reported_runtime () =
+  let replace_route route = function
+    | `Assoc fields ->
+        `Assoc (("default_route", `String route) :: List.remove_assoc "default_route" fields)
+    | json -> json
+  in
+  let json = runtime_resolved_surface_json () |> replace_route "degraded" in
+  match Tui_decode.decode_runtime_resolved_snapshot json with
+  | Error detail ->
+      Alcotest.(check string) "a lane cannot claim another entry runtime"
+        "default_route disagrees with its lane's entry runtime" detail
+  | Ok _ -> Alcotest.fail "contradictory default route was accepted"
+
 let test_runtime_surface_keeps_resolved_rows_without_a_probe () =
   match
     Tui_decode.decode_runtime_resolved_snapshot (runtime_resolved_surface_json ())
   with
   | Error detail -> Alcotest.fail detail
   | Ok resolved ->
+      Alcotest.(check (option string)) "configured route is a lane"
+        (Some "primary") resolved.rrs_default_route;
+      Alcotest.(check (option string)) "entry runtime is distinct"
+        (Some "runtime-a") resolved.rrs_default_runtime_id;
       (match
          Tui_decode.join_runtime_surface ~probe:None
            ~probe_error:(Some "probe permission denied") ~resolved
@@ -12620,6 +12672,8 @@ let () =
           test_runtime_route_keeps_declared_order
       ; Alcotest.test_case "default limits match listed runtime" `Quick
           test_runtime_default_limits_must_match_listed_row
+      ; Alcotest.test_case "default route agrees with entry runtime" `Quick
+          test_default_route_must_enter_the_reported_runtime
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
           test_runtime_surface_keeps_resolved_rows_without_a_probe
       ] );
@@ -12632,6 +12686,8 @@ let () =
           test_decode_runtime_resolved_full;
         Alcotest.test_case "exact slot destination is typed" `Quick
           test_exact_slot_group_is_typed;
+        Alcotest.test_case "exact body deadline flag is optional" `Quick
+          test_exact_body_deadline_flag_is_optional;
         Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
           test_decode_unavailable_runtime_assignment;
         Alcotest.test_case "a lane says whether a table declares it" `Quick

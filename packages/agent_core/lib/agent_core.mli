@@ -35,7 +35,8 @@ module Hooks = Agent_core_base.Hooks
 module Tracing = Tracing
 module Tool_contract = Agent_core_base.Tool_contract
 module Execution_json = Execution_json
-module Execution_tool_schedule = Execution_tool_schedule
+(* Expose the codec signature, not an alias requiring its private CMI. *)
+module Execution_tool_schedule : module type of Execution_tool_schedule
 module Tool = Agent_core_base.Tool
 module Typed_tool = Typed_tool
 module Mcp = Mcp
@@ -78,7 +79,29 @@ module Agent_tools = Agent_tools
     with its own tool loop -- has to reach the same verdict for the same
     decision. Deciding it twice is how the same hook came to mean different
     things depending on which runtime a caller was bound to. *)
-module Agent_tool_pre_execution_gate = Agent_tool_pre_execution_gate
+module Agent_tool_pre_execution_gate : sig
+  type settlement =
+    | Admit
+    | Block of string
+    | Reject of
+        { stage : Hooks.hook_stage
+        ; detail : string
+        }
+
+  (** The host-facing settlement contract. Internal scheduling and durable
+      execution helpers remain private to Agent Core. *)
+  val settle
+    :  ?tool_approval:Hooks.tool_approval_callback
+    -> ?correlation_id:string
+    -> ?run_id:string
+    -> event_bus:Event_bus.t option
+    -> agent_name:string
+    -> invocation:Tool_contract.Invocation.t
+    -> tool_name:string
+    -> input:Yojson.Safe.t
+    -> Hooks.hook_decision
+    -> settlement
+end
 module Agent_checkpoint = Agent_checkpoint
 module Terminal_tool_receipt = Terminal_tool_receipt
 module Agent = Agent

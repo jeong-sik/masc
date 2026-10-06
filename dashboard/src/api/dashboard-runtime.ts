@@ -2300,11 +2300,58 @@ export async function fetchRuntimeResolved(
   return parseRuntimeResolvedResponse(raw)
 }
 
-export async function saveRuntimeTomlConfig(sourceText: string): Promise<CommittedRuntimeTomlConfig> {
+export interface RuntimeTomlCurrentSource {
+  source_path: string
+  source_text: string
+  source_revision: string
+}
+
+export class RuntimeTomlRevisionConflict extends Error {
+  constructor(message: string, readonly current: RuntimeTomlCurrentSource) {
+    super(message)
+    this.name = 'RuntimeTomlRevisionConflict'
+  }
+}
+
+export async function saveRuntimeTomlConfig(
+  sourceText: string,
+  expectedSourceRevision: string,
+  options: { expectedSourcePath: string },
+): Promise<CommittedRuntimeTomlConfig> {
+  if (!/^[0-9a-f]{64}$/.test(expectedSourceRevision)) {
+    throw new Error('runtime.toml 저장 기준 revision이 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
+  }
+  if (typeof options.expectedSourcePath !== 'string' || options.expectedSourcePath === '' || options.expectedSourcePath.includes('\0')) {
+    throw new Error('runtime.toml 저장 기준 path가 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
+  }
   await ensureDevToken()
-  return post<unknown>('/api/v1/runtime/config/raw', {
-    source_text: sourceText,
-  }).then(decodeCommittedRuntimeTomlConfig)
+  try {
+    const raw = await post<unknown>('/api/v1/runtime/config/raw', {
+      source_text: sourceText,
+      expected_source_revision: expectedSourceRevision,
+      expected_source_path: options.expectedSourcePath,
+    })
+    return decodeCommittedRuntimeTomlConfig(raw)
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError && error.status === 409) {
+      const failure = error.responseData
+      if (isRecord(failure) && failure.code === 'revision_conflict'
+        && typeof failure.error === 'string' && isRecord(failure.current)) {
+        const current = failure.current
+        if (typeof current.source_path === 'string' && current.source_path !== ''
+          && typeof current.source_text === 'string'
+          && typeof current.source_revision === 'string'
+          && /^[0-9a-f]{64}$/.test(current.source_revision)) {
+          throw new RuntimeTomlRevisionConflict(failure.error, {
+            source_path: current.source_path,
+            source_text: current.source_text,
+            source_revision: current.source_revision,
+          })
+        }
+      }
+    }
+    throw error
+  }
 }
 
 export async function previewRuntimeTomlConfig(sourceText: string): Promise<RuntimeConfigPreview> {
@@ -2328,12 +2375,12 @@ export type RuntimeRoutingLane =
 
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
-  runtimeId: string | null,
+  routeId: string | null,
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
-    runtime_id: runtimeId,
+    runtime_id: routeId,
   }).then(decodeCommittedRuntimeTomlConfig)
 }
 

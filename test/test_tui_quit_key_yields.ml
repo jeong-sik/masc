@@ -4,7 +4,8 @@ open Masc_tui_types
    [quit_key_allowed_for] so that adding a field breaks both: the list in the
    code decides, and this list is the reader that notices. *)
 let every_text_target =
-  [ ("browser url", Text_browser_url)
+  [ ("account login", Text_account_login)
+  ; ("browser url", Text_browser_url)
   ; ("ask answer", Text_ask_answer)
   ; ("fusion launch", Text_fusion_launch)
   ; ("preset name", Text_preset_name)
@@ -23,9 +24,12 @@ let every_text_target =
   ; ("board draft", Text_board_draft)
   ]
 
-(* A field showing a cursor owns [q]. Three of the thirteen were named and the
-   rest fell through a catch-all, so a [q] typed into the command palette
-   armed the exit and the next one ended the process. *)
+(* A field showing a cursor owns [q]. Three of the first thirteen were named
+   and the rest fell through a catch-all, so a [q] typed into the command
+   palette armed the exit and the next one ended the process. The list above
+   once named seventeen of the eighteen targets (the account login input was
+   missing) under a count of sixteen, so the count and the missing field each
+   went unnoticed; both are pinned here. *)
 let test_no_field_lets_the_quit_key_through () =
   List.iter
     (fun (name, target) ->
@@ -46,9 +50,9 @@ let test_with_no_field_open_the_quit_key_is_a_quit_key () =
    before it goes on measuring all of them rather than a subset someone
    trimmed. *)
 let test_the_list_covers_every_target_this_build_has () =
-  Alcotest.(check int) "fields counted" 16 (List.length every_text_target);
+  Alcotest.(check int) "fields counted" 18 (List.length every_text_target);
   let spelled = List.map fst every_text_target in
-  Alcotest.(check int) "and none of them is listed twice" 16
+  Alcotest.(check int) "and none of them is listed twice" 18
     (List.length (List.sort_uniq String.compare spelled))
 
 let () =

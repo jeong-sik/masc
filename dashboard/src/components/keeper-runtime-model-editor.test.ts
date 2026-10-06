@@ -258,6 +258,7 @@ function makeRuntimeResolved(
 ): RuntimeResolvedResponse {
   return {
     config_path: '/cfg/runtime.toml',
+    default_route: null,
     default_runtime: null,
     runtimes: [],
     lanes: [],

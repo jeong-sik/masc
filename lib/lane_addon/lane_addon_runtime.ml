@@ -32,6 +32,17 @@ type backend = {
   image_ready : package:package -> (unit, string) result;
 }
 type configuration_owner = { id : string; source_path : string; revision : string }
+type inventory_presence = Live | Retained
+type inventory_instance = {
+  instance_id : string; incarnation : string; run_id : string;
+  package_id : string; title : string; package_revision : string;
+  configuration : configuration_owner option;
+  presence : inventory_presence; phase : phase;
+}
+type inventory = {
+  owner_present : bool; instances : inventory_instance list;
+  issues : (string * string) list; complete : bool;
+}
 type visibility = Shared | Operator_only | Keeper_only of string
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = { owner : skill_export_owner; instance_id : string; package : package }
@@ -482,12 +493,10 @@ type observation_writer = store:Lane_addon_store.t -> instance_id:string -> seq:
 let observation_writer_key : observation_writer Eio.Fiber.key = Eio.Fiber.create_key ()
 let commit_output m e ~sources output =
   let seq = e.seq + 1 in
-  (* The declared observation envelope also bounds the host representation.
-     Check prefix expansion before allocating it: package-controlled relation
-     lists cannot manufacture extra retained capacity. *)
-  let* () =
-    if String.length (Yojson.Safe.to_string (output_to_json output)) <= e.package.resources.max_reply_bytes
-    then Ok () else Error "observation exceeds the package output envelope" in
+  (* The declared observation envelope also bounds the host representation:
+     package-controlled relation lists cannot manufacture extra retained
+     capacity. The allowance is never negative, so this one check also covers
+     the package's own bytes. *)
   let* allowance = namespace_allowance e seq output in
   let* namespaced_bytes = add_output_bytes
     (Int64.of_int (String.length (Yojson.Safe.to_string (output_to_json output)))) allowance in
@@ -774,6 +783,53 @@ let historical_inventory m =
         Log.Misc.warn "Lane retained binding omitted from inventory: %s" detail;
         None) bindings in
   Ok (without_live_bindings m visible)
+let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let stored = offload (fun () -> Lane_addon_store.binding_inventory ~root) in
+  let manager = Hashtbl.find_opt managers root in
+  let live = match manager with
+    | None -> []
+    | Some m -> entries m |> List.map (fun (e : entry) ->
+        { instance_id=e.instance_id; incarnation=e.instance_id; run_id=e.run_id;
+          package_id=e.package.id; title=e.package.title; package_revision=e.package.revision;
+          configuration=e.configuration; presence=Live; phase=e.phase }) in
+  let bindings = List.map snd stored.records in
+  let decode path json =
+    let* () = unique_json json in
+    let* json = normalize_retained_binding ~bindings json in
+    let* fields = object_ json in
+    let* instance_id = text fields "instance_id" in
+    let* () = if Filename.basename path = Lane_addon_store.digest instance_id ^ ".json"
+      then Ok () else Error "binding filename does not match its instance identity" in
+    let* incarnation = text fields "incarnation" in
+    let* () = if incarnation=instance_id then Ok ()
+      else Error "retained incarnation does not match its instance identity" in
+    let* run_id = text fields "run_id" in
+    let* package_id = text fields "addon_id" in
+    let* title = text fields "title" in
+    let* package_revision = text fields "revision" in
+    let* configuration = match List.assoc_opt "configuration" fields with
+      | None -> Error "missing retained configuration owner"
+      | Some _ -> configuration_of_fields fields in
+    let* phase = match List.assoc_opt "phase" fields with
+      | Some value -> phase_of_json value | None -> Error "missing retained phase" in
+    let phase = match phase with
+      | Detached -> Detached
+      | Failed detail -> Failed detail
+      | Detaching when Option.exists (fun m -> Hashtbl.mem m.recovering instance_id) manager -> Detaching
+      | Attached | Observing | Detaching ->
+          Failed "previous process; explicit detach can verify container cleanup" in
+    Ok {instance_id;incarnation;run_id;package_id;title;package_revision;
+        configuration;presence=Retained;phase} in
+  let retained,issues = List.fold_left (fun (values,issues) (path,json) ->
+    match decode path json with
+    | Error detail -> values,(path,detail)::issues
+    | Ok value when List.exists (fun (current : inventory_instance) ->
+        current.instance_id=value.instance_id) live -> values,issues
+    | Ok value -> value::values,issues) ([],stored.issues) stored.records in
+  {owner_present=Option.is_some manager;
+   instances=List.sort (fun (a : inventory_instance) b -> String.compare a.instance_id b.instance_id) (live @ retained);
+   issues=List.sort_uniq Stdlib.compare issues; complete=stored.complete && issues=[]})
 let persisted_binding m id =
   let* bindings = runtime_result (read_retained_bindings m) in
   match List.find_opt (function
@@ -1255,7 +1311,7 @@ let enqueue_action ?caller m args =
         let* () = if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then Ok ()
           else Error (Request_rejected "action input exceeds the package message envelope") in
         let* () = runtime_result (Lane_addon_action.validate_schema schema) in
-        let* _ = request_result (Lane_addon_action.validate ~schema ~name arguments) in
+        let* _ = request_result (Lane_addon_action.validate_input ~schema ~name arguments) in
         let receipt : Lane_addon_action.receipt = {instance_id; incarnation; request_id; requester;
           executor = None; input_sha256; action; state = Queued; result = None; detail = None} in
         let* () = runtime_result (save_action_unlocked m receipt) in
@@ -1692,6 +1748,10 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
               | Ok (Some owner) -> Some (owner, fields)
               | Error message -> histories_readable := false; add_issue directory message; None) values in
     let can_apply = Result.is_ok past && !histories_readable && snapshot.complete in
+    if not can_apply then
+      List.iter (fun (d : Lane_addon_config.declaration) ->
+        if not d.enabled then add_issue ~id:d.id d.source_path
+          "Off requested; worker cleanup waits for a complete declaration and retained-binding reading") snapshot.declarations;
     let retire sw e =
       match detach_entry ~sw m e with
       | Ok _ -> ()
@@ -1732,9 +1792,21 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
              | [visibility] -> Ok visibility
              | [] -> desired_visibility [] d
              | _ -> Error "declaration has ambiguous retained ownership" in
-           let admitted =
+           let document_owner =
              let* visibility = retained_visibility in
              let* () = retain_configured_document_owner m d visibility in
+             Ok visibility in
+           if not d.enabled then (
+             (* Disabling keeps the document and its privacy owner. Cleanup
+                must not depend on an upstream connection or an available image. *)
+             (match document_owner with
+              | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message);
+             List.iter (retire sw) (live_for d.id);
+             List.iter (retire_past sw)
+               (List.filter (fun (owner, fields) -> owner.id = d.id && not (detached fields)) histories))
+           else
+           let admitted =
+             let* visibility = document_owner in
              let* _ = validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding in
              Ok visibility in
            match admitted with
@@ -1775,6 +1847,14 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Ok _ -> ());
     let nullable_string = function None -> `Null | Some s -> `String s in
     let exports = entries m |> List.filter_map (fun e ->
+      let configured_off = snapshot.complete && match e.configuration with
+        | None -> false
+        | Some owner -> List.exists (fun (d : Lane_addon_config.declaration) ->
+            d.id = owner.id && not d.enabled) snapshot.declarations in
+      (* Cleanup failures retain their worker and evidence for retry, but a
+         retiring owner cannot supply a usable Skill. An incomplete reading
+         does not authorize inferring desired activity for a running owner. *)
+      if e.stopping || configured_off then None else
       match e.package.skills_directory, e.phase with
       | None, _ | Some _, Detached -> None
       | Some _, (Attached | Observing | Failed _ | Detaching) ->
@@ -1791,7 +1871,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     let declarations = List.map (fun (d : Lane_addon_config.declaration) ->
       let active = match live_for d.id with [e] -> Some e | _ -> None in
       let applied_revision = Option.bind active (fun e -> Option.map (fun o -> o.revision) e.configuration) in
-      `Assoc ["id", `String d.id; "source_path", `String d.source_path;
+      `Assoc ["id", `String d.id; "source_path", `String d.source_path; "enabled", `Bool d.enabled;
         "desired_revision", `String d.revision; "applied_revision", nullable_string applied_revision;
         "instance_id", nullable_string (Option.map (fun e -> e.instance_id) active)]) snapshot.declarations in
     let json = `Assoc ["directory", `String directory; "complete", `Bool snapshot.complete;

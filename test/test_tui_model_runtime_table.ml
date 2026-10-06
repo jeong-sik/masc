@@ -293,6 +293,41 @@ let test_exact_runtime_lookup () =
   check bool "missing binding stays missing" true
     (Option.is_none (T.find_runtime ~runtime_id:"account-three.model.6" rows))
 
+let one_binding name =
+  let rows =
+    parse
+      [ "[models." ^ name ^ "]"; ""; "[local." ^ name ^ "]"; "max-tokens = 16384" ]
+  in
+  check int "fixture yields one row" 1 (List.length rows);
+  rows
+
+let contains line needle =
+  let n = String.length needle in
+  let rec at i =
+    i + n <= String.length line && (String.equal (String.sub line i n) needle || at (i + 1))
+  in
+  at 0
+
+(* At 60 cells render gives the model column 14 (46 reserved), so a 16-cell
+   name used to pass [fits] on natural widths and then be clipped. *)
+let test_fits_measures_the_drawn_allocation () =
+  let name = String.make 16 'a' in
+  let rows = one_binding name in
+  check bool "16-cell name does not fit at 60" false (T.fits ~width:60 rows);
+  check bool "fits once the column holds it" true (T.fits ~width:62 rows);
+  let stacked = T.render ~width:60 ~pane:60 rows in
+  check bool "name survives whole in stacked layout" true
+    (List.exists (fun l -> contains l name) stacked);
+  let table = T.render ~width:62 ~pane:62 rows in
+  check bool "name survives whole in the table" true
+    (List.exists (fun l -> contains l name) table)
+
+(* Short names still drew a 53-cell header into a 50-cell pane. *)
+let test_fits_counts_the_padded_header () =
+  let rows = one_binding "abcd" in
+  check bool "header runs past 50" false (T.fits ~width:50 rows);
+  check bool "fits at 54" true (T.fits ~width:54 rows)
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
@@ -320,6 +355,10 @@ let () =
         ; Alcotest.test_case "stacked item starts are monotonic" `Quick
             test_stacked_item_starts_are_monotonic
         ; Alcotest.test_case "empty input" `Quick test_empty_input
+        ; Alcotest.test_case "fits measures the drawn allocation" `Quick
+            test_fits_measures_the_drawn_allocation
+        ; Alcotest.test_case "fits counts the padded header" `Quick
+            test_fits_counts_the_padded_header
         ; Alcotest.test_case
             "detail names owners and API override"
             `Quick

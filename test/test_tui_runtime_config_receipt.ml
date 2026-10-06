@@ -273,11 +273,78 @@ let test_preview_without_can_save_is_not_a_pass () =
   check bool "not an object" true (Result.is_error (Receipt.decode_preview (`List [])))
 ;;
 
+let test_lane_notice_retains_application_and_durability () =
+  let decode json = match Receipt.decode json with Ok value -> value | Error e -> fail e in
+  let kept = decode (receipt ~exact:(exact_output_registry ~status:"kept" ()) ()) in
+  check bool "kept warns" true (Receipt.lane_needs_attention kept);
+  check string "kept explains why restarting is not a repair"
+    "File saved · exact lanes unchanged: catalog read failed; correct configuration before restart · routing applied · Keeper settings await restart: turn.temperature"
+    (Receipt.lane_summary kept);
+  let unpublished = decode (receipt ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:true ()) ()) in
+  let unpublished = {unpublished with Receipt.durability = Receipt.Durability_unconfirmed} in
+  check bool "unpublished warns" true (Receipt.lane_needs_attention unpublished);
+  check string "file uncertainty and missing registry are distinct"
+    "File written; durability unconfirmed · exact lanes unavailable; restart required · routing applied · Keeper settings await restart: turn.temperature"
+    (Receipt.lane_summary unpublished)
+;;
+
+let test_lane_notice_reports_environment_preemption () =
+  List.iter (fun (status, applied, expected) ->
+    let keeper = `Assoc ["status", `String status; "configured_count", `Int (1 + List.length applied);
+      "requires_restart", `Bool false; "pending_keys", `List [];
+      "applied_keys", `List (List.map (fun key -> `String key) applied);
+      "preempted_keys", `List [`String "turn.temperature"]; "applied_at", `Null] in
+    let value = decoded (receipt ~keeper ()) in
+    check bool "environment preemption needs attention without restart" true
+      (Receipt.lane_needs_attention value);
+    check string "lane summary retains preemption and affected keys"
+      ("File saved · exact lanes applied · routing applied · " ^ expected)
+      (Receipt.lane_summary value))
+    ["preempted_by_env", [], "Keeper settings overridden by environment: turn.temperature";
+     "mixed", ["turn.max_tokens"],
+       "Keeper settings partially applied; overridden by environment: turn.temperature"]
+;;
+
+let test_lane_notice_reports_skill_application () =
+  let keeper = `Assoc
+    [ "status", `String "not_configured"; "configured_count", `Int 0
+    ; "requires_restart", `Bool false; "pending_keys", `List []
+    ; "applied_keys", `List []; "preempted_keys", `List []; "applied_at", `Null ] in
+  let snapshot state config_state =
+    match published ~config_state () with
+    | `Assoc fields -> `Assoc (("state", `String state) :: List.remove_assoc "state" fields)
+    | _ -> fail "Skill snapshot fixture must be an object" in
+  let base_summary = "File saved · exact lanes applied · routing applied" in
+  List.iter (fun (skills, warning) ->
+    let value = decoded (receipt ~keeper ~skills ()) in
+    check bool "Skill outcome alone controls attention" (Option.is_some warning)
+      (Receipt.lane_needs_attention value);
+    check string "saved file and Skill application remain distinct"
+      (String.concat " · " (base_summary :: Option.to_list warning))
+      (Receipt.lane_summary value))
+    [ snapshot "published" "configured", None
+    ; snapshot "unchanged" "configured", None
+    ; snapshot "published" "rejected", Some "Skill configuration rejected; catalog not applied"
+    ; snapshot "unchanged" "rejected", Some "Skill configuration rejected; catalog not applied"
+    ; snapshot "published" "unreadable", Some "Skill configuration unreadable; catalog not applied"
+    ; snapshot "unchanged" "unreadable", Some "Skill configuration unreadable; catalog not applied"
+    ; superseded (), Some "Skill catalog superseded by commit 8"
+    ; `Assoc [ "state", `String "workspace_retired";
+               "input_source_revision", `String "source-7" ],
+      Some "Skill catalog not applied; workspace retired"
+    ; `Assoc [ "state", `String "invalid_workspace" ],
+      Some "Skill catalog not applied; invalid workspace" ]
+;;
+
 let () =
   run
     "tui runtime config receipt"
     [ ( "decode"
-      , [ test_case "valid receipt preserves typed outcomes" `Quick
+      , [ test_case "lane notices report every Skill application outcome" `Quick test_lane_notice_reports_skill_application;
+          test_case "lane preemption is visible without restart" `Quick test_lane_notice_reports_environment_preemption;
+          test_case "lane notices preserve application and durability" `Quick
+            test_lane_notice_retains_application_and_durability
+        ; test_case "valid receipt preserves typed outcomes" `Quick
             test_valid_receipt_preserves_typed_outcomes
         ; test_case "causal mismatches are rejected" `Quick
             test_rejects_causal_mismatches

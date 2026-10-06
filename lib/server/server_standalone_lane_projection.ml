@@ -957,7 +957,17 @@ let live_lane_configuration registry lane_id =
       }
 ;;
 
-let snapshot_json () =
+type observation = {
+  now : float;
+  resolve_lane : string -> lane_configuration;
+  jev_readiness : Typesafeai_config.readiness;
+  exact_runs_total : int;
+  exact_runs : Exact_lane_run_registry.run list;
+  verification_runs : Verification_run_registry.run list;
+  goal_verification_runs : Goal_verification_run_registry.run list;
+}
+
+let observe () =
   let registry_result = Runtime_exact_output_registry.current () in
   let resolve_lane lane_id =
     match registry_result with
@@ -966,6 +976,11 @@ let snapshot_json () =
       Registry_unavailable
         (Runtime_exact_output_registry.publication_error_to_string error)
   in
+  let configurations = List.map (fun lane ->
+    let id = Standalone_lane.to_id lane in id,resolve_lane id) Standalone_lane.all in
+  let resolve_lane lane_id = match List.assoc_opt lane_id configurations with
+    | Some configuration -> configuration
+    | None -> Registry_unavailable "unknown standalone lane" in
   (* [list_runs] is already newest-first from the registry's immutable
      projection. Do not call [recent_runs] here: it sorts the entire list
      again, and persistence-failed core rows can remain Running beyond normal
@@ -985,16 +1000,19 @@ let snapshot_json () =
       []
       exact_run_source
   in
-  snapshot_json_with
-    ~now:(Time_compat.now ())
-    ~resolve_lane
-    ~jev_readiness:(Typesafeai_config.readiness ())
-    ~exact_runs_total:(List.length exact_run_source)
-    ~exact_runs
-    ~verification_runs:
-      (Verification_run_registry.list_runs (Verification_run_registry.global ()))
-    ~goal_verification_runs:(retained_goal_reviews ())
+  { now=Time_compat.now (); resolve_lane; jev_readiness=Typesafeai_config.readiness ();
+    exact_runs_total=List.length exact_run_source; exact_runs;
+    verification_runs=Verification_run_registry.list_runs (Verification_run_registry.global ());
+    goal_verification_runs=retained_goal_reviews () }
 ;;
+
+let configuration observation lane = observation.resolve_lane (Standalone_lane.to_id lane)
+let observation_to_json observation =
+  snapshot_json_with ~now:observation.now ~resolve_lane:observation.resolve_lane
+    ~jev_readiness:observation.jev_readiness ~exact_runs_total:observation.exact_runs_total
+    ~exact_runs:observation.exact_runs ~verification_runs:observation.verification_runs
+    ~goal_verification_runs:observation.goal_verification_runs
+let snapshot_json () = observation_to_json (observe ())
 
 module For_testing = struct
   let snapshot_json_with = snapshot_json_with

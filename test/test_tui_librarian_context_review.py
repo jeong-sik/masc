@@ -32,7 +32,7 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
     run_id = run["run_id"]
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (200, fixture["page"])
     reads: list[str] = []
 

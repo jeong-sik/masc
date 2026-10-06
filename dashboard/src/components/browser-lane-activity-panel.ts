@@ -39,10 +39,10 @@ export function BrowserLaneActivityPanel({ lane, title }: { lane: BrowserActivit
         ${changedPath ? html`<p role="alert">설정 파일 경로가 바뀌었습니다. 새 파일을 편집하려면 먼저 초안을 버리세요.</p>` : null}
       </div>` : null}
       <div class="flex flex-wrap gap-2">
-        <button type="button" class=${button} disabled=${!ready || !session.modified() || !!conflict}
+        <button type="button" class=${button} disabled=${!ready || !session.modified() || !!conflict || state.uncertain !== null}
           onClick=${() => session.save(authority)}>${state.phase === 'saving' ? '활동 설정 저장 중…' : '활동 설정 저장'}</button>
         <button type="button" class=${button} disabled=${busy} onClick=${() => session.read(authority)}>현재 설정 읽기</button>
-        ${conflict && !changedPath ? html`<button type="button" class=${button} disabled=${!ready}
+        ${(conflict || state.uncertain !== null) && !changedPath ? html`<button type="button" class=${button} disabled=${!ready}
           onClick=${() => session.reapply(authority)}>활동 값만 다시 적용</button>` : null}
         <button type="button" class=${button} disabled=${busy || !state.draft} onClick=${() => session.discard(authority)}>초안 버리기</button>
       </div>

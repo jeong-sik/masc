@@ -175,13 +175,15 @@ let rec validate_node ~name schema value =
 let validate_value_schema schema =
   let* _ = canonical schema in
   schema_node schema
-let validate_value ~schema ~name input =
-  let* () = validate_value_schema schema in
+let validate_input ~schema ~name input =
   let* input = canonical input in
   let* () = validate_node ~name schema input in Ok input
+let validate_value ~schema ~name input =
+  let* () = validate_value_schema schema in
+  validate_input ~schema ~name input
 let validate ~schema ~name input =
   let* () = validate_schema schema in
-  validate_value ~schema ~name input
+  validate_input ~schema ~name input
 let decode_result ~store ~max_bytes json =
   let* fields = exact ["status"; "result"; "output"] json in
   let* status = match List.assoc "status" fields with

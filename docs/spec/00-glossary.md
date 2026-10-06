@@ -2427,6 +2427,9 @@ status: reference
   상태로 시작하므로, 매번 콜드 빌드 한 번을 치르는 대신 재시작 사이에 쌓인 빌드
   산출물이 다음 세션으로 새지 않는다. `container volume create`는 멱등이 아니므로
   존재 여부를 probe로 가리고, probe 결과가 애매하면 추측으로 지우지 않고 거절한다.
+  링크가 걸리기 전에 빌드해서 work volume 에 생긴 진짜 `_build` 는 게스트가 뜨기 전
+  trim helper 가 지운다(`build_output_removal_script`). `.masc-keep-build` 가 있는
+  체크아웃은 남긴다.
   → [Keeper_sandbox_microvm](../../lib/keeper/keeper_sandbox_microvm.mli)
 
 ## Continuity

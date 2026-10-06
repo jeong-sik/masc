@@ -7,7 +7,7 @@ import {
 import type { RuntimeTomlRequestOptions } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 import { idle, loading, loaded, failed, type AsyncState } from './async-state'
-import { announceRuntimeTomlWritten, announceRuntimeTomlWriteUncertain, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
+import { announceRuntimeTomlWriteUncertain, runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { resumeSavedModelSetup } from './model-setup-resume'
 import { refreshRuntimeConfigConsumers } from './runtime-config-refresh'
 import { runtimeConfigCommitReceiptNotice } from './runtime-config-receipt'
@@ -153,7 +153,6 @@ export class SettingsRuntimeSession {
       attachment.cancelUnsent = null
       this.update({ source: loaded(receipt), write: { phase: 'saving', target,
         message: `저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`, receipt } })
-      announceRuntimeTomlWritten()
       const resumed = await resumeSavedModelSetup({ signal: controller.signal })
       if (!owns()) return false
       announceExactLaneObservationChanged(this.authority)

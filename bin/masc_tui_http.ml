@@ -1476,6 +1476,19 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("chat history page was not JSON: " ^ detail))
 
+let fetch_keeper_memory_input ~host ~port ~keeper_name =
+  let path = Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+      (percent_encode_path_segment keeper_name) Masc_tui_memory_usage.page_limit in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (named_refusal "Memory input" ~status ~body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc_tui_memory_usage.decode ~keeper:keeper_name json
+       | exception Yojson.Json_error detail ->
+           Error ("Memory input was not JSON: " ^ detail))
+
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)
@@ -1496,7 +1509,8 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   let encoded = percent_encode_path_segment keeper_name in
   let turn =
     fetch ~label:"turn-records"
-      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+               encoded Masc_tui_memory_usage.page_limit)
       ~decode:Masc_tui_context_inspector.decode_turn_records
   in
   (* Which row the exact provider input is read for. Stepping back names the

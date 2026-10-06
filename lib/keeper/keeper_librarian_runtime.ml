@@ -1404,9 +1404,15 @@ let run_best_effort
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
              let* (answer, exact_output), served_slot =
+               (* Judged by what the prompt shows. Once a Keeper has any
+                  working-context snapshot, [previous] is [Some] on every
+                  capture, and a running Keeper usually carries an execution
+                  basis too; neither reaches the prompt without a source, yet
+                  comparing the record with [empty] refused every live pass. *)
                let eligible = match pass with
                  | Memory_pass None ->
-                   prompt_input.working_context = Keeper_librarian_context.empty
+                   Keeper_librarian_context.shows_no_working_context
+                     prompt_input.working_context
                  | Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _ -> false in
                let observation = Typesafeai_librarian_preflight.assess
                  ~observe:(fun observation -> observed_preflight := Some observation)
@@ -1534,10 +1540,13 @@ let run_best_effort
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
                 answer left out or got wrong is skipped for this pass and
-                recorded on the run; the Memory decision below is kept. *)
+                recorded on the run; the Memory decision below is kept.
+                A no-change judgment reaches here only with nothing pending,
+                where the empty organization is the only valid answer; writing
+                it retires consumed contexts exactly as a generated one does. *)
              (match selection.working_contexts, continuity_answer with
               | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
-               if not !full_llm_skipped then organize_working_context pockets
+               organize_working_context pockets
               | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
               | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
                 context_write := Answer_missing;

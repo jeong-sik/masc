@@ -428,7 +428,7 @@ max_reply_bytes=4194304
       on_created connection; Ok connection);
     acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready=(fun ~package:_ -> Ok ());
-    recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
+    recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())} in
   Lane_addon_runtime.For_testing.with_backend backend (fun () ->
     let reconcile () = require (Lane_addon_runtime.reconcile_configuration ~config ~directory) in
     let inspect () = Lane_addon_runtime.dispatch ~config ~operation:Lane_addon_runtime.Inspect (`Assoc [])

@@ -168,7 +168,7 @@
  (name test_workspace_memory_curator_lane)
  (modules test_workspace_memory_curator_lane)
  (deps ../config/prompts/workspace_memory_curator.md)
- (libraries alcotest masc masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
+ (libraries alcotest masc masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -4110,9 +4110,14 @@
 (include stanzas/test_tui_connector_error_once.inc)
 
 (test
+ (name test_tui_memory_usage)
+ (modules test_tui_memory_usage)
+ (libraries alcotest masc_tui_memory_usage masc.masc_types yojson))
+
+(test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
- (libraries masc_tui_surface_search
+ (libraries masc_tui_memory_usage masc_tui_surface_search
   masc_tui_pick_list
   alcotest
   masc
@@ -7335,6 +7340,15 @@
   (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
+ (alias runtest-test_tui_keeper_items_equip_pty)
+ (deps
+  test_tui_keeper_items_equip_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
+ (action
+  (run python3 %{dep:test_tui_keeper_items_equip_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
  (alias runtest-test_tui_queue_visibility_pty)
  (deps test_tui_queue_visibility_pty.py
   tui_keyboard_chat.py
@@ -7396,6 +7410,10 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_items_equip_pty)))
 
 (rule
  (alias runtest-test_tui_acting_pane_floor_pty)
@@ -8204,6 +8222,15 @@
  (name test_dashboard_execution_render_window)
  (modules test_dashboard_execution_render_window)
  (libraries alcotest eio eio.mock yojson masc.dashboard unix masc.fs_compat masc))
+
+; Keeper practice summary: autonomous turn-mode/outcome mix folded from the
+; decision-log tail. The vocabulary-coupling case builds probe rows from
+; the writer's own path/mode label functions; outcome labels stay pinned
+; (decision_outcome_to_label is not exposed) with writer-site citations.
+(test
+ (name test_dashboard_keeper_practice)
+ (modules test_dashboard_keeper_practice)
+ (libraries alcotest eio eio_main yojson masc.dashboard unix masc.fs_compat masc masc_test_deps))
 
 ; Mock clock orders the timer's wake-up ahead of the read's: the official
 ; client lanes' idle window keeps a line that arrived as it passed.
@@ -9405,6 +9432,31 @@
 
 (include stanzas/test_tui_lane_inventory_pty.inc)
 
+(rule
+ (alias runtest-test_tui_memory_input_stats_pty)
+ (deps test_tui_memory_input_stats_pty.py tui_keyboard_harness.py tui_keyboard_memory.py tui_keyboard_context.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_input_stats_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_input_stats_pty)))
+
+(test
+ (name test_memory_input_store)
+ (modules test_memory_input_store)
+ (libraries alcotest masc_server masc_tui_memory_usage masc.masc_types dated_jsonl eio_main yojson unix))
+
+(rule
+ (alias runtest-test_tui_memory_selection_refresh_pty)
+ (deps test_tui_memory_selection_refresh_pty.py tui_keyboard_harness.py tui_keyboard_memory.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_selection_refresh_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_selection_refresh_pty)))
+
 (test
  (name test_tui_exact_activity)
  (modules test_tui_exact_activity)
@@ -9500,3 +9552,13 @@
  (name test_goal_suspension_projection)
  (modules test_goal_suspension_projection)
  (libraries masc_dashboard masc_goal alcotest yojson))
+
+(rule
+ (alias runtest-test_tui_memory_workspace_pty)
+ (deps test_tui_memory_workspace_pty.py tui_keyboard_harness.py tui_keyboard_memory.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_workspace_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_workspace_pty)))

@@ -281,7 +281,7 @@ let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir 
   let worker = unwrap (start ~instance_id:"worker-test" env sw dir docker "good") in
   let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:(Some (Worker.container_id worker)) ~max_reply_bytes:4096
+      ~instance_id ~container_id:(Some (Worker.container_id worker))
       ~docker_command:docker () in
   check bool "another binding cannot remove this container" true
     (Result.is_error (recover "different-owner"));
@@ -296,7 +296,7 @@ let test_restart_without_create_receipt () = with_fixture (fun env sw dir docker
   let other = unwrap (start env sw dir docker "good") in
   let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id ~container_id:None ~docker_command:docker () in
   unwrap (recover ());
   check bool "container is found without a retained create response" false
     (Sys.file_exists (Filename.concat dir (Worker.container_id worker ^ ".json")));
@@ -318,7 +318,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
   write path (Yojson.Safe.to_string changed);
   let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id ~container_id:None ~docker_command:docker () in
   check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
   check bool "foreign owner survives recovery refusal" true (Sys.file_exists path);
   check bool "failed creation does not clean up a foreign name collision" true
@@ -331,7 +331,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
 let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir docker ->
   let recover container_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id:"not-created" ~container_id ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id:"not-created" ~container_id ~docker_command:docker () in
   unwrap (recover None);
   let marker = Filename.concat dir "daemon-unavailable" in
   write marker "unavailable";
@@ -349,7 +349,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
   let started_at = Eio.Time.now clock in
   let result = Worker.recover_stop ~clock ~control_timeout_sec:0.05
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
-      ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~container_id:None ~docker_command:docker () in
   check bool "hung control command is reported" true (Result.is_error result);
   check bool "timeout names the failed control operation" true
     (match result with
@@ -368,7 +368,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
      starved 0.05 one. The hung-command assertions above stay unchanged. *)
   unwrap (Worker.recover_stop ~clock ~control_timeout_sec:1.
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
-    ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker ()))
+    ~container_id:None ~docker_command:docker ()))
 
 let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fun env sw dir docker ->
   let other = unwrap (start env sw dir docker "good") in
@@ -466,6 +466,19 @@ let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir
     (Array.exists (fun path -> Filename.check_suffix path ".json") (Sys.readdir dir));
   write (Filename.concat dir "daemon-unavailable") "offline";
   check bool "daemon failure stays an error rather than absence" true (Result.is_error (inspect ())))
+
+(* The Docker CLI answers the host, not the package, so a small manifest reply
+   bound must not decide whether an image can be inspected. *)
+let test_docker_control_ignores_the_package_reply_bound () = with_fixture (fun env _sw dir docker ->
+  let small = package dir "good" in
+  let small = {small with resources={small.resources with max_reply_bytes=16}} in
+  let identity = "sha256:" ^ String.make 64 'a' in
+  check bool "the engine reply is longer than the declared reply bound" true
+    (String.length identity > small.resources.max_reply_bytes);
+  check string "image identity is returned" identity
+    (unwrap (Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
+      ~package:small ~docker_command:docker ())))
 
 (* Lists every request of one instance and reads each through the production
    loader, which prefers the terminal outcome over the pending index row. *)
@@ -797,17 +810,21 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check int "out-of-observation callback never invokes provider" before_outside !calls;
   check bool "out-of-observation callback creates no durable request" true
     (before_records = sampling_requests store ~instance_id:"sampling-worker");
-  let tiny_package = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=1}} in
-  let bounded = match Masc.Lane_addon_sampling.create ~store ~package:tiny_package
+  (* A file where the evidence directory belongs makes every blob write fail,
+     whoever runs the test. *)
+  let unretainable = Masc.Lane_addon_store.create ~root:(Filename.concat dir "unretainable-model-evidence") in
+  Unix.mkdir (Masc.Lane_addon_store.root unretainable) 0o700;
+  write (Filename.concat (Masc.Lane_addon_store.root unretainable) "evidence") "not a directory";
+  let sampling_package = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let bounded = match Masc.Lane_addon_sampling.create ~store:unretainable ~package:sampling_package
       ~instance_id:"bounded-model" ~route:"fixture-route" ~invoke () with
     | Ok handler -> handler | Error detail -> fail detail in
   let before = !calls in
-  check bool "unretained oversized request is refused before invocation" true
+  check bool "unretained request is refused before invocation" true
     (Result.is_error (Masc.Lane_addon_sampling.with_observation bounded
       ~binding:(`Assoc []) ~sources:(`List []) ~on_error:Fun.id (fun () ->
       Result.map (fun _ -> {Types.rows=[];coverage=[]}) ((match Masc.Lane_addon_sampling.for_worker bounded
-        ~package:tiny_package ~instance_id:"bounded-model" with
+        ~package:sampling_package ~instance_id:"bounded-model" with
         | Ok handler -> handler | Error detail -> fail detail) params))));
   check int "retention is required before the model is called" before !calls;
   let argv = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".json"))
@@ -1093,6 +1110,35 @@ let test_sampling_receipt_requires_durable_journal () = with_fixture (fun _env _
   check string "projection carries the retained outcome" "answered"
     Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "status" |> to_string))
 
+(* The reply the worker receives is measured against its bound. The outcome the
+   host stores for itself carries the same answer plus its identity fields, so
+   it is larger, and that larger record must not turn a deliverable answer
+   into a refusal. *)
+let test_stored_outcome_is_not_measured_against_the_reply_bound () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module S = Mcp_protocol.Sampling in
+  let store = Store.create ~root:(Filename.concat dir "stored-outcome") in
+  let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  let answer : S.create_message_result = {role=Assistant;
+    content=Text {type_="text";text=String.make 700 'x'};model="model";stop_reason=None;_meta=None} in
+  let placeholder = Types.evidence_to_json (Store.blob_reference "") in
+  let reply = {answer with _meta=Some (`Assoc ["masc.lane_sampling",
+    `Assoc ["request",placeholder;"outcome",placeholder]])} in
+  let reply_size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson reply)) in
+  let p = {(package dir "sampling") with model_access=Types.Host_sampling;
+    resources={(package dir "sampling").resources with max_reply_bytes=reply_size}} in
+  (* The stored outcome also names its route, which the worker's reply does not. *)
+  let long_route = String.make 400 'r' in
+  let broker = match Sampling.create ~store ~package:p ~instance_id:"stored-outcome" ~route:long_route
+    ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) () with
+    | Ok value -> value | Error detail -> fail detail in
+  let handler = match Sampling.for_worker broker ~package:p ~instance_id:"stored-outcome" with
+    | Ok value -> value | Error detail -> fail detail in
+  check bool "an answer whose reply fits the bound is delivered" true
+    (Result.is_ok (run_sampling_observation broker handler params)))
+
 let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
@@ -1259,57 +1305,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
         (Result.is_ok (Store.read_blob_bounded
           ~budget:(Store.read_budget ~max_bytes:p.resources.max_reply_bytes) store request))))) [false;true]
 
-(* The transport measures the whole JSON-RPC error, so the host tells the
-   handler how many bytes its message may encode for this request. A receipt
-   that fits [max_reply_bytes] but not that budget must not be returned as is. *)
-let test_sampling_refusal_reserves_error_envelope () = with_fixture (fun _env _sw dir _docker ->
-  let module Store = Masc.Lane_addon_store in
-  let module Sampling = Masc.Lane_addon_sampling in
-  let module S = Mcp_protocol.Sampling in
-  let require = function Ok value -> value | Error detail -> fail detail in
-  let reference = Types.evidence_to_json (Store.blob_reference "") in
-  let raw_receipt = Yojson.Safe.to_string (`Assoc ["status", `String "retention_error";
-    "evidence", `Assoc ["request", reference; "outcome", reference]]) in
-  let quoted_receipt_bytes = String.length (Yojson.Safe.to_string (`String raw_receipt)) in
-  let max_reply_bytes = quoted_receipt_bytes + 64 in
-  let base = package dir "sampling" in
-  let p = {base with model_access=Types.Host_sampling;
-    resources={base.resources with max_reply_bytes}} in
-  let params = require (S.create_message_params_of_yojson
-    (`Assoc ["messages", `List []; "maxTokens", `Int 1])) in
-  let refusal ~name ~error_bytes =
-    let store = Store.create ~root:(Filename.concat dir name) in
-    let broker = require (Sampling.create ~store ~package:p ~instance_id:"x" ~route:"r"
-      ~invoke:(fun ~route:_ ~request _ ->
-        let bytes = Yojson.Safe.to_string ~std:true (`Assoc [
-          "kind", `String "model_outcome"; "instance_id", `String "x";
-          "route", `String "r"; "request", Types.evidence_to_json request;
-          "status", `String "host_error"; "error", `String "failed"]) in
-        List.iter (fun directory ->
-          let directory = Filename.concat (Store.root store) directory in
-          if not (Sys.file_exists directory) then Unix.mkdir directory 0o700;
-          Unix.mkdir (Filename.concat directory (Store.digest bytes ^ ".json")) 0o700)
-          ["evidence"; "sampling-evidence"];
-        Error "failed") ()) in
-    let handler = require (Sampling.for_worker broker ~package:p ~instance_id:"x") in
-    let handler params = handler ?error_bytes params in
-    match run_sampling_observation broker handler params with
-    | Ok _ -> fail "failed host call cannot report success"
-    | Error message -> message in
-  let is_receipt message = match Yojson.Safe.from_string message with
-    | `Assoc fields -> List.assoc_opt "status" fields = Some (`String "retention_error")
-    | _ -> false
-    | exception Yojson.Json_error _ -> false in
-  check bool "a receipt within the error budget is delivered" true
-    (is_receipt (refusal ~name:"error-budget-fits" ~error_bytes:(Some quoted_receipt_bytes)));
-  let tight = refusal ~name:"error-budget-tight" ~error_bytes:(Some (quoted_receipt_bytes - 1)) in
-  check bool "a receipt beyond the error budget is not returned" false (is_receipt tight);
-  check bool "the replacement fits the error budget" true
-    (String.length (Yojson.Safe.to_string (`String tight)) <= quoted_receipt_bytes - 1);
-  check bool "without a budget only the reply bound applies" true
-    (is_receipt (refusal ~name:"error-budget-absent" ~error_bytes:None)))
-
-let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fun _env _sw dir _docker ->
+let test_sampling_retention_error_carries_receipt () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
   let module S = Mcp_protocol.Sampling in
@@ -1319,8 +1315,6 @@ let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fu
   let raw_receipt = Yojson.Safe.to_string (`Assoc ["status", `String "retention_error";
     "evidence", `Assoc ["request", reference; "outcome", reference]]) in
   let max_reply_bytes = String.length raw_receipt in
-  check bool "fixture distinguishes object bytes from the encoded error string" true
-    (String.length (Yojson.Safe.to_string (`String raw_receipt)) > max_reply_bytes);
   let base = package dir "sampling" in
   let p = {base with model_access=Types.Host_sampling;
     resources={base.resources with max_reply_bytes}} in
@@ -1348,8 +1342,12 @@ let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fu
   (match reply with
    | Ok _ -> fail "failed host call cannot report success"
    | Error message ->
-       check bool "MCP error string fits the package wire envelope" true
-         (String.length (Yojson.Safe.to_string (`String message)) <= max_reply_bytes));
+       let receipt = Yojson.Safe.from_string message in
+       let member key json = Yojson.Safe.Util.member key json in
+       check bool "the retention error carries the host receipt" true
+         (member "status" receipt = `String "retention_error"
+          && member "request" (member "evidence" receipt) <> `Null
+          && member "outcome" (member "evidence" receipt) <> `Null));
   let journal = Filename.concat (Store.root store)
     (Filename.concat "sampling-outcomes" (Store.digest "x")) in
   let paths = Sys.readdir journal in
@@ -1538,17 +1536,18 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling fallback rejects external hardlinks" `Quick
     (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
-  test_case "sampling retention error uses encoded wire bound" `Quick test_sampling_retention_error_uses_encoded_reply_bound;
-  test_case "sampling refusal reserves error envelope" `Quick test_sampling_refusal_reserves_error_envelope;
+  test_case "sampling retention error carries the receipt" `Quick test_sampling_retention_error_carries_receipt;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
+  test_case "stored outcome is not measured against the reply bound" `Quick test_stored_outcome_is_not_measured_against_the_reply_bound;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling refuses nonfinite retained evidence" `Quick test_sampling_refuses_nonfinite_evidence;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
+  test_case "docker control ignores the package reply bound" `Quick test_docker_control_ignores_the_package_reply_bound;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
   test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;

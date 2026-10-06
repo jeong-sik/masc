@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
+import { announceRuntimeTomlCommit, RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
 import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration, type ExecutionWorkspaceAuthority } from '../store'
 import { committedRuntimeTomlConfigFixture } from './runtime-config-receipt.test-fixture'
 import { runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
@@ -56,7 +56,7 @@ beforeEach(() => {
   api.saveRuntimeTomlConfig.mockImplementation(async (text: string, expected: string, options: SaveOptions) => {
     options.beforeDispatch?.()
     if (expected !== revision(stored)) throw new RuntimeTomlRevisionConflict('changed', { source_path: path, source_text: stored, source_revision: revision(stored) })
-    stored = text; return receipt(text)
+    stored = text; return announceRuntimeTomlCommit(receipt(text), options)
   })
   afterCommit.mockResolvedValue(true)
   consumers.refreshRuntimeConfigConsumers.mockResolvedValue(undefined)
@@ -138,6 +138,29 @@ describe('Lane activity session', () => {
     expect(runtimeTomlSourceGeneration.peek()).toBe(sourceGeneration + 1)
     expect(observations).toHaveBeenCalledWith(authority)
     expect(session.state.value.notice).toBeNull()
+  })
+
+  it('lets every screen hear its write that answers after the workspace changed, without adopting it', async () => {
+    const { authority, session } = await draft()
+    const answer = deferred<void>()
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async (text: string, _expected: string, options: SaveOptions) => {
+      options.beforeDispatch?.(); await answer.promise
+      stored = text; return announceRuntimeTomlCommit(receipt(text), options)
+    })
+    const saving = session.save(authority)
+    await vi.waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1))
+    workspace('/fixture/B'); const fresh = workspace('/fixture/A')
+    const other = others.sessionFor(fresh, 'beta')
+    await session.read(fresh); await other.read(fresh)
+    expect(session.state.value.current?.source_text).toBe(base); expect(other.state.value.current?.source_text).toBe(base)
+    answer.resolve(); expect(await saving).toBe(false)
+    expect(other.state.value.current).toBeNull()
+    expect(session.state.value.current).toBeNull(); expect(session.state.value.receipt).toBeNull()
+    expect(session.state.value.notice).toBe('이전에 보낸 저장이 늦게 완료됐습니다. 현재 설정을 다시 읽으세요.')
+    expect(afterCommit).not.toHaveBeenCalled(); expect(settings.announceRuntimeTomlCommitted).not.toHaveBeenCalled()
+    await session.read(fresh)
+    expect(session.state.value.current?.source_text).toBe(stored)
+    expect(session.state.value.uncertain?.stage).toBe('answered')
   })
 
   it.each([

@@ -23,8 +23,17 @@ let generated = Yojson.Safe.to_string (`Assoc
       ; "supersedes", `Null; "absorbs", `List [] ]]
   ; "dropped", `List []; "working_contexts", `List []; "working_state", `Null ])
 
+(* The working-context input a pass carries. [Live_nothing_pending] is what
+   [Keeper_librarian_context_io.capture] returns for a running Keeper whose
+   pending inputs were all consumed: no source, yet a prior snapshot and an
+   execution basis, neither of which the prompt shows. *)
+type context_shape = No_context | Pending_source | Unavailable_source | Live_nothing_pending
+
+let consumed_source =
+  {Keeper_librarian_context.reference="consumed"; content=`String "An answered question"}
+
 let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
-    ?(context_only = false) ?(with_context = false) ?(lane_enabled = true)
+    ?(context_only = false) ?(context = No_context) ?(lane_enabled = true)
     ?(disable_during_preflight = false) ~name ~status ~body
     ~expected_jev ~expected_llm () =
   Fixture.with_official_client_runtimes @@ fun () ->
@@ -75,10 +84,22 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
   let stored = match Current.replace ~keepers_dir ~keeper_id:name ~expected_revision:None
     ~now:1000. ~source:{Current.kind=Current.Librarian;trace_id=name} ~facts:[fact] () with
     | Ok stored -> stored | Error detail -> Alcotest.fail detail in
-  let working_context = if with_context then
-    {Keeper_librarian_context.empty with sources=
-      [{Keeper_librarian_context.reference="pending"; content=`String "An unresolved obligation"}]}
-    else Keeper_librarian_context.empty in
+  let working_context = match context with
+    | No_context -> Keeper_librarian_context.empty
+    | Pending_source ->
+      {Keeper_librarian_context.empty with sources=
+        [{Keeper_librarian_context.reference="pending"; content=`String "An unresolved obligation"}]}
+    | Unavailable_source ->
+      {Keeper_librarian_context.empty with unavailable=["events: fixture store unavailable"]}
+    | Live_nothing_pending ->
+      let prior = match Keeper_librarian_context.commit ~keepers_dir ~keeper_id:name
+          ~expected_version:None ~sources:[consumed_source]
+          [{Keeper_librarian_context.id="fixture"; merge_contexts=[]; sources=["consumed"];
+            context="The answered question"; next_steps=["Close the thread"];
+            completeness=Current}] with
+        | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
+      {Keeper_librarian_context.sources=[]; previous=Some prior; unavailable=[];
+       execution_basis=Some "fixture-live-basis"} in
   let input : Keeper_librarian.input =
     {turn_ref=Ids.Turn_ref.make ~trace_id:name ~absolute_turn:1;
      historical_task_contexts=[];goal_context=Keeper_librarian.No_task;
@@ -121,12 +142,43 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
        if expected_llm = 0 then Alcotest.(check int) "no-change keeps revision"
          stored.revision snapshot.revision
      | Ok None -> Alcotest.fail "snapshot missing" | Error detail -> Alcotest.fail detail));
+  (match context, context_only with
+   | No_context, false ->
+     (* The empty input has no snapshot yet; every route writes the first. *)
+     (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
+      | Ok (Some snapshot) ->
+        Alcotest.(check int) "first working context written" 1 snapshot.revision;
+        Alcotest.(check int) "with no context" 0 (List.length snapshot.pockets)
+      | Ok None -> Alcotest.fail "working context missing"
+      | Error detail -> Alcotest.fail detail)
+   | Live_nothing_pending, _ ->
+     (* Both routes write the only valid organization of nothing pending,
+        which retires the consumed source's context. *)
+     (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
+      | Ok (Some snapshot) ->
+        Alcotest.(check int) "working context advanced once" 2 snapshot.revision;
+        Alcotest.(check int) "consumed context retired" 0 (List.length snapshot.pockets)
+      | Ok None -> Alcotest.fail "working context missing"
+      | Error detail -> Alcotest.fail detail)
+   | No_context, true | (Pending_source | Unavailable_source), _ -> ());
   let run = List.filter (fun (run : Runs.run) -> run.actor = name) (Runs.list_runs registry) in
   match run with
   | [] when not lane_enabled -> ()
-  | [{Runs.status=Runs.Completed {outcome=Runs.Succeeded;selected_slot;_};_}] ->
+  | [{Runs.status=Runs.Completed {outcome=Runs.Succeeded;selected_slot;_};run_id;_}] ->
     Alcotest.(check (option string)) "JEV never claims a catalog or CLI slot"
-      (if expected_llm = 0 then None else Some Fixture.cli_primary_runtime) selected_slot
+      (if expected_llm = 0 then None else Some Fixture.cli_primary_runtime) selected_slot;
+    (match context, context_only with
+     | (No_context | Live_nothing_pending), false ->
+       (* The listing omits payloads; one run is read whole. *)
+       let output = match Runs.get registry ~run_id with
+         | Some {Runs.status=Runs.Completed {output;_};_} -> output
+         | Some _ | None -> Alcotest.fail "completed run not readable" in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "the run records the working-context write" "committed"
+         (output |> member "context_write" |> member "status" |> to_string);
+       Alcotest.(check string) "an empty organization needs no review" "no_contexts"
+         (output |> member "context_review" |> member "reason" |> to_string)
+     | (No_context | Live_nothing_pending), true | (Pending_source | Unavailable_source), _ -> ())
   | _ -> Alcotest.fail "expected one successful terminal run"
 
 let () =
@@ -138,12 +190,32 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
-  let case ?enabled ?excluded ?context_only ?with_context ?lane_enabled ?disable_during_preflight name status body jev llm =
+  let case ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight name status body jev llm =
     Alcotest.test_case name `Quick
-      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?with_context ?lane_enabled ?disable_during_preflight
+      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight
         ~name ~status ~body ~expected_jev:jev ~expected_llm:llm) in
+  let prompt_shape name input expected =
+    Alcotest.test_case name `Quick (fun () ->
+      Alcotest.(check bool) "eligibility reads the prompt" expected
+        (Keeper_librarian_context.shows_no_working_context input);
+      Alcotest.(check bool) "the prompt matches the empty projection" expected
+        (Yojson.Safe.equal (Keeper_librarian_context.prompt_json input)
+           (Keeper_librarian_context.prompt_json Keeper_librarian_context.empty))) in
+  let prior = {Keeper_librarian_context.generation="fixture"; revision=1;
+    execution_basis=Some "fixture-old-basis"; sources=[consumed_source];
+    pockets=[{Keeper_librarian_context.id="fixture"; merge_contexts=[]; sources=["consumed"];
+      context="The answered question"; next_steps=[]; completeness=Current}]} in
   Alcotest.run "Librarian JEV preflight"
-    ["real dispatch and commit", [
+    ["prompt projection", [
+      prompt_shape "empty" Keeper_librarian_context.empty true;
+      prompt_shape "running keeper with nothing pending"
+        {Keeper_librarian_context.sources=[]; previous=Some prior; unavailable=[];
+         execution_basis=Some "fixture-live-basis"} true;
+      prompt_shape "pending source"
+        {Keeper_librarian_context.empty with sources=[consumed_source]} false;
+      prompt_shape "unavailable source"
+        {Keeper_librarian_context.empty with unavailable=["events: fixture"]} false];
+     "real dispatch and commit", [
       case ~lane_enabled:false "off-skips-jev-and-consumption" `OK (answer "keep_current") 0 0;
       case ~disable_during_preflight:true "accepted-pass-keeps-cli-after-off" `OK (answer "needs_generation") 1 1;
       case ~disable_during_preflight:true "accepted-no-change-finishes-after-off" `OK (answer "keep_current") 1 0;
@@ -168,5 +240,10 @@ let () =
       case "provider-failed" `Service_unavailable {|{"error":"fixture unavailable"}|} 1 1;
       case ~enabled:false "opt-out" `OK (answer "keep_current") 0 1;
       case ~excluded:true "excluded" `OK (answer "keep_current") 0 1;
-      case ~with_context:true "pending-context" `OK (answer "keep_current") 0 1;
+      case ~context:Live_nothing_pending "live-nothing-pending-keep-current" `OK
+        (answer "keep_current") 1 0;
+      case ~context:Live_nothing_pending "live-nothing-pending-needs-generation" `OK
+        (answer "needs_generation") 1 1;
+      case ~context:Pending_source "pending-context" `OK (answer "keep_current") 0 1;
+      case ~context:Unavailable_source "unavailable-context" `OK (answer "keep_current") 0 1;
       case ~context_only:true "context-only" `OK (answer "keep_current") 0 1]]

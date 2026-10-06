@@ -66,10 +66,10 @@ must-do: true
 ```
 ````
 
-The vocabulary SSOT is `.github/issue-taxonomy.json`. The `Issue Taxonomy` workflow reads the block,
-validates every value against that file, and reconciles the labels. It never invents a label:
-if the repository drifts from the SSOT the run fails and names the missing labels.
-`APPLY=1 bash scripts/sync-issue-labels.sh` puts the repository back in line.
+The vocabulary SSOT is `.github/issue-taxonomy.json`. Labels are set from the `masc-triage`
+block when the issue is created; nothing reconciles them afterwards.
+`APPLY=1 bash scripts/sync-issue-labels.sh` reports and repairs drift between the
+repository labels and the SSOT.
 
 | Axis | Cardinality | Values |
 |------|-------------|--------|

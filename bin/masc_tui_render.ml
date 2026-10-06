@@ -1042,9 +1042,14 @@ let render_planning_list (state : state) =
        in
        let add_summary_if_fits summary =
          if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
-         then Buffer.add_buffer buf summary
+         then (Buffer.add_buffer buf summary; true)
+         else false
        in
        let summary_width = framed_inner_width cols in
+       let wrap_summary summary ~style text =
+         Message_layout.wrap_styled_words ~max_cells:(max 1 summary_width) text
+         |> List.iter (box_line_styled summary cols ~style)
+       in
        let summary_cards =
          studio_pair ~width:summary_width
            (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
@@ -1059,33 +1064,36 @@ let render_planning_list (state : state) =
          && count_frame_lines buf + summary_card_rows + reserved_rows <= rows
        in
        if cards_fit then List.iter (box_line buf cols) summary_cards
-       else box_line buf cols rollup;
-       let trend = Buffer.create 256 in
-       box_line_styled trend cols ~style:(Theme.info ())
-         (match state.planning_baseline with
-          | None -> "  Trend: waiting for the first successful reading"
-          | Some first ->
-              (* How long the reading has been running, not the clock it
-                 started at. The baseline is the first successful read of
-                 this process and is never replaced, so on a screen left open
-                 overnight "since 09:31:39" named a moment on a day the
-                 reader had no way to identify.
-
-                 The sentence names where the span starts, because the span
-                 is not a window anyone chose: "over the last 1d21h" reads
-                 like a day-and-a-half report, when what it measures is how
-                 long this screen has been open. *)
-              Printf.sprintf
-                "  Net change since this TUI's first reading %s ago: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
-                (Masc_tui_wire_age.text ~now:now_unix first.pl_generated_at)
-                (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
-                (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
-                (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
-       add_summary_if_fits trend;
+       else begin
+         let rollup_summary = Buffer.create 256 in
+         wrap_summary rollup_summary ~style:"" rollup;
+         ignore (add_summary_if_fits rollup_summary)
+       end;
        let backlog_summary = Buffer.create 256 in
-       box_line backlog_summary cols
+       wrap_summary backlog_summary ~style:""
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       if not cards_fit then add_summary_if_fits backlog_summary;
+       (* Preserve the current counts before spending optional rows on change
+          since the baseline. Wrapped physical rows share the list budget. *)
+       let backlog_visible = cards_fit || add_summary_if_fits backlog_summary in
+       let trend = Buffer.create 256 in
+       (match state.planning_baseline with
+        | None ->
+            wrap_summary trend ~style:(Theme.info ())
+              "  Change: waiting for the first successful snapshot"
+        | Some first ->
+            (* Baseline and current are server snapshot generation times,
+               not the time this TUI received them or the process age. *)
+            wrap_summary trend ~style:(Theme.recede ())
+              ("  Baseline snapshot: " ^ Terminal_text.single_line first.pl_generated_at);
+            wrap_summary trend ~style:(Theme.recede ())
+              ("  Current snapshot: " ^ Terminal_text.single_line p.pl_generated_at);
+            wrap_summary trend ~style:(Theme.info ())
+              (Printf.sprintf
+                 "  Change from baseline: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
+                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
+                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
+                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)));
+       if backlog_visible then ignore (add_summary_if_fits trend);
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;
@@ -5187,9 +5195,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           "  Account unavailable: " ^ Terminal_text.single_line detail
       | None, None -> "  Loading Item account…"
     in
+    let is_worn item =
+      match portrait_reading with
+      | Tui_decode.Unavailable _ -> false
+      | Tui_decode.Ready equipment ->
+          (match Keeper_portrait_item.in_slot equipment
+                   (Keeper_portrait_item.slot item) with
+           | None -> false
+           | Some equipped ->
+               String.equal (Keeper_portrait_item.id equipped)
+                 (Keeper_portrait_item.id item))
+    in
+    (* Equipped implies owned: the state word is exclusive so a worn row
+       never reads "owned". The row suffix below carries "equipped". *)
     let item_account_facts item =
       match account with
       | Some (Item_account.Ready account) ->
+          let worn = is_worn item in
           let owned =
             List.exists (fun owned ->
               String.equal (Keeper_portrait_item.id owned)
@@ -5204,7 +5226,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                | Item_account.Priced amount -> milli amount)
             | None -> "catalog unavailable"
           in
-          Some (price ^ (if owned then " owned" else ""))
+          Some (price ^ (if worn then "" else if owned then " owned" else ""))
       | Some (Item_account.Off | Item_account.Disabled _) | None -> None
     in
     let portrait =
@@ -5223,17 +5245,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
 
     let item_row cursor index item =
-      let worn =
-        match portrait_reading with
-        | Tui_decode.Unavailable _ -> false
-        | Tui_decode.Ready equipment ->
-            (match Keeper_portrait_item.in_slot equipment
-                     (Keeper_portrait_item.slot item) with
-             | None -> false
-             | Some equipped ->
-                 String.equal (Keeper_portrait_item.id equipped)
-                   (Keeper_portrait_item.id item))
-      in
+      let worn = is_worn item in
       let account_facts =
         if inner < 90 then ""
         else match item_account_facts item with
@@ -5278,7 +5290,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | None -> []
         | Some item ->
             (match item_account_facts item with
-             | Some facts -> [ "  Selected: " ^ facts ]
+             | Some facts ->
+               [ "  Selected: " ^ facts ^ (if is_worn item then "  equipped" else "") ]
              | None -> []) in
       let footer = [ "  Preview changes this picture only." ] in
       let reserved = List.length headline + List.length selected_facts
@@ -11044,7 +11057,7 @@ let usage_lines ~cols (state : state) =
                   match row.kur_coverage with
                   | Keeper_usage_complete -> "read"
                   | Keeper_usage_partial { malformed_rows; unread_turn_rows } ->
-                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows)"
+                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows) · reported totals are lower bounds"
                         malformed_rows unread_turn_rows
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason

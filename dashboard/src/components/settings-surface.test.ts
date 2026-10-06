@@ -143,6 +143,11 @@ const runtimeRefreshMock = vi.hoisted(() => ({
 
 vi.mock('../api/dashboard.js', async () => {
   const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
+  const runtime = await vi.importActual<typeof import('../api/dashboard-runtime')>('../api/dashboard-runtime')
+  // Each stand-in write announces its receipt the way the real request does.
+  const announced = <A extends unknown[]>(write: (...args: A) => unknown, optionsAt: number) =>
+    async (...args: A) => runtime.announceRuntimeTomlCommit(await write(...args),
+      args[optionsAt] as import('../api/dashboard-runtime').RuntimeTomlRequestOptions | undefined)
   return {
     ...actual,
     fetchDashboardTools: apiMock.fetchDashboardTools,
@@ -152,10 +157,10 @@ vi.mock('../api/dashboard.js', async () => {
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
     fetchRuntimeTomlConfig: apiMock.fetchRuntimeTomlConfig,
     fetchFusionConfig: apiMock.fetchFusionConfig,
-    patchRuntimeMediaFailover: apiMock.patchRuntimeMediaFailover,
-    patchRuntimeRouting: apiMock.patchRuntimeRouting,
-    patchRuntimeLane: apiMock.patchRuntimeLane,
-    saveRuntimeTomlConfig: apiMock.saveRuntimeTomlConfig,
+    patchRuntimeMediaFailover: announced(apiMock.patchRuntimeMediaFailover, 1),
+    patchRuntimeRouting: announced(apiMock.patchRuntimeRouting, 2),
+    patchRuntimeLane: announced(apiMock.patchRuntimeLane, 2),
+    saveRuntimeTomlConfig: announced(apiMock.saveRuntimeTomlConfig, 2),
   }
 })
 
@@ -2584,7 +2589,7 @@ describe('SettingsSurface', () => {
       }
       await waitFor(() => expect(container.textContent).toContain('late-save-visible-model'))
       if (providerFailure) {
-        expect(container.querySelector('[data-testid="runtime-catalog-error"]')).not.toBeNull()
+        await waitFor(() => expect(container.querySelector('[data-testid="runtime-catalog-error"]')).not.toBeNull())
       }
       expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreaterThan(counts[0]!)
       expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGreaterThan(counts[1]!)

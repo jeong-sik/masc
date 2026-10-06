@@ -2,7 +2,9 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
+import { batch } from '@preact/signals'
 import { ApiRequestError, get, post, type AbortableRequestOptions } from './core'
+import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
@@ -2130,7 +2132,7 @@ function decodeCommittedRuntimeConfigApplication(
   }
 }
 
-export function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
+function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
   if (
     !isRecord(raw)
     || raw.state !== 'committed'
@@ -2156,6 +2158,22 @@ export function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntime
     commit,
     application,
   }
+}
+
+/** Decodes a runtime.toml write's commit receipt and tells every screen the
+ * file changed. The receipt proves the write whether or not the screen that
+ * sent it still waits for the answer, so the request announces it, not the
+ * screen. `onCommitted` runs in the same batch, before any screen hears it,
+ * so a writer that adopts its own receipt can take the new generation. */
+export function receiveRuntimeTomlCommit(raw: unknown, options: RuntimeTomlRequestOptions = {}): CommittedRuntimeTomlConfig {
+  return announceRuntimeTomlCommit(decodeCommittedRuntimeTomlConfig(raw), options)
+}
+
+/** The announcement half of receiveRuntimeTomlCommit. Only a write function,
+ * or a test double standing in for one, calls it; a screen never does. */
+export function announceRuntimeTomlCommit<T>(receipt: T, options: RuntimeTomlRequestOptions = {}): T {
+  batch(() => { announceRuntimeTomlWritten(); options.onCommitted?.() })
+  return receipt
 }
 
 function appliedAt(raw: unknown): string | number | null {
@@ -2232,7 +2250,7 @@ function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | 
   })
 }
 
-export type RuntimeTomlRequestOptions = { beforeDispatch?: () => void }
+export type RuntimeTomlRequestOptions = { beforeDispatch?: () => void; onCommitted?: () => void }
 
 export async function fetchRuntimeTomlConfig(options: RuntimeTomlRequestOptions = {}): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
@@ -2341,7 +2359,7 @@ export async function saveRuntimeTomlConfig(
       expected_source_revision: expectedSourceRevision,
       expected_source_path: options.expectedSourcePath,
     })
-    return decodeCommittedRuntimeTomlConfig(raw)
+    return receiveRuntimeTomlCommit(raw, options)
   } catch (error: unknown) {
     if (error instanceof ApiRequestError && error.method === 'POST'
       && error.path === '/api/v1/runtime/config/raw'
@@ -2407,7 +2425,7 @@ export async function patchRuntimeRouting(
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
     runtime_id: routeId,
-  }).then(decodeCommittedRuntimeTomlConfig)
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 export async function patchRuntimeMediaFailover(
@@ -2419,7 +2437,7 @@ export async function patchRuntimeMediaFailover(
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: 'media_failover',
     runtime_ids: [...runtimeIds],
-  }).then(decodeCommittedRuntimeTomlConfig)
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 // A declared [runtime.lanes."<id>"] candidate chain. The server resolves the
@@ -2460,7 +2478,7 @@ export async function patchRuntimeLane(
   await ensureDevToken()
   options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', runtimeLaneEditBody(lane, edit))
-    .then(decodeCommittedRuntimeTomlConfig)
+    .then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 export type RuntimeExactSlotAction = 'append' | 'drop' | 'move'
@@ -2480,7 +2498,7 @@ export async function patchRuntimeExactSlot(
     action,
     runtime_id: runtimeId,
     ...(direction === undefined ? {} : { direction }),
-  }).then(decodeCommittedRuntimeTomlConfig)
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 
 export async function patchRuntimeAssignment(
@@ -2511,7 +2529,7 @@ export async function patchRuntimeAssignment(
       assignment_revision: assignmentRevision,
     }
   }
-  return decodeCommittedRuntimeTomlConfig(raw)
+  return receiveRuntimeTomlCommit(raw, options)
 }
 
 /**

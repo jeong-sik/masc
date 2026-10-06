@@ -34,6 +34,9 @@ let output : Types.output = {rows=[{id="state";lane_id="state";kind=Types.Event;
   title="Observed state";observed_at=1.;subject_id="owned-fixture";clock=None;
   actor=None;fields=[];evidence=[];related_ids=[]}];coverage=[]}
 type outcome = Confirm | Refuse | Unknown | Lost_reply
+(* A long request id would inflate the committed observation past a small
+   declared bound, so the fixture echoes only its digest. *)
+let echoed request_id = if String.length request_id > 256 then Store.digest request_id else request_id
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
@@ -52,20 +55,20 @@ let backend fixture : Runtime.For_testing.backend = {
               | Refuse -> Action.Package_failed_before_effect
               | Unknown -> Action.Package_outcome_unknown | Lost_reply -> assert false in
             let output = {output with rows=List.map (fun (row:Types.row) ->
-              {row with fields=["action_request",str (text "request_id" arguments)]}) output.rows} in
+              {row with fields=["action_request",str (echoed (text "request_id" arguments))]}) output.rows} in
             Ok {Action.status;result=obj ["calls",`Int !(fixture.calls)];output});
       stop=(fun () -> Ok ())} in
     on_created connection; Ok connection);
   image_ready=(fun ~package:_ -> Ok ());
   acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-  recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())}
+  recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())}
 let dispatch fixture operation fields =
   Runtime.dispatch ~caller:"authenticated-tester" ~config:fixture.config ~operation (obj fields)
 let inspect fixture id = dispatch fixture Runtime.Inspect ["instance_id",str id] |> unwrap
   |> values "instances" |> List.hd
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001;loop ()) in loop ()
-let attach clock fixture ~acting =
+let attach ?(reply_bytes=65536) clock fixture ~acting =
   let name = if acting then "actor" else "observer" in
   let path = Filename.concat fixture.root (name ^ ".toml") in
   let manifest = Printf.sprintf {|id = %S
@@ -79,9 +82,9 @@ contributions = %s
 cpus = 0.5
 memory_bytes = 67108864
 pids = 16
-max_reply_bytes = 65536
+max_reply_bytes = %d
 |} name (if acting then "[\"observe\",\"act\"]" else "[\"observe\"]")
-    (if acting then "[world.actions]\ntool = \"lane_act\"" else "") in
+    (if acting then "[world.actions]\ntool = \"lane_act\"" else "") reply_bytes in
   Out_channel.with_open_bin path (fun channel -> output_string channel manifest);
   let instance = dispatch fixture Runtime.Attach ["manifest_path",str path;
     "run_id",str "action-world";"binding",obj ["sources",`List []]] |> unwrap in
@@ -155,6 +158,17 @@ let test_validation_precedes_effect () = with_fixture (fun clock fixture ->
   ignore (act fixture id "valid" (`Int 1) |> unwrap);
   ignore (await_state clock fixture id "valid" "confirmed");
   detach clock fixture id; detach clock fixture observer)
+
+(* The HTTP entry already bounds a request body (Http_server_eio.max_body_bytes),
+   so a package's reply bound must not also decide whether a valid action is
+   accepted. *)
+let test_action_input_is_not_bounded_by_the_reply_bound () = with_fixture (fun clock fixture ->
+  let id = attach ~reply_bytes:4096 clock fixture ~acting:true in
+  let long_request_id = String.make 8192 'r' in
+  ignore (act fixture id long_request_id (`Int 1) |> unwrap);
+  ignore (await_state clock fixture id long_request_id "confirmed");
+  check int "the accepted input reached the worker" 1 !(fixture.calls);
+  detach clock fixture id)
 
 let test_held_action_preserves_other_activity () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in
@@ -616,6 +630,7 @@ let () = run "Lane action workflow" ["optional world actions",[
   test_case "persisted confirmation requires its received result without replay" `Quick test_confirmed_receipt_requires_result;
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;
   test_case "identity, schema and actor before effect" `Quick test_validation_precedes_effect;
+  test_case "action input is not bounded by the reply bound" `Quick test_action_input_is_not_bounded_by_the_reply_bound;
   test_case "held action preserves another observer and Slice" `Quick test_held_action_preserves_other_activity;
   test_case "package outcomes and lost replies stay distinct" `Quick test_outcomes_are_not_inferred;
   test_case "an action commits its output once" `Quick test_action_commits_its_output_once;

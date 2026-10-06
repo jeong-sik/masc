@@ -54,7 +54,8 @@ let test_model_form_requires_current_workspace_reading () =
       routing=Routing_active; routing_requires_restart=false; keeper=Not_configured;
       keeper_requires_restart=false; configured_count=0; pending_keys=[];
       applied_keys=[]; preempted_keys=[] } in
-  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_rows=[];rcv_metadata=metadata};
+  state.runtime_config_view <-
+    Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata};
   check bool "current successful reading permits the selected model" true
     (Tui_types.selected_config_model state=Ok row);
   state.runtime_config_view_error <- Some "read failed";

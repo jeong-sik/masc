@@ -525,8 +525,8 @@ let for_surface = function
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
-      ; b Act "Ctrl-Q" "leave"
-          ~help:"leave with a turn running, without interrupting it"
+      ; b Act "Q / Ctrl-Q" "leave"
+          ~help:"Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting"
       ; (* One key, two focuses, listed once for the reason [Up / Down] above
            is: the dispatcher reads Esc from the roster as the way back to the
            composer and from the chat as the way off the screen. Spelled as two
@@ -1371,6 +1371,11 @@ let footer_hints_resources ~detail_focus =
 
 let opens_keepers ~message_mode key =
   (not message_mode) && String.equal key keepers_jump.key
+
+let chat_quiet_leave ~input_supported ~turn_active ~draft_empty key =
+  (String.equal key "Q"
+   && (not input_supported || (turn_active && draft_empty)))
+  || (String.length key = 1 && Char.code key.[0] = 17)
 
 (* An armed two-press action expires on the next unrelated input: otherwise
    it waits indefinitely and a later press of the same key -- after the

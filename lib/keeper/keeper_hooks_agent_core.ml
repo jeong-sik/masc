@@ -725,6 +725,16 @@ let make_hooks
             ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
+        (* task-627: the row carries the I/O fingerprints the loop guard's
+           cross-cycle seed reads back. Computed from the raw input and output
+           here, at the same boundary the live accumulator computes them, so a
+           row and a live call of the same call answer the same identity. *)
+        let progress_io_fingerprints =
+          Keeper_tool_progress_identity.digest_tool_io
+            ~tool_name
+            ~input
+            ~output_text
+        in
         (* Full record read: log_call no longer falls back to ambient
            context (RFC-0225 §3.3), so every field this row should carry
            must be passed explicitly from the run's own cell. *)
@@ -813,6 +823,16 @@ let make_hooks
              ?network_mode:tctx.network_mode
              ?runtime_profile:tctx.runtime_profile
              ~result_bytes ?truncated_to
+             ?input_fingerprint:
+               (Option.map
+                  (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                     d.input_fingerprint)
+                  progress_io_fingerprints)
+             ?output_fingerprint:
+               (Option.map
+                  (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                     d.output_fingerprint)
+                  progress_io_fingerprints)
              ?on_committed:on_log_committed
              ()
          with

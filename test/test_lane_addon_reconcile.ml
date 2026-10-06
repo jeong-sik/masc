@@ -131,7 +131,8 @@ max_reply_bytes = 4096
 |} id);
   path
 
-let declaration ?(setting = "initial") ~id ~manifest () =
+let declaration ?enabled ?(setting = "initial") ~id ~manifest () =
+  (Option.fold ~none:"" ~some:(fun value -> Printf.sprintf "enabled = %b\n" value) enabled) ^
   Printf.sprintf {|id = %S
 run_id = "declared-world"
 manifest_path = %S
@@ -150,7 +151,9 @@ let phase value = value |> member "phase" |> text "kind"
 let active config = instances config |> List.filter (fun value -> phase value <> "detached")
 let configuration_id value = value |> member "configuration" |> text "id"
 let declared_instance config id =
-  active config |> List.find (fun value -> configuration_id value = id)
+  active config |> List.find (fun value -> match member "configuration" value with
+    | `Null -> false
+    | owner -> text "id" owner = id)
 let starts state = List.filter_map (function Started id -> Some id | _ -> None) !(state.events)
 let stops state = List.filter_map (function Stopped id -> Some id | _ -> None) !(state.events)
 let reconcile config directory = unwrap (Runtime.reconcile_configuration ~config ~directory)
@@ -757,7 +760,129 @@ let test_missing_image_creates_nothing_until_it_is_built () =
       (In_channel.with_open_bin path In_channel.input_all);
     detach clock config id)
 
+let test_inventory_reads_live_manual_without_effects () =
+  with_fixture (fun env _sw config _directory packages state ->
+    let manifest = package packages "ready" in
+    let attached = dispatch config Runtime.Attach ["manifest_path",`String manifest;
+      "run_id",`String "manual-world";"binding",`Assoc ["sources",`List []]] in
+    let id = text "instance_id" attached in
+    await_ready (Eio.Stdenv.clock env) config id;
+    let events = !(state.events) and observations = !(state.observations) in
+    let inventory = Runtime.inventory ~config in
+    check bool "existing manager observed" true inventory.owner_present;
+    let current = List.find (fun (i : Runtime.inventory_instance) -> i.instance_id=id) inventory.instances in
+    check bool "manual identity and live presence retained" true
+      (current.incarnation=id && current.configuration=None && current.presence=Runtime.Live);
+    check bool "metadata never starts or stops a worker" true (events = !(state.events));
+    check bool "metadata never requests an observation" true (observations = !(state.observations));
+    detach (Eio.Stdenv.clock env) config id)
+
+let test_disable_keeps_configuration_evidence_and_manual_workers () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    let source = declaration ~id:"observer" ~manifest () in
+    write path source;
+    let initial = Lane_addon_config.load_file ~path |> unwrap in
+    check bool "accepting deployment keeps omitted enabled on" true initial.enabled;
+    check bool "nonboolean activity is rejected" true
+      (Result.is_error (Lane_addon_config.load_source ~source_path:path
+        ~source_text:("enabled = \"false\"\n" ^ source)));
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    let row = inspect config |> values "rows" |> List.hd |> text "id" in
+    write path (declaration ~enabled:true ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    check string "explicit true keeps the existing worker" id
+      (declared_instance config "observer" |> text "instance_id");
+    let manual = dispatch config Runtime.Attach ["manifest_path",`String manifest;
+      "run_id",`String "manual-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
+    await_ready clock config manual;
+    state.image_available := false;
+    let off = declaration ~enabled:false ~id:"observer" ~manifest () in
+    write path off;
+    let disabled = Lane_addon_config.load_file ~path |> unwrap in
+    check string "activity flag does not invalidate worker inputs" initial.revision disabled.revision;
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    check string "off keeps exact declaration bytes" off (In_channel.with_open_bin path In_channel.input_all);
+    ignore (reconcile config directory);
+    check int "repeated off never starts another worker" 2 (List.length (starts state));
+    check bool "manual attachment is untouched" false (List.mem manual (stops state));
+    let retained = dispatch config Runtime.Slice ["run_id",`String "declared-world"] in
+    check bool "off preserves existing evidence" true
+      (values "rows" retained |> List.exists (fun value -> text "id" value = row));
+    state.image_available := true;
+    write path (declaration ~enabled:true ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let replacement = declared_instance config "observer" |> text "instance_id" in
+    check bool "on starts a new worker after cleanup" true (replacement <> id);
+    await_ready clock config replacement;
+    detach clock config replacement;
+    detach clock config manual)
+
+let test_disabled_cleanup_failure_remains_owned_until_retry () =
+  with_fixture (fun env sw config directory packages state ->
+    let real_clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~enabled:true ~id:"observer" ~manifest ());
+    let clock, manual, sleeps = service_clock () in
+    Runtime.start_configuration_service ~config ~sw ~clock;
+    await_yield (fun () -> starts state <> []);
+    let id = List.hd (starts state) in
+    await_ready real_clock config id;
+    let next = Eio.Stream.take sleeps in
+    state.cleanup_available := false;
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    Eio_mock.Clock.set_time manual next;
+    await_yield (fun () -> phase (instance config id) = "failed");
+    check bool "failed cleanup keeps TOML" true (Sys.file_exists path);
+    write path (declaration ~enabled:true ~id:"observer" ~manifest ());
+    let rec advance_until predicate =
+      if not (predicate ()) then (
+        let next = Eio.Stream.take sleeps in
+        Eio_mock.Clock.set_time manual next;
+        advance_until predicate) in
+    advance_until (fun () -> List.length (stop_requests state) >= 2);
+    check int "reenable cannot overlap unconfirmed cleanup" 1 (List.length (starts state));
+    state.cleanup_available := true;
+    advance_until (fun () -> List.length (starts state) = 2);
+    await_detached real_clock config id;
+    let replacement = declared_instance config "observer" |> text "instance_id" in
+    await_ready real_clock config replacement;
+    check int "one replacement after confirmed cleanup" 2 (List.length (starts state));
+    detach real_clock config replacement)
+
+let test_disabled_intent_does_not_override_incomplete_inventory () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    let unreadable = Filename.concat directory "unreadable.toml" in
+    Unix.mkdir unreadable 0o700;
+    let status = reconcile config directory in
+    check bool "partial read remains explicit" false (member "complete" status |> Yojson.Safe.Util.to_bool);
+    check bool "desired off is still visible" false
+      (values "declarations" status |> List.hd |> member "enabled" |> Yojson.Safe.Util.to_bool);
+    check int "incomplete inventory cannot authorize cleanup" 0 (List.length (stops state));
+    Unix.rmdir unreadable;
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    check bool "successful retry keeps declaration" true (Sys.file_exists path))
+
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
+  test_case "off preserves configuration, evidence and manual workers" `Quick test_disable_keeps_configuration_evidence_and_manual_workers;
+  test_case "reenable waits for confirmed disabled cleanup" `Quick test_disabled_cleanup_failure_remains_owned_until_retry;
+  test_case "disabled intent remains visible during incomplete inventory" `Quick test_disabled_intent_does_not_override_incomplete_inventory;
+  test_case "live manual inventory reads no worker effects" `Quick test_inventory_reads_live_manual_without_effects;
   test_case "duplicate TOML keys preserve applied owners and report issues" `Quick
     test_duplicate_toml_keys_preserve_applied_workers;
   test_case "historical cleanup failures wait for virtual maintenance beats" `Quick

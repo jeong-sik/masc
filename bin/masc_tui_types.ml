@@ -1791,9 +1791,10 @@ type runtime_lane_list =
 type runtime_lane_write =
   | Lane_write_idle
   | Lane_write_posting
-  | Lane_write_rereading of runtime_lane_list * int
+  | Lane_write_rereading of runtime_lane_list * int * Masc_tui_runtime_config_receipt.t
       (* The list's load generation when the write answered. A load of that
-         list launched after it is the first to carry the write. *)
+         list launched after it reads current execution state; the receipt
+         independently says whether the saved configuration was applied. *)
 
 (* What the lane editor says about its last key or write. Both the Runtime
    and the Lanes view draw it, and a new view, a moved cursor or a newly
@@ -1803,12 +1804,12 @@ type runtime_lane_notice =
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
-  | Lane_write_confirmed
-      (* A key that would write, pressed while the previous write is out. *)
+  | Lane_write_committed of Masc_tui_runtime_config_receipt.t
+      (* File commit and application facts, not inferred from a list GET. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
-  | Lane_write_confirmed -> "Saved · current candidate order reloaded"
+  | Lane_write_committed receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
@@ -1892,7 +1893,7 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
-(** Lanes surface sub-mode. The overview lists standalone LLM lane rows;
+(** Lanes surface sub-mode. The overview lists every Lane family;
     [Lanes_run_list] drills into one standalone
     lane's recent durable runs, and [Lanes_run_detail] reads one run's exact
     prompt/output or Verifier request/verdict/tool evidence. The lane id rides
@@ -1902,6 +1903,8 @@ type lanes_mode =
   | Lanes_run_list of Standalone_lane.t
   | Lanes_run_detail of Standalone_lane.t * string
   | Lanes_measurement_detail of string
+  | Lanes_inventory_detail of string option
+      (** [Some id] reads one Lane; [None] reads inventory-wide diagnostics. *)
 
 module Measurement = struct
   module R = Masc.Librarian_continuity_report
@@ -4660,8 +4663,17 @@ type workspace_activity_read = {
 
 type runtime_config_reading = {
   rcv_path : string;
+  rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+}
+
+type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list
+type runtime_config_edit_session = {
+  rce_workspace : string * string;
+  rce_session : Masc_tui_runtime_config_edit.t;
+  rce_rows : (string * string) list list;
+  rce_view : runtime_config_edit_view;
 }
 
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
@@ -5144,6 +5156,7 @@ type state = {
      so the next live read sends that mark as [since]. *)
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
+  mutable msx_live_in_flight: machine_live_request option;
   mutable dos_live_in_flight: machine_live_request option;
   (* Recent Keeper activity on the DOS machine, newest first, from the same
      live route [dos_live] reads. MSX has no such feed yet (its Lane takes no
@@ -5269,6 +5282,7 @@ type state = {
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
   mutable runtime_config_view: runtime_config_reading option;
+  mutable runtime_config_edits: runtime_config_edit_session list;
   mutable runtime_config_generation: int;
   mutable runtime_config_read: [ `Idle | `Loading of bool ];
   (* Loading carries an explicit refresh queued behind the current read. *)
@@ -5738,6 +5752,7 @@ type state = {
   mutable schedule_cancel_error: (string * string) option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
@@ -5765,7 +5780,8 @@ type state = {
      summary page of the lane named in [lanes_mode]; payloads stay behind the
      per-run detail fetch, so the list never holds one. *)
   mutable lanes_mode: lanes_mode;
-  mutable lanes_standalone_cursor: int;
+  mutable lanes_cursor: int;
+  mutable lanes_scroll: int;
   mutable lane_runs: Tui_decode.lane_run_summary list option;
   mutable lane_runs_error: string option;
   mutable lane_runs_next: (float * string) option;
@@ -6581,7 +6597,7 @@ let accept_measurement_artifact state ~sha256 ~generation result =
            state.lane_run_detail_error <- None
        | Error detail -> state.lane_run_detail_error <- Some detail)
   | Lanes_measurement_detail _ | Lanes_run_detail _
-  | Lanes_overview | Lanes_run_list _ -> ()
+  | Lanes_overview | Lanes_run_list _ | Lanes_inventory_detail _ -> ()
 
 let browser_lane_on_screen (state : state) =
   match state.view, state.browser_lane_visibility with
@@ -7948,20 +7964,25 @@ let pan_code_content (state : state) ~direction =
       max 0 (min (max 0 (state.code_file_max_width - 1))
         (state.code_file_hscroll + direction))
 
-let selected_standalone_lane (state : state) =
-  match state.standalone_lanes with
-  | Some snapshot ->
-      List.nth_opt snapshot.Tui_decode.sls_lanes state.lanes_standalone_cursor
-  | None -> None
+let lane_inventory_rows (state : state) =
+  match state.lane_inventory with
+  | None -> []
+  | Some snapshot -> snapshot.Masc.Tui_decode_lane_inventory.rows
 
-(** Row count of the standalone observation matrix, snapshot or not. Every
-    mapping between the Lanes overview's two sections and one flat index --
-    the "/" search list, its landing, a mouse press -- reads this, so the
-    count cannot drift between the list and the landing. *)
-let lanes_standalone_count (state : state) =
-  match state.standalone_lanes with
-  | None -> 0
-  | Some snapshot -> List.length snapshot.Tui_decode.sls_lanes
+let selected_inventory_lane (state : state) =
+  List.nth_opt (lane_inventory_rows state) state.lanes_cursor
+
+(* Exact-only editors retain their current data contract. The inventory cursor
+   names a row by identity, never by its position in the exact-only snapshot. *)
+let selected_standalone_lane (state : state) =
+  match selected_inventory_lane state, state.standalone_lanes with
+  | Some { Masc.Tui_decode_lane_inventory.selection = Exact target; _ }, Some snapshot ->
+      List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
+        Standalone_lane.equal lane.sl_lane target) snapshot.sls_lanes
+  | Some { selection = (Browser _ | Machine _ | Declaration _ | Manual_instance _); _ }, _
+  | None, _ | _, None -> None
+
+let lanes_inventory_count state = List.length (lane_inventory_rows state)
 
 (** Whether a goal lifecycle arm targets this goal. Answered here rather
     than at the renderer so the renderer never reads [pg_id] outside
@@ -8278,6 +8299,7 @@ let create_state
   machine_source = Masc.Machine_lane.Msx;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
+  msx_live_in_flight = None;
   dos_live_in_flight = None;
   dos_activity = [];
   play_invite = { cards = []; shown_name = None };
@@ -8332,6 +8354,7 @@ let create_state
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
   runtime_config_view = None;
+  runtime_config_edits = [];
   runtime_config_generation = 0;
   runtime_config_read = `Idle;
   runtime_config_status_open = false;
@@ -8557,6 +8580,7 @@ let create_state
   schedule_cancel_error = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  lane_inventory = None;
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_inflight = false;
@@ -8572,7 +8596,8 @@ let create_state
   client_detail_scroll = 0;
   clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
-  lanes_standalone_cursor = 0;
+  lanes_cursor = 0;
+  lanes_scroll = 0;
   lane_runs = None;
   lane_runs_error = None;
   lane_runs_next = None;
@@ -9626,13 +9651,72 @@ let board_read_layout ~cols ~wide =
   else Board_read_split
 ;;
 
-let standalone_lanes_chrome ~row_count ~error ~truncated =
-  let evidence_rows = match row_count with None -> 1 | Some count -> count in
-  let stale_error_row =
-    if Option.is_some row_count && Option.is_some error then 1 else 0
-  in
-  2 + evidence_rows + stale_error_row + (if truncated then 1 else 0)
-;;
+(* Drafts belong to a workspace and exact config path, and survive view changes
+   and temporary loss of workspace authority. Only a matching current reading
+   can expose one. The colored rows are a rendering cache of that session text. *)
+let runtime_config_workspace (state : state) =
+  Option.map (fun identity ->
+    canonical_path identity.Tui_decode.sid_base_path,
+    canonical_path identity.Tui_decode.sid_masc_root) state.server_identity
+
+let runtime_config_edit_session (state : state) =
+  match runtime_config_workspace state, state.runtime_config_view with
+  | Some workspace, Some reading ->
+    List.find_opt (fun edit -> edit.rce_workspace = workspace
+      && String.equal edit.rce_session.base.path reading.rcv_path) state.runtime_config_edits
+  | None, _ | _, None -> None
+
+let runtime_config_source_rows ~path source =
+  Masc_tui_code_lexer.rows_of_source
+    ~language:(Masc_tui_code_lexer.language_of_path path) source
+  |> List.map (List.map (fun (text, kind) ->
+      Masc.Tui_terminal_text.sanitize_terminal_text text, kind))
+
+let put_runtime_config_edit ?(preserve_view=false) (state : state) ~workspace session =
+  let previous = List.find_opt (fun edit -> edit.rce_workspace = workspace
+    && String.equal edit.rce_session.base.path session.Masc_tui_runtime_config_edit.base.path)
+    state.runtime_config_edits in
+  let view = match preserve_view, previous, session.current with
+    | true, Some {rce_view=Config_edit_current _;_}, Some current ->
+        Config_edit_current (runtime_config_source_rows ~path:current.path current.source_text)
+    | _ -> Config_edit_draft in
+  let edit = { rce_workspace = workspace; rce_session = session;
+    rce_rows = runtime_config_source_rows ~path:session.Masc_tui_runtime_config_edit.base.path session.text;
+    rce_view = view } in
+  state.runtime_config_edits <- edit :: List.filter (fun existing ->
+    not (existing.rce_workspace = workspace
+      && String.equal existing.rce_session.base.path session.base.path)) state.runtime_config_edits
+
+let discard_runtime_config_edit (state : state) ~workspace ~path =
+  state.runtime_config_edits <- List.filter (fun edit ->
+    not (edit.rce_workspace = workspace && String.equal edit.rce_session.base.path path))
+    state.runtime_config_edits
+
+let runtime_config_active_rows (state : state) =
+  match runtime_config_edit_session state with
+  | Some { rce_view = Config_edit_draft; rce_rows; _ } -> rce_rows
+  | Some { rce_view = Config_edit_current rows; _ } -> rows
+  | None -> (match state.runtime_config_view with None -> [] | Some reading -> reading.rcv_rows)
+
+let runtime_config_edit_lines ~cols state =
+  match state.runtime_account_form, runtime_config_edit_session state with
+  | Some _, _ | None, None -> []
+  | None, Some edit ->
+    let session = edit.rce_session in
+    let heading = match edit.rce_view with
+      | Config_edit_draft -> "Local draft retained · e edit · S save · r read current · X discard"
+      | Config_edit_current _ -> "Current file snapshot · C return to draft · u adopt revision · U replace draft" in
+    let comparison = match session.current with
+      | None -> []
+      | Some current ->
+        let changed = not (String.equal current.source_revision session.base.source_revision) in
+        [(if changed then "Current file differs from the draft base. " else "Current file matches the draft base. ")
+         ^ "C compare · u keep draft, adopt revision · U use current text"] in
+    let lines = heading :: (comparison @ Option.to_list session.error) in
+    List.concat_map (fun line ->
+      Masc_tui_message_layout.wrap_words
+        ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
+        (Masc.Tui_terminal_text.sanitize_terminal_text line)) lines
 
 let dismiss_runtime_lane_notice (state : state) = state.runtime_lane_notice <- None
 
@@ -9658,6 +9742,16 @@ let runtime_lane_stale_lines (state : state) =
     ; line "standalone lane list" state.standalone_lanes_lane_freshness
     ]
 
+let lane_inventory_notice_lines ~cols state =
+  let notices = match state.lane_inventory with
+    | None -> []
+    | Some snapshot -> Masc_tui_lane_inventory.overview_notices snapshot in
+  let notices = notices @ (match state.standalone_lanes_error with
+    | None -> []
+    | Some detail -> [(if Option.is_some state.lane_inventory then "STALE · " else "") ^ detail]) in
+  List.concat_map (fun line -> Masc.Tui_terminal_text.sanitize_terminal_text line
+    |> Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))) notices
+
 let lanes_scrolled (state : state) ~cols =
   match state.lanes_mode with
   | Lanes_run_list _ ->
@@ -9671,7 +9765,7 @@ let lanes_scrolled (state : state) ~cols =
       ; sc_overflow_takes_row = true
       ; sc_preview_keep = None
       }
-  | Lanes_run_detail _ | Lanes_measurement_detail _ ->
+  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
       (* The detail's lines are built by the drawing; the frame reports the
          clamp through [clamped_scroll], so no count is knowable here. *)
       { sc_count = 0
@@ -9680,50 +9774,16 @@ let lanes_scrolled (state : state) ~cols =
       ; sc_preview_keep = None
       }
   | Lanes_overview ->
-  { sc_count = lanes_standalone_count state
-  ; sc_chrome =
-      standalone_lanes_chrome
-        ~row_count:
-          (Option.map
-             (fun snapshot -> List.length snapshot.Tui_decode.sls_lanes)
-             state.standalone_lanes)
-        ~error:state.standalone_lanes_error
-        ~truncated:
-          (match state.standalone_lanes with
-           | None -> false
-           | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
-      + lanes_action_error_row_count ~cols state.lanes_action_error
-      + runtime_lane_notice_lines ~cols state.runtime_lane_notice
-      + List.length (runtime_lane_stale_lines state)
-  ; sc_overflow_takes_row = true
-  ; sc_preview_keep = None
-  }
-
-(** Where a left-button press lands on the Standalone-only Lanes overview. *)
-type lanes_overview_hit =
-  | Lanes_hit_standalone of int  (** index into [sls_lanes] *)
-  | Lanes_hit_none  (** chrome, notes and padding: nothing to select *)
-
-(* The rows the Standalone overview draws above its lanes, in the order
-   [render_lanes_overview] writes them: the strip the frame prepends, the box
-   top, the header, the divider, the standalone heading, the Add-ons summary
-   and the table's own heading. The count stood at five while seven were
-   drawn, and a press on the first lane selected the third.
-
-   Mouse rows count from one, so the first lane sits one row below them. A
-   PTY walk presses the row the fixture's last lane is drawn on and reads
-   the detail below, so a row added to either section is caught on the screen
-   rather than in a second hand count here. *)
-let lanes_overview_rows_above_standalone = 7
-let lanes_overview_first_standalone_row = lanes_overview_rows_above_standalone + 1
-
-let lanes_overview_hit (state : state) ~terminal_rows:_ ~row : lanes_overview_hit =
-  if row < lanes_overview_first_standalone_row then Lanes_hit_none
-  else
-    let standalone_count = lanes_standalone_count state in
-    let offset = row - lanes_overview_first_standalone_row in
-    if offset < standalone_count then Lanes_hit_standalone offset
-    else Lanes_hit_none
+      let notices = lane_inventory_notice_lines ~cols state in
+      { sc_count = lanes_inventory_count state
+      ; sc_chrome = Masc_tui_frame.chrome_rows + 3
+          + List.length notices
+          + lanes_action_error_row_count ~cols state.lanes_action_error
+          + runtime_lane_notice_lines ~cols state.runtime_lane_notice
+          + List.length (runtime_lane_stale_lines state)
+      ; sc_overflow_takes_row = true
+      ; sc_preview_keep = Some 1
+      }
 
 (* One browsable row of the Memory fact browser. The three kinds keep their
    sections apart -- an ordinary fact, a fact bound to a file, and a fact
@@ -10507,10 +10567,10 @@ let same_runtime_lane_list a b =
    waiting for a re-read of the list it changed that starts after this
    point; the caller launches that re-read. *)
 let settle_runtime_lane_write (state : state) ~written = function
-  | Ok () ->
-    state.runtime_lane_notice <- None;
+  | Ok receipt ->
+    state.runtime_lane_notice <- Some (Lane_write_committed receipt);
     state.runtime_lane_write <-
-      Lane_write_rereading (written, runtime_lane_list_generation state written)
+      Lane_write_rereading (written, runtime_lane_list_generation state written, receipt)
   | Error detail ->
     state.runtime_lane_notice <- Some (Lane_write_refused detail);
     state.runtime_lane_write <- Lane_write_idle
@@ -10523,15 +10583,18 @@ let runtime_lane_list_reread (state : state) ~list ~generation result =
    | Ok () -> set_runtime_lane_list_freshness state list Lane_list_read
    | Error _ -> ());
   match state.runtime_lane_write with
-  | Lane_write_rereading (written, answered_at)
+  | Lane_write_rereading (written, answered_at, receipt)
     when same_runtime_lane_list written list && generation > answered_at ->
     state.runtime_lane_write <- Lane_write_idle;
     (match result with
      | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
-     | Ok () -> state.runtime_lane_notice <- Some Lane_write_confirmed);
+     | Ok () -> ());
+    (* A pending-key notice may cover the receipt while this read is out.
+       Navigation dismissal and newer refusals must survive its completion. *)
     (match state.runtime_lane_notice with
-     | Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Some (Lane_write_refused _ | Lane_write_confirmed) | None -> ())
+     | Some Lane_write_pending ->
+         state.runtime_lane_notice <- Some (Lane_write_committed receipt)
+     | Some (Lane_write_committed _ | Lane_write_refused _) | None -> ())
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
@@ -11543,7 +11606,7 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
           }
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
+       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
        | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state ~cols))
   | Clients ->
       listing ~error:state.clients_surface_error
@@ -11609,8 +11672,10 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   | Config when state.config_pane = Config_runtime && state.runtime_config_status_open -> None
   | Config when state.config_pane = Config_runtime ->
       Some
-        { sc_count = (match state.runtime_config_view with None -> 0 | Some r -> List.length r.rcv_rows)
-        ; sc_chrome = 7 + (match state.runtime_config_view with None -> 0 | Some r ->
+        { sc_count = List.length (runtime_config_active_rows state)
+        ; sc_chrome = 7 + List.length (runtime_config_edit_lines ~cols state)
+            + (if Option.is_some state.runtime_config_view_error then 1 else 0)
+            + (match state.runtime_config_view with None -> 0 | Some r ->
               List.length (Masc_tui_runtime_config_view.summary_lines r.rcv_metadata))
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None

@@ -488,14 +488,36 @@ let parse_fusion_edit_body body_str =
 let parse_runtime_config_raw_body body_str =
   try
     match Yojson.Safe.from_string body_str with
-    | `Assoc _ as json ->
-      (match Json_util.assoc_member_opt "source_text" json with
-       | Some (`String source_text) -> Ok source_text
-       | Some _ -> Error "source_text must be a string"
-       | None -> Error "source_text required")
+    | `Assoc fields ->
+      (match List.filter (fun (key, _) -> String.equal key "source_text") fields with
+       | [_, `String source_text] -> Ok source_text
+       | [_] -> Error "source_text must be a string"
+       | [] -> Error "source_text required"
+       | _ -> Error "source_text must occur exactly once")
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+
+let parse_runtime_config_raw_save_body body_str =
+  let open Result.Syntax in
+  let* source_text = parse_runtime_config_raw_body body_str in
+  (* The source parser has already established a valid JSON object. Require
+     one revision: duplicate revision fields cannot identify an editor base. *)
+  match Yojson.Safe.from_string body_str with
+  | `Assoc fields ->
+    let* revision = match List.filter (fun (key, _) -> String.equal key "expected_source_revision") fields with
+     | [_, `String revision] when String_util.is_lowercase_sha256_hex revision -> Ok revision
+     | [] -> Error "expected_source_revision required"
+     | [_] -> Error "expected_source_revision must be lowercase SHA-256 hex"
+     | _ -> Error "expected_source_revision must occur exactly once" in
+    let* path = match List.filter (fun (key, _) -> String.equal key "expected_source_path") fields with
+     | [_, `String path] when path <> "" && not (String.contains path '\000') -> Ok path
+     | [] -> Error "expected_source_path required"
+     | [_] -> Error "expected_source_path must be a nonempty path without NUL"
+     | _ -> Error "expected_source_path must occur exactly once" in
+    Ok (source_text, revision, path)
+  | _ -> Error "JSON object body required"
+;;
 
 type skill_editor_body =
   { reference : Skill_reference.t
@@ -904,6 +926,49 @@ let respond_runtime_config_commit
     response_json
     reqd
 
+let handle_runtime_config_raw_post state agent_name req reqd body_str =
+  match parse_runtime_config_raw_save_body body_str with
+  | Error msg ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+  | Ok (source_text, expected_source_revision, expected_source_path) ->
+    (* Audit metadata excludes the source, which can contain provider secrets. *)
+    (match Keeper_runtime_config.validate_source_text source_text with
+     | Error msg ->
+       audit_runtime_config_write state agent_name
+         ~operation:Runtime_config_raw_save ~text:source_text
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd
+         ("runtime config parse failed: " ^ msg)
+     | Ok report when not (Keeper_runtime_config.validation_report_is_valid report) ->
+       let detail = keeper_validation_error_message report in
+       audit_runtime_config_write state agent_name
+         ~operation:Runtime_config_raw_save ~text:source_text
+         ~outcome:(Audit_log.Failure detail) ();
+       respond_keeper_validation_error ~request:req reqd report
+     | Ok _ ->
+       (match Runtime.save_config_text_if_current ~expected_source_path ~expected_source_revision source_text with
+        | Error (Runtime.Config_edit_failed msg) ->
+          audit_runtime_config_write state agent_name
+            ~operation:Runtime_config_raw_save ~text:source_text
+            ~outcome:(Audit_log.Failure msg) ();
+          respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+        | Error (Runtime.Config_source_conflict current) ->
+          Http.Response.json_value ~status:`Conflict ~request:req
+            (`Assoc
+              [ "error", `String "runtime configuration changed; reload before saving"
+              ; "code", `String "revision_conflict"
+              ; "current", `Assoc
+                  [ "source_path", `String current.path
+                  ; "source_text", `String current.source_text
+                  ; "source_revision", `String
+                      (Runtime.config_source_revision_to_string current.source_revision)
+                  ]
+              ]) reqd
+        | Ok receipt ->
+          respond_runtime_config_commit state agent_name
+            ~operation:Runtime_config_raw_save ~receipt req reqd))
+;;
+
 let handle_runtime_assignment_post_with ~set_assignment state agent_name req reqd
     body_str =
   match Runtime_request.parse_runtime_assignment_body body_str with
@@ -1267,6 +1332,7 @@ module For_testing = struct
   let handle_runtime_assignment_post = handle_runtime_assignment_post
   let handle_runtime_assignment_post_with = handle_runtime_assignment_post_with
   let handle_runtime_routing_post = handle_runtime_routing_post
+  let handle_runtime_config_raw_post = handle_runtime_config_raw_post
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
   let skill_delete_audit_of_outcome = skill_delete_audit_of_outcome
@@ -1775,6 +1841,13 @@ let add_routes ~sw ~clock router =
               reqd)
          request
          reqd)
+  |> Http.Router.get "/api/v1/lanes" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun state _agent_name req reqd ->
+            Server_lane_inventory.snapshot ~config:(Mcp_server.workspace_config state)
+            |> Server_lane_inventory.to_json
+            |> fun json -> Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   (* Paged, and without detail payloads. [lane=] and [run_kind=] filter BEFORE pagination so
      the Verifier's task/Goal review registries cannot be hidden behind a busy
      Librarian window. Serving every exact-output payload made this response
@@ -2667,43 +2740,8 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
-             match parse_runtime_config_raw_body body_str with
-             | Error msg ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-             | Ok source_text ->
-               (* RFC-0273 §3.3 — record the runtime.toml write to the audit
-                  audit trail (actor + path + size) on top of the CanAdmin gate.
-                  The config body is deliberately excluded: runtime.toml can carry
-                  provider secrets (RFC-0132 redaction). *)
-               (match Keeper_runtime_config.validate_source_text source_text with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:Runtime_config_raw_save ~text:source_text
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error
-                    ~status:`Bad_request
-                    ~request:req
-                    reqd
-                    ("runtime config parse failed: " ^ msg)
-                | Ok report
-                  when not (Keeper_runtime_config.validation_report_is_valid report) ->
-                  let detail = keeper_validation_error_message report in
-                  audit_runtime_config_write state agent_name
-                    ~operation:Runtime_config_raw_save ~text:source_text
-                    ~outcome:(Audit_log.Failure detail) ();
-                  respond_keeper_validation_error ~request:req reqd report
-                | Ok _ ->
-                  (match Runtime.save_config_text source_text with
-                   | Error msg ->
-                     audit_runtime_config_write state agent_name
-                       ~operation:Runtime_config_raw_save ~text:source_text
-                       ~outcome:(Audit_log.Failure msg) ();
-                     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                   | Ok receipt ->
-                     respond_runtime_config_commit state agent_name
-                       ~operation:Runtime_config_raw_save ~receipt req reqd))
-           )
-         ) request reqd)
+             handle_runtime_config_raw_post state agent_name req reqd body_str))
+         request reqd)
   |> Http.Router.post "/api/v1/runtime/config/routing" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->

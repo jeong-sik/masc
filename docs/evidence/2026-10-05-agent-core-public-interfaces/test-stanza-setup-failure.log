@@ -1,0 +1,11 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-1723684442.lock
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-41188-public-interfaces-20261005/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-41188-public-interfaces-20261005 --sandbox=copy packages/agent_core/test/test_public_tool_schedule.exe packages/agent_core/test/test_public_pre_execution_gate.exe
+File "packages/agent_core/test/dune", line 1, characters 0-0:
+Error: Module "Agent_core_test_deps" is used in several stanzas:
+- packages/agent_core/test/dune:1
+- packages/agent_core/test/dune:691
+To fix this error, you must specify an explicit "modules" field in every
+library, executable, and executables stanzas in this dune file. Note that
+each module cannot appear in more than one "modules" field - it must belong
+to a single library or executable.

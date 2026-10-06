@@ -26,7 +26,10 @@
 
     Registry decisions are pure immutable transitions. Scheduler creation,
     diagnostics, snapshots, and permit waiting are performed after leaving
-    the registry's short process-wide critical section.
+    the registry's short process-wide critical section. {!publish} is the
+    exception: it changes a published identity's scheduler and wakes its
+    newly granted waiters inside that section, so the registry and the
+    scheduler change together.
 
     @since 0.216.0 *)
 

@@ -4,11 +4,11 @@
 module State = Provider_admission_state
 
 (* Stdlib.Mutex rather than Eio.Mutex: the critical section only swaps an
-   immutable registry state and never blocks or switches fibers. A published
-   allowance change also reconfigures its scheduler inside it, which never
-   blocks either, so schedulers take allowances in the order the registry
-   records them. Scheduler creation, diagnostics, snapshots, and permit
-   waiting remain outside it. *)
+   immutable registry state and never switches fibers. A published allowance
+   change also reconfigures its scheduler inside it, taking that scheduler's
+   own short mutex and waking the waiters it grants, so schedulers take
+   allowances in the order the registry records them. Scheduler creation,
+   diagnostics, snapshots, and permit waiting remain outside it. *)
 let state : Slot_scheduler.t State.t ref = ref State.empty
 let state_mutex = Stdlib.Mutex.create ()
 

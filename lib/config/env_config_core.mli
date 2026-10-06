@@ -33,6 +33,8 @@ val raw_value_opt : string -> string option
 (** {1 Typed getters with defaults} *)
 
 val get_string : default:string -> string -> string
+(** Unset or empty (including whitespace-only) gives [default], matching the
+    other getters. Any other value is returned verbatim, without trimming. *)
 type retention =
   | Retain_forever
   | Prune_after_days of int

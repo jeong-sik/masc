@@ -411,9 +411,12 @@ let () =
     | Some result ->
       (* The substituted defaults keep the snapshot renderable, but the
          snapshot no longer pretends the reads succeeded. The broken agents
-         path deterministically fails the session-binding read; the identity
-         and roster readers treat a non-directory as empty by their own
-         contract, so they stay silent here. *)
+         path deterministically fails the session-binding read. The identity
+         and current-task readers are guarded by Sys.file_exists checks, so
+         the same non-directory reaches their bare readdir too; their safe
+         wrappers record the resulting Sys_error in observation_failures.
+         The test only requires at least one recorded failure so the
+         assertion stays robust across the read order. *)
       assert (Tool_result.is_success result);
       let message = status_message result in
       assert_contains message "⚠ Observation incomplete";

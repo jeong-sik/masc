@@ -1,0 +1,67 @@
+{
+  "checkpoint": "abcc3644615079a8d22e9e996c57aa606c1c3ce8",
+  "parent": "2fdea0432d062d334539a83067c81c0046e54a7d",
+  "red": {
+    "draft_filename_handle": 82494,
+    "exit_code": 1,
+    "valid_cases": 5,
+    "excluded_case": "initial slice case used a nonexistent Instance ID input label; corrected separate run below"
+  },
+  "slice_red": {
+    "handle": 30500,
+    "exit_code": 1,
+    "cause": "A frozen evidence still rendered immediately after B authority"
+  },
+  "initial_green": {
+    "handle": 52910,
+    "exit_code": 0,
+    "tests": 61
+  },
+  "integrated_green": {
+    "handle": 18183,
+    "exit_code": 0,
+    "suites": 3,
+    "tests": 77,
+    "command": "pnpm test src/components/lane-declaration-editor.test.ts src/components/lane-addons-panel.test.ts src/api/lane-declarations.test.ts"
+  },
+  "checkers": {
+    "handle": 42626,
+    "exit_code": 0,
+    "commands": [
+      "pnpm exec tsc --noEmit --pretty false",
+      "pnpm exec eslint src/lib/lane-declaration-sessions.ts src/components/lane-addons-panel.ts src/components/lane-declaration-editor.test.ts src/components/lane-addons-panel.test.ts src/components/lane-addon-readings.ts"
+    ]
+  },
+  "logs": {
+    "draft-filename-red.log": {
+      "source": "/tmp/pr41124-boundary-red.log",
+      "sha256": "1e9b318cace2f106455ad399ed2c76753c21a8fc003d7ba9fb82692279f7b0ef"
+    },
+    "slice-red.log": {
+      "source": "/tmp/pr41124-slice-red.log",
+      "sha256": "feaa657041e0f891f09e4537e3aa398cb1a3e75d550194f6444b3dad32296645"
+    },
+    "initial-green.log": {
+      "source": "/tmp/pr41124-boundary-green.log",
+      "sha256": "c27a74c0300cce3450a0895f137a618cba9a488046d5dff17f4917033e394906"
+    },
+    "integrated-tests.log": {
+      "source": "/tmp/pr41124-boundary-integrated-tests.log",
+      "sha256": "fe4a0b80b368df8b75026f5cf2a2328590062bb97ec43d5bdf0ddf3620170b77"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41124-boundary-integrated-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41124-boundary-integrated-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "source_sha256": {
+    "dashboard/src/lib/lane-declaration-sessions.ts": "9c42499078e69083548c4958b4ad025281a4d144103e362ce76459d1d40b8b4c",
+    "dashboard/src/components/lane-addons-panel.ts": "0337160ed0bbbad1b469057a2565c41a8b5ce91eff9c168b0b3546bc073621b1",
+    "dashboard/src/components/lane-declaration-editor.test.ts": "705c523e17c3f3c872948808b364b8ef85b5ff635f5df0f0bc2f8dab6428a590"
+  },
+  "native_parent_exact": true
+}

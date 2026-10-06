@@ -8,8 +8,10 @@ MASC 원천·다른 Lane 출력 사이의 연결을 지정한다.
 ## TUI
 
 `:go lane add-ons` 또는 `/addons`로 연다. TOML 설치 목록은 선언 경로와
-원하는 설정·실제 적용 revision, 설정 오류를 보여준다. Tab으로 설치·인스턴스·관측
-행 사이의 선택을 전환한다. 패키지의 named output, binding과 Skills 경로도 공통
+원하는 설정·실제 적용 revision, 설정 오류를 보여준다. 목록에서 `j/k`로 항목을 고르고
+Enter로 연다. 선언 항목은 설치 선언 화면, 인스턴스 항목은 Add-on 상세를 연다.
+인스턴스 상세에서만 Tab으로 Results → Links → Installation → Records를 순환한다.
+패키지의 named output, binding과 Skills 경로도 공통
 표현으로 표시하며, 기존 Timeline과 Slice 질의가 같은 관측을 가로지른다.
 
 - `n`: 파일 이름을 정하고 기존 `$EDITOR`/`$VISUAL`에서 `.toml` 초안을 작성한다.
@@ -26,10 +28,12 @@ MASC 원천·다른 Lane 출력 사이의 연결을 지정한다.
 메모리에 보존하며, TUI 프로세스 종료를 넘어 영속화하지는 않는다.
 
 행동을 제공하는 인스턴스에는 패키지가 광고한 `action_schema`와 정확한 incarnation이
-표시된다. `:act {"instance_id":"…","expected_incarnation":"…","request_id":"…","action":{…}}`는
-공통 행동 경로로 명시적으로 제출한다. action 내용은 표시된 스키마를 따른다. `t`는
-마지막 요청의 상태만 읽고 실행을 반복하지 않는다. `:action`에 같은 요청 JSON을
-넣으면 TUI 재시작 후에도 해당 요청을 조회할 수 있다. queued·running·confirmed·
+표시된다. `A`로 Add-on 명령 입력을 열고
+`act {"instance_id":"…","expected_incarnation":"…","request_id":"…","action":{…}}`를
+입력한 뒤 Enter로 제출한다. action 내용은 표시된 스키마를 따른다. `t`는
+마지막 요청의 상태만 읽고 실행을 반복하지 않는다. `A`에서 `action`에 같은 요청 JSON을
+붙여 제출하면 TUI 재시작 후에도 해당 요청을 조회할 수 있다. `:`는 전역 이동 팔레트다.
+queued·running·confirmed·
 failed_before_effect·outcome_unknown을 구분하며, 실제 executor가 없으면 unknown으로
 남긴다. 작업은 기존 owner와 lifecycle에서 이어지고 TUI 창을 닫는다고 취소하지 않는다.
 
@@ -48,6 +52,24 @@ Lane Add-ons의 **New TOML**에서 파일 이름과 선언 원문을 입력한�
 revision**은 내 초안을 유지하면서 다음 저장의 기준을 선택하고, **Replace draft with
 current file**은 표시된 현재 원문으로 초안을 바꾼다. 이후 저장 시에도 변경 검사를
 다시 수행한다. 오류가 났다는 이유로 사용자의 초안을 버리지 않는다.
+
+편집 세션은 Dashboard 탭의 메모리에 보관한다. Status의 다른 화면으로 이동하거나
+편집기를 닫고 다시 열어도 선택한 문서, 새 파일 이름, 파일별 초안이 유지된다.
+페이지 새로고침과 브라우저 종료를 넘어 저장하지는 않는다. 저장하지 않은 내용이
+있으면 페이지를 떠날 때 브라우저의 확인 절차를 요청한다.
+
+화면을 이동해도 이미 보낸 읽기·저장 요청은 취소하지 않는다. 응답은 원래 문서의
+세션에 반영되고, 저장 도중 추가한 편집은 저장되지 않은 초안으로 남는다. 새 파일
+생성이 늦게 끝나도 파일 경로로 세션을 옮기고 다음 **New TOML**은 새 초안을 연다.
+같은 경로를 별도로 열어 편집했다면 그 초안을 유지하고 생성 중 작성한 내용도 비교할 수
+있게 보관한다.
+
+작업공간을 확인할 수 없으면 편집과 저장을 막고 **Verify workspace**로 다시 확인한다.
+확인된 작업공간의 설정 목록까지 읽은 뒤 그 작업공간의 초안을 연다. 다른 작업공간으로
+전환해도 이전 초안을 합치거나 저장하지 않는다. 요청 도중 작업공간 권한이 바뀐 경우,
+요청이 끝날 때까지 해당 문서는 대기 상태로 남고 그 뒤 결과를 미확인으로 표시한다.
+원래 작업공간에서 **Read current file**로 현재 파일을 확인한 뒤 필요한 revision을
+명시적으로 선택한다. 작업공간 전환은 진행 중 요청의 즉시 취소를 뜻하지 않는다.
 
 ## Keeper와 공통 API
 
@@ -94,6 +116,11 @@ Keeper는 기존 도구 선택 경로에서 `masc_lane_declaration_read`와
 때는 이 차이를 고려해야 한다. 원문 revision만으로 임의의 외부 편집기까지 분산
 compare-and-swap을 보장하지 않는다. 잘못된 외부 변경은 기존 재조정 진단으로 표시된다.
 
-삭제는 기존 TOML 관리 설치의 **Detach**를 사용하거나 선언 파일을 제거한다. 해당
-설치가 소유한 자원만 정리하며, 이전 관측과 선택한 근거를 삭제하는 기능은 아니다.
+삭제는 Dashboard의 **Remove TOML + worker** 또는 TUI의 `d`를 사용하거나 선언 파일을 제거한다.
+TOML 관리 설치의 제거 요청은 일치하는 선언 파일도 디스크에서 삭제한다. 변경된 선언은 거절하며
+다른 인스턴스가 이어받은 선언은 보존한다. 수동 Attach 인스턴스의 **Remove worker**는
+선언 파일 없이 해당 worker를 정리한다. 해당 설치가 소유한 자원만 정리하며,
+이전 관측과 선택한 근거를 삭제하는 기능은 아니다.
 이 편집 경로는 Keeper의 기존 도구 권한이나 다른 활동의 필수 절차를 추가하지 않는다.
+
+A retained draft needs a fresh file read after workspace authority changes. Reading a comparison leaves the draft unchanged; choose **Use current file revision** or **Replace draft with current file** before saving it.

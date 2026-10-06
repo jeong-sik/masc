@@ -116,11 +116,13 @@ type async_msg =
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
-  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
+  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
+  | Msx_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   | Dos_live_loaded of machine_live_request
       * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
@@ -213,8 +215,8 @@ type async_msg =
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
-  | Standalone_lanes_loaded of
-      int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
+  | Lane_inventory_loaded of
+      int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
   | Clients_loaded of
       int * (Masc.Tui_decode.clients_snapshot, string) result
   (* Keyed by the lane / run they answer for: an answer that lands after the
@@ -299,11 +301,12 @@ type async_msg =
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
-      * (unit, string) result
+      * (Masc_tui_runtime_config_receipt.t, string) result
   | Runtime_catalog_loaded of
       int * ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
-        * Masc.Tui_decode.runtime_assignment list,
+        * Masc.Tui_decode.runtime_assignment list
+        * string option,
         string )
       result
   | Runtime_assignment_set of
@@ -447,9 +450,8 @@ type async_msg =
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Runtime_config_view_loaded of
       int * string option
-      * (string * string list * Masc_tui_runtime_config_view.metadata, string) result
-      (* Read generation and captured runtime ID to edit; [None] is a source
-         refresh without a model-settings entry request. *)
+      * (Masc_tui_runtime_config_view.reading, string) result
+      (* Read generation and captured model-settings entry request. *)
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
   | Runtime_param_written of

@@ -65,7 +65,8 @@ describe('operator Lane inventory', () => {
     fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'machine/dos' } })
     expect(screen.getAllByRole('button', { name: /^Inspect / })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: /^Inspect / }))
-    expect(screen.getByText('Manage this machine through its TUI detail or operator tools.')).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'DOS 활동 설정' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '활동 설정 열기' }).getAttribute('aria-expanded')).toBe('false')
   })
   it('shows off with retained candidates and work finishing independently', async () => {
     const raw = structuredClone(fixture)

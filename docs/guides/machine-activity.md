@@ -54,5 +54,22 @@ If the reread already contains the intended value, no further save is needed.
 requires discarding the old draft before editing the new file. Existing inline
 or dotted machine declarations currently use the Runtime source editor.
 
-Web inventory provides activity readings; its dedicated machine editor remains
-a follow-up. Package Add-ons have a separate [activity setting](lane-package-activity.md).
+In Web **All Lanes**, choose **Inspect** on MSX or DOS, then open activity
+settings. The switch changes a retained draft; **Save activity settings**
+(활동 설정 저장) previews and saves explicitly. MSX and DOS have independent
+drafts, retained across dashboard navigation. The Runtime source editor keeps
+its own draft. Web editing supports standard tables, dotted keys and inline
+tables while retaining comments and unrelated settings.
+
+The editor rereads the file and server activity after a successful save. After
+an unanswered save it waits for **현재 설정 읽기** (Read current settings); that
+read shows what the file holds but does not settle the save. It shows the
+last observation and its time separately from the saved file and commit
+receipt. A failed read remains visible and can be retried. A mismatch
+does not claim that the file has been applied. An uncertain write requires an
+explicit reapply or discard after reading; it is never automatically repeated.
+Reapply changes only the selected machine's activity in the freshly read file.
+A changed file path requires discarding the old draft first. Enabling does not
+load a machine or restore a checkpoint.
+
+Package Add-ons have a separate [activity setting](lane-package-activity.md).

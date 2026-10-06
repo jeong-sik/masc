@@ -3339,12 +3339,15 @@
   alcotest
   fmt
   masc
+  masc_tui_model_runtime_table
   masc_tui_types
   masc_tui_voice_wizard_session
   masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc_tui_runtime_account_form
+  masc_tui_runtime_config_view
+  masc_tui_model_form
   masc.voice_setup
   masc.voice_wizard))
 
@@ -4109,17 +4112,17 @@
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
- (libraries masc_tui_hit
-  masc_tui_press
-  masc_tui_roster_pane
-  masc_tui_ansi
-  masc_tui_surface_search
+ (libraries masc_tui_surface_search
   masc_tui_pick_list
   alcotest
   masc
   masc_tui_acting_pane
+  masc_tui_ansi
   masc_tui_fetched
   masc_tui_frame
+  masc_tui_hit
+  masc_tui_press
+  masc_tui_roster_pane
   masc_tui_scroll
   masc_tui_message_layout
   masc_tui_render_memory
@@ -4130,7 +4133,7 @@
 (test
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
- (libraries alcotest masc masc_tui_fetched masc_tui_render_memory masc_tui_types))
+ (libraries alcotest masc masc_tui_fetched masc_tui_render_memory masc_tui_roster_pane masc_tui_types))
 
 (test
  (name test_tui_memory_header_states)
@@ -4189,7 +4192,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries alcotest masc.masc_goal masc_tui_types))
+ (libraries alcotest masc.masc_goal masc_tui_types masc_tui_render_prim))
 
 ; The named keyboard alias keeps the existing targeted-suite entry point.
 ; Each dependency has its own process, so Dune can run the six parts together.
@@ -7526,6 +7529,28 @@
  (deps (alias runtest-test_tui_memory_health_read_error)))
 
 (rule
+ (alias runtest-test_tui_memory_facts_authority_pty)
+ (deps
+  test_tui_memory_facts_authority_pty.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_memory.py
+  test_tui_remote_workspace_history_pty.py
+  tui_keyboard_approvals.py
+  tui_keyboard_chat.py
+  tui_keyboard_keepers.py
+  tui_keyboard_observer.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_tools.py)
+ (action
+  (run python3 %{dep:test_tui_memory_facts_authority_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_facts_authority_pty)))
+
+(rule
  (alias runtest-test_tui_memory_default_view_pty)
  (deps
   test_tui_memory_default_view_pty.py
@@ -8063,7 +8088,7 @@
 (test
  (name test_runtime_setup_spec)
  (modules test_runtime_setup_spec)
- (libraries alcotest yojson masc.runtime)
+ (libraries alcotest otoml unix yojson masc.agent_core.llm_provider masc.runtime masc.string_util)
  (deps fixtures/runtime-setup-specs.json))
 (test
  (name test_runtime_setup_batch)
@@ -8072,7 +8097,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries masc.toml_line_editor alcotest yojson unix eio eio_main httpun masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries masc.toml_line_editor alcotest yojson unix eio eio_main httpun masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -9289,6 +9314,8 @@
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
 
+(include stanzas/test_librarian_preflight_report.inc)
+
 (rule
  (alias runtest-test_candle_evidence_audits)
  (deps test_candle_evidence_audits.py
@@ -9357,14 +9384,14 @@
 (test
  (name test_tui_model_form)
  (modules test_tui_model_form)
- (libraries alcotest masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
+ (libraries alcotest astring masc.agent_core.llm_provider masc.toml_line_editor masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
 
 (include stanzas/test_tui_context_catalog_scope.inc)
 
 (test
  (name test_tui_runtime_evidence)
  (modules test_tui_runtime_evidence)
- (libraries alcotest masc_tui_runtime_evidence))
+ (libraries alcotest yojson masc_tui_runtime_evidence))
 
 (rule
  (alias runtest-test_tui_runtime_evidence_pty)
@@ -9377,3 +9404,13 @@
 (include stanzas/test_goal_drop_delivery.inc)
 
 (include stanzas/test_goal_notification_contract.inc)
+
+(test
+ (name test_goal_suspension)
+ (modules test_goal_suspension)
+ (libraries masc masc_goal masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
+
+(test
+ (name test_goal_suspension_projection)
+ (modules test_goal_suspension_projection)
+ (libraries masc_dashboard masc_goal alcotest yojson))

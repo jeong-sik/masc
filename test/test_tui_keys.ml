@@ -681,7 +681,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  d:Category pane  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
@@ -1097,7 +1097,7 @@ let test_board_and_planning_explain_their_order () =
     (board_sort_explanation Board_hot);
   check str "trending formula" "net votes / √age-hours"
     (board_sort_explanation Board_trending);
-  check str "active phase set" "executing + verifying"
+  check str "active phase set" "all nonterminal goals (including suspended)"
     (planning_filter_explanation Planning_filter_active);
   check str "phase and priority order" "phase order, then P1→P5"
     (planning_sort_explanation Planning_sort_phase_priority);
@@ -2016,7 +2016,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  i:input  a:fragments / voice / account  u:restore / adopt revision  S:save draft  C:compare file  U:use current text  X:discard draft  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2168,7 +2168,12 @@ let test_config_pane_footer_actions () =
     enabled "e"
       (List.mem pane
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
-    List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
+    enabled "n" (pane = Config_presets);
+    (* [u] answers on two panes: restoring a preset, and adopting the current
+       runtime.toml revision for a retained draft. The other draft keys answer
+       on runtime.toml only. *)
+    enabled "u" (List.mem pane [ Config_presets; Config_runtime ]);
+    List.iter (fun key -> enabled key (pane = Config_runtime)) [ "S"; "C"; "U"; "X" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
     (* [a] answers on three panes: the prompt fragments, the keeper-voice
        screen the voice pane opens, and the account form on runtime.toml. *)
@@ -2431,6 +2436,28 @@ let test_the_sheet_carries_the_fact_detail_keys () =
   Alcotest.(check string) "the footer projects the same binding table"
     "j/k:scroll  PgUp/PgDn:page  g / G:top/bottom  Esc:close"
     Masc_tui_keys.memory_fact_detail_hints
+
+let test_chat_quiet_leave_respects_the_draft () =
+  let leaves = Masc_tui_keys.chat_quiet_leave in
+  List.iter (fun (input_supported, turn_active, draft_empty, expected) ->
+    Alcotest.(check bool) "printable Q follows viewport, turn and complete draft" expected
+      (leaves ~input_supported ~turn_active ~draft_empty "Q");
+    Alcotest.(check bool) "Ctrl-Q always leaves" true
+      (leaves ~input_supported ~turn_active ~draft_empty "\017");
+    Alcotest.(check bool) "lowercase q remains text" false
+      (leaves ~input_supported ~turn_active ~draft_empty "q"))
+    [ true, true, true, true; true, true, false, false
+    ; true, false, true, false; true, false, false, false
+    ; false, true, true, true; false, true, false, true
+    ; false, false, true, true; false, false, false, true ];
+  let chat = Masc_tui_keys.for_surface (Keepers Keeper_message) in
+  Alcotest.(check bool) "chat help names both quiet exits" true
+    (List.exists
+       (fun (binding : Masc_tui_keys.binding) ->
+         String.equal binding.key "Q / Ctrl-Q"
+         && binding.help = Some
+              "Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting")
+       chat)
 
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
   let global_threes =
@@ -2761,7 +2788,7 @@ let planning_state () =
           ; pr_verifying = 0
           ; pr_awaiting_confirmation = 0
           ; pr_done = 0
-          ; pr_dropped = 0
+          ; pr_paused = 0; pr_blocked = 0; pr_dropped = 0
           }
       ; pl_backlog =
           { pb_todo = 0; pb_claimed = 0; pb_running = 0
@@ -3033,17 +3060,17 @@ let test_detail_search_counts_follow_the_active_pane () =
     let count () = Masc_tui_surface_search.surface_search_count state surface ~query:state.search_last in
     Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
     Alcotest.(check bool) (label ^ " list has a cursor") true
-      (Option.is_some (scrolled_surface_rows ~cols:100 state surface));
+      (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     set_detail true;
     Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
     Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
       None (Masc_tui_surface_search.surface_row_texts state surface);
     Alcotest.(check bool) (label ^ " detail has no cursor") false
-      (Option.is_some (scrolled_surface_rows ~cols:100 state surface));
+      (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     set_detail false;
     Alcotest.(check (option int)) (label ^ " return restores count") (Some 1) (count ());
     Alcotest.(check bool) (label ^ " return restores cursor") true
-      (Option.is_some (scrolled_surface_rows ~cols:100 state surface));
+      (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     Alcotest.(check string) (label ^ " keeps settled query") "needle" state.search_last
   in
   check_pane "Harness" Harness
@@ -3069,7 +3096,7 @@ let test_changes_diff_uses_visible_search_rows () =
     Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
       (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
     Alcotest.(check bool) (label ^ " cursor available") true
-      (Option.is_some (scrolled_surface_rows ~cols:100 state Changes)) in
+      (Option.is_some (scrolled_surface_rows state ~cols:80 Changes)) in
   check_list "list";
   state.changes_diff_row <- Some 0;
   Alcotest.(check (option (list string))) "diff has no hidden search rows" None
@@ -3077,7 +3104,7 @@ let test_changes_diff_uses_visible_search_rows () =
   Alcotest.(check (option int)) "diff has no hidden list count" None
     (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
   Alcotest.(check bool) "diff cannot move a hidden list cursor" false
-    (Option.is_some (scrolled_surface_rows ~cols:100 state Changes));
+    (Option.is_some (scrolled_surface_rows state ~cols:80 Changes));
   state.changes_diff_row <- None;
   check_list "return";
   state.changes_diff_row <- Some 1;
@@ -3556,6 +3583,8 @@ let () =
             test_the_sheet_carries_the_fact_detail_keys
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"
             `Quick test_keeper_detail_reserves_lowercase_u_for_channel_unbind
+        ; Alcotest.test_case "empty chat Q leaves, draft Q types" `Quick
+            test_chat_quiet_leave_respects_the_draft
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "the sheet opens on the current surface" `Quick

@@ -31,7 +31,7 @@ it.each([false, true])('reads and renders HTTP dollar usage with official client
   ] }
   let utilization: { unit: 'usd'; value: number; limit: number | null } = { unit: 'usd', value: 7.5, limit: 20 }
   vi.mocked(get).mockImplementation(async path => path === '/api/v1/runtime/resolved' ? {
-    config_path: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
+    config_path: null, default_route: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
     provider_usage_windows: [{ scope: 'account:openrouter', providers: [{ id: 'openrouter', display_name: 'OpenRouter account' }],
       state: 'reported', windows: [{ limit_id: null, window: { kind: 'provider_label', label: 'credit limit' },
         utilization, resets_at: null, observed_at: 1_100, source: 'openrouter.key_read', role: 'gates_model_calls' }] }],
@@ -57,7 +57,7 @@ it('shows each official client account once with its provider-reported usage', a
     { provider: 'codex_two.shared', provider_id: 'codex_two', provider_display_name: 'Codex · two', protocol: 'codex-app-server', available: false, models: [] },
   ] }
   vi.mocked(get).mockImplementation(async path => path === '/api/v1/runtime/resolved' ? {
-    config_path: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
+    config_path: null, default_route: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
     provider_usage_windows_since: 1_000,
     provider_usage_windows: [
       { scope: 'account:1', providers: [{ id: 'claude_one', display_name: 'Claude · one' }, { id: 'claude_alias', display_name: 'Claude · alias' }], state: 'reported', windows: [{

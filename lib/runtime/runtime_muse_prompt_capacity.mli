@@ -21,16 +21,12 @@
     A later host can change any of these. *)
 
 type error =
-  | No_window_declared
-      (** The model declares neither [max-prompt-bytes] nor [max-context]. *)
+  | No_window_declared  (** The model declares no [max-context]. *)
   | Window_below_host_overhead of { max_context : int }
       (** 75% of [max-context] does not cover the host's own overhead. *)
 
 val error_to_string : error -> string
 
-val start_prompt_bytes : declared:int option -> max_context:int option -> (int, error) result
-(** The derived ceiling is [4 × (⌊75% of max-context⌋ − 11,946)] bytes: a
-    prompt no larger keeps the host's estimate under its compaction line. A
-    declared [max-prompt-bytes] can only narrow it, because a larger prompt
-    is compacted whatever the operator wrote. Without a window the declared
-    value is all there is. *)
+val start_prompt_bytes : max_context:int option -> (int, error) result
+(** The ceiling is [4 × (⌊75% of max-context⌋ − 11,946)] bytes: a prompt no
+    larger keeps the host's estimate under its compaction line. *)

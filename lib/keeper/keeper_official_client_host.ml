@@ -646,8 +646,8 @@ let continuity_observation_input ~trace_id ~continuity front =
    starts without a ledger too (RFC keeper-context-window-in-tokens §13.4).
 
    [own_first_atom] is the front the calling lane already chose for its own
-   reason — Claude Code cuts its start seed to the runtime's declared
-   max-prompt-bytes. A seed at or past that cut decides, even when it is
+   reason — Antigravity cuts its start seed to the ceiling derived from its
+   window. A seed at or past that cut decides, even when it is
    older than [turn_start]: the range the last answered request carried is
    this lane's continuity, and the turn start is only where a lane with no
    seed begins. Without a seed the range starts at the later of the lane's

@@ -560,14 +560,9 @@ protocol = "claude-code"
 command = "claude"
 is-non-interactive = true
 
-# max-prompt-bytes: the history MASC seeds the client's first turn with. The
-# client owns its own context window and refuses an oversized seed in a typed
-# terminal; without this ceiling a keeper learned 524288 from that refusal one
-# 29-minute attempt at a time (2026-08-24).
 [models.claude-code-sonnet]
 api-name = "claude-sonnet-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 
@@ -592,7 +587,6 @@ wizard-default = true
 [models.claude-code-opus-high]
 api-name = "claude-opus-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -608,7 +602,6 @@ turn-timeout-s = 600.0
 [models.claude-code-sonnet-low]
 api-name = "claude-sonnet-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -621,7 +614,6 @@ supports-image-input = true
 [models.claude-code-sonnet-medium]
 api-name = "claude-sonnet-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -634,7 +626,6 @@ supports-image-input = true
 [models.claude-code-sonnet-high]
 api-name = "claude-sonnet-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -647,7 +638,6 @@ supports-image-input = true
 [models.claude-code-sonnet-xhigh]
 api-name = "claude-sonnet-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -660,7 +650,6 @@ supports-image-input = true
 [models.claude-code-sonnet-max]
 api-name = "claude-sonnet-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -673,7 +662,6 @@ supports-image-input = true
 [models.claude-code-opus-low]
 api-name = "claude-opus-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -686,7 +674,6 @@ supports-image-input = true
 [models.claude-code-opus-medium]
 api-name = "claude-opus-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -699,7 +686,6 @@ supports-image-input = true
 [models.claude-code-opus-xhigh]
 api-name = "claude-opus-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -712,7 +698,6 @@ supports-image-input = true
 [models.claude-code-opus-max]
 api-name = "claude-opus-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -730,7 +715,6 @@ supports-image-input = true
 [models.claude-code-opus-5-5-low]
 api-name = "claude-opus-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -743,7 +727,6 @@ supports-image-input = true
 [models.claude-code-opus-5-5-medium]
 api-name = "claude-opus-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -756,7 +739,6 @@ supports-image-input = true
 [models.claude-code-opus-5-5-high]
 api-name = "claude-opus-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -769,7 +751,6 @@ supports-image-input = true
 [models.claude-code-opus-5-5-xhigh]
 api-name = "claude-opus-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -782,7 +763,6 @@ supports-image-input = true
 [models.claude-code-opus-5-5-max]
 api-name = "claude-opus-5-5"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -795,7 +775,6 @@ supports-image-input = true
 [models.claude-code-fable-low]
 api-name = "claude-fable-5-1"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -808,7 +787,6 @@ supports-image-input = true
 [models.claude-code-fable-medium]
 api-name = "claude-fable-5-1"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -821,7 +799,6 @@ supports-image-input = true
 [models.claude-code-fable-high]
 api-name = "claude-fable-5-1"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -834,7 +811,6 @@ supports-image-input = true
 [models.claude-code-fable-xhigh]
 api-name = "claude-fable-5-1"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -847,7 +823,6 @@ supports-image-input = true
 [models.claude-code-fable-max]
 api-name = "claude-fable-5-1"
 max-context = 1000000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -860,7 +835,6 @@ supports-image-input = true
 [models.claude-code-haiku]
 api-name = "claude-haiku-4-5"
 max-context = 200000
-max-prompt-bytes = 524288
 tools-support = true
 streaming = true
 
@@ -871,14 +845,6 @@ supports-image-input = true
 
 # Codex reads images from its turn/start input list, so the image capability
 # key means the same thing here as it does above.
-#
-# max-prompt-bytes on every Codex model is the vendor's own limit, not a MASC
-# estimate: the app-server refuses one string above it with
-# "Expected a string with maximum length 10485760 ... string_above_max_length"
-# (#37353), and a Resume carries the whole history in one such string
-# (developerInstructions). Declared, it windows Start and Resume from the first
-# attempt. The limit counts characters and the window counts bytes, which are
-# never fewer, so the window can only cut short of it.
 [providers.codex_subscription]
 model-set = "codex"
 display-name = "Codex ChatGPT Subscription"
@@ -889,7 +855,6 @@ is-non-interactive = true
 [models.codex-gpt-5-6]
 api-name = "gpt-5.6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -905,7 +870,6 @@ wizard-default = true
 [models.codex-gpt-6-1-sol-low]
 api-name = "gpt-6.1-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -916,7 +880,6 @@ supports-image-input = true
 [models.codex-gpt-6-1-sol-medium]
 api-name = "gpt-6.1-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -927,7 +890,6 @@ supports-image-input = true
 [models.codex-gpt-6-1-sol-high]
 api-name = "gpt-6.1-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -938,7 +900,6 @@ supports-image-input = true
 [models.codex-gpt-6-1-sol-xhigh]
 api-name = "gpt-6.1-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -949,7 +910,6 @@ supports-image-input = true
 [models.codex-gpt-6-1-sol-max]
 api-name = "gpt-6.1-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -960,7 +920,6 @@ supports-image-input = true
 [models.codex-gpt-6-1-sol-ultra]
 api-name = "gpt-6.1-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "ultra"
@@ -971,7 +930,6 @@ supports-image-input = true
 [models.codex-gpt-6-astra-ultra]
 api-name = "gpt-6-astra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "ultra"
@@ -982,7 +940,6 @@ supports-image-input = true
 [models.codex-gpt-6-sol-ultra]
 api-name = "gpt-6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "ultra"
@@ -993,7 +950,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-ultra]
 api-name = "gpt-5.6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "ultra"
@@ -1004,7 +960,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-ultra]
 api-name = "gpt-5.6-terra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "ultra"
@@ -1015,7 +970,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-medium]
 api-name = "gpt-5.6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1027,7 +981,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-high]
 api-name = "gpt-5.6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1039,7 +992,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-xhigh]
 api-name = "gpt-5.6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1051,7 +1003,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-max]
 api-name = "gpt-5.6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1063,7 +1014,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-low]
 api-name = "gpt-5.6-terra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1075,7 +1025,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-medium]
 api-name = "gpt-5.6-terra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1087,7 +1036,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-high]
 api-name = "gpt-5.6-terra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1099,7 +1047,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-xhigh]
 api-name = "gpt-5.6-terra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1111,7 +1058,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-max]
 api-name = "gpt-5.6-terra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1123,7 +1069,6 @@ supports-image-input = true
 [models.codex-gpt-6-astra-low]
 api-name = "gpt-6-astra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1135,7 +1080,6 @@ supports-image-input = true
 [models.codex-gpt-6-astra-medium]
 api-name = "gpt-6-astra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1147,7 +1091,6 @@ supports-image-input = true
 [models.codex-gpt-6-astra-high]
 api-name = "gpt-6-astra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1159,7 +1102,6 @@ supports-image-input = true
 [models.codex-gpt-6-astra-xhigh]
 api-name = "gpt-6-astra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1171,7 +1113,6 @@ supports-image-input = true
 [models.codex-gpt-6-astra-max]
 api-name = "gpt-6-astra"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1183,7 +1124,6 @@ supports-image-input = true
 [models.codex-gpt-6-sol-low]
 api-name = "gpt-6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1195,7 +1135,6 @@ supports-image-input = true
 [models.codex-gpt-6-sol-medium]
 api-name = "gpt-6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1207,7 +1146,6 @@ supports-image-input = true
 [models.codex-gpt-6-sol-high]
 api-name = "gpt-6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1219,7 +1157,6 @@ supports-image-input = true
 [models.codex-gpt-6-sol-xhigh]
 api-name = "gpt-6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1231,7 +1168,6 @@ supports-image-input = true
 [models.codex-gpt-6-sol-max]
 api-name = "gpt-6-sol"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1243,7 +1179,6 @@ supports-image-input = true
 [models.codex-gpt-6-luna-low]
 api-name = "gpt-6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1255,7 +1190,6 @@ supports-image-input = true
 [models.codex-gpt-6-luna-medium]
 api-name = "gpt-6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1267,7 +1201,6 @@ supports-image-input = true
 [models.codex-gpt-6-luna-high]
 api-name = "gpt-6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1279,7 +1212,6 @@ supports-image-input = true
 [models.codex-gpt-6-luna-xhigh]
 api-name = "gpt-6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1291,7 +1223,6 @@ supports-image-input = true
 [models.codex-gpt-6-luna-max]
 api-name = "gpt-6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1303,7 +1234,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-low]
 api-name = "gpt-5.6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1315,7 +1245,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-medium]
 api-name = "gpt-5.6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1327,7 +1256,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-high]
 api-name = "gpt-5.6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1339,7 +1267,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-xhigh]
 api-name = "gpt-5.6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1351,7 +1278,6 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-max]
 api-name = "gpt-5.6-luna"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1363,7 +1289,6 @@ supports-image-input = true
 [models.codex-gpt-5-5-low]
 api-name = "gpt-5.5"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1375,7 +1300,6 @@ supports-image-input = true
 [models.codex-gpt-5-5-medium]
 api-name = "gpt-5.5"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1387,7 +1311,6 @@ supports-image-input = true
 [models.codex-gpt-5-5-high]
 api-name = "gpt-5.5"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1399,7 +1322,6 @@ supports-image-input = true
 [models.codex-gpt-5-5-xhigh]
 api-name = "gpt-5.5"
 max-context = 272000
-max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1438,7 +1360,6 @@ max-context = 1048576
 # Keepers later reached 21-48 MB and failed before their first turn (#37123).
 # This conservative ceiling is a measured success point, not the CLI maximum
 # or a tokenizer estimate; raise it only after a larger end-to-end probe.
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1456,7 +1377,6 @@ wizard-default = true
 [models.antigravity-gemini-3-8-flash-high]
 api-name = "gemini-3.8-flash-high"
 max-context = 1048576
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1465,7 +1385,6 @@ streaming = true
 [models.antigravity-gemini-3-8-flash-medium]
 api-name = "gemini-3.8-flash-medium"
 max-context = 1048576
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1474,7 +1393,6 @@ streaming = true
 [models.antigravity-gemini-3-8-flash-low]
 api-name = "gemini-3.8-flash-low"
 max-context = 1048576
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1483,7 +1401,6 @@ streaming = true
 [models.antigravity-gemini-3-7-flash-medium]
 api-name = "gemini-3.7-flash-medium"
 max-context = 1048576
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1492,7 +1409,6 @@ streaming = true
 [models.antigravity-gemini-3-7-flash-low]
 api-name = "gemini-3.7-flash-low"
 max-context = 1048576
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1501,7 +1417,6 @@ streaming = true
 [models.antigravity-gemini-3-6-flash-high]
 api-name = "gemini-3.6-flash-high"
 max-context = 1000000
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1510,7 +1425,6 @@ streaming = true
 [models.antigravity-gemini-3-6-flash-medium]
 api-name = "gemini-3.6-flash-medium"
 max-context = 1000000
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1519,7 +1433,6 @@ streaming = true
 [models.antigravity-gemini-3-6-flash-low]
 api-name = "gemini-3.6-flash-low"
 max-context = 1000000
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1528,7 +1441,6 @@ streaming = true
 [models.antigravity-gemini-3-1-pro-high]
 api-name = "gemini-3.1-pro-high"
 max-context = 1000000
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1537,7 +1449,6 @@ streaming = true
 [models.antigravity-gemini-3-1-pro-low]
 api-name = "gemini-3.1-pro-low"
 max-context = 1000000
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1546,7 +1457,6 @@ streaming = true
 [models.antigravity-claude-sonnet-4-6]
 api-name = "claude-sonnet-4-6"
 max-context = 1000000
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1555,7 +1465,6 @@ streaming = true
 [models.antigravity-claude-opus-4-6-thinking]
 api-name = "claude-opus-4-6-thinking"
 max-context = 1000000
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -1564,7 +1473,6 @@ streaming = true
 [models.antigravity-gpt-oss-120b-medium]
 api-name = "gpt-oss-120b-medium"
 max-context = 131072
-max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 

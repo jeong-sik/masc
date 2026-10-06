@@ -69,8 +69,8 @@ let resolve_turn_timeout_s_or ~runtime_id ~default =
   turn_timeout_s_of_declared ~default (resolve_turn_timeout_s ~runtime_id)
 ;;
 
-let resolve_max_prompt_bytes ~runtime_id =
-  Runtime.max_prompt_bytes_of_runtime_id runtime_id
+let resolve_prompt_capacity_bytes ~runtime_id =
+  Runtime.prompt_capacity_bytes_of_runtime_id runtime_id
 
 (* masc#24067 / agent-core boundary: MASC must not synthesize a request [max_tokens]
    value. The former resolver invented one from either a model capability

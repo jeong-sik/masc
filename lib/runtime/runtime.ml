@@ -1981,31 +1981,24 @@ let entry_runtime_id_of_route (route : string) : string option =
    smallest ceiling any of those candidates declares, not the entry's alone.
 
    A candidate without a ceiling ([prompt_capacity_bytes]) has no byte bound
-   in any admission path: Claude Code starts unbounded and shrinks only on
-   the provider's own refusal, Antigravity refuses such a binding before
-   sending, Codex bounds its history by the carried range alone, a Muse
-   candidate whose ceiling cannot be derived fails its own turn with that
-   cause, and no other runtime reads the field. It adds no bound here, and
-   it does not erase a bound a sibling declares.
-
-   A declaration on a runtime that does not read it
-   ([Runtime_schema.api_format_reads_max_prompt_bytes]) is not a ceiling
-   either: that provider never checks the number, so counting it would shrink
-   the whole lane's budget for nothing.
+   in any admission path: Claude Code and the HTTP formats start unbounded and
+   shrink only on the provider's own refusal, and a Muse or Antigravity
+   candidate whose window cannot be resolved fails its own turn with that
+   cause. It adds no bound here, and it does not erase a bound a sibling
+   has.
 
    An id the loaded catalog does not hold adds no bound either: the walk
    cannot dispatch it, so it cannot serve the turn. *)
-let smallest_declared_max_prompt_bytes (runtimes : t list) candidate_ids =
-  let declared =
+let smallest_prompt_capacity_bytes (runtimes : t list) candidate_ids =
+  let ceilings =
     List.filter_map
       (fun (runtime : t) ->
          if List.mem runtime.id candidate_ids
-            && api_format_reads_max_prompt_bytes runtime.provider.api_format
          then prompt_capacity_bytes runtime
          else None)
       runtimes
   in
-  match declared with
+  match ceilings with
   | [] -> None
   | first :: rest -> Some (List.fold_left min first rest)
 ;;
@@ -2014,18 +2007,18 @@ let smallest_declared_max_prompt_bytes (runtimes : t list) candidate_ids =
    refuses a configuration whose lane names a runtime it does not declare,
    so every candidate of a lane resolved from [state] is in
    [state.runtimes]. *)
-let smallest_max_prompt_bytes_of_route (route : string) : int option =
+let smallest_prompt_capacity_bytes_of_route (route : string) : int option =
   let state = runtime_state () in
   match resolve_assignment_in state route with
   | `Lane lane ->
-    smallest_declared_max_prompt_bytes
+    smallest_prompt_capacity_bytes
       state.runtimes
       (Runtime_lane.ordered_candidates lane)
   | `Unavailable _ | `Missing -> None
 ;;
 
-let smallest_max_prompt_bytes_of_runtime_ids (ids : string list) : int option =
-  smallest_declared_max_prompt_bytes (runtime_state ()).runtimes ids
+let smallest_prompt_capacity_bytes_of_runtime_ids (ids : string list) : int option =
+  smallest_prompt_capacity_bytes (runtime_state ()).runtimes ids
 ;;
 
 let resolve_max_context_of_runtime_id (id : string)
@@ -2091,7 +2084,7 @@ let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option 
   | Some rt -> Some (quota_scope_of_runtime rt)
   | None -> None
 ;;
-let max_prompt_bytes_of_runtime_id (id : string) : int option =
+let prompt_capacity_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> prompt_capacity_bytes rt
   | None -> None

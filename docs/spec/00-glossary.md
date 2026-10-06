@@ -1125,19 +1125,18 @@ status: reference
   → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
   [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
 
-**Max Prompt Bytes (최대 프롬프트 바이트)**
-: MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한
-  (`[models.<이름>].max-prompt-bytes`, `Runtime_schema.model.max_prompt_bytes`).
-  클라이언트는 자기 컨텍스트 창을 스스로 소유하고, 상한을 넘는 seed는 typed
-  terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
-  29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
-  10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
-  (#38740). Muse 는 넘친 입력을 거절하지 않고 조용히 요약으로 줄이므로, MASC 가
-  `max-context` 에서 `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(Muse Code
-  1.4.0 실측, `Runtime_muse_prompt_capacity`). 선언값은 이보다 작을 때만 쓴다.
-  운영자에게는 묻지 않는다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
-  MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
-  → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
+**Client Start-prompt Ceiling (클라이언트 시작 프롬프트 상한)**
+: MASC 가 공식 클라이언트의 첫 턴에 심는 history(시작 프롬프트)의 바이트 상한.
+  넘친 입력을 typed 오류로 알리지 않는 클라이언트에만 있다.
+  Antigravity 는 끝까지 간 실측 2,078,915 바이트와 `2 × max-context` 중 작은
+  값이다. 토큰당 2바이트는 보장이 아니라 어림값이다. agy 는 공개하지 않은
+  저장 한도를 넘으면 세션을 지우고(agy 1.2.6 changelog), 그 아래에서도 스스로
+  대화를 압축한다. Muse Code 는 넘친 입력을 조용히 요약하므로 상한을
+  `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(`Runtime_muse_prompt_capacity`).
+  Claude Code·Codex 는 이 상한이 없다. 넘치면 provider 가 typed overflow 로
+  알리고, keeper 는 이어 보낼 범위를 줄여 다시 보낸다. 운영자가 바이트 수를
+  적는 설정은 없다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다.
+  → [Runtime_client_prompt_ceiling](../../lib/runtime/runtime_client_prompt_ceiling.mli)
 
 **Attempt Dispatch (시도 파견 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,

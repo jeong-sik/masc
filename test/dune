@@ -2911,6 +2911,7 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
+(include stanzas/test_runtime_client_prompt_ceiling.inc)
 (include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
 (include stanzas/test_runtime_muse_model_discovery.inc)

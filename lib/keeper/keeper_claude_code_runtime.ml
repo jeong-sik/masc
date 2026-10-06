@@ -62,11 +62,8 @@ let measure_model_input_message_bytes message =
 ;;
 
 (* Keep the durable conversation intact and narrow only the provider-bound
-   start seed. A runtime that declares max-prompt-bytes starts inside it; one
-   that does not starts unbounded and narrows after Claude has explicitly
-   rejected the prior view as too large. Waiting for that rejection in both
-   cases is what made a declared ceiling cost a full turn to discover. The
-   next structural boundary is computed before source projections append
+   start seed. The seed starts unbounded and narrows after Claude has explicitly
+   rejected the prior view as too large. The next structural boundary is computed before source projections append
    synthetic evidence, matching the Codex official-client path. *)
 (* The cut is the same one [Keeper_turn_driver_try_provider] makes on the
    Agent Core path, and that path reports it: [project_with_drop] returns how
@@ -1405,22 +1402,15 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   let starting_capacity_bytes =
-    (* Every turn starts at the runtime's declared ceiling. Before that
-       ceiling was read, this lane passed [max_int], so a model that declares
-       max-prompt-bytes was sent the whole history anyway and learned its
-       ceiling only from the provider's rejection -- after the turn had
-       already run. claude-sonnet-5 declares 524288, and one live keeper
-       spent 29 minutes per attempt discovering it (2026-08-24). A runtime
-       that declares nothing starts unbounded.
-
-       The ceiling is this runtime's own max-prompt-bytes. The pinned
-       briefing was sized earlier from the smallest max-prompt-bytes among
+    (* Every turn starts at the runtime's own ceiling when it has one, and
+       unbounded otherwise: the provider's typed overflow is what narrows it.
+       The pinned briefing was sized earlier from the smallest ceiling among
        the candidates the turn's walk holds
        ([Keeper_turn_runtime_budget.world_state_briefing_budget_bytes]). That
        budget can only withhold [Own_recent_actions] rows, so it does not
        promise a fit; the shrink below cuts only the conversation window. *)
     Option.value
-      (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
+      (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id)
       ~default:unbounded_model_input_capacity_bytes
   in
   let result =

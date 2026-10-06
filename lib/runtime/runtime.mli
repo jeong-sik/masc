@@ -698,14 +698,14 @@ val entry_runtime_id_of_route : string -> string option
     route here first — {!get_runtime_by_id} knows nothing about lanes and
     answers [None] for a lane name. *)
 
-val smallest_max_prompt_bytes_of_route : string -> int option
+val smallest_prompt_capacity_bytes_of_route : string -> int option
 (** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of any
     candidate the route may walk: every candidate of a declared lane, or the
     runtime itself when the route names one. A candidate without one adds no
     ceiling and does not erase one a sibling has. [None] when no candidate
     has a ceiling, or when the route names neither a lane nor a runtime. *)
 
-val smallest_max_prompt_bytes_of_runtime_ids : string list -> int option
+val smallest_prompt_capacity_bytes_of_runtime_ids : string list -> int option
 (** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of the
     named runtimes, for a walk whose candidate list is already fixed (a
     deferred lane suffix). An id without one, or that the loaded catalog does
@@ -773,7 +773,7 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
-val max_prompt_bytes_of_runtime_id : string -> int option
+val prompt_capacity_bytes_of_runtime_id : string -> int option
 (** {!Runtime_instance.prompt_capacity_bytes} of the runtime with this id, or [None] when the
     id is unknown or no ceiling applies. *)
 

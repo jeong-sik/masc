@@ -3055,13 +3055,11 @@ let with_config_save_model_catalog f =
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
 
-(* max-prompt-bytes is optional for an official-client runtime. An explicit
-   declaration remains supported. *)
-let test_runtime_config_validation_admits_undeclared_official_client_seed () =
+(* An official-client runtime loads with only its window declared. *)
+let test_runtime_config_validation_admits_official_client_runtime () =
   with_config_save_model_catalog @@ fun () ->
-  let content ~bound =
-    Printf.sprintf
-      "[providers.local]\n\
+  let content =
+    "[providers.local]\n\
        protocol = \"openai-compatible-http\"\n\
        endpoint = \"http://127.0.0.1:1/v1\"\n\
        \n\
@@ -3076,7 +3074,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
        \n\
        [models.seeded]\n\
        api-name = \"seeded\"\n\
-       max-context = 1024\n%s\
+       max-context = 1024\n\
        \n\
        [local.sample]\n\
        \n\
@@ -3087,7 +3085,6 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
        \n\
        [runtime.assignments]\n\
        \"probe\" = \"subscription.seeded\"\n"
-      bound
   in
   let attempt text =
     let snapshot = Runtime.For_testing.snapshot () in
@@ -3102,17 +3099,10 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
         | Sys_error _ -> ())
       (fun () -> Runtime.save_config_text ~runtime_config_path:path text)
   in
-  (match attempt (content ~bound:"") with
-   | Ok _receipt -> ()
-   | Error detail ->
-     failf
-       "an official-client Keeper runtime with no max-prompt-bytes must load: %s"
-       detail);
-  (* Declaring it stays legal — the key still exists for operators who want the
-     seed bounded; it is simply no longer an admission condition. *)
-  match attempt (content ~bound:"max-prompt-bytes = 131072\n") with
+  match attempt content with
   | Ok _receipt -> ()
-  | Error detail -> failf "a declared seed bound must still load: %s" detail
+  | Error detail ->
+    failf "an official-client Keeper runtime with only a window must load: %s" detail
 ;;
 
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
@@ -6883,9 +6873,9 @@ let () =
           test_case "non-positive max-tokens is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_tokens;
           test_case
-            "runtime config admits an undeclared official-client seed"
+            "runtime config admits an official-client runtime"
             `Quick
-            test_runtime_config_validation_admits_undeclared_official_client_seed;
+            test_runtime_config_validation_admits_official_client_runtime;
           test_case
             "unknown capabilities key is rejected at load"
             `Quick test_unknown_capability_key_rejected_at_load;

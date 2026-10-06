@@ -70,10 +70,11 @@ type briefing_candidates =
 
 val world_state_briefing_budget_bytes : briefing_candidates -> int option
 (** Byte budget for the pinned world-state briefing:
-    [keeper.context.briefing.share_percent] of the smallest [max-prompt-bytes]
-    those candidates declare, so the briefing fits whichever of them serves
-    the turn. A candidate that declares none adds no ceiling. [None] when no
-    candidate declares a ceiling, or the route names nothing. *)
+    [keeper.context.briefing.share_percent] of the smallest prompt ceiling
+    ({!Runtime_instance.prompt_capacity_bytes}) those candidates have, so the
+    briefing fits whichever of them serves the turn. A candidate with none
+    adds no ceiling. [None] when no candidate has a ceiling, or the route
+    names nothing. *)
 
 val resolved_max_context_for_turn
   :  meta:keeper_meta

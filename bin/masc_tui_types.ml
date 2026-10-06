@@ -5914,6 +5914,8 @@ type state = {
   mutable memory_health_inflight: bool;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
+  mutable memory_unit: Masc_tui_memory_usage.display_unit;
+  mutable memory_input: (string, Masc_tui_memory_usage.t) Masc_tui_fetched.t;
   (* The Memory fact browser. [memory_facts_keeper = None] draws the health
      table; [Some name] draws that keeper's fact listing over it. The
      category filter holds a category string exactly as the server spelled
@@ -8708,6 +8710,8 @@ let create_state
   memory_health_inflight = false;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
+  memory_unit = Masc_tui_memory_usage.Tokens;
+  memory_input = Masc_tui_fetched.initial;
   memory_facts_keeper = None;
   memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;
@@ -9992,6 +9996,27 @@ let visible_memory_keepers (state : state) =
 let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
+
+let apply_memory_health_snapshot (state : state) snapshot =
+  let selected_id =
+    Option.map
+      (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id)
+      (selected_memory_keeper state)
+  in
+  state.memory_health <- Some snapshot;
+  state.memory_health_error <- None;
+  let rows = visible_memory_keepers state in
+  (* A cadence read can change the current sort order. Follow the Keeper the
+     operator was reading, then clamp the old position if that row vanished. *)
+  state.memory_health_cursor <-
+    match Option.bind selected_id (fun keeper_id ->
+      List.find_index
+        (fun keeper ->
+          String.equal keeper.Masc.Tui_decode_memory_health.mkh_keeper_id keeper_id)
+        rows)
+    with
+    | Some index -> index
+    | None -> max 0 (min state.memory_health_cursor (List.length rows - 1))
 
 (* [header_rows] is how many rows the fleet header above the sort row takes,
    and [context_rows] how many the selected keeper's block below the list

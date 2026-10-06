@@ -28,7 +28,11 @@ Design reference: [Anthropic context engineering](https://www.anthropic.com/engi
 
 ## Operator readings in the TUI
 
-Memory storage is shown in observed B/KiB/MiB, never estimated model tokens. Storage includes the persisted snapshot serialization, so it is not a measure of this turn's recall or provider request. The chat Context inspector labels the measured Recall block at its own recorded turn; prior records may have full-memory content and must not be relabelled as notices.
+Memory defaults to estimated tokens (marked ≈); `u` switches to B/KiB/MiB. The health endpoint measures rendered knowledge text, excluding snapshot bookkeeping. Storage is not a measure of this turn's Recall or provider request.
+
+Selecting a Keeper also shows mean, maximum, minimum and last input over its recent 50 recorded Keeper turns. Each turn contributes its recorded latest request, not every internal request in that turn. Token mode uses recorded per-request input (which can include runtime estimates whose basis TurnRecord does not preserve); byte mode independently measures serialized request bodies. Missing values and cumulative/turn-total usage are excluded from token aggregates, reported zeros remain samples, and the newest turn's missing value is shown as unreported rather than replaced by an older value. Coverage is shown separately for each unit. Unreadable/skipped records make the reading unavailable. A failed refresh retains explicitly stale values.
+
+The chat Context inspector labels the measured Recall block at its own recorded turn; prior records may have full-memory content and must not be relabelled as notices.
 
 A currently failed Librarian pass and historical failed-pass counts are separate readings. Recovered memory can be current even while its failure history is nonzero. The memory state label describes memory processing, not Keeper execution. Both the historical count and current error cause stay available.
 

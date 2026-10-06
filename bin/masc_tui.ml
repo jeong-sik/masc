@@ -4469,6 +4469,24 @@ let launch_repositories_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_repositories ~host ~port)
   end
 
+let launch_memory_input_load state ~mailbox ~refresh =
+  if state.view = Memory && Option.is_none state.memory_facts_keeper
+     && same_workspace_identity state.server_identity state.server_identity then
+    match selected_memory_keeper state with
+    | None -> ()
+    | Some keeper ->
+      let key = keeper.Masc.Tui_decode_memory_health.mkh_keeper_id in
+      let current = Masc_tui_fetched.current_key state.memory_input in
+      if refresh || current <> Some key then
+        match Masc_tui_fetched.start ~equal:String.equal state.memory_input ~key with
+        | Masc_tui_fetched.Already_loading -> ()
+        | Masc_tui_fetched.Started (next, request) ->
+          state.memory_input <- next;
+          let host = server_peer_host and port = state.port in
+          launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+            ~deliver:(fun result -> Memory_input_loaded (request, result))
+            (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key)
+
 let launch_memory_health_load state ~mailbox =
   if state.memory_health_inflight
      || not (same_workspace_identity state.server_identity state.server_identity) then ()
@@ -10412,6 +10430,14 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
   withdraw_voice_capture state;
+  (* Keeper names are local to a workspace. Retire both the selected roster
+     and its input request before another workspace can reuse the same name. *)
+  state.memory_input <- Masc_tui_fetched.clear state.memory_input;
+  state.memory_health <- None;
+  state.memory_health_error <- None;
+  state.memory_health_inflight <- false;
+  state.memory_health_cursor <- 0;
+  state.memory_health_scroll <- 0;
   state.task_detail_id <- None;
   state.task_detail_scroll <- 0;
   state.task_history <- None;
@@ -16466,9 +16492,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       state.memory_health_inflight <- false;
       (match result with
       | Ok snapshot ->
-          state.memory_health <- Some snapshot;
-          state.memory_health_error <- None
-      | Error detail -> state.memory_health_error <- Some detail)
+          apply_memory_health_snapshot state snapshot
+      | Error detail -> state.memory_health_error <- Some detail);
+      launch_memory_input_load state ~mailbox ~refresh:true
+  | Memory_input_loaded (request, result) ->
+      state.memory_input <-
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_input request result
   | Memory_facts_loaded (request, result) ->
       (* A late answer for a browser that closed, or for the keeper the reader
          already left, is dropped whole by [complete]. A failed refresh keeps
@@ -22908,6 +22937,9 @@ and is loaded on demand through keeper_skill.
              Masc_tui_types.next_memory_overview_sort state.memory_overview_sort;
            state.memory_health_cursor <- 0;
            state.memory_health_scroll <- 0
+       | Some ("u" | "U")
+         when state.view = Memory && Option.is_none state.memory_facts_keeper ->
+           state.memory_unit <- Masc_tui_memory_usage.next_unit state.memory_unit
        | Some ("d" | "D")
          when state.view = Memory && Option.is_some state.memory_facts_keeper ->
            toggle_memory_facts_categories ~cols:terminal_columns state
@@ -26979,6 +27011,8 @@ and is loaded on demand through keeper_skill.
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
+
+      launch_memory_input_load state ~mailbox:async_messages ~refresh:false;
 
       (* A prompt revalidation keeps the last observed connection. Only a
          read still pending beyond the operator's refresh cadence needs a

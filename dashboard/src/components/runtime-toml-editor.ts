@@ -1,5 +1,5 @@
 import type { ModelSetupResumeState } from '../lib/model-setup-resume'
-import { completeExactLaneSetupResume } from '../lib/exact-lane-activity-session'
+import { completeLaneActivitySetupResume } from '../lib/lane-activity-session'
 import { ModelSetupResumeControl } from './model-setup-resume-control'
 import { html } from 'htm/preact'
 import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
@@ -266,7 +266,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, authority, session }: Runt
 
   async function afterSetupResume(result: ModelSetupResumeState) {
     if (!session.admits(authority)) return
-    completeExactLaneSetupResume(authority, result)
+    completeLaneActivitySetupResume(authority, result)
     announceExactLaneObservationChanged(authority)
     try { await refreshRuntimeConfigConsumers() }
     catch (error) {

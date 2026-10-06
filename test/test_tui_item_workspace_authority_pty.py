@@ -48,6 +48,7 @@ class ItemWire(authority.WorkspaceWire):
         self.missing_revision = False
         self.booting = False
         self.ready_after_boot = False
+        self.returned_balance = "3250"
 
     def set_booting(self, booting):
         with self.lock:
@@ -99,8 +100,10 @@ class ItemWire(authority.WorkspaceWire):
                     row["runtime_id"] = "a.boot.ready"
                 if missing:
                     row.pop("candle_account_revision")
+                    row["runtime_id"] = "a.public.missing"
                 elif malformed:
                     row["candle_account_revision"] = {"unexpected": "object"}
+                    row["runtime_id"] = "a.public.malformed"
         return status, payload
 
     def change_account(self, state):
@@ -116,6 +119,7 @@ class ItemWire(authority.WorkspaceWire):
     def items(self):
         with self.lock:
             phase, state = self.phase, self.account_state
+            returned_balance = self.returned_balance
             held = self.hold_next and phase == "a"
             if held:
                 self.hold_next = False
@@ -136,7 +140,7 @@ class ItemWire(authority.WorkspaceWire):
         if phase == "a":
             return account("12500", "glasses", "1000", "a")
         if phase == "a-returned":
-            return account("3250", "quill", "1750", "c")
+            return account(returned_balance, "quill", "1750", "c")
         return account("7500", "crown", "2000", "b")
 
 
@@ -268,13 +272,6 @@ def run(binary, captures):
                 (captures / (name + ".pty")).write_bytes(output)
             print("ITEM_AUTHORITY_FRAME " + name + "\n" + visible().decode(errors="replace"), flush=True)
 
-        def item_read_observed(*, missing=False, malformed=False):
-            with wire.lock:
-                return any(event["event"] == "items"
-                    and event["missing_revision"] == missing
-                    and event["malformed_revision"] == malformed
-                    for event in wire.events)
-
         def booting_observed():
             with wire.lock:
                 return any(event["event"] == "item-health" and event["booting"]
@@ -394,19 +391,43 @@ def run(binary, captures):
             wire.set_roster_unavailable(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
-            wire.set_missing_revision(True)
-            wait(lambda text: item_read_observed(missing=True) and b"Balance 3.250 Candle" in text,
-                 "missing public revision blocked the authenticated Item account")
-            wire.set_missing_revision(False)
-            wait(lambda text: b"Balance 3.250 Candle" in text,
-                 "restored revision did not reload Item facts")
-            wire.set_malformed_revision(True)
-            wait(lambda text: item_read_observed(malformed=True) and b"Balance 3.250 Candle" in text,
-                 "malformed public revision blocked the authenticated Item account")
-            capture("a-revision-malformed")
-            wire.set_malformed_revision(False)
-            wait(lambda text: b"Balance 3.250 Candle" in text,
-                 "valid revision recovery did not reload Item facts")
+            # Public revision fields cannot suppress a fresh private account.
+            # Changed balances prove the returned body replaced the old reading.
+            for public_revision, balance, rendered_balance in (
+                ("missing", "4250", b"Balance 4.250 Candle"),
+                ("malformed", "5250", b"Balance 5.250 Candle"),
+            ):
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                with wire.lock:
+                    wire.missing_revision = public_revision == "missing"
+                    wire.malformed_revision = public_revision == "malformed"
+                os.write(fd, b"r")
+                # The marker travels in the same public row as the invalid
+                # revision. Its rendered frame proves that row was applied,
+                # not merely requested concurrently with a private Item read.
+                marker = ("a.public." + public_revision).encode()
+                wait(lambda text: b"MASC Keepers" in text and marker in text,
+                     "public " + public_revision + " revision was not applied")
+                capture("a-public-roster-" + public_revision)
+                with wire.lock:
+                    before_events = len(wire.events)
+                    wire.returned_balance = balance
+                open_items()
+                os.write(fd, b"r")
+                def fresh_items():
+                    with wire.lock:
+                        return any(event["event"] == "items"
+                            and event[public_revision + "_revision"]
+                            for event in wire.events[before_events:])
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output, fresh_items,
+                    timeout=authority.WAIT_SECONDS), "public revision blocked the authenticated Item read"
+                wait(lambda text: rendered_balance in text and b"quill" in text and b"owned" in text,
+                     "fresh private Item facts were not applied with " + public_revision + " public revision")
+                capture("a-public-revision-" + public_revision)
+                wire.set_missing_revision(False)
+                wire.set_malformed_revision(False)
+            with wire.lock:
+                wire.returned_balance = "3250"
             wire.set_booting(True)
             wait(lambda text: booting_observed() and b"No keeper selected." in text
                  and "▸Items".encode() not in text,

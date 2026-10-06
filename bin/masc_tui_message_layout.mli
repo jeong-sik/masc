@@ -619,6 +619,14 @@ val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
     Words wider than the budget are split between complete UTF-8 scalars. *)
 
+val boxed_rows : inner:int -> string -> string list
+(** The rows a box body spends on [content] at inner width [inner]: one row per
+    server line, plus the rows a line longer than the body wraps to. The box
+    draws each row with a two-cell indent, so a line wraps at [inner - 2]. Both
+    the drawing and every row budget that reserves space for it count with this
+    one function, so the frame and the footer cannot disagree about how many
+    rows the body took. *)
+
 val wrap_styled_words : max_cells:int -> string -> string list
 (** Word wrapping for trusted renderer-owned SGR text. Each row replays the
     preceding SGR state and ends with a reset, so any row can be drawn alone. *)

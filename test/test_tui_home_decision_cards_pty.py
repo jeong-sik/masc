@@ -152,9 +152,9 @@ def failed_source_keeps_known_cards(executable):
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.wait_for_output(process, fd, output, b"known-gate-card", start=0, timeout=10)
         _keyboard_harness.wait_for_output(process, fd, output, b"known-held-card", start=0, timeout=10)
-        _keyboard_harness.wait_for_output(process, fd, output, b"confirm queue not fully read", start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, "not fully read · confirm queue".encode(), start=0, timeout=10)
         visible = frame(process, fd, output, "partial-source-success")
-        for label in (b"known-held-card", b"known-gate-card", b"confirm queue not fully read"):
+        for label in (b"known-held-card", b"known-gate-card", "not fully read · confirm queue".encode()):
             assert label in visible, visible
         assert b"No decision is waiting" not in visible, visible
         select_home(process, fd, output, b"known-gate-card", destinations=4)
@@ -229,7 +229,7 @@ def each_failed_source_keeps_other_cards(executable):
         def interact(process, fd, _slave, output, _base):
             known = b"retained-gate-card" if failed_path == HELD_PATH else b"retained-held-card"
             _keyboard_harness.wait_for_output(process, fd, output, known, start=0, timeout=10)
-            note = b"Approvals and questions: " + failed_label + b" not fully read"
+            note = "Approvals and questions: not fully read · ".encode() + failed_label
             # Match the sole-source label through the end of its drawn row.
             # The last changed row ends the frame without another row cursor.
             settled = re.compile(
@@ -237,6 +237,14 @@ def each_failed_source_keeps_other_cards(executable):
                 + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m"
                 + rb"(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)"
             )
+            # The first identity read withdraws the pre-identity operator
+            # ticket. Read again under the applied workspace authority before
+            # asserting that only the deliberately failed source is unread.
+            _keyboard_harness.wait_for_output(process, fd, output, b"Health: ok", start=0, timeout=10)
+            _keyboard_harness.write_all(fd, output, b"r")
+            # The failed-confirm case already has this exact status; refresh
+            # need not repaint an unchanged row. The forced frames below
+            # assert the current sole-source label at both widths.
             _keyboard_harness.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(_keyboard_harness.FULL_REDRAW,),
@@ -247,9 +255,11 @@ def each_failed_source_keeps_other_cards(executable):
                                           final_cursor=b"\x1b[?25l")
                 visible = _keyboard_harness.screen_text(drawn)
                 assert known in visible and note in visible, visible
+                status_row = next(row for row in visible.splitlines() if note in row)
+                source_names = status_row.split("not fully read · ".encode(), 1)[1]
                 for _path, label in cases:
                     if label != failed_label:
-                        assert label + b" not fully read" not in visible, visible
+                        assert label not in source_names, visible
                 assert b"No decision is waiting" not in visible, visible
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")

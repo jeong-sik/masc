@@ -1,0 +1,46 @@
+{
+    "version": "1.1.409",
+    "time": "1791131382636",
+    "generalDiagnostics": [
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-metadata-scanner-types-20261005/test/test_tui_keeper_metadata_wrap_pty.py",
+            "severity": "error",
+            "message": "\"current\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 68,
+                    "character": 86
+                },
+                "end": {
+                    "line": 68,
+                    "character": 93
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-metadata-scanner-types-20261005/test/test_tui_keeper_metadata_wrap_pty.py",
+            "severity": "error",
+            "message": "\"current\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 69,
+                    "character": 11
+                },
+                "end": {
+                    "line": 69,
+                    "character": 18
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 2,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.235
+    }
+}
+

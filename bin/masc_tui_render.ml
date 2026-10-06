@@ -1042,9 +1042,14 @@ let render_planning_list (state : state) =
        in
        let add_summary_if_fits summary =
          if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
-         then Buffer.add_buffer buf summary
+         then (Buffer.add_buffer buf summary; true)
+         else false
        in
        let summary_width = framed_inner_width cols in
+       let wrap_summary summary ~style text =
+         Message_layout.wrap_styled_words ~max_cells:(max 1 summary_width) text
+         |> List.iter (box_line_styled summary cols ~style)
+       in
        let summary_cards =
          studio_pair ~width:summary_width
            (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
@@ -1059,9 +1064,19 @@ let render_planning_list (state : state) =
          && count_frame_lines buf + summary_card_rows + reserved_rows <= rows
        in
        if cards_fit then List.iter (box_line buf cols) summary_cards
-       else box_line buf cols rollup;
+       else begin
+         let rollup_summary = Buffer.create 256 in
+         wrap_summary rollup_summary ~style:"" rollup;
+         ignore (add_summary_if_fits rollup_summary)
+       end;
+       let backlog_summary = Buffer.create 256 in
+       wrap_summary backlog_summary ~style:""
+         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
+       (* Preserve the current counts before spending optional rows on change
+          since the baseline. Wrapped physical rows share the list budget. *)
+       let backlog_visible = cards_fit || add_summary_if_fits backlog_summary in
        let trend = Buffer.create 256 in
-       box_line_styled trend cols ~style:(Theme.info ())
+       wrap_summary trend ~style:(Theme.info ())
          (match state.planning_baseline with
           | None -> "  Trend: waiting for the first successful reading"
           | Some first ->
@@ -1081,11 +1096,7 @@ let render_planning_list (state : state) =
                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
-       add_summary_if_fits trend;
-       let backlog_summary = Buffer.create 256 in
-       box_line backlog_summary cols
-         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       if not cards_fit then add_summary_if_fits backlog_summary;
+       if backlog_visible then ignore (add_summary_if_fits trend);
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;

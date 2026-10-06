@@ -1,0 +1,26 @@
+{
+  "base": "f72e5902dacd359a008b3cf0d5272e5911193815",
+  "source_sha256": {
+    "bin/masc_tui_render.ml": "a8e36f3aadf355faa59347ca0fae307eca04bcc5d44fe327c21717c3af21b586",
+    "test/test_tui_usage_studio_pty.py": "d08082683893822adcc17e07b8c85e376cc6bcffe3ac96f13b8dcbe5379b2b54",
+    "changelog.d/40906.md": "0a0a62d350c02d006767174591ddd73152672cf1e38c22b18da16bdfed81a422"
+  },
+  "artifacts_sha256": {
+    "red.log": "7339d0cd667915836d2ee31786e0e409695cc51de5ad2689774aa599b43e5349",
+    "green.log": "9ad079168d6b29a9688f82d1e414ad64c6bf4f8eb14adab41b44bc34b5ad6f07",
+    "pyright.json": "cb4d1467fb39616e723905ae47d1ecb4b7f247f1429b5e7716145c5438b40dba",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "build.log": "990fa021ad8479f19f6f39523ddc8516ab80f70e65eca0fb16077cb60003d687"
+  },
+  "binary_sha256": {
+    "_build/default/bin/masc_tui.exe": "4a004f48f98ae6f7b16b2b5da7192db5b54bded2752417a9a225cdcc4378017a"
+  },
+  "results": {
+    "before": "Actual Usage journey fails: Trend omitted range meaning down arrow below zero",
+    "focused_tui_build": 0,
+    "after": "Two full Usage journeys PASS; wide and compact Trend meanings; color and NO_COLOR",
+    "ruff": 0,
+    "pyright": 0,
+    "native_suite": "Not rerun; presentation label only"
+  }
+}

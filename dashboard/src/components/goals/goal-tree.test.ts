@@ -87,7 +87,7 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     goal_fsm: {
       state: 'executing',
       source: 'goal.phase',
-      next_actions: [],
+      next_actions: ['request_complete', 'drop', 'pause', 'block'],
       activity_observation: 'goal_metadata',
     },
     priority: 3,
@@ -272,7 +272,33 @@ describe('GoalTree', () => {
       expect(mocks.fetchDashboardGoalDetail.mock.calls.length).toBeGreaterThanOrEqual(2)
     })
     expect(screen.getByTestId('goal-lifecycle-action-status').textContent)
-      .toContain('requested completion')
+      .toContain('Request completion applied')
+  })
+
+  it.each([
+    ['paused', 'resume', 'Resume', 'verifying'],
+    ['blocked', 'unblock', 'Unblock', 'awaiting_confirmation'],
+  ] as const)('restores a %s Goal using server actions', async (phase, action, label, restore) => {
+    const goal = {
+      ...makeGoal('goal-suspended', 'Suspended goal'), phase, resume_phase: restore,
+      goal_fsm: { state: phase, source: 'goal.phase', next_actions: [action, 'drop', 'reopen'], activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, phase_counts: { [phase]: 1 } },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByRole('button', { name: label })).toBeTruthy())
+    expect(document.querySelector('[data-goal-resume-phase]')?.textContent).toContain('재개 시')
+    expect(screen.queryByRole('button', { name: 'Request completion' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
+      goal_id: 'goal-suspended', action, actor: { id: 'dashboard-test', display_name: 'dashboard-test' },
+    }))
   })
 
   it('renders a verifying goal with phase label, filter chip, and summary count', async () => {

@@ -1,0 +1,75 @@
+{
+ "keeper": "sangsu",
+ "from": "2026-10-05T18:00",
+ "until": "2026-10-06T02:50",
+ "calls": 2442,
+ "tokens": 1333812637,
+ "by_total_turns": {
+  "3944": {
+   "first": "2026-10-05T18:03:05",
+   "first_call_tokens": 48004,
+   "calls": 3,
+   "tokens": 150785,
+   "max_tokens": 53445,
+   "last": "2026-10-05T18:04:04"
+  },
+  "3945": {
+   "first": "2026-10-05T18:14:21",
+   "first_call_tokens": 37309,
+   "calls": 1608,
+   "tokens": 637705143,
+   "max_tokens": 686047,
+   "last": "2026-10-05T19:57:02"
+  },
+  "4003": {
+   "first": "2026-10-05T21:00:45",
+   "first_call_tokens": 691265,
+   "calls": 776,
+   "tokens": 641061892,
+   "max_tokens": 966863,
+   "last": "2026-10-06T00:15:02"
+  },
+  "4043": {
+   "first": "2026-10-06T01:24:45",
+   "first_call_tokens": 974986,
+   "calls": 55,
+   "tokens": 54894817,
+   "max_tokens": 1015783,
+   "last": "2026-10-06T02:49:11"
+  }
+ },
+ "tools": [
+  [
+   "keeper_memory_write",
+   2396
+  ],
+  [
+   "keeper_memory_search",
+   16
+  ],
+  [
+   "Execute",
+   9
+  ],
+  [
+   "WebSearch",
+   5
+  ],
+  [
+   "keeper_artifact_read",
+   4
+  ],
+  [
+   "keeper_surface_read",
+   3
+  ],
+  [
+   "masc_schedule_list",
+   3
+  ],
+  [
+   "masc_board_post_get",
+   3
+  ]
+ ]
+}

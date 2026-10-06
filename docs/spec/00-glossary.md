@@ -1978,6 +1978,23 @@ status: reference
   채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
   → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
 
+**Keeper Delegate Completion Wake (위임 완료 깨움)**
+: 다른 Keeper에게 떼어 맡긴 turn(`masc_keeper_delegate`)의 답을 요청한 Keeper에게
+  되돌리는 durable 자극. `masc_keeper_delegate`는 operation id만 돌려주고 기다리지
+  않으므로, 이 자극이 없으면 답은 요청한 Keeper가 그 id를 다시 읽어야만 닿았다 —
+  2026-08-17..24 실측에서 위임 4건 중 상태 조회 0건이었다. 자극은
+  `Keeper_event_queue.Delegate_completed`이고 payload는 `delegate_completion`
+  (`dc_operation_id`·`dc_keeper`·`dc_terminal`)이다. `dc_terminal`은 닫힌 세 값이다 —
+  `Delegate_replied`(되돌릴 가시적 답을 나름)·`Delegate_no_reply`(되돌릴 텍스트 없이
+  turn이 끝남; 도구로 다른 곳에 썼는지 아무 말도 안 했는지는 가르지 않는다)·`Delegate_failed`
+  (실패 상세). 자극 id는 `keeper-delegate:<operation_id>`이고, 한 위임은 한 번만 답하므로
+  operation id 하나로 완전한 키다. 답은 먼저 커밋되고 그 뒤에 알린다 — 커밋은 HITL·Fusion과
+  같은 fail-closed durable 경로를 쓰고, 뒤따르는 live wake는 힌트일 뿐이라 `Running`
+  Keeper에게만 닿고 실패는 로그로 남긴다(자극은 이미 큐에 있어 다음 admitted turn에 읽힌다).
+  `Fusion_completed`·`Hitl_resolved`와 같은 부류다.
+  → [Keeper_delegate_completion_wake](../../lib/keeper/keeper_delegate_completion_wake.mli) ·
+  [Keeper_event_queue](../../lib/keeper_runtime/keeper_event_queue.mli)
+
 **Approval Queue Phase (승인 큐 진행 단계)**
 : Human-in-the-Loop (HITL) 승인 큐에서 각 승인 요청 항목이 거치고 있는 진행 단계를
   서버가 단일 wire 문자열로 투영한 닫힌 네 값(`approval_queue_phase`: `Phase_queued` ·

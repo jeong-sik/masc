@@ -63,8 +63,13 @@ def wait_for_picture(process, fd, output, *, start: int, expected: bytes) -> byt
             raise AssertionError("TUI exited before the expected remote portrait")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
+            sizes = sorted({rgba_png(image)[:2] for image in images})
             hashes = [hashlib.sha256(image).hexdigest() for image in images]
-            raise AssertionError(f"remote portrait pixels did not arrive; observed PNGs: {hashes}")
+            raise AssertionError(
+                f"remote portrait pixels did not arrive; wanted sha256 "
+                f"{hashlib.sha256(expected).hexdigest()[:16]}... at "
+                f"{wanted[:2]}, observed sizes {sizes} sha256 "
+                f"{[h[:16] + '...' for h in hashes]}")
         select.select([fd], [], [], min(0.1, remaining))
 
 
@@ -145,11 +150,19 @@ class RemoteIdentity:
 def remote_portrait(binary: str, evidence: Path) -> None:
     manifest = json.loads((evidence / "manifest.json").read_text())
     keeper = manifest["keeper"]
-    before = (evidence / "before.png").read_bytes()
-    equipped = (evidence / "equipped.png").read_bytes()
+    # The Info tab's icon band draws the face-framed icon render at
+    # min_pixel_rows cell rows (4 * 20 px here), not the endpoint's full
+    # scene; the fixture exports the same renderer at the same framing and
+    # edge (before-icon.png / equipped-icon.png) as the comparison baseline.
+    # 80px is this scenario's terminal constant (cell height 20px reported
+    # by display_of at rows=70), not a product bound: a 24px-cell terminal
+    # would draw 96px and this expectation must be recomputed from the
+    # terminal's cell metrics, never widened to match what arrives.
+    before = (evidence / "before-icon.png").read_bytes()
+    equipped = (evidence / "equipped-icon.png").read_bytes()
     assert manifest["pixel_size"] == 160
-    assert rgba_png(before)[:2] == rgba_png(equipped)[:2] == (160, 160)
-    assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
+    assert rgba_png(before)[:2] == rgba_png(equipped)[:2] == (80, 80), \
+        "fixture icon exports must match the Info band's 4x20px box"    assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
     roster = Roster((evidence / "before-roster.json").read_bytes(),
                     (evidence / "equipped-roster.json").read_bytes())
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
@@ -375,10 +388,15 @@ def main() -> None:
             environment["RUNNER_TEMP"] = str(root)
             # Run only the existing real purchase/equip/router scenario.
             # Its export is reached after all product assertions succeed.
-            result = subprocess.run([fixture, "test", "router", "4"],
+            # The dedicated suite keeps the consumer aimed at this case even
+            # when future fixture cases are inserted into "router", and the
+            # manifest check names what actually failed if that ever moves.
+            result = subprocess.run([fixture, "test", "router-ledger-export"],
                 env=environment, capture_output=True, timeout=60, check=False)
             (evidence / "native-fixture.log").write_bytes(result.stdout + result.stderr)
             assert result.returncode == 0, (result.stdout + result.stderr).decode(errors="replace")
+            assert (evidence / "manifest.json").exists(), \
+                "fixture ran the wrong case (no manifest export); see native-fixture.log"
             remote_portrait(binary, evidence)
         finally:
             artifact_root = os.environ.get("RUNNER_TEMP")

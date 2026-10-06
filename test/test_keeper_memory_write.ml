@@ -475,7 +475,29 @@ let test_a_rewrite_receipt_has_the_same_answer () =
     "two rewrites: one answer" (fingerprint rewrite_a) (fingerprint rewrite_b);
   Alcotest.(check bool)
     "the insert is another answer" false
-    (String.equal (fingerprint inserted) (fingerprint rewrite_a))
+    (String.equal (fingerprint inserted) (fingerprint rewrite_a));
+  (* The answer keeps the fields it names, so a field the receipt gains
+     drops out of it unseen. Pinning what the real receipt leaves out makes
+     a new field a decision: answer or stamp. [what_committed] is the prose
+     [identity_disposition] already names. *)
+  let keys = function
+    | `Assoc fields -> List.sort String.compare (List.map fst fields)
+    | _ -> Alcotest.fail "a memory write receipt is a JSON object"
+  in
+  let answer_keys =
+    match
+      Masc.Keeper_tool_answer.answer ~tool_name:"keeper_memory_write"
+        ~output_text:rewrite_a
+    with
+    | Some answer -> keys answer
+    | None -> Alcotest.fail "keeper_memory_write read no answer from its receipt"
+  in
+  Alcotest.(check (list string))
+    "only the stamps are left out of the answer"
+    [ "recorded_at"; "revision"; "rows_written"; "what_committed" ]
+    (List.filter
+       (fun key -> not (List.mem key answer_keys))
+       (keys (Yojson.Safe.from_string rewrite_a)))
 
 let test_write_comes_back_through_recall () =
   with_temp_dir

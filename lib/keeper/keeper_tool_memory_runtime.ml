@@ -1703,13 +1703,60 @@ let support_invalidation_receipt
 (* What a removal took with it: the facts that left the snapshot, and the
    derived facts among them that lost their last complete support path. A
    retraction and a supersession report it in the same two fields. *)
+(* The keys of a [keeper_memory_write] receipt that say what the write did.
+   The receipts below write them through these names and the repeat guard's
+   answer ([memory_write_answer_of_output]) keeps exactly [answer], so the two
+   cannot drift apart without the compiler seeing it. Snapshot stamps
+   ([revision], [recorded_at]), counts and prose ([rows_written],
+   [what_committed]) are not answer keys. *)
+module Write_receipt_key = struct
+  let ok = "ok"
+  let error_kind = "error_kind"
+  let effect_disposition = "effect_disposition"
+  let detail = "detail"
+  let outcome = "outcome"
+  let store = "store"
+  let memory_id = "memory_id"
+  let identity_disposition = "identity_disposition"
+  let basis = "basis"
+  let superseded_memory_id = "superseded_memory_id"
+  let supersedes = "supersedes"
+  let supersedes_already_removed = "supersedes_already_removed"
+  let source_path = "source_path"
+  let source_sha256 = "source_sha256"
+  let missing_premise_ids = "missing_premise_ids"
+  let removed_memory_ids = "removed_memory_ids"
+  let support_invalidations = "support_invalidations"
+
+  let answer =
+    [ ok
+    ; error_kind
+    ; effect_disposition
+    ; detail
+    ; outcome
+    ; store
+    ; memory_id
+    ; identity_disposition
+    ; basis
+    ; superseded_memory_id
+    ; supersedes
+    ; supersedes_already_removed
+    ; source_path
+    ; source_sha256
+    ; missing_premise_ids
+    ; removed_memory_ids
+    ; support_invalidations
+    ]
+  ;;
+end
+
 let removal_receipt (snapshot : Keeper_memory_os_current.t) =
-  [ ( "removed_memory_ids"
+  [ ( Write_receipt_key.removed_memory_ids
     , `List
         (List.map
            (fun fact -> `String (Keeper_memory_os_types.memory_id fact))
            snapshot.change.removed) )
-  ; ( "support_invalidations"
+  ; ( Write_receipt_key.support_invalidations
     , `List (List.map support_invalidation_receipt snapshot.change.invalidated) )
   ]
 ;;
@@ -1749,10 +1796,10 @@ let memory_write_identity_disposition
 
 let memory_write_identity_receipt = function
   | Inserted ->
-    [ "identity_disposition", `String "inserted"
+    [ Write_receipt_key.identity_disposition, `String "inserted"
     ; "what_committed", `String "One current fact was inserted. Its memory_id identifies the exact claim bytes; writing those bytes again reuses this identity, without creating another copy." ]
   | Reobserved ->
-    [ "identity_disposition", `String "reobserved"
+    [ Write_receipt_key.identity_disposition, `String "reobserved"
     ; "what_committed", `String "The existing current fact was re-observed; its observation or support was refreshed. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
 ;;
 
@@ -1763,28 +1810,13 @@ let memory_write_identity_receipt = function
    receipt different only there). A field this list does not name stays out
    of the answer: a new stamp then cannot hide a loop, and a new field that
    does carry a change costs at most one resume. *)
-let memory_write_answer_fields =
-  [ "ok"
-  ; "error_kind"
-  ; "effect_disposition"
-  ; "detail"
-  ; "outcome"
-  ; "store"
-  ; "memory_id"
-  ; "identity_disposition"
-  ; "basis"
-  ; "superseded_memory_id"
-  ; "supersedes"
-  ; "supersedes_already_removed"
-  ; "source_path"
-  ; "source_sha256"
-  ]
-;;
+let memory_write_answer_fields = Write_receipt_key.answer
 
 let memory_write_answer_of_output output_text =
   let names_answer (key, _) = List.exists (String.equal key) memory_write_answer_fields in
   match Yojson.Safe.from_string output_text with
-  | `Assoc fields when List.exists (fun (key, _) -> String.equal key "ok") fields ->
+  | `Assoc fields
+    when List.exists (fun (key, _) -> String.equal key Write_receipt_key.ok) fields ->
     Some (`Assoc (List.filter names_answer fields))
   | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   | exception Yojson.Json_error _ -> None
@@ -1798,8 +1830,8 @@ let keeper_memory_write_with_outcome
   =
   let respond ~ok ~error_kind extras =
     let head =
-      [ "ok", `Bool ok
-      ; "error_kind", `String (memory_write_error_kind_to_string error_kind)
+      [ Write_receipt_key.ok, `Bool ok
+      ; Write_receipt_key.error_kind, `String (memory_write_error_kind_to_string error_kind)
       ]
     in
     if ok
@@ -1809,7 +1841,7 @@ let keeper_memory_write_with_outcome
       let payload =
         `Assoc
           (head
-           @ [ ( "effect_disposition"
+           @ [ ( Write_receipt_key.effect_disposition
                , `String (Tool_result.failure_effect_disposition_to_string effect_disposition) )
              ; "what_committed", `String what_committed
              ]
@@ -1871,10 +1903,10 @@ let keeper_memory_write_with_outcome
                ; ( "recorded_at"
                  , `String
                      (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-               ; "outcome", `String "persisted_source_bound_current"
-               ; "store", `String "source_bound_current_memory"
-               ; "source_path", `String source_path
-               ; "source_sha256", `String source_sha256
+               ; Write_receipt_key.outcome, `String "persisted_source_bound_current"
+               ; Write_receipt_key.store, `String "source_bound_current_memory"
+               ; Write_receipt_key.source_path, `String source_path
+               ; Write_receipt_key.source_sha256, `String source_sha256
                ]
            | None ->
              let detail =
@@ -1889,12 +1921,12 @@ let keeper_memory_write_with_outcome
              respond
                ~ok:false
                ~error_kind:Commit_receipt_inconsistent
-               [ "revision", `Int snapshot.revision; "detail", `String detail ])
+               [ "revision", `Int snapshot.revision; Write_receipt_key.detail, `String detail ])
         | Error (Keeper_memory_source_current.Source_read_failed failure) ->
           respond
             ~ok:false
             ~error_kind:(Source_read_failed failure)
-            [ "detail"
+            [ Write_receipt_key.detail
             , `String (Keeper_memory_source_current.source_read_failure_to_string failure)
             ]
         | Error (Keeper_memory_source_current.Store_write_failed detail) ->
@@ -1902,7 +1934,7 @@ let keeper_memory_write_with_outcome
             "explicit source-bound memory write failed keeper=%s: %s"
             meta.name
             detail;
-          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ]
+          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ]
         | exception (Eio.Cancel.Cancelled _ as error) -> raise error
         | exception exn ->
           let detail = Printexc.to_string exn in
@@ -1910,7 +1942,7 @@ let keeper_memory_write_with_outcome
             "explicit source-bound memory write failed keeper=%s: %s"
             meta.name
             detail;
-          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ])
+          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ])
      | None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
      | Ok (snapshot, supersession) ->
@@ -1952,19 +1984,19 @@ let keeper_memory_write_with_outcome
             ; ( "recorded_at"
               , `String
                   (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-            ; "outcome", `String "persisted_current_snapshot"
-            ; "store", `String "current_memory_snapshot"
-            ; "memory_id", `String written_memory_id
-            ; "basis", memory_write_basis_receipt written_fact.basis
+            ; Write_receipt_key.outcome, `String "persisted_current_snapshot"
+            ; Write_receipt_key.store, `String "current_memory_snapshot"
+            ; Write_receipt_key.memory_id, `String written_memory_id
+            ; Write_receipt_key.basis, memory_write_basis_receipt written_fact.basis
             ]
              @
              match supersession with
              | No_supersedes -> []
              | Superseded superseded_memory_id ->
-               ("superseded_memory_id", `String superseded_memory_id)
+               (Write_receipt_key.superseded_memory_id, `String superseded_memory_id)
                :: removal_receipt snapshot
              | Target_already_dropped { memory_id; removal } ->
-               [ ( "supersedes_already_removed"
+               [ ( Write_receipt_key.supersedes_already_removed
                  , supersedes_removal_json ~memory_id removal )
                ])
         | None ->
@@ -1977,7 +2009,7 @@ let keeper_memory_write_with_outcome
           respond
             ~ok:false
             ~error_kind:Commit_receipt_inconsistent
-            [ "revision", `Int snapshot.revision; "detail", `String detail ])
+            [ "revision", `Int snapshot.revision; Write_receipt_key.detail, `String detail ])
      | Error (Write_supersede_refused error_kind) ->
        respond
          ~ok:false
@@ -1985,7 +2017,7 @@ let keeper_memory_write_with_outcome
          (Option.fold
             ~none:[]
             ~some:(fun superseded_memory_id ->
-              [ "supersedes", `String superseded_memory_id ])
+              [ Write_receipt_key.supersedes, `String superseded_memory_id ])
             supersedes)
      | Error (Write_supersede_target_removed removal) ->
        (* Still [Supersedes_not_current]; the removal is shown so the keeper
@@ -1996,7 +2028,7 @@ let keeper_memory_write_with_outcome
          (Option.fold
             ~none:[]
             ~some:(fun superseded_memory_id ->
-              [ "supersedes", `String superseded_memory_id
+              [ Write_receipt_key.supersedes, `String superseded_memory_id
               ; ( "supersedes_removed"
                 , supersedes_removal_json ~memory_id:superseded_memory_id removal )
               ])
@@ -2005,7 +2037,7 @@ let keeper_memory_write_with_outcome
        respond
          ~ok:false
          ~error_kind:Unsupported_derivation
-         [ ( "missing_premise_ids"
+         [ ( Write_receipt_key.missing_premise_ids
            , `List
                (List.map
                   (fun premise_id -> `String premise_id)
@@ -2015,7 +2047,7 @@ let keeper_memory_write_with_outcome
        respond
          ~ok:false
          ~error_kind:Supersedes_premise_of_successor
-         (( "missing_premise_ids"
+         (( Write_receipt_key.missing_premise_ids
           , `List
               (List.map
                  (fun premise_id -> `String premise_id)
@@ -2023,14 +2055,14 @@ let keeper_memory_write_with_outcome
           :: Option.fold
                ~none:[]
                ~some:(fun superseded_memory_id ->
-                 [ "supersedes", `String superseded_memory_id ])
+                 [ Write_receipt_key.supersedes, `String superseded_memory_id ])
                supersedes)
      | Error (Write_persistence_failed detail) ->
        Log.Keeper.warn
          "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
-       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ "detail", `String detail ]
+       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ Write_receipt_key.detail, `String detail ]
      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
      | exception exn ->
        (* The store is the only place a long-term claim survives, so a
@@ -2041,7 +2073,7 @@ let keeper_memory_write_with_outcome
          "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
-       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ "detail", `String detail ]))
+       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ Write_receipt_key.detail, `String detail ]))
 ;;
 
 (* --- Explicit memory retraction surface -------------------------- *)

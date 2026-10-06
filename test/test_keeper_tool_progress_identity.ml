@@ -93,13 +93,15 @@ let test_tool_names_reach_their_handlers () =
     match A.resolve name with
     | A.Keeper_handler handler -> Masc.Keeper_tool_descriptor.runtime_handler_to_string handler
     | A.Outside_keeper_descriptors -> "outside"
-    | A.Ambiguous_name _ -> "ambiguous"
   in
   check string "Execute" (Masc.Keeper_tool_descriptor.runtime_handler_to_string Masc.Keeper_tool_descriptor.Tool_execute)
     (handler "Execute");
   check string "keeper_memory_write"
     (Masc.Keeper_tool_descriptor.runtime_handler_to_string Masc.Keeper_tool_descriptor.Tool_memory_write)
     (handler "keeper_memory_write");
+  check string "a transport-prefixed name"
+    (Masc.Keeper_tool_descriptor.runtime_handler_to_string Masc.Keeper_tool_descriptor.Tool_memory_write)
+    (handler "mcp__masc__keeper_memory_write");
   check string "an external tool" "outside" (handler "some_external_mcp_tool")
 
 let test_a_whole_output_tool_keeps_every_field () =
@@ -140,6 +142,27 @@ let test_a_memory_rewrite_is_the_same_answer () =
           (memory_receipt ~disposition:"inserted" ~memory_id:"sha256:aa" ~revision:1
              ~recorded_at:"t")))
 
+(* A source-bound write names what it stored by the file's hash, not by a
+   memory_id. The hash is the answer: the same file written again is the
+   same answer, an edited file is another one. *)
+let source_bound_receipt ~source_sha256 ~revision =
+  Printf.sprintf
+    {|{"ok":true,"error_kind":"","what_committed":"w","rows_written":1,"revision":%d,"recorded_at":"2026-10-05T21:%02d:00Z","outcome":"persisted_source_bound_current","store":"source_bound_current_memory","source_path":"docs/a.md","source_sha256":%S}|}
+    revision revision source_sha256
+
+let test_a_source_bound_rewrite_is_named_by_its_hash () =
+  let fingerprint ~source_sha256 ~revision =
+    output_fingerprint ~tool_name:"keeper_memory_write"
+      (source_bound_receipt ~source_sha256 ~revision)
+  in
+  check string "the same file written again is the same answer"
+    (fingerprint ~source_sha256:"sha256:11" ~revision:7)
+    (fingerprint ~source_sha256:"sha256:11" ~revision:8);
+  check bool "an edited file is another answer" false
+    (String.equal
+       (fingerprint ~source_sha256:"sha256:11" ~revision:7)
+       (fingerprint ~source_sha256:"sha256:22" ~revision:7))
+
 (* The detector the turn runs, fed the fingerprints the turn computes. *)
 let test_a_third_memory_rewrite_stops_the_turn () =
   let call revision : Masc.Keeper_agent_result.tool_call_detail =
@@ -177,6 +200,8 @@ let () =
             test_a_whole_output_tool_keeps_every_field
         ; test_case "a memory rewrite is the same answer" `Quick
             test_a_memory_rewrite_is_the_same_answer
+        ; test_case "a source-bound rewrite is named by its hash" `Quick
+            test_a_source_bound_rewrite_is_named_by_its_hash
         ; test_case "a third memory rewrite stops the turn" `Quick
             test_a_third_memory_rewrite_stops_the_turn
         ; test_case "a changed answer changes identity" `Quick

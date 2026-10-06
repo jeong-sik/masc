@@ -26,12 +26,13 @@ val reader : Keeper_tool_descriptor.runtime_handler -> reader
 type resolution =
   | Keeper_handler of Keeper_tool_descriptor.runtime_handler
   | Outside_keeper_descriptors
-  | Ambiguous_name of Keeper_tool_descriptor.runtime_handler list
 
-(** By public name first, then by internal name. *)
+(** The descriptor {!Keeper_tool_descriptor_resolution.descriptor_for_tool_name}
+    finds, so a transport-prefixed name ([mcp__masc__...]) resolves the way
+    receipts and tool-call evidence resolve it. *)
 val resolve : string -> resolution
 
 (** The answer the tool reads from [output_text], or [None] when the whole
     output is the answer: the handler reads [Whole_output], the name resolves
-    to no single handler, or the text is not in the tool's shape. *)
+    to no handler, or the text is not in the tool's shape. *)
 val answer : tool_name:string -> output_text:string -> Yojson.Safe.t option

@@ -68,31 +68,16 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
 type resolution =
   | Keeper_handler of Keeper_tool_descriptor.runtime_handler
   | Outside_keeper_descriptors
-  | Ambiguous_name of Keeper_tool_descriptor.runtime_handler list
 
 let resolve tool_name =
-  let descriptors =
-    match Keeper_tool_descriptor.find_public tool_name with
-    | Some descriptor -> [ descriptor ]
-    | None -> Keeper_tool_descriptor.descriptors_for_internal tool_name
-  in
-  let handlers =
-    descriptors
-    |> List.map (fun (descriptor : Keeper_tool_descriptor.t) -> descriptor.runtime_handler)
-    |> List.sort_uniq (fun left right ->
-      String.compare
-        (Keeper_tool_descriptor.runtime_handler_to_string left)
-        (Keeper_tool_descriptor.runtime_handler_to_string right))
-  in
-  match handlers with
-  | [] -> Outside_keeper_descriptors
-  | [ handler ] -> Keeper_handler handler
-  | _ :: _ :: _ -> Ambiguous_name handlers
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  | Some descriptor -> Keeper_handler descriptor.Keeper_tool_descriptor.runtime_handler
+  | None -> Outside_keeper_descriptors
 ;;
 
 let answer ~tool_name ~output_text =
   match resolve tool_name with
-  | Outside_keeper_descriptors | Ambiguous_name _ -> None
+  | Outside_keeper_descriptors -> None
   | Keeper_handler handler ->
     (match reader handler with
      | Whole_output -> None

@@ -2516,7 +2516,7 @@
 
 (include stanzas/test_machine_checkpoint.inc)
 
-(include stanzas/test_lane_activity.inc)
+(include stanzas/test_machine_action_feed.inc)
 
 (include stanzas/test_lane_id.inc)
 

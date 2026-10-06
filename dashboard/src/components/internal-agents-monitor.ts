@@ -45,13 +45,11 @@ type Filter =
   | 'board-attention'
   | 'verification'
   | 'fusion'
-type InventoryRow =
+type Row =
   | { source: 'exact'; id: string; run: ExactLaneRunSummary }
   | { source: 'verification'; id: string; run: VerificationRunRecord }
+  | { source: 'goal_verification'; id: string; run: GoalVerificationRunRecord }
   | { source: 'fusion'; id: string; run: FusionRunRecord }
-// A selected Lane's timeline can also hold Goal reviews, which none of the
-// inventory sources above read.
-type Row = InventoryRow | { source: 'goal_verification'; id: string; run: GoalVerificationRunRecord }
 type CommittedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'committed' }>
 type FailedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'failed' }>
 
@@ -136,7 +134,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 ]
 
 type RunReading = 'loading' | 'ready' | 'stale' | 'unavailable'
-type RunSource = InventoryRow['source']
+type RunSource = Row['source']
 type SelectedLane = Extract<LaneNavigationTarget, { kind: 'exact' }>['lane']
 type SelectedLaneRuns = { lane: SelectedLane; rows: Row[]; reading: RunReading }
 
@@ -160,12 +158,16 @@ function laneRunHistory(lane: SelectedLane): LaneRunHistory {
   }
 }
 
-function exactRow(run: ExactLaneRunSummary): InventoryRow {
+function exactRow(run: ExactLaneRunSummary): Row {
   return { source: 'exact', id: `exact:${run.runId}`, run }
 }
 
-function verificationRow(run: VerificationRunRecord): InventoryRow {
+function verificationRow(run: VerificationRunRecord): Row {
   return { source: 'verification', id: `verification:${run.verificationId}`, run }
+}
+
+function goalVerificationRow(run: GoalVerificationRunRecord): Row {
+  return { source: 'goal_verification', id: `goal_verification:${run.runId}`, run }
 }
 
 // The exact-run request names the lane, so the server filters before it
@@ -176,27 +178,34 @@ async function fetchLaneRuns(history: LaneRunHistory): Promise<Row[]> {
       return (await fetchExactLaneRuns({ lane: history.lane })).runs.map(exactRow)
     case 'verifier': {
       const [task, goal] = await Promise.all([fetchVerificationRuns(), fetchGoalVerificationRuns()])
-      const rows: Row[] = [
-        ...task.runs.map(verificationRow),
-        ...goal.runs.map(run => ({ source: 'goal_verification' as const, id: `goal_verification:${run.runId}`, run })),
-      ]
-      return rows.sort((a, b) => startedAt(b) - startedAt(a))
+      return [...task.runs.map(verificationRow), ...goal.runs.map(goalVerificationRow)]
+        .sort((a, b) => startedAt(b) - startedAt(a))
     }
     case 'not_retained': return []
   }
 }
 
-function sourceForKind(kind: Exclude<Filter, 'all'>): RunSource {
+// Verification counts task and Goal reviews, the two run kinds the server's
+// Lane matrix attributes to verifier_exact.
+function sourcesForKind(kind: Exclude<Filter, 'all'>): RunSource[] {
   switch (kind) {
-    case 'verification': return 'verification'
-    case 'fusion': return 'fusion'
-    case 'librarian': case 'workspace-curator': case 'candle-appraiser': case 'auto-judge': case 'board-attention': return 'exact'
+    case 'verification': return ['verification', 'goal_verification']
+    case 'fusion': return ['fusion']
+    case 'librarian': case 'workspace-curator': case 'candle-appraiser': case 'auto-judge': case 'board-attention': return ['exact']
   }
 }
 
 function nextRunReading(previous: RunReading, result: PromiseSettledResult<unknown>): RunReading {
   if (result.status === 'fulfilled') return 'ready'
   return previous === 'ready' || previous === 'stale' ? 'stale' : 'unavailable'
+}
+
+// Rows drawn from several sources are only as complete as the weakest read:
+// a count missing one source would show fewer runs than happened.
+function combinedReading(readings: RunReading[]): RunReading {
+  if (readings.includes('unavailable')) return 'unavailable'
+  if (readings.includes('loading')) return 'loading'
+  return readings.includes('stale') ? 'stale' : 'ready'
 }
 
 function readingHasRows(reading: RunReading): boolean {
@@ -280,8 +289,8 @@ function finishedAt(row: Row): number | undefined {
   return duration == null ? undefined : startedAt(row) + duration
 }
 
-function rowKind(row: InventoryRow): Exclude<Filter, 'all'> {
-  if (row.source === 'verification') return 'verification'
+function rowKind(row: Row): Exclude<Filter, 'all'> {
+  if (row.source === 'verification' || row.source === 'goal_verification') return 'verification'
   if (row.source === 'fusion') return 'fusion'
   switch (row.run.lane) {
     case 'librarian_exact': return 'librarian'
@@ -716,26 +725,28 @@ function Details({ row }: { row: Row }) {
   `
 }
 
-function matches(row: InventoryRow, filter: Filter): boolean {
+function matches(row: Row, filter: Filter): boolean {
   if (filter === 'all') return true
   return rowKind(row) === filter
 }
 
 type KeeperIdentity = { name: string; agent_name?: string | null }
 
-function recordedOwner(row: InventoryRow): string {
-  if (row.source === 'verification') return row.run.producer
-  if (row.source === 'fusion') return row.run.keeper
-  return row.run.actor
+// The Keeper the run's work belongs to, or null when the run records none:
+// workspace-scoped exact lanes and Goal reviews name no producing Keeper.
+function recordedOwner(row: Row): string | null {
+  switch (row.source) {
+    case 'verification': return row.run.producer
+    case 'goal_verification': return null
+    case 'fusion': return row.run.keeper
+    case 'exact':
+      return row.run.lane === 'workspace_curator_exact' || row.run.lane === 'candle_appraiser' ? null : row.run.actor
+  }
 }
 
-function hasKeeperOwner(row: InventoryRow): boolean {
-  return !(row.source === 'exact'
-    && (row.run.lane === 'workspace_curator_exact' || row.run.lane === 'candle_appraiser'))
-}
-
-function resolvedOwner(row: InventoryRow, roster: readonly KeeperIdentity[]): string {
+function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string | null {
   const recorded = recordedOwner(row)
+  if (recorded === null) return null
   return roster.find(keeper => keeper.name === recorded || keeper.agent_name === recorded)?.name ?? recorded
 }
 
@@ -749,7 +760,7 @@ export function InternalAgentsMonitor() {
 }
 
 function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigationTarget, { kind: 'exact' }> }) {
-  const [rows, setRows] = useState<InventoryRow[]>([])
+  const [rows, setRows] = useState<Row[]>([])
   const targetLane = target?.lane
   const [laneRuns, setLaneRuns] = useState<SelectedLaneRuns | null>(null)
   // Rows read for an earlier target never stand in for the current one.
@@ -762,7 +773,7 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
   const [runReadings, setRunReadings] = useState<Record<RunSource, RunReading>>({
-    exact: 'loading', verification: 'loading', fusion: 'loading',
+    exact: 'loading', verification: 'loading', goal_verification: 'loading', fusion: 'loading',
   })
   const refreshVersion = useRef(0)
   const targetRow = useRef<HTMLTableRowElement>(null), focusedTarget = useRef<typeof target>(undefined)
@@ -776,14 +787,15 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
     const version = ++refreshVersion.current
     setLoading(true)
     const history = targetLane === undefined ? null : laneRunHistory(targetLane)
-    const [exact, verification, fusion, standalone, selected] = await Promise.allSettled([
+    const [exact, verification, goalVerification, fusion, standalone, selected] = await Promise.allSettled([
       fetchExactLaneRuns(),
       fetchVerificationRuns(),
+      fetchGoalVerificationRuns(),
       fetchFusionRuns(),
       fetchStandaloneLanes(),
       history === null ? Promise.resolve([]) : fetchLaneRuns(history),
     ])
-    const next: InventoryRow[] = []
+    const next: Row[] = []
     const failures: string[] = []
     if (exact.status === 'fulfilled') {
       next.push(...exact.value.runs.map(exactRow))
@@ -793,6 +805,9 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
     if (verification.status === 'fulfilled') {
       next.push(...verification.value.runs.map(verificationRow))
     } else failures.push(`Verification: ${String(verification.reason)}`)
+    if (goalVerification.status === 'fulfilled') {
+      next.push(...goalVerification.value.runs.map(goalVerificationRow))
+    } else failures.push(`Goal verification: ${String(goalVerification.reason)}`)
     if (fusion.status === 'fulfilled') {
       next.push(...fusion.value.runs.map(run => ({ source: 'fusion' as const, id: `fusion:${run.runId}`, run })))
     } else failures.push(`Fusion: ${String(fusion.reason)}`)
@@ -806,7 +821,9 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
         ? 'Lanes: Admin 권한 필요.'
         : `Lanes: ${String(standalone.reason)}`)
     }
-    const results = { exact, verification, fusion }
+    const results: Record<RunSource, PromiseSettledResult<unknown>> = {
+      exact, verification, goal_verification: goalVerification, fusion,
+    }
     setRows(previous => [
       ...next,
       ...previous.filter(row => results[row.source].status === 'rejected'),
@@ -814,6 +831,7 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
     setRunReadings(previous => ({
       exact: nextRunReading(previous.exact, exact),
       verification: nextRunReading(previous.verification, verification),
+      goal_verification: nextRunReading(previous.goal_verification, goalVerification),
       fusion: nextRunReading(previous.fusion, fusion),
     }))
     if (targetLane !== undefined) setLaneRuns(previous => {
@@ -846,31 +864,30 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
     const names = new Set(roster.map(keeper => keeper.name))
     for (const name of pausedKeeperNames) names.add(name)
     for (const row of rows) {
-      if (hasKeeperOwner(row)) names.add(resolvedOwner(row, roster))
+      const owner = resolvedOwner(row, roster)
+      if (owner !== null) names.add(owner)
     }
     return Array.from(names).sort()
   }, [pausedKeeperNames, rows, roster])
   const allReadings = Object.values(runReadings)
   const completeReading = allReadings.every(readingHasRows)
   const allFresh = allReadings.every(reading => reading === 'ready')
-  const selectedSources: RunSource[] = filter === 'all' ? ['exact', 'verification', 'fusion'] : [sourceForKind(filter)]
-  const selectedReadings = target
+  const selectedReading = combinedReading(target
     ? [selectedLaneRuns?.reading ?? 'loading']
-    : selectedSources.map(source => runReadings[source])
-  const selectedReading = !selectedReadings.every(readingHasRows) ? 'unavailable'
-    : selectedReadings.every(reading => reading === 'ready') ? 'ready' : 'stale'
+    : filter === 'all' ? allReadings : sourcesForKind(filter).map(source => runReadings[source]))
   const inventory = FILTERS.filter(item => item.id !== 'all').map(item => {
     const kind = item.id as Exclude<Filter, 'all'>
     const matching = rows.filter(row => rowKind(row) === kind)
+    const reading = combinedReading(sourcesForKind(kind).map(source => runReadings[source]))
     return {
       ...item,
-      count: readingHasRows(runReadings[sourceForKind(kind)]) ? matching.length : null,
-      reading: runReadings[sourceForKind(kind)],
+      count: readingHasRows(reading) ? matching.length : null,
+      reading,
       latest: matching.reduce<number | null>((value, row) => value == null ? startedAt(row) : Math.max(value, startedAt(row)), null),
     }
   })
   const owners = keepers.map(name => {
-    const owned = rows.filter(row => hasKeeperOwner(row) && resolvedOwner(row, roster) === name)
+    const owned = rows.filter(row => resolvedOwner(row, roster) === name)
     return {
       name,
       total: owned.length,

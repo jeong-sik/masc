@@ -268,7 +268,7 @@ let add_routes ~sw router =
            ~compute:(fun () -> Model_inference_metrics.compute_runtime_metrics_json
              ~base_path ~window_minutes)
            |> redact_provider_history_cache_error in
-         let _, runtimes = Runtime.get_default_and_runtimes () in
+         let _, _, runtimes = Runtime.get_default_route_and_runtimes () in
          let json = `Assoc [ "history", history;
            "specifications", `List (List.map runtime_specification_json runtimes) ] in
          Http.Response.json_value ~compress:true ~request:req json reqd)

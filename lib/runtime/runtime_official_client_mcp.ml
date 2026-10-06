@@ -264,8 +264,14 @@ let dispatch_message
   =
   match message.method_name, message.request_id with
     | "initialize", Some request_id ->
+      (* [initialize] opens a handshake from any phase. Claude Code checks its
+         SDK MCP servers on the first message it reads and, for a server it
+         holds as failed or pending, builds a new client and handshakes again
+         over the same control channel (client 2.1.289, [Mp] / [sdk_mcp_update]).
+         A fresh client is a fresh MCP session, so the old phase is dropped and
+         the new handshake starts at [Awaiting_initialized]. Refusing it failed
+         the whole turn before admission. *)
       let expected = Atomic.get session.state in
-      let* () = require_phase session ~stage:"MCP initialize" Awaiting_initialize in
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       let* protocol_version = protocol_version message.params in
       let initialize_response =

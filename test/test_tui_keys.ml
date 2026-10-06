@@ -403,7 +403,7 @@ let test_lanes_footer_opens_standalone_runs () =
        One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
        and "A:add-ons" as separate items reading as separate destinations,
        and the dispatch had always been one arm. *)
-    "j/k:move  o / A:Lane Add-ons  d:reading  i:read issues  e:exact: config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:open  a:exact: add slot  Space:exact/browser: activity  s:exact: models  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o / A:Lane Add-ons  d:reading  i:read issues  e:exact: config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:open  a:exact: add slot  Space:activity  s:exact: models  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_harness_footer_links_to_overview_task () =

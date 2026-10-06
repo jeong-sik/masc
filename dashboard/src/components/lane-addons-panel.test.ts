@@ -295,6 +295,36 @@ describe('optional Lane Add-on surface', () => {
     expect(api.attachLaneAddon).not.toHaveBeenCalled()
     expect(api.observeLaneAddon).not.toHaveBeenCalled()
   })
+  it.each([
+    ['partial inventory', false, [], []],
+    ['invalid owned file', true, [], [{ source_path: '/config/site.toml', id: null, message: 'invalid TOML' }]],
+    ['same ID issue elsewhere', true, [], [{ source_path: '/config/other.toml', id: 'website', message: 'duplicate ID' }]],
+    ['owned file renamed to another ID', true, [{ id: 'renamed', source_path: '/config/site.toml', desired_revision: 'r2', applied_revision: null, instance_id: null }], []],
+    ['duplicate ID declarations', true, [
+      { id: 'website', source_path: '/config/site.toml', desired_revision: 'r1', applied_revision: 'r1', instance_id: 'instance-1' },
+      { id: 'website', source_path: '/config/other.toml', desired_revision: 'r1', applied_revision: null, instance_id: null },
+    ], []],
+  ] as const)('blocks removal for backend refusal: %s', async (_name, complete, declarations, issues) => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete, declarations, issues },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Resolve TOML before removal' })
+    expect((removal as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(removal)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+  })
+  it.each([false, true])('allows configured cleanup when its file is absent (unrelated issue=%s)', async unrelated => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete: true, declarations: [],
+        issues: unrelated ? [{ source_path: '/config/other.toml', id: null, message: 'invalid TOML' }] : [] },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Remove TOML + worker' })
+    expect((removal as HTMLButtonElement).disabled).toBe(false)
+  })
   it('keeps the previous instance visible while a changed declaration and parse errors remain unresolved', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
       configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true,
@@ -313,12 +343,16 @@ describe('optional Lane Add-on surface', () => {
     expect(declarations.getByText('configuration-2')).toBeTruthy()
     expect(declarations.getByText('configuration-1')).toBeTruthy()
     expect(declarations.getByText('Revision change pending')).toBeTruthy()
+    const removal = screen.getByRole('button', { name: 'Resolve TOML before removal' })
+    expect(removal.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(removal)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+    expect(screen.getByText(/Resolve the changed declaration with Edit TOML/)).toBeTruthy()
     expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toEqual([
       expect.stringContaining('/workspace/.masc/config/lane-addons/site.toml · website — Replacement binding could not be applied'),
       expect.stringContaining('/workspace/.masc/config/lane-addons/broken.toml — Expected a closing quote'),
     ])
     expect(screen.getByText('observing')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Detach' }) as HTMLButtonElement).disabled).toBe(false)
     expect(api.detachLaneAddon).not.toHaveBeenCalled()
 
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
@@ -368,7 +402,7 @@ describe('optional Lane Add-on surface', () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
     api.detachLaneAddon.mockResolvedValue({ phase: { kind: 'detaching' } })
     const screen = render(html`<${LaneAddonsPanel} />`)
-    const detach = await screen.findByRole('button', { name: 'Detach' })
+    const detach = await screen.findByRole('button', { name: 'Remove worker' })
     expect((screen.getByRole('button', { name: 'Observe' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(detach)
     await waitFor(() => expect(api.detachLaneAddon).toHaveBeenCalledWith('instance-1'))
@@ -501,7 +535,7 @@ describe('optional Lane Add-on surface', () => {
     expect(request).toEqual({ ...actionRequest, request_id: expect.any(String) })
     expect(request.request_id).toMatch(/^[0-9a-f-]{36}$/)
     expect((screen.getByRole('button', { name: 'Send new request' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Detach' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Remove worker' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
     await screen.findByText('Slice: partial')
     expect(api.fetchLaneAddonSlice).toHaveBeenCalledTimes(1)

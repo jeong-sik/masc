@@ -33,6 +33,18 @@ function isDeclarationFile(directory: string, sourcePath: string): boolean {
     && fileName.endsWith('.toml') && !fileName.includes('\\') && !fileName.includes('\0')
 }
 
+function staleRemoval(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
+  const owner = item.configuration
+  if (owner === null) return false
+  if (configuration === null || !configuration.complete) return true
+  const matches = configuration.declarations.filter(current => current.id === owner.id)
+  const conflicts = configuration.issues.filter(issue => issue.id === owner.id)
+  if (conflicts.length > 0 || matches.length > 1) return true
+  if (matches.length === 1) return matches[0]!.desired_revision !== owner.revision
+  return configuration.declarations.some(current => current.source_path === owner.source_path)
+    || configuration.issues.some(issue => issue.source_path === owner.source_path)
+}
+
 function hasCurrentDeclaration(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
   const source = item.configuration
   if (configuration === null || source === null || !isDeclarationFile(configuration.directory, source.source_path)) return false
@@ -336,7 +348,12 @@ export function LaneAddonsPanel() {
       <td>${item.phase.kind}${(item.phase.message || item.error) && html`<p role="status">${item.phase.message ?? item.error}</p>`}</td>
       <td>${item.observation_seq} / ${item.rows_count}</td>
       <td class="space-x-2"><button class=${buttonClass} disabled=${item.phase.kind === 'detached' || item.phase.kind === 'detaching' || item.phase.kind === 'observing'} onClick=${() => act(() => observeLaneAddon(item.instance_id))}>Observe</button>
-      <button class=${buttonClass} disabled=${item.phase.kind === 'detached'} onClick=${() => act(() => detachLaneAddon(item.instance_id))}>Detach</button></td>
+      <button class=${buttonClass} disabled=${item.phase.kind === 'detached' || staleRemoval(configuration, item)} onClick=${() => { if (!staleRemoval(configuration, item)) act(() => detachLaneAddon(item.instance_id)) }}>${staleRemoval(configuration, item) ? 'Resolve TOML before removal' : item.configuration === null ? 'Remove worker' : 'Remove TOML + worker'}</button>
+      <p class="mt-2 max-w-sm text-sm">${staleRemoval(configuration, item)
+        ? 'Resolve the changed declaration with Edit TOML, then Refresh until its revision is applied before removing this installation. No TOML or worker has been removed.'
+        : item.configuration === null
+        ? 'Cleans up this worker and its owned resources. Retained observations and evidence remain.'
+        : 'Deletes the matching installation TOML from disk and cleans up its worker. Retained observations and evidence remain.'}</p></td>
     </tr>`)}</tbody></table></div>
     ${snapshot?.instances.length === 0 && html`<p>No attached packages.</p>`}
     <${LaneAddonActions} instances=${snapshot?.instances ?? []} />

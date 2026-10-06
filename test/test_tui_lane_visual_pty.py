@@ -78,7 +78,7 @@ def main(executable: str, captures: Path | None) -> None:
         overview = key(b"A", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
         first = screen(overview, b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
         for needle in (b"> World observer", b"MSX", b"o:retry observation",
-                       b"d:cleanup", b"D:full"):
+                       b"d:remove worker", b"D:full"):
             if needle not in first:
                 raise AssertionError(f"Add-on overview omitted {needle!r}")
         print("TUI_CAPTURE lane-addons overview " + repr(first), flush=True)
@@ -108,7 +108,7 @@ def main(executable: str, captures: Path | None) -> None:
         help_output = key(b"?", b"Lane Add-ons keys")
         help_screen = screen(help_output, b"Lane Add-ons keys")
         for needle in (b"Esc:close", b"j/k select", b"Enter open", b"1 Results",
-                       b"4 Records", b"E edit", b"e export marked rows", b"A command"):
+                       b"4 Records", b"E edit", b"e export marked rows", b"A opens Add-on commands"):
             if needle not in help_screen:
                 raise AssertionError(f"Lane help omitted {needle!r}")
         key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
@@ -423,7 +423,7 @@ def run_navigation_consistency(executable: str) -> None:
         key(b":go lane add-ons\r", b"World observer")
         capture("palette-from-addons", key(b":", b"From Lane Add-ons"))
         key(b"\x1b", b"World observer")
-        draft = key(b"A::act", b":::act")
+        draft = key(b"A::act", b"Add-on command: ::act")
         if b"MASC Command palette" in terminal.screen_text(draft):
             raise AssertionError("advanced text input intercepted a literal colon")
         key(b"\x1b", b"World observer")

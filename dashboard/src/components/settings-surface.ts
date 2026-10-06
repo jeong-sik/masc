@@ -41,6 +41,7 @@ import {
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
 import {
+  executionWorkspaceAuthority,
   refreshShell,
   shellAuthSummary,
   shellConfigResolution,
@@ -60,7 +61,8 @@ import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
 import { declaredRuntimeLaneCandidates, declaredRuntimeLanes } from '../lib/runtime-toml-config'
-import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
+import { announceRuntimeTomlWritten, runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
+import { runtimeTomlSessionFor } from '../lib/runtime-toml-session'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
@@ -1598,6 +1600,8 @@ export function SettingsSurface() {
     }
   }
 
+  const runtimeAuthority = executionWorkspaceAuthority.value
+
   // runtime defaults / model routing — resolved from runtime.toml (SSOT)
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
   // single resolved-runtime document (bugs #14/#15/#36) — effective
@@ -1623,101 +1627,122 @@ export function SettingsSurface() {
 
   useEffect(() => {
     let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+    setRuntimeDefaults(null)
+    if (!runtimeAuthority) return () => { active = false }
     void (async () => {
       try {
         const resp = await fetchRuntimeDefaults()
-        if (!active) return
+        if (!current()) return
         setRuntimeDefaults(resp)
       } catch {
-        if (!active) return
+        if (!current()) return
         setRuntimeDefaults(null)
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [runtimeAuthority])
 
   useEffect(() => {
     let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+    setRuntimeResolved(null)
     setRuntimeResolvedStatus('loading')
+    if (!runtimeAuthority) return () => { active = false }
     void (async () => {
       try {
         const resp = await fetchRuntimeResolved()
-        if (!active) return
+        if (!current()) return
         setRuntimeResolved(resp)
         setRuntimeResolvedStatus('ready')
       } catch {
-        if (!active) return
+        if (!current()) return
         setRuntimeResolved(null)
         setRuntimeResolvedStatus('error')
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [runtimeAuthority])
 
   useEffect(() => {
     let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+    setRuntimeProviders(null)
     setRuntimeCatalogStatus('loading')
+    if (!runtimeAuthority) return () => { active = false }
     void (async () => {
       try {
         const resp = await fetchRuntimeProviders()
-        if (!active) return
+        if (!current()) return
         setRuntimeProviders(resp)
         setRuntimeCatalogStatus('ready')
       } catch {
-        if (!active) return
+        if (!current()) return
         setRuntimeProviders(null)
         setRuntimeCatalogStatus('error')
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [runtimeAuthority])
 
-  async function reloadRuntimeTomlSourceSnapshot(): Promise<{ sourceText: string; sourceRevision: string } | null> {
+  async function reloadRuntimeTomlSourceSnapshot(current: () => boolean = () => true): Promise<{ sourceText: string; sourceRevision: string } | null> {
     try {
       const config = await fetchRuntimeTomlConfig()
+      if (!current()) return null
       setRuntimeTomlSource({ status: 'ready', sourceText: config.source_text })
       return { sourceText: config.source_text, sourceRevision: config.source_revision }
     } catch (err) {
+      if (!current()) return null
       setRuntimeTomlSource({ status: 'error', message: errorToString(err) })
       return null
     }
   }
 
   useEffect(() => {
-    if (sec !== 'routing') return
-    void reloadRuntimeTomlSourceSnapshot()
-  }, [sec])
+    let active = true
+    setRuntimeTomlSource({ status: 'loading' })
+    if (sec === 'routing' && runtimeAuthority) {
+      void reloadRuntimeTomlSourceSnapshot(() => active && executionWorkspaceAuthority.peek() === runtimeAuthority)
+    }
+    return () => { active = false }
+  }, [sec, runtimeAuthority])
 
-  async function reloadRuntimeDefaultsSnapshot(): Promise<void> {
+  async function reloadRuntimeDefaultsSnapshot(current: () => boolean = () => true): Promise<void> {
     try {
       const resp = await fetchRuntimeDefaults()
+      if (!current()) return
       setRuntimeDefaults(resp)
     } catch (err) {
+      if (!current()) return
       setRuntimeDefaults(null)
       throw err
     }
   }
 
-  async function reloadRuntimeResolvedSnapshot(): Promise<void> {
+  async function reloadRuntimeResolvedSnapshot(current: () => boolean = () => true): Promise<void> {
     setRuntimeResolvedStatus('loading')
     try {
       const resp = await fetchRuntimeResolved()
+      if (!current()) return
       setRuntimeResolved(resp)
       setRuntimeResolvedStatus('ready')
     } catch (err) {
+      if (!current()) return
       setRuntimeResolved(null)
       setRuntimeResolvedStatus('error')
       throw err
     }
   }
 
-  async function reloadRuntimeProvidersSnapshot(): Promise<void> {
+  async function reloadRuntimeProvidersSnapshot(current: () => boolean = () => true): Promise<void> {
     setRuntimeCatalogStatus('loading')
     try {
       const resp = await fetchRuntimeProviders()
+      if (!current()) return
       setRuntimeProviders(resp)
       setRuntimeCatalogStatus('ready')
     } catch (err) {
+      if (!current()) return
       setRuntimeProviders(null)
       setRuntimeCatalogStatus('error')
       throw err
@@ -1743,13 +1768,22 @@ export function SettingsSurface() {
     await refreshRuntimeConfigConsumers()
   }
 
-  async function handleRuntimeTomlSaved(): Promise<void> {
-    try {
-      await Promise.all([refreshRuntimeSettingsSnapshot(), reloadRuntimeTomlSourceSnapshot()])
-    } catch (err) {
-      console.warn('[Settings] runtime settings refresh failed after editor save:', err)
-    }
-  }
+  // The mounted parent owns refreshes even when navigation unmounts the editor.
+  const runtimeCommit = runtimeAuthority ? runtimeTomlSessionFor(runtimeAuthority).committed.value : null
+  useEffect(() => {
+    if (!runtimeCommit || runtimeCommit.authority !== runtimeAuthority) return
+    let active = true
+    const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
+      && runtimeTomlSourceGeneration.peek() === runtimeCommit.generation
+    if (!current()) return
+    void Promise.allSettled([
+      reloadRuntimeDefaultsSnapshot(current),
+      reloadRuntimeResolvedSnapshot(current),
+      reloadRuntimeProvidersSnapshot(current),
+      reloadRuntimeTomlSourceSnapshot(current),
+    ])
+    return () => { active = false }
+  }, [runtimeAuthority, runtimeCommit])
 
   async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, routeId: string | null): Promise<void> {
     if (runtimeWriteInFlight.current) return
@@ -2226,7 +2260,7 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <${RuntimeTomlEditor} onSaved=${handleRuntimeTomlSaved} />
+              <${RuntimeTomlEditor} />
             `}
 
             ${sec === 'prompts' && html`

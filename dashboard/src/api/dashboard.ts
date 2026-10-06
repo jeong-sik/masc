@@ -241,6 +241,7 @@ export {
   fetchRuntimeResolved,
   saveRuntimeTomlConfig,
   RuntimeTomlRevisionConflict,
+  RuntimeTomlSaveRejected,
   previewRuntimeTomlConfig,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,

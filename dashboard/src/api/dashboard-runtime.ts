@@ -2232,8 +2232,11 @@ function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | 
   })
 }
 
-export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+export type RuntimeTomlRequestOptions = { beforeDispatch?: () => void }
+
+export async function fetchRuntimeTomlConfig(options: RuntimeTomlRequestOptions = {}): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
 }
 
@@ -2313,10 +2316,16 @@ export class RuntimeTomlRevisionConflict extends Error {
   }
 }
 
+/** This raw route returns structured HTTP 400 only before a visible file
+ * replacement; after-rename durability failures return a committed receipt. */
+export class RuntimeTomlSaveRejected extends Error {
+  constructor(message: string) { super(message); this.name = 'RuntimeTomlSaveRejected' }
+}
+
 export async function saveRuntimeTomlConfig(
   sourceText: string,
   expectedSourceRevision: string,
-  options: { expectedSourcePath: string },
+  options: RuntimeTomlRequestOptions & { expectedSourcePath: string },
 ): Promise<CommittedRuntimeTomlConfig> {
   if (!/^[0-9a-f]{64}$/.test(expectedSourceRevision)) {
     throw new Error('runtime.toml 저장 기준 revision이 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
@@ -2325,6 +2334,7 @@ export async function saveRuntimeTomlConfig(
     throw new Error('runtime.toml 저장 기준 path가 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
   }
   await ensureDevToken()
+  options.beforeDispatch?.()
   try {
     const raw = await post<unknown>('/api/v1/runtime/config/raw', {
       source_text: sourceText,
@@ -2333,6 +2343,17 @@ export async function saveRuntimeTomlConfig(
     })
     return decodeCommittedRuntimeTomlConfig(raw)
   } catch (error: unknown) {
+    if (error instanceof ApiRequestError && error.method === 'POST'
+      && error.path === '/api/v1/runtime/config/raw' && error.status === 400
+      && !error.timeout && error.configApplied !== true
+      && error.configApplicationState !== 'indeterminate' && !error.authoritativeReloadRequired
+      && error.runtimeSync === undefined) {
+      const failure = error.responseData
+      if (isRecord(failure) && typeof failure.error === 'string' && failure.error.trim() !== ''
+        && (failure.ok === undefined || failure.ok === false)) {
+        throw new RuntimeTomlSaveRejected(error.message)
+      }
+    }
     if (error instanceof ApiRequestError && error.status === 409) {
       const failure = error.responseData
       if (isRecord(failure) && failure.code === 'revision_conflict'
@@ -2376,8 +2397,10 @@ export type RuntimeRoutingLane =
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
   routeId: string | null,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
     runtime_id: routeId,
@@ -2441,8 +2464,10 @@ export async function patchRuntimeExactSlot(
   action: RuntimeExactSlotAction,
   runtimeId: string,
   direction?: RuntimeExactSlotDirection,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: `exact/${laneId}`,
     action,
@@ -2455,12 +2480,14 @@ export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,
   expectedAssignmentRevision: KeeperRuntimeAssignmentRevision,
+  options: RuntimeTomlRequestOptions = {},
 ): Promise<CommittedRuntimeTomlConfig | {
   ok: true
   applied: false
   assignment_revision: KeeperRuntimeAssignmentRevision
 }> {
   await ensureDevToken()
+  options.beforeDispatch?.()
   const raw = await post<unknown>('/api/v1/runtime/config/assignment', {
     keeper_name: keeperName,
     runtime_id: runtimeId,

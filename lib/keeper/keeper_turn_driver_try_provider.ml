@@ -455,7 +455,6 @@ type try_provider_ctx =
   ; (* Session / checkpoint *)
     checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
-  ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
   ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
@@ -2014,7 +2013,15 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                    Ok ())
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
-          ; yield_on_tool = ctx.yield_on_tool
+          ; (* An AGENT_CORE run releases the provider lease before the tools
+               it executes and takes it back for the next model turn, so the
+               attempt watchdog below measures each model turn from its own
+               resumption and never counts that tool time as provider
+               silence. A completion review has no registry progress to read;
+               on this runtime the lease is what bounds each of its model
+               turns. An official client runs its tools inside one provider
+               call, so its attempt has no such boundary. *)
+            yield_on_tool = true
             (* Read per turn rather than captured at boot so the ceiling can be
                tuned through the runtime-params API without a restart. *)
           ; max_tool_rounds = Keeper_config.keeper_max_tool_rounds ()

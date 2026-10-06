@@ -23,9 +23,9 @@ let apply_transition transition =
     output)
 ;;
 
-let resolve_existing ~key ~max =
+let resolve_existing ~key ~allowance =
   Stdlib.Mutex.protect state_mutex (fun () ->
-    match State.resolve_existing key ~declared_max:max !state with
+    match State.resolve_existing key ~declared:allowance !state with
     | None -> None
     | Some (next, resolution) ->
       state := next;
@@ -38,42 +38,63 @@ let resolve_existing ~key ~max =
    both callers believing their own number. This is a configuration error and
    it is raised here, which is before the permit is taken and therefore
    before any provider I/O. *)
+let allowance_to_string (allowance : State.allowance) =
+  match allowance.priority_run_limit with
+  | None -> Printf.sprintf "max_concurrent_requests=%d" allowance.max
+  | Some limit ->
+    Printf.sprintf
+      "max_concurrent_requests=%d admission_priority_run_limit=%d"
+      allowance.max
+      limit
+;;
+
 let reject_conflict = function
   | None -> ()
   | Some (conflict : State.conflict) ->
     invalid_arg
       (Printf.sprintf
-         "Provider_admission: conflicting max_concurrent_requests for %s %s: one \
-          config declares %d, another declares %d. The endpoint identity (kind, \
+         "Provider_admission: conflicting admission allowances for %s %s: one \
+          config declares %s, another declares %s. The endpoint identity (kind, \
           base_url, api-key identity) admits one allowance; make the declarations \
           agree or give them different identities."
          conflict.kind
          (Complete_common.sanitize_url_for_log conflict.base_url)
-         conflict.authoritative_max
-         conflict.declared_max)
+         (allowance_to_string conflict.authoritative)
+         (allowance_to_string conflict.declared))
 ;;
 
-let entry_for ~key ~max =
+let entry_for ~key ~(allowance : State.allowance) =
   let resolution =
-    match resolve_existing ~key ~max with
+    match resolve_existing ~key ~allowance with
     | Some resolution -> resolution
     | None ->
-      let candidate = Slot_scheduler.create ~max_slots:max in
-      apply_transition (State.install key ~declared_max:max ~candidate)
+      let candidate =
+        Slot_scheduler.create
+          ~max_slots:allowance.max
+          ~priority_run_limit:allowance.priority_run_limit
+      in
+      apply_transition (State.install key ~declared:allowance ~candidate)
   in
   reject_conflict resolution.conflict;
   resolution.scheduler
+;;
+
+(* max >= 1 and a declared run limit >= 1 are enforced by
+   Complete_common.validate_all before any dispatch reaches this point;
+   Slot_scheduler.create re-checks and raises on a bypassing caller rather
+   than admitting silently. *)
+let allowance_of_config (config : Provider_config.t) ~max : State.allowance =
+  { max; priority_run_limit = config.admission_priority_run_limit }
 ;;
 
 let with_admission ~(config : Provider_config.t) f =
   match config.max_concurrent_requests with
   | None -> f ()
   | Some max ->
-    (* max >= 1 is enforced by Complete_common.validate_all before any
-       dispatch reaches this point; Slot_scheduler.create re-checks and
-       raises on a bypassing caller rather than admitting silently. *)
-    let scheduler = entry_for ~key:(key_of_config config) ~max in
-    Slot_scheduler.with_permit scheduler f
+    let scheduler =
+      entry_for ~key:(key_of_config config) ~allowance:(allowance_of_config config ~max)
+    in
+    Slot_scheduler.with_permit ~admission_class:config.admission_class scheduler f
 ;;
 
 type permit_wait = Slot_scheduler.permit_wait =
@@ -85,8 +106,16 @@ let with_admission_until ?wait ~clock ~deadline_at ~(config : Provider_config.t)
   match config.max_concurrent_requests with
   | None -> Ok (f ())
   | Some max ->
-    let scheduler = entry_for ~key:(key_of_config config) ~max in
-    Slot_scheduler.with_permit_until ?wait ~clock ~deadline_at scheduler f
+    let scheduler =
+      entry_for ~key:(key_of_config config) ~allowance:(allowance_of_config config ~max)
+    in
+    Slot_scheduler.with_permit_until
+      ?wait
+      ~clock
+      ~deadline_at
+      ~admission_class:config.admission_class
+      scheduler
+      f
 ;;
 
 type deadline_expiry =

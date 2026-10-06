@@ -12,6 +12,7 @@ let make_config
       ?(base_url = "http://admission.test:1")
       ?(api_key = "test-key")
       ?max_concurrent_requests
+      ?admission_priority_run_limit
       ()
   =
   Provider_config.make
@@ -21,6 +22,7 @@ let make_config
     ~request_path:"/v1/chat/completions"
     ~api_key
     ?max_concurrent_requests
+    ?admission_priority_run_limit
     ()
 ;;
 
@@ -150,9 +152,10 @@ let test_conflict_error_sanitizes_base_url () =
   in
   check
     bool
-    "the conflict names the field"
+    "the conflict names both declarations"
     true
-    (Agent_core_strings.contains_substring ~needle:"conflicting max_concurrent_requests" ~haystack:logged);
+    (Agent_core_strings.contains_substring ~needle:"max_concurrent_requests=1" ~haystack:logged
+     && Agent_core_strings.contains_substring ~needle:"max_concurrent_requests=5" ~haystack:logged);
   check bool "sanitized host survives" true (Agent_core_strings.contains_substring ~needle:"leak.test:1" ~haystack:logged);
   check
     bool
@@ -164,6 +167,32 @@ let test_conflict_error_sanitizes_base_url () =
     "query credential is stripped from the message"
     false
     (Agent_core_strings.contains_substring ~needle:"token=abc" ~haystack:logged)
+;;
+
+(* The priority run limit describes the endpoint as the permit count does:
+   a second config that names the same endpoint with another limit is the
+   same authoring error, refused before any permit is taken. *)
+let test_a_different_priority_run_limit_is_a_conflict () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_url = "http://run-limit-conflict.test:1" in
+  let first =
+    make_config ~base_url ~max_concurrent_requests:2 ~admission_priority_run_limit:3 ()
+  in
+  let second = make_config ~base_url ~max_concurrent_requests:2 () in
+  Provider_admission.with_admission ~config:first (fun () -> ());
+  let ran = ref false in
+  match Provider_admission.with_admission ~config:second (fun () -> ran := true) with
+  | () -> fail "a declaration without the run limit was admitted"
+  | exception Invalid_argument message ->
+    check bool "the body never ran" false !ran;
+    check
+      bool
+      "the conflict names the declared run limit"
+      true
+      (Agent_core_strings.contains_substring
+         ~needle:"admission_priority_run_limit=3"
+         ~haystack:message)
 ;;
 
 let reject_dispatch_transport : Llm_transport.t =
@@ -198,6 +227,39 @@ let test_zero_declaration_rejected_before_dispatch () =
       true
       (Agent_core_strings.contains_substring ~needle:"max_concurrent_requests" ~haystack:reason)
   | Ok _ -> fail "expected AcceptRejected for max_concurrent_requests = 0"
+  | Error _ -> fail "expected AcceptRejected, got a different error kind"
+;;
+
+let test_zero_priority_run_limit_rejected_before_dispatch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config
+      ~base_url:"http://invalid-run-limit.test:1"
+      ~max_concurrent_requests:1
+      ~admission_priority_run_limit:0
+      ()
+  in
+  match
+    Complete.complete
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~transport:reject_dispatch_transport
+      ~config
+      ~messages:[]
+      ()
+  with
+  | Error (Http_client.AcceptRejected { reason }) ->
+    check
+      bool
+      "rejection names the offending field"
+      true
+      (Agent_core_strings.contains_substring
+         ~needle:"admission_priority_run_limit"
+         ~haystack:reason)
+  | Ok _ -> fail "expected AcceptRejected for admission_priority_run_limit = 0"
   | Error _ -> fail "expected AcceptRejected, got a different error kind"
 ;;
 
@@ -671,9 +733,17 @@ let () =
             `Quick
             test_conflict_error_sanitizes_base_url
         ; test_case
+            "a different priority run limit is a conflict"
+            `Quick
+            test_a_different_priority_run_limit_is_a_conflict
+        ; test_case
             "zero declaration rejected before dispatch"
             `Quick
             test_zero_declaration_rejected_before_dispatch
+        ; test_case
+            "zero priority run limit rejected before dispatch"
+            `Quick
+            test_zero_priority_run_limit_rejected_before_dispatch
         ; test_case
             "Complete.complete dispatch is admitted"
             `Quick

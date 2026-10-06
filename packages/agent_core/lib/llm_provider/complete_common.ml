@@ -625,18 +625,27 @@ let validate_thinking_control_request
 ;;
 
 (* An admission bound of zero or less would mean "no request may ever
-   dispatch" — a config authoring error, not a throttle. Reject it before
-   dispatch instead of letting Slot_scheduler.create raise mid-request. *)
+   dispatch", and a priority run limit of zero or less would never let a
+   priority request ahead -- config authoring errors, not throttles. Reject
+   them before dispatch instead of letting Slot_scheduler.create raise
+   mid-request. *)
 let validate_admission_declaration (config : Provider_config.t) =
-  match config.max_concurrent_requests with
-  | None -> Ok ()
-  | Some n when n >= 1 -> Ok ()
-  | Some n ->
+  match config.max_concurrent_requests, config.admission_priority_run_limit with
+  | Some n, _ when n < 1 ->
     Error
       (Http_client.AcceptRejected
          { reason =
              Printf.sprintf "max_concurrent_requests must be >= 1 when declared, got %d" n
          })
+  | _, Some limit when limit < 1 ->
+    Error
+      (Http_client.AcceptRejected
+         { reason =
+             Printf.sprintf
+               "admission_priority_run_limit must be >= 1 when declared, got %d"
+               limit
+         })
+  | (None | Some _), (None | Some _) -> Ok ()
 ;;
 
 let validate_common (config : Provider_config.t) =

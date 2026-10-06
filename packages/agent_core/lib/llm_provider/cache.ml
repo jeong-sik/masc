@@ -68,6 +68,8 @@ let request_fingerprint
                      ; previous_response_id
                      ; connect_timeout_s
                      ; max_concurrent_requests
+                     ; admission_priority_run_limit
+                     ; admission_class
                      ; repeat_penalty
                      ; repeat_last_n
                      }
@@ -75,8 +77,9 @@ let request_fingerprint
     config
   in
   (* Excluded, and why. These do not change what the provider is asked:
-     [connect_timeout_s] and [max_concurrent_requests] are transport
-     limits enforced on this side;
+     [connect_timeout_s], [max_concurrent_requests],
+     [admission_priority_run_limit] and [admission_class] are transport
+     limits and queueing enforced on this side;
      [return_progress] and [tool_stream] select how the answer is delivered,
      not what is asked; [internal_model_rotation_count] is a local attempt
      counter; [supports_*_override] and [model_capabilities_override] gate
@@ -93,6 +96,8 @@ let request_fingerprint
   ignore credential_source;
   ignore connect_timeout_s;
   ignore max_concurrent_requests;
+  ignore admission_priority_run_limit;
+  ignore admission_class;
   ignore return_progress;
   ignore tool_stream;
   ignore internal_model_rotation_count;

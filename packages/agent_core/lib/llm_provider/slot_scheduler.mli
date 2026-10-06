@@ -1,7 +1,9 @@
-(** Fair FIFO slot scheduler for LLM requests.
+(** Slot scheduler for LLM requests.
 
-    Capacity is the only scheduling constraint. When capacity is exhausted,
-    requests are queued and granted slots in arrival order.
+    When capacity is exhausted, requests are queued by their
+    {!Admission_class.t}. Within a class, slots are granted in arrival order.
+    A scheduler created without a priority run limit has a single queue, so
+    every request is granted in arrival order whatever its class.
 
     Cancel-safe: whether a waiter owns a slot once its wait has ended is
     decided by the waiter's state transition, not by how the wait ended. A
@@ -14,12 +16,20 @@
 type t
 
 (** Create a scheduler with [max_slots] concurrent permits.
-    @raise Invalid_argument if [max_slots < 1]. *)
-val create : max_slots:int -> t
 
-(** Run [f] with a permit. If all slots are in use, the request joins the FIFO.
-    Raises the original exception if [f] fails; the permit is still released. *)
-val with_permit : t -> (unit -> 'a) -> 'a
+    With [priority_run_limit = Some limit], a freed slot goes to the oldest
+    [Priority] waiter. Once [Priority] has taken [limit] slots in a row while
+    a [Standard] waiter was queued, the next slot goes to the oldest
+    [Standard] waiter, so [Standard] gets at least one slot in every
+    [limit + 1] while both classes wait. With [None] there is one queue.
+
+    @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
+val create : max_slots:int -> priority_run_limit:int option -> t
+
+(** Run [f] with a permit. If all slots are in use, the request joins the
+    queue of [admission_class]. Raises the original exception if [f] fails;
+    the permit is still released. *)
+val with_permit : admission_class:Admission_class.t -> t -> (unit -> 'a) -> 'a
 
 (** A bounded wait for a slot as its caller sees it. The caller owns the
     cell and starts it at [Before_any_wait]; the wait writes
@@ -47,6 +57,7 @@ val with_permit_until
   :  ?wait:permit_wait Atomic.t
   -> clock:_ Eio.Time.clock
   -> deadline_at:float
+  -> admission_class:Admission_class.t
   -> t
   -> (unit -> 'a)
   -> ('a, [> `Permit_wait_expired ]) result

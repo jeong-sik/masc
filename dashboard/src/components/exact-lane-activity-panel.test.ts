@@ -12,6 +12,7 @@ import { readExactActivity, writeExactActivity } from '../lib/exact-lane-activit
 import { exactLaneActivitySessionFor, resetExactLaneActivitySessionsForTesting } from '../lib/exact-lane-activity-session'
 import { runtimeTomlSessionFor, resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
 import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
+import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { LaneInventoryPanel } from './lane-inventory-panel'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
@@ -551,6 +552,34 @@ describe('Exact activity operator flow', () => {
     expect(session.state.value.current?.source_text).toBe(off)
     expect(session.state.value.receipt?.application.exact_output_registry.status).toBe('kept')
     expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
+  })
+  it('offers reapply when a read after an unanswered write still shows the old revision', async () => {
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async (_text, _revision, options) => {
+      options?.beforeDispatch?.(); throw new Error('connection lost')
+    })
+    const view = render(html`<${ExactLaneActivityPanel} lane=${lane} />`)
+    fireEvent.click(view.getByRole('button', { name: '활동 설정 열기' }))
+    fireEvent.click(await view.findByRole('switch'))
+    fireEvent.click(view.getByRole('button', { name: '활동 설정 저장' }))
+    await view.findByText(/저장 결과가 불확실합니다/)
+    fireEvent.click(view.getByRole('button', { name: '현재 설정 읽기' }))
+    await view.findByText(/아직 저장 전 그대로/)
+    expect(view.getByRole('button', { name: '활동 설정 저장' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(view.getByRole('button', { name: '활동 값만 다시 적용' }))
+    const save = view.getByRole('button', { name: '활동 설정 저장' })
+    await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false))
+    fireEvent.click(save)
+    await waitFor(() => expect(api.saveRuntimeTomlConfig).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(stored).toBe(off))
+  })
+  it('tells mounted Lane views to reread after an owned Runtime save resumes setup', async () => {
+    const authority = executionWorkspaceAuthority.peek()!, raw = runtimeTomlSessionFor(authority)
+    await raw.read(authority, 'reload')
+    const before = exactLaneObservationRevision(authority)
+    expect(await raw.write(authority, async options => {
+      options.beforeDispatch?.(); stored = off; return receipt(off)
+    }, off)).toBe(true)
+    expect(exactLaneObservationRevision(authority)).toBeGreaterThan(before)
   })
   it('does not report its own resume failure once a newer resume has succeeded', async () => {
     const { session, authority } = await draft()

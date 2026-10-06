@@ -392,6 +392,34 @@ let judge_source_schema_is_enforced () =
   check bool "empty union is not an advertised enforceable schema" true
     (Result.is_error (Lane_addon_action.validate_value_schema (union [])))
 
+(* One definition decides which resource declarations can run. A cpu count
+   Docker cannot represent is refused when the manifest is read, not later when
+   the worker is installed. *)
+let resources_are_checked_where_they_are_read () = with_directory (fun _root packages _declarations ->
+  let manifest cpus = Printf.sprintf {|id = "resources-probe"
+revision = "fixture-1"
+title = "Resources probe"
+image = "fixture/worker"
+command = ["worker"]
+contributions = ["observe"]
+
+[resources]
+cpus = %s
+memory_bytes = 67108864
+pids = 16
+max_reply_bytes = 4096
+|} cpus in
+  let load cpus =
+    let path = Filename.concat packages "resources-probe.toml" in
+    write path (manifest cpus);
+    Lane_addon_manifest.load ~path in
+  check bool "a runnable declaration loads" true (Result.is_ok (load "0.5"));
+  check bool "a cpu count below one nano-CPU is refused at load" true (Result.is_error (load "1e-12"));
+  check bool "a zero cpu count is refused at load" true (Result.is_error (load "0.0"));
+  check bool "check_resources agrees with the manifest" true
+    (Result.is_error (Lane_addon_types.check_resources
+      {Lane_addon_types.cpus = 1e-12; memory_bytes = 1L; pids = 1; max_reply_bytes = 1})))
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
     [test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
@@ -405,6 +433,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "comments, rename and key order preserve identity" `Quick comments_rename_and_key_order;
      test_case "meaningful configuration and package changes alter revision" `Quick meaningful_changes;
      test_case "invalid values remain errors" `Quick reject_invalid_values;
+     test_case "resources are checked where they are read" `Quick resources_are_checked_where_they_are_read;
      test_case "malformed files retain membership and identity" `Quick invalid_files_remain_visible;
      test_case "duplicate identities do not elect a winner" `Quick duplicates_have_no_winner;
      test_case "missing and unreadable configuration are distinct" `Quick directory_and_read_failures]]

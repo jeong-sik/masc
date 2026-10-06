@@ -119,12 +119,13 @@ let load ~path =
     if command = [] || List.exists (fun arg -> String.trim arg = "") command
     then Error "command requires non-blank argv entries"
     else if contributions = [] then Error "at least one contribution is required"
-    else if not (cpus > 0.) || classify_float cpus = FP_infinite
-         || memory <= 0 || pids <= 0 || max_reply_bytes <= 0
-    then Error "resources require finite positive CPU, memory, pids and reply bytes"
-    else Ok { id; revision; title; contributions = List.rev contributions; image; command;
-      directory = Filename.dirname path; skills_directory; action_tool; outputs; refresh_policy; model_access; binding_schema; presentation;
-      resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }
+    else
+      let resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } in
+      match check_resources resources with
+      | Error detail -> Error detail
+      | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; image; command;
+          directory = Filename.dirname path; skills_directory; action_tool; outputs; refresh_policy; model_access; binding_schema; presentation;
+          resources }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
   | Sys_error message -> Error (Io_failure message)

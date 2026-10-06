@@ -29,7 +29,8 @@ let overshoot_tolerance_s = 0.7
 let make_self_signed () : X509.Certificate.t * X509.Private_key.t =
   let key = X509.Private_key.generate ~bits:2048 `RSA in
   let dn =
-    X509.Distinguished_name.[ Relative_distinguished_name.singleton (CN "localhost") ]
+    let cn = X509.Distinguished_name.Common_name.v "localhost" in
+    X509.Distinguished_name.[ Relative_distinguished_name.singleton (CN cn) ]
   in
   let csr =
     match X509.Signing_request.create dn key with

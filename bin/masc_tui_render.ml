@@ -6017,6 +6017,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                       Terminal_text.single_line row.sch_requested_by)
                    rows
                in
+               let recurrence_words =
+                 List.map
+                   (fun (row : schedule_row) ->
+                      Terminal_text.single_line row.sch_recurrence_summary)
+                   rows
+               in
                (* Every line carries a two-cell lead before the table, so the
                   table is fitted to what the lead leaves -- the same reserve
                   the Schedules list makes, without which the frame cuts the
@@ -6028,6 +6034,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ~clock_width:schedule_requested_clock_cells
                    ~outcome_width:
                      (Render_schedule.schedule_delivery_width outcome_words)
+                   ~recurrence_width:
+                     (Render_schedule.kauto_recurrence_width recurrence_words)
                    ~by_width:(Render_schedule.kauto_by_width by_words)
                in
                let header = Render_schedule.kauto_header_row ~layout in
@@ -10876,7 +10884,7 @@ let usage_lines ~cols (state : state) =
         [ " Keeper usage (24h) · unavailable: " ^ Terminal_text.single_line reason ]
     | Keeper_usage_read Keeper_usage_loading ->
         [ " Keeper usage (24h) · collecting" ]
-    | Keeper_usage_read (Keeper_usage_window { kuw_rows; kuw_window_minutes; kuw_freshness; _ }) ->
+    | Keeper_usage_read (Keeper_usage_window { kuw_rows; kuw_window_minutes; kuw_freshness; kuw_generated_at }) ->
         let freshness = match kuw_freshness with
           | Keeper_usage_fresh -> ""
           | Keeper_usage_stale { age_s; last_error } ->
@@ -10885,9 +10893,55 @@ let usage_lines ~cols (state : state) =
                    ~some:(fun reason -> " · refresh failed: " ^ Terminal_text.single_line reason)
                    last_error)
         in
-        (Printf.sprintf " Keeper usage · last %dm · recorded turn metrics%s"
-           kuw_window_minutes freshness)
-        :: (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
+        let readable row = match row.kur_coverage with
+          | Keeper_usage_failed _ | Keeper_usage_partial _ -> false
+          | Keeper_usage_complete -> true
+        in
+        let token_value row = Option.map float_of_int row.kur_tokens in
+        let cost_value row = row.kur_cost_usd in
+        let valid value = Float.is_finite value && value >= 0. in
+        let largest value = List.fold_left
+            (fun highest row ->
+              if readable row then
+                match value row with
+                | Some amount when valid amount ->
+                    Some (Option.fold ~none:amount ~some:(max amount) highest)
+                | _ -> highest
+              else highest) None kuw_rows in
+        let token_max = largest token_value and cost_max = largest cost_value in
+        let scale value format = function
+          | Some amount -> format amount
+          | None when List.exists (fun row ->
+              Option.fold ~none:false ~some:valid (value row)) kuw_rows ->
+              "unavailable (no complete window)"
+          | None -> "unreported"
+        in
+        let width = max 1 (cols - 7) in
+        let bar_cells = min 32 (max 1 (width - 2)) in
+        let meter value highest row =
+          match value row with
+          | Some amount when readable row && valid amount ->
+              let maximum = Option.value ~default:0. highest in
+              let filled = if maximum = 0. then 0
+                else min bar_cells (int_of_float (amount /. maximum *. float_of_int bar_cells)) in
+              "[" ^ String.concat "" (List.init bar_cells
+                (fun index -> if index < filled then "█" else "░")) ^ "]"
+              ^ (if amount = 0. then " 0" else "")
+          | _ -> "[unavailable · no comparison bar]"
+        in
+        let generated = Unix.gmtime kuw_generated_at in
+        [ Printf.sprintf " Keeper usage · last %dm · recorded turn metrics%s"
+            kuw_window_minutes freshness
+        ; Printf.sprintf " As of %04d-%02d-%02d %02d:%02d UTC"
+            (generated.Unix.tm_year + 1900) (generated.Unix.tm_mon + 1)
+            generated.Unix.tm_mday generated.Unix.tm_hour generated.Unix.tm_min
+        ; " Bars compare read windows; each metric scales to its largest Keeper."
+        ; " Partial windows have no comparison bar; missing metrics can understate totals; bars are not quota."
+        ; Printf.sprintf " Scale: tokens %s · cost %s"
+            (scale token_value (Printf.sprintf "%.0f") token_max)
+            (scale cost_value (Printf.sprintf "$%.4f") cost_max)
+        ; "" ]
+        @ (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
             else List.concat_map
               (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
                 let tokens =
@@ -10898,8 +10952,9 @@ let usage_lines ~cols (state : state) =
                 let coverage =
                   match row.kur_coverage with
                   | Keeper_usage_complete -> "read"
-                  | Keeper_usage_partial count ->
-                      Printf.sprintf "partial (%d malformed rows)" count
+                  | Keeper_usage_partial { malformed_rows; unread_turn_rows } ->
+                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows)"
+                        malformed_rows unread_turn_rows
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason
                 in
@@ -10913,8 +10968,10 @@ let usage_lines ~cols (state : state) =
                     [ Printf.sprintf "%d turns · %s" row.kur_turn_samples coverage
                     ; Printf.sprintf "Tokens  %s · %d reported, %d missing"
                         tokens row.kur_tokens_reported row.kur_tokens_missing
+                    ; meter token_value token_max row
                     ; Printf.sprintf "Cost    %s · %d reported, %d missing"
                         cost row.kur_cost_reported row.kur_cost_missing
+                    ; meter cost_value cost_max row
                     ; "" ])
               kuw_rows)
   in

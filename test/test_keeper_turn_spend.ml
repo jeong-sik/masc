@@ -487,7 +487,7 @@ let test_attempt_rows_decode_under_distinct_keys () =
         (List.map
            (fun (row : Cost_ledger.t) ->
               match row.usage_projection, row.usage with
-              | ( Cost_ledger.Resolved_attempt_delta { lane_attempt_index; reading_index }
+              | ( Cost_ledger.Resolved_attempt_delta { lane_attempt_index; reading_index; _ }
                 , Cost_ledger.Usage_reported { input_tokens; _ } ) ->
                 lane_attempt_index, reading_index, input_tokens
               | Cost_ledger.Resolved_attempt_delta _, Cost_ledger.Usage_missing ->

@@ -56,6 +56,7 @@ val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val status_to_string : status -> string
 val position_to_string : cumulative_position -> string
+val position_of_string : string -> (cumulative_position, string) result
 
 val resolve :
   cursor:cursor option ->

@@ -477,7 +477,8 @@ let test_a_resolved_row_with_a_scope_is_rejected () =
 let attempt_row =
   { (raw_row Runtime_usage_scope.Per_request) with
     usage_projection =
-      Cost_ledger.Resolved_attempt_delta { lane_attempt_index = 2; reading_index = 1 }
+      Cost_ledger.Resolved_attempt_delta
+        { routing_run_id = "run-before-restart"; lane_attempt_index = 2; reading_index = 1 }
   }
 ;;
 
@@ -485,17 +486,47 @@ let attempt_row =
    caller's field of the same name cannot rename it. *)
 let test_an_attempt_row_round_trips_its_reading () =
   let json =
-    Cost_ledger.to_json ~extra_fields:[ "lane_attempt_index", `Int 9 ] attempt_row
+    Cost_ledger.to_json
+      ~extra_fields:[ "lane_attempt_index", `Int 9; "routing_run_id", `String "other-run" ]
+      attempt_row
   in
   check int "the row's own attempt" 2 (int_field json "lane_attempt_index");
+  check string "the row's own run" "run-before-restart"
+    (Yojson.Safe.Util.(json |> member "routing_run_id" |> to_string));
   check int "its reading" 1 (int_field json "reading_index");
   check_null_field json "usage_scope";
   match decoded_projection json with
-  | Cost_ledger.Resolved_attempt_delta { lane_attempt_index; reading_index } ->
-    check (pair int int) "the reading survives the wire" (2, 1)
-      (lane_attempt_index, reading_index)
+  | Cost_ledger.Resolved_attempt_delta { routing_run_id; lane_attempt_index; reading_index } ->
+    check (triple string int int) "the reading survives the wire"
+      ("run-before-restart", 2, 1)
+      (routing_run_id, lane_attempt_index, reading_index)
   | Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_delta ->
     fail "an attempt row decoded as another projection"
+;;
+
+(* A server that restarts during a turn runs its attempts again from lane
+   index 0, and an official client numbers its turns from 1 again, so two
+   attempts can share the lane index, the ordinal and the reading position.
+   The run that made each attempt keeps their rows apart: a reader drops both
+   rows of a shared key. *)
+let test_attempts_of_two_runs_have_distinct_keys () =
+  let after_restart =
+    { attempt_row with
+      usage_projection =
+        Cost_ledger.Resolved_attempt_delta
+          { routing_run_id = "run-after-restart"; lane_attempt_index = 2; reading_index = 1 }
+    }
+  in
+  match Cost_ledger.inference_key attempt_row, Cost_ledger.inference_key after_restart with
+  | Some before, Some after ->
+    check bool "distinct keys" true (Cost_ledger.compare_inference_key before after <> 0)
+  | None, _ | _, None -> fail "an attempt row has no inference key"
+;;
+
+let test_an_attempt_row_without_its_run_is_refused () =
+  match Cost_ledger.of_json (without_field "routing_run_id" (Cost_ledger.to_json attempt_row)) with
+  | Error _ -> ()
+  | Ok _ -> fail "an attempt row without its run was accepted"
 ;;
 
 let test_an_attempt_row_without_its_reading_is_rejected () =
@@ -574,6 +605,10 @@ let () =
             test_an_attempt_row_round_trips_its_reading;
           test_case "an attempt row without its reading is rejected" `Quick
             test_an_attempt_row_without_its_reading_is_rejected;
+          test_case "attempts of two runs have distinct keys" `Quick
+            test_attempts_of_two_runs_have_distinct_keys;
+          test_case "an attempt row without its run is refused" `Quick
+            test_an_attempt_row_without_its_run_is_refused;
           test_case "a manual attempt row is rejected" `Quick
             test_a_manual_attempt_row_is_rejected;
           test_case "an attempt reading keys apart from the turn" `Quick

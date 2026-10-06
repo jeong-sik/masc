@@ -3181,3 +3181,1674 @@ def press_and_settle(
     wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=5.0)
     drain_until_quiet(process, master_fd, output, cap=cap)
     return CSI_RE.sub(b"", bytes(output[start:]))
+FRAME_END = b"\x1b[?7h"
+
+
+FRAME_START = b"\x1b[?7l"
+
+
+FULL_REDRAW = b"\x1b[2J"
+
+
+CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+OSC_RE = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def find_needle(
+    haystack: bytes | bytearray,
+    needle: bytes | re.Pattern[bytes],
+    start: int = 0,
+) -> int:
+    if isinstance(needle, bytes):
+        return haystack.find(needle, start)
+    found = needle.search(haystack, start)
+    return found.start() if found else -1
+
+
+def end_of_needle(
+    haystack: bytes | bytearray,
+    needle: bytes | re.Pattern[bytes],
+    start: int = 0,
+) -> int:
+    if isinstance(needle, bytes):
+        return haystack.find(needle, start) + len(needle)
+    found = needle.search(haystack, start)
+    assert found is not None
+    return found.end()
+
+
+def read_available(master_fd: int, output: bytearray) -> None:
+    while True:
+        try:
+            chunk = os.read(master_fd, 65536)
+        except BlockingIOError:
+            return
+        except OSError as error:
+            if error.errno in (errno.EIO, errno.EBADF):
+                return
+            raise
+        if not chunk:
+            return
+        output.extend(chunk)
+        if isinstance(output, PtyOutput):
+            output.last_byte_at = time.monotonic()
+            output.last_byte_ticks = (
+                _child_cpu_ticks(output.pid) if output.pid is not None else None
+            )
+
+
+def _needle_before_start(
+    output: bytearray, needle: Needle, start: int
+) -> str:
+    if start <= 0:
+        return ""
+    earlier = find_needle(output, needle, 0)
+    if earlier < 0 or earlier >= start:
+        return ""
+    return (
+        f" (first drawn at offset {earlier}, none after this wait began at"
+        f" {start})"
+    )
+
+
+def _child_cpu_ticks(pid: int) -> tuple[int, int] | None:
+    """(utime, stime) of a still-running child, in clock ticks, from /proc.
+
+    None where /proc does not exist (macOS) or the child is already reaped:
+    both make the delta unmeasurable, and the diagnostic line says so instead
+    of guessing a zero.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            fields = stat.read().rsplit(b")", 1)[-1].split()
+    except OSError:
+        return None
+    try:
+        # fields[0] is state (field 3); utime and stime are fields 14 and 15.
+        return int(fields[11]), int(fields[12])
+    except (IndexError, ValueError):
+        return None
+
+
+def _stall_line(
+    process: subprocess.Popen[bytes],
+    output: bytearray,
+    *,
+    started_at: float,
+    started_len: int,
+    last_byte_at: float | None,
+    last_byte_ticks: tuple[int, int] | None,
+) -> str:
+    """One bracketed line for a wait that timed out, task-1776.
+
+    The three readings separate the ways a PTY wait dies: silence counts from
+    the last byte the PTY delivered, so a screen that froze mid-draw reads
+    differently from one that never drew; loadavg is copied from /proc at the
+    timeout; the child CPU snapshot and delta use the last byte as their
+    baseline. No timeout, needle or wait behaviour changes because of it.
+    """
+    now = time.monotonic()
+    try:
+        with open("/proc/loadavg", "rt", encoding="ascii") as loadavg:
+            load = loadavg.read().rstrip("\n")
+    except OSError:
+        load = "unavailable"
+    silence = (
+        f"silence {now - last_byte_at:.2f}s"
+        if last_byte_at is not None else "last byte unavailable"
+    )
+    parts = [
+        silence
+        + f" (wait ran {now - started_at:.2f}s,"
+        f" bytes {started_len} -> {len(output)})",
+        f"loadavg(at timeout) {load}",
+    ]
+    ended = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
+    if last_byte_ticks is None or ended is None:
+        parts.append("child utime/stime unavailable")
+    else:
+        try:
+            hz = os.sysconf("SC_CLK_TCK")
+            last_user, last_system = (value / hz for value in last_byte_ticks)
+            end_user, end_system = (value / hz for value in ended)
+            user_delta = end_user - last_user
+            system_delta = end_system - last_system
+            parts.append(
+                "child utime/stime "
+                f"at last byte {last_user:.2f}s/{last_system:.2f}s; "
+                f"at timeout {end_user:.2f}s/{end_system:.2f}s; "
+                f"delta +{user_delta:.2f}s/+{system_delta:.2f}s"
+            )
+        except (OSError, ValueError):
+            parts.append("child utime/stime unavailable")
+    return " [stall: " + "; ".join(parts) + "]"
+
+
+def poll_for_output(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    needle: Needle,
+    *,
+    start: int,
+    timeout: float,
+) -> bool:
+    """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
+
+    A caller that has something to do when it does not arrive -- press the key
+    again, say -- needs the answer rather than the exception. An exited TUI
+    still raises: no amount of waiting brings it back. ``read_available``
+    records byte observations across all waits in the terminal session.
+    """
+    deadline = time.monotonic() + timeout
+    while find_needle(output, needle, start) < 0:
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return False
+        select.select([master_fd], [], [], min(0.1, remaining))
+    return True
+
+
+def wait_for_output(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    needle: Needle,
+    *,
+    start: int,
+    timeout: float,
+) -> None:
+    started_at = time.monotonic()
+    started_len = len(output)
+    if poll_for_output(
+        process,
+        master_fd,
+        output,
+        needle,
+        start=start,
+        timeout=timeout,
+    ):
+        return
+    stall = _stall_line(
+        process,
+        output,
+        started_at=started_at,
+        started_len=started_len,
+        last_byte_at=output.last_byte_at if isinstance(output, PtyOutput) else None,
+        last_byte_ticks=output.last_byte_ticks if isinstance(output, PtyOutput) else None,
+    )
+    raise AssertionError(
+        f"timed out waiting for {needle!r}"
+        f"{_needle_before_start(output, needle, start)}"
+        f"{stall}: {bytes(output)!r}"
+    )
+
+
+def write_all(master_fd: int, output: bytearray, data: bytes) -> None:
+    """Write every byte, draining the TUI as it goes.
+
+    A terminal's input queue is small -- 1024 bytes on macOS -- and the master
+    is non-blocking here, so one os.write of a real paste returns short and
+    the rest is simply gone. A scenario that pastes 4 kB and asserts on what
+    arrived would be asserting on the first kilobyte. Reading between writes
+    is what lets the TUI drain the queue so the next chunk fits.
+    """
+    offset = 0
+    while offset < len(data):
+        try:
+            offset += os.write(master_fd, data[offset : offset + 512])
+        except BlockingIOError:
+            pass
+        read_available(master_fd, output)
+
+
+def send_and_wait(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    data: bytes,
+    needle: Needle,
+) -> bytes:
+    read_available(master_fd, output)
+    start = len(output)
+    # Through write_all, not os.write: the master is non-blocking and the
+    # terminal's input queue holds about a kilobyte, so a single write of a
+    # longer payload returns short and the rest is dropped without an error.
+    # A scenario that types 1,819 bytes and waits for the tail was waiting on
+    # bytes the terminal never received -- 1,022 of them arrived.
+    write_all(master_fd, output, data)
+    wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
+    needle_end = end_of_needle(output, needle, start)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=needle_end,
+        timeout=3.0,
+    )
+    frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
+    return bytes(output[start:frame_end])
+
+
+TAB_CYCLE_BOUND = 24
+
+
+def drain_until_quiet(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    quiet: float = 0.25,
+    cap: float = 3.0,
+) -> bool:
+    """Read until the TUI has written nothing for [quiet] seconds. True when
+    it went quiet, False when [cap] passed with output still arriving.
+
+    A keypress's consequences are not one frame: the switch redraw can be
+    preceded by frames already in flight. The only moment a press can be
+    judged is after its output has stopped arriving. A screen that animates
+    never stops, and a caller that needs the quiet asserts the answer rather
+    than reading a screen [cap] happened to cut.
+    """
+    deadline = time.monotonic() + cap
+    grown_at = time.monotonic()
+    length = len(output)
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise AssertionError(f"TUI exited while draining: {bytes(output)!r}")
+        select.select([master_fd], [], [], 0.05)
+        read_available(master_fd, output)
+        if len(output) != length:
+            length = len(output)
+            grown_at = time.monotonic()
+        elif time.monotonic() - grown_at >= quiet:
+            return True
+    return False
+
+
+def tab_until(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    needle: Needle,
+) -> bytes:
+    """Press Tab until the screen shows [needle], or give up after a lap.
+
+    Name the surface the walk is going to, not one on the way. The ring is
+    not fixed: Masc_tui_surface_navigation.is_surface_active leaves Approvals out of it
+    while nothing is pending, so a walk that stopped there first burned
+    every press on a screen that did not exist. Six scenarios used it as a
+    waypoint to Board, and a seventh fabricated a pending tool approval in
+    its fixtures to keep the waypoint alive.
+    """
+    for _ in range(TAB_CYCLE_BOUND):
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"\t")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=start,
+            timeout=3.0,
+        )
+        # Asynchronous frames (a feed event row, a clock tick, the previous
+        # surface's redraw still in flight) can land between the press and
+        # the switch redraw. Judging the first frame pressed Tab again over
+        # surfaces that had already drawn, and the walk lapped its target
+        # without ever reading it; judging everything since the walk began
+        # returned while the walk had already overshot. So the press is
+        # judged only once its frames have stopped arriving: after the
+        # quiet, everything since the press belongs to this press.
+        drain_until_quiet(process, master_fd, output)
+        found = find_needle(output, needle, start)
+        if found < 0:
+            continue
+        frame_end = output.find(FRAME_END, found)
+        if frame_end < 0:
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                FRAME_END,
+                start=found,
+                timeout=3.0,
+            )
+            frame_end = output.find(FRAME_END, found)
+        frame_end += len(FRAME_END)
+        frame_begin = output.rfind(FRAME_END, start, found)
+        frame_begin = start if frame_begin < 0 else frame_begin + len(FRAME_END)
+        return bytes(output[frame_begin:frame_end])
+    raise AssertionError(
+        f"tabbed {TAB_CYCLE_BOUND} times without reaching {needle!r}; "
+        f"last frame: {bytes(output[-1500:])!r}"
+    )
+
+
+KEEPER_ROW_SCAN_BOUND = 24
+
+
+KEEPER_ROW_STEP_TIMEOUT_S = 1.0
+
+
+def keeper_row_selected(name: bytes) -> re.Pattern[bytes]:
+    """A needle that matches only while ``name`` is the selected keeper row.
+
+    Selection is a full-row reverse band: the row opens with reverse video
+    and, because the band folds every cell colour, carries no other escape
+    before the name. The legacy caret-plus-bold-name shape is still accepted
+    while unconverted builds circulate.
+    """
+    return re.compile(
+        rb"(?:\x1b\[7m[^\x1b\n]*" + re.escape(name)
+        + rb"|\x1b\[0m \x1b\[1m" + re.escape(name) + rb")"
+    )
+
+
+def transport_health_fixture() -> HttpFixture:
+    """A quiet transport: sse carries the stream, the other paths are down.
+
+    The TUI reads this surface on every refresh, so a fixture set without it
+    would add a load-failure event and push the oldest event out of a short
+    viewport.
+    """
+    return (
+        200,
+        {
+            "summary": {"primary_path": "sse", "queue_pressure": "steady"},
+            "sse": {"sessions_total": 1},
+            "websocket": {"listening": False},
+            "grpc": {"listening": False, "events_dropped": 0},
+        },
+    )
+
+
+def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
+    return {
+        "summary": {
+            "workspace_health": "ok",
+            "cluster": cluster,
+            "project": "project-a",
+        },
+        "generated_at": "2026-08-22T00:00:00Z",
+        "incidents": [],
+        "attention_queue": [],
+        "attention_items": [],
+        "agent_briefs": [],
+        "keepers_listing": {"state": "listed"},
+        "keepers_unread": [],
+    }
+
+
+def fleet_safety_fixture() -> HttpResponse:
+    """A fleet reading the TUI can decode.
+
+    Without it the poll fails and the TUI records a "fleet safety data
+    unreliable" event, which is correct behaviour but adds a row to scenarios
+    that are counting the event list. Every field the TUI reads is here,
+    with the schema that marks a reading: the TUI requires each one, because
+    a missing observation must not become a zero count. The snapshot beside
+    it says the reading is current; without it the TUI refuses the reading,
+    because a stale snapshot serves a past one.
+    """
+    return (200, {"full_health_snapshot": {"status": "ready"}, "keeper_fleet_safety": {
+        "schema": "masc.keeper_fleet_operator.v1",
+        "status": "ok",
+        "blocker": None,
+        "operator_action_required": False,
+        "bootable_keeper_count": 0,
+        "bootable_keeper_names": [],
+        "running_keeper_fiber_count": 0,
+        "running_keeper_names": [],
+        "executable_keeper_fiber_count": 0,
+        "executable_keeper_names": [],
+        "failing_keeper_fiber_count": 0,
+        "recovering_keeper_fiber_count": 0,
+        "turn_configuration_error_keeper_count": 0,
+        "turn_configuration_error_keeper_names": [],
+        "official_client_recovery_required_keeper_count": 0,
+        "official_client_recovery_required_keeper_names": [],
+        "paused_keeper_count": 0,
+        "target_reaction_capacity_count": 0,
+        "reaction_capacity_shortfall_count": 0,
+        "active_task_owner_without_executable_fiber_count": 0,
+        "completion_authority_pending_task_count": 0,
+        "active_task_owner_scan_error_count": 0,
+    }})
+
+
+def overview_event_http_fixtures() -> HttpFixtures:
+    return {
+        "/health?full=1": fleet_safety_fixture(),
+        # The Overview reads the roster for its Candle observation even when
+        # the Keeper pane is hidden. An unrelated scenario has no currency.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
+        "/api/v1/dashboard/transport-health": transport_health_fixture(),
+        "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
+        "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
+            200,
+            {
+                "pending_confirm_envelope": {
+                    "items": [],
+                    "summary": {
+                        "actor_filter": "masc-tui",
+                        "filter_active": True,
+                        "visible_count": 0,
+                        "total_count": 0,
+                        "hidden_count": 0,
+                        "hidden_actors": [],
+                        "confirm_required_actions": [],
+                    },
+                }
+            },
+        ),
+        "/api/v1/board?sort_by=hot": (200, {"posts": []}),
+        "/api/v1/dashboard/planning": (
+            200,
+            {
+                "goals": [],
+                "goal_history": {"unlisted": []},
+                "rollup": {
+                    "active_count": 0,
+                    "verifying_count": 0,
+                    "awaiting_confirmation_count": 0,
+                    "done_count": 0,
+                    "dropped_count": 0,
+                },
+                "task_backlog": {
+                    "todo": 0,
+                    "claimed": 0,
+                    "in_progress": 0,
+                    "awaiting_verification": 0,
+                    "done": 0,
+                    "cancelled": 0,
+                },
+                "generated_at": "2026-08-22T00:00:00Z",
+            },
+        ),
+    }
+
+
+def keeper_roster_meta(name: str) -> dict[str, object]:
+    # The roster row nests the keeper's own declaration under [meta], and the
+    # decoder reads sandbox_profile from there rather than from a second
+    # top-level copy (lib/tui_decode.ml, decode_keeper_runtime). A row without
+    # [meta] is not a smaller server response -- keeper_brief_meta_json always
+    # writes it -- and dropping it fails the whole list decode, which the TUI
+    # reports as a malformed roster rather than as a per-row gap. Every runtime
+    # column then draws as absent.
+    return {
+        "name": name,
+        "trace_id": f"trace-{name}",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "sandbox_profile": "docker",
+    }
+
+
+def keeper_runtime_http_fixtures(
+    *,
+    alpha_runtime_id: str = "anthropic.claude-opus-5",
+    beta_runtime_id: str = "anthropic.claude-sonnet-4",
+) -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/gate/keepers?detailed=true"] = (
+        200,
+        {
+            "candle": {"status": "off"},
+            "count": 2,
+            "total": 2,
+            "truncated": False,
+            "keepers": [
+                {
+                    "runtime_class": "keeper",
+                    "name": "alpha",
+                    "meta": keeper_roster_meta("alpha"),
+                    "status": "active",
+                    "health": "healthy",
+                    "paused": False,
+                    "phase": "running",
+                    "keepalive_running": True,
+                    "activation_mode": "autonomous",
+                    "runtime_id": alpha_runtime_id,
+                    "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
+                    "candle_account_revision": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
+                },
+                {
+                    "runtime_class": "keeper",
+                    "name": "beta",
+                    "meta": keeper_roster_meta("beta"),
+                    "status": "idle",
+                    "health": "idle",
+                    "paused": True,
+                    "phase": "paused",
+                    "keepalive_running": True,
+                    "activation_mode": "on_demand",
+                    "runtime_id": beta_runtime_id,
+                    "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
+                    "candle_account_revision": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
+                },
+            ],
+        },
+    )
+    return fixtures
+
+
+def board_selection_post(suffix: str, title: str, body: str) -> dict[str, object]:
+    return {
+        "id": f"post-{suffix}",
+        "author": "board-author",
+        "title": title,
+        "body": body,
+        "votes": 1,
+        "comment_count": 0,
+        "created_at_iso": "2026-08-22T00:00:00Z",
+    }
+
+
+def board_detail_page(
+    post: dict[str, object], comments: list[dict[str, object]],
+    *, offset: int | None = None, limit: int = 20,
+) -> dict[str, object]:
+    total = len(comments)
+    first = max(0, total - limit) if offset is None else offset
+    page = comments[first:first + limit]
+    next_offset = first + len(page) if first + len(page) < total else None
+    by_id = {comment["id"]: comment for comment in comments}
+    context_ids = set()
+    for comment in page:
+        current = comment
+        while current["id"] not in context_ids:
+            context_ids.add(current["id"])
+            parent = by_id.get(current.get("parent_id"))
+            if parent is None:
+                break
+            current = parent
+    return {
+        "post": {**post, "comment_count": total},
+        "comments": page,
+        "comment_context": [comment for comment in comments if comment["id"] in context_ids],
+        "comment_revision": hashlib.sha256(json.dumps(
+            [[comment["id"], comment.get("parent_id")] for comment in comments],
+            ensure_ascii=False, separators=(",", ":")).encode()).hexdigest(),
+        "comment_page": {
+            "offset": first,
+            "returned": len(page),
+            "total": total,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
+        },
+    }
+
+
+ACTING_PANE_NARROW_COLUMNS = 56
+
+
+def acting_pane_header_cell(output: bytearray) -> int:
+    """The cell "[Recent]" starts at on the screen now, or -1 when no pane
+    header is drawn. Cells are counted as code points: the surface beside
+    the pane at this size draws no wide glyph."""
+    for _row, text in sorted(screen_rows(bytes(output)).items()):
+        plain = text.decode("utf-8", "replace")
+        cell = plain.find("[Recent]")
+        if cell >= 0:
+            return cell
+    return -1
+
+
+KEEPER_CHAT_PANE_COLUMNS = 160
+
+
+def keeper_chat_draws_activity_pane_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # Tab rather than a number key: the number that reaches Keepers is being
+    # reassigned (#38801), the Tab ring reaches it either way.
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"c",
+        b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+    )
+    drain_until_quiet(process, master_fd, output, cap=4.0)
+    expected = KEEPER_CHAT_PANE_COLUMNS - ACTING_PANE_NARROW_COLUMNS + 1
+    drawn = acting_pane_header_cell(output)
+    if drawn != expected:
+        raise AssertionError(
+            f"chat: pane header at cell {drawn}, expected {expected}: "
+            f"{screen_text(bytes(output))!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+
+def select_keeper_row(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    name: bytes,
+) -> None:
+    """Move the keeper-list cursor onto ``name``, wherever the row sits.
+
+    The roster comes from the fixture plus whatever the live read added, so a
+    scenario that presses Enter on the list's first row is asserting an order
+    nothing promises. Read the current completed screen after draining pending
+    bytes: a roster refresh may have selected the target during that drain.
+    Historical highlights do not prove which row is selected now.
+
+    A boundary arrow can produce no frame. Poll without throwing in that case,
+    then reconstruct the current screen again before deciding on another key.
+    A band in an intermediate frame is not proof of the final selection.
+    """
+    needle = keeper_row_selected(name)
+    for _ in range(KEEPER_ROW_SCAN_BOUND):
+        read_available(master_fd, output)
+        last_end = output.rfind(FRAME_END)
+        completed_end = 0 if last_end < 0 else last_end + len(FRAME_END)
+        if output.rfind(FRAME_START) >= completed_end:
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        rows = screen_rows(bytes(output[:completed_end]), preserve_styles=True)
+        if any(find_needle(row, needle) >= 0 for row in rows.values()):
+            return
+        selected = [row for row, text in rows.items() if b"\x1b[7m" in text]
+        if not selected:
+            # The list header can arrive before its asynchronous roster. A
+            # Down here would race the first selected row and overshoot it.
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        target = screen_row_of(rows, name)
+        key = b"\x1b[A" if 0 <= target < min(selected) else b"\x1b[B"
+        start = len(output)
+        os.write(master_fd, key)
+        poll_for_output(
+            process, master_fd, output, FRAME_END,
+            start=start, timeout=KEEPER_ROW_STEP_TIMEOUT_S,
+        )
+    raise AssertionError(
+        f"keeper row {name!r} never became selected: {bytes(output[-2000:])!r}"
+    )
+
+
+def keeper_asks_response(*, long_question: bool = False) -> HttpFixture:
+    return (
+        200,
+        {
+            "keeper": None,
+            "open_count": 1,
+            "asks": [
+                {
+                    "keeper": "alpha",
+                    "ask_id": "ask-1",
+                    "asked_at": 1787557669.0,
+                    "context": "the rollout needs a call",
+                    "resolution": {"state": "open"},
+                    "questions": [
+                        {
+                            "question_id": "q-1",
+                            "header": "Rollout",
+                            "prompt": "ship the cold-start change now?",
+                            "mode": "single",
+                            "free_text": {"allowed": False},
+                            "choices": [
+                                {"choice_id": "c-yes", "label": "ship it"},
+                                {"choice_id": "c-no", "label": "hold"},
+                            ],
+                        },
+                        *([
+                            {
+                                "question_id": "q-2",
+                                "header": "Explanation",
+                                "prompt": "Explain the rollout decision",
+                                "mode": "single",
+                                "free_text": {"allowed": True},
+                                "choices": [{
+                                    "choice_id": "c-long",
+                                    "label": "Consider the deployment consequences. " * 80,
+                                }],
+                            }
+                        ] if long_question else []),
+                    ],
+                }
+            ],
+        },
+    )
+
+
+def blocked_gate_detail_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    reason = (
+        "Auto Judge exact attempt quarantined after provider transport closed "
+        "while decoding the structured verdict; operator must retain this "
+        "terminal explanation"
+    )
+    fixtures["/api/v1/dashboard/gate"] = (
+        200,
+        {
+            "approval_queue": [
+                {
+                    "id": "appr-blocked-detail",
+                    "keeper_name": "alpha",
+                    "tool_name": "tool_execute",
+                    "input_preview": '{"command":"deploy"}',
+                    "input_hash": "a" * 64,
+                    "sequence": 41,
+                    "exact_attempt": {
+                        "state": "bound",
+                        "status": "quarantined",
+                        "quarantine_cause": "cancellation",
+                    },
+                    "summary_status": {"status": "failed", "reason": reason},
+                    "summary_attempt_disposition": {"code": "settled"},
+                    # What the server derives from a settled attempt whose
+                    # summary failed (phase_of_disposition_and_summary).
+                    "phase": "blocked",
+                }
+            ],
+            "approval_queue_state": {"state": "ready"},
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": [],
+            "approval_rules_state": {"state": "ready"},
+        },
+    )
+    return fixtures
+
+
+ESCAPED_QUESTION_INJECTED = b"ok\x1b[1A\x1b[2Krm"
+
+
+ESCAPED_QUESTION_DETAIL_MARKER = b"detail-only-marker"
+
+
+def escaped_question_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    command = "echo " + "x" * 120 + " " + ESCAPED_QUESTION_DETAIL_MARKER.decode()
+    fixtures["/api/v1/keepers/tool-approvals"] = (
+        200,
+        {
+            "pending": [
+                {
+                    "keeper": "alpha",
+                    "tool_call_id": "tool-escaped-question",
+                    "tool": "Bash",
+                    "args": json.dumps({"command": command}),
+                    "question": "Run Bash on echo "
+                    + ESCAPED_QUESTION_INJECTED.decode()
+                    + " -rf /tmp/forged?",
+                    "because": None,
+                    "asked_at": 1787766400.0,
+                    "timeout_sec": 300.0,
+                }
+            ]
+        },
+    )
+    return fixtures
+
+
+BOARD_REFERENCE_TASK = "masc://overview/tasks/task-77"
+
+
+BOARD_REFERENCE_GOAL = "masc://planning/goal-9"
+
+
+def board_reference_http_fixtures() -> HttpFixtures:
+    # One body per post, in the list and in the detail. The related block reads
+    # the bodies the list carries, and board_post_dashboard_json sends p.body
+    # whole -- a list body that summarised would leave the block permanently
+    # empty while every unit test still passed.
+    bodies = {
+        "r1": ("Retry", f"we changed {BOARD_REFERENCE_TASK} for {BOARD_REFERENCE_GOAL}"),
+        "r2": ("Rollout", f"also about {BOARD_REFERENCE_TASK}"),
+        "r3": ("Prose", "task-77 and goal-9 in prose only"),
+        "r4": ("Hostile", "see masc://board/post%1b%5b2Jdanger"),
+    }
+    posts = [
+        board_selection_post(suffix, title, body)
+        for suffix, (title, body) in bodies.items()
+    ]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
+    for suffix, (title, body) in bodies.items():
+        fixtures[f"/api/v1/board/post-{suffix}?format=flat"] = (
+            200,
+            board_detail_page(board_selection_post(suffix, title, body), []),
+        )
+    return fixtures
+
+
+CURSOR_ROW_RE = re.compile(rb"\x1b\[(\d+);1H")
+
+
+def screen_rows(drawn: bytes, *, preserve_styles: bool = False) -> dict[int, bytes]:
+    """The screen the pane has painted, as row number to plain text.
+
+    A frame is a set of (row, text) pairs, not a picture, so no single frame
+    holds the whole screen: a row keeps whatever was written to it until
+    something writes it again. Replaying every absolute row address in
+    arrival order and keeping the last write to each row reconstructs what
+    is on screen. The pane never scrolls the terminal -- it addresses rows
+    absolutely -- so nothing moves a row's text to another row behind this.
+
+    A clear ends that inheritance. Everything painted before the last
+    FULL_REDRAW is gone from the terminal, and a row the redraw has not
+    reached yet is blank rather than holding what it said before -- a
+    resize redraws the top of a surface first and the rest a frame later.
+    Replaying across a clear reported text the reader could no longer see."""
+    cleared = drawn.rfind(FULL_REDRAW)
+    if cleared >= 0:
+        drawn = drawn[cleared:]
+    rows: dict[int, bytes] = {}
+    addresses = list(CURSOR_ROW_RE.finditer(drawn))
+    for index, address in enumerate(addresses):
+        end = (
+            addresses[index + 1].start()
+            if index + 1 < len(addresses)
+            else len(drawn)
+        )
+        # OSC changes terminal state (such as the title), not screen cells.
+        text = OSC_RE.sub(b"", drawn[address.end() : end])
+        rows[int(address.group(1))] = text if preserve_styles else CSI_RE.sub(b"", text)
+    return rows
+
+
+def screen_row_of(rows: dict[int, bytes], needle: bytes) -> int:
+    """The topmost row [needle] currently occupies, or -1 when it is gone."""
+    carrying = [row for row, text in rows.items() if needle in text]
+    return min(carrying) if carrying else -1
+
+
+def screen_text(drawn: bytes) -> bytes:
+    """The plain text of the screen, rows joined top to bottom."""
+    return b"\n".join(text for _, text in sorted(screen_rows(drawn).items()))
+
+
+PASTE_START = b"\x1b[200~"
+
+
+GRAPHICS_QUERY_ID = 31
+
+
+GRAPHICS_SUPPORTED_REPLY = b"\x1b_Gi=%d;OK\x1b\\" % GRAPHICS_QUERY_ID
+
+
+def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
+    request = json.loads(request_body)
+    request_id = request.get("request_id")
+    keeper_name = request.get("name")
+    message = request.get("message")
+    run_id = f"keeper-operation-run-{request_id}"
+    message_id = f"keeper-operation-message-{request_id}"
+    reply = f"reply-{message}"
+    thread_id = f"keeper:{keeper_name}"
+    events = [
+        {
+            "type": "CUSTOM",
+            "threadId": "default",
+            "timestamp": 1.0,
+            "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+            "value": {
+                "operation_id": request_id,
+                "state": "Queued",
+                "queued_count": 0,
+            },
+        },
+        {
+            "type": "RUN_STARTED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+        {
+            "type": "TEXT_MESSAGE_START",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+            "role": "assistant",
+        },
+        {
+            "type": "TEXT_MESSAGE_CONTENT",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+            "delta": reply,
+        },
+        {
+            "type": "CUSTOM",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "name": "KEEPER_REPLY_DETAILS",
+            "value": {
+                "reply": reply,
+                "turn_outcome": "visible_reply",
+                "turn_ref": "trace-pty#1",
+            },
+        },
+        {
+            "type": "TEXT_MESSAGE_END",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+        },
+        {
+            "type": "RUN_FINISHED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+    ]
+    return RawHttpResponse(
+        200,
+        "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode(),
+        content_type="text/event-stream",
+    )
+
+
+def unwrapped(plain: bytes) -> bytes:
+    """Screen text with the chat rows' chrome read as blanks -- the turn
+    rail's box-drawing glyphs (U+2500..U+257F) down the left margin -- and
+    every run of blanks (a wrap's padding, the next row's indent) read as
+    one space, so a phrase wrapped across rows compares equal to the
+    phrase."""
+    without_rail = re.sub(rb"\xe2[\x94\x95][\x80-\xbf]", b" ", plain)
+    return re.sub(rb"\s+", b" ", without_rail)
+
+
+class AtomicChatFixture:
+    """A held server turn with durable admissions and a separately gated Esc ack.
+
+    Events, rather than model completion or a guessed sleep, release each phase.
+    The real TUI runs against this wire fixture; Owner/SQLite execution is tested
+    by the OCaml suites, not simulated as a claimed production success here.
+    """
+
+    def __init__(self, *, first_working: bool = False,
+                 no_control_token: bool = False,
+                 hold_first_acceptance: bool = False,
+                 retained_after_resume_message: str | None = None) -> None:
+        self.first_working = first_working
+        self.no_control_token = no_control_token
+        self.hold_first_acceptance = hold_first_acceptance
+        self.retained_after_resume_message = retained_after_resume_message
+        self.resume_confirmed = False
+        self.lock = threading.Lock()
+        self.started_at = time.time()
+        self.run_next_calls = 0
+        self.interrupt_requests: list[dict[str, Any]] = []
+        self.release = threading.Event()
+        self.interrupted = threading.Event()
+        self.release_interrupt = threading.Event()
+        self.old_poll_seen = threading.Event()
+        self.first_post_received = threading.Event()
+        self.release_first_acceptance = threading.Event()
+        self.received: list[dict[str, Any]] = []
+        self.submitted: list[dict[str, Any]] = []
+        self.admitted = threading.Condition(self.lock)
+        self.edited = threading.Event()
+        self.paused = False
+        self.token = "control-before-stop"
+        self.turn_token = "9dd7c86d-0ca9-4a91-a24f-4d57085f0372"
+        self.operations: list[dict[str, Any]] = []
+        self.fixtures: HttpFixtures = {
+            "/api/v1/keepers/turns": self.turns,
+            "/api/v1/keepers/chat/stream": RequestHttpResponse(self.stream),
+            "/api/v1/keepers/turn/interrupt": RequestHttpResponse(self.interrupt),
+            "/api/v1/keepers/turn/run-next": RequestHttpResponse(self.unexpected_run_next),
+            "/api/v1/keepers/alpha/directive": RequestHttpResponse(self.directive),
+            "/api/v1/keepers/alpha/waiting-inventory": self.inventory,
+            "/api/v1/keepers/alpha/chat/operations?state=queued": self.queue,
+        }
+
+    def turns(self) -> HttpResponse:
+        if self.interrupted.is_set() and not self.release_interrupt.is_set():
+            self.old_poll_seen.set()
+        return 200, {"schema": "masc.keeper_turns.v1", "keepers": [{
+            "keeper_name": "alpha", "status": "ok",
+            "chat_control_token": None if self.no_control_token else self.token,
+            "turn": None if self.release.is_set() else {
+                "lane": "autonomous", "started_at_unix": self.started_at,
+                "interrupt_token": self.turn_token,
+                "preview": {"text_tail": "Atomic fixture ready", "last_tool": None,
+                            "status_text": "waiting for cooperative settlement", "updated_at_unix": self.started_at},
+            },
+        }]}
+
+    def inventory(self) -> HttpResponse:
+        return 200, {"keepers": [{"state": "busy", "paused": self.paused,
+            "waiting_on": [{"source": "direct_chat", "what": "Accepted messages waiting for the held turn",
+                            "next_action": "settle current turn", "detail": {}}]}]}
+
+    def queue(self) -> HttpResponse:
+        with self.lock:
+            return 200, {"operations": list(self.operations)}
+
+    def stream(self, body: bytes) -> StreamingHttpResponse:
+        request = json.loads(body)
+        with self.lock:
+            self.received.append(request)
+            first_post = len(self.received) == 1
+        if first_post:
+            self.first_post_received.set()
+            if self.hold_first_acceptance and not self.release_first_acceptance.wait(timeout=10):
+                raise AssertionError("first admission receipt was never released")
+        intent = request.get("admission_intent")
+        # The saved Enter predates the stop receipt; resume sends that original
+        # request without inventing a new interactive admission intent.
+        resumed_retained = (
+            self.resume_confirmed
+            and request.get("message") == self.retained_after_resume_message
+            and intent is None
+        )
+        if self.no_control_token:
+            if intent is not None:
+                raise AssertionError(f"Enter without a control token must queue only: {request!r}")
+        elif not resumed_retained:
+            if not isinstance(intent, dict) or intent.get("kind") != "interactive":
+                raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
+            if intent.get("control_token") != self.token:
+                raise AssertionError(f"Enter used stale control authority: {request!r}")
+        # Enter admits the line in queue order and names nothing to stop. Until
+        # 2026-09-14 it bound the working direct execution, else the observed
+        # autonomous turn, as the interrupt target, so every line typed while
+        # the Keeper worked cancelled that work. Esc still targets the exact
+        # turn (see [interrupt] below); Enter must not.
+        if isinstance(intent, dict) and (
+            intent.get("interrupt_token") is not None
+            or intent.get("operation_id") is not None
+        ):
+            raise AssertionError(f"Enter named a turn to stop; it must only admit to the queue: {request!r}")
+        with self.admitted:
+            self.submitted.append(request)
+            sequence = len(self.submitted)
+            operation = {
+                "operation_id": request["request_id"], "sequence": str(sequence),
+                "source": {"schema": "masc.keeper_chat_operation.source.v2", "submitted_by": "masc-tui",
+                    "thread_id": "keeper:alpha", "continuation_channel": {"kind": "dashboard", "thread_id": "keeper:alpha"},
+                    "surface": {"kind": "dashboard"}, "channel": "", "channel_user_id": "", "channel_user_name": "",
+                    "channel_workspace_id": "", "conversation_id": None, "external_message_id": None,
+                    "workspace_id": None, "extra_mentions": [], "sender_keeper": None,
+                    "user_row_origin": "needs_append"},
+                # The server keeps the input as submitted, so a later /queue edit
+                # reads the staged media and attachments back from here.
+                "input": {"schema": "masc.keeper_chat_operation.input.v1", "message": request["message"],
+                    "user_blocks": request.get("user_blocks", []), "turn_instructions": None,
+                    "surface_context": None, "attachments": request.get("attachments", [])},
+            }
+            self.operations.append(operation)
+            path = "/api/v1/keepers/alpha/chat/operations/" + request["request_id"]
+            self.fixtures[path] = lambda: (200, operation)
+            self.fixtures[path + "/edit"] = RequestHttpResponse(lambda body: self.edit(operation, body))
+            self.fixtures[f"/api/v1/keepers/alpha/chat/operations?state=queued&after_sequence={sequence}"] = (200, {"operations": []})
+            self.admitted.notify_all()
+        response = keeper_chat_succeeded_response(body)
+        blocks = [block for block in response.body.split(b"\n\n") if block]
+        acceptance = json.loads(blocks[0].removeprefix(b"data: "))
+        working = self.first_working and sequence == 1
+        acceptance["value"]["state"] = "Running" if working else "Queued"
+        acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
+        if self.no_control_token or resumed_retained:
+            acceptance["value"].pop("interactive", None)
+        else:
+            acceptance["value"]["interactive"] = {
+                "outcome": "applied", "chat_control_token": self.token,
+                "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
+            }
+        self.paused = False
+
+        def chunks() -> Iterator[bytes]:
+            prefix = f"data: {json.dumps(acceptance)}\n\n".encode()
+            if working:
+                prefix += blocks[1] + b"\n\n"
+            yield prefix
+            if not self.release.wait(timeout=30):
+                raise AssertionError("interaction never released the held server turn")
+            # The original request id is retained even when queued text is edited.
+            terminal = keeper_chat_succeeded_response(json.dumps({**request, "message": operation["input"]["message"]}).encode())
+            yield b"\n\n".join(terminal.body.split(b"\n\n")[2 if working else 1:])
+
+        return StreamingHttpResponse(chunks)
+
+    def edit(self, operation: dict[str, Any], body: bytes) -> HttpResponse:
+        operation["input"] = json.loads(body)["input"]
+        self.edited.set()
+        return 200, operation
+
+    def interrupt(self, body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        if self.release.is_set():
+            # A periodic preview may outlive the completed fixture execution.
+            # Refuse that stale target without pretending to signal or pause it.
+            return 409, {"error": "target is no longer current", "signalled": False,
+                         "paused": False, "chat_control_token": self.token}
+        if self.first_working and self.submitted:
+            expected = self.submitted[0]["request_id"]
+            if request.get("request_id") != expected or request.get("interrupt_token") is not None:
+                raise AssertionError(f"Esc ignored the locally working direct execution {expected}: {request!r}")
+        elif request.get("interrupt_token") != self.turn_token:
+            raise AssertionError(f"Esc targeted another turn: {request!r}")
+        with self.lock:
+            self.interrupt_requests.append(request)
+        self.paused = True
+        self.interrupted.set()
+        if not self.release_interrupt.wait(timeout=20):
+            raise AssertionError("interaction never acknowledged Esc")
+        self.token = "control-after-stop"
+        target = ({"request_id": request["request_id"]} if "request_id" in request
+                  else {"interrupt_token": self.turn_token})
+        return 200, {"signalled": True, "paused": True, **target, "chat_control_token": self.token}
+
+    def directive(self, body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        if request.get("action") != "resume":
+            raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        self.paused = False
+        self.resume_confirmed = True
+        return 200, {"ok": True}
+
+    def unexpected_run_next(self, body: bytes) -> HttpResponse:
+        self.run_next_calls += 1
+        raise AssertionError(f"ordinary Enter must not require run-next: {body!r}")
+
+
+REPOSITORIES_PATH = "/api/v1/repositories"
+
+
+def verification_request_row(task_id: str) -> dict[str, object]:
+    return {
+        "request_id": f"vr-{task_id}",
+        "task_id": task_id,
+        "task_title": f"finish {task_id}",
+        # request_kind, request_summary and next_action are gone from the
+        # producer: Verification_protocol wrote them as the fixed literals
+        # "normal", "" and "", so three rows of the detail pane said the same
+        # thing on every request ever drawn. Nothing reads them now.
+        "submitted_by": "keeper-alpha",
+        "created_at": "2026-08-25T14:00:00+09:00",
+        "required_artifacts": ["diff"],
+        "submitted_evidence": ["diff"],
+    }
+
+
+def standalone_lane_fixture(
+    lane_id: str, label: str, *, status: str = "idle", retained: int = 12
+) -> dict[str, object]:
+    """One row of the observation matrix, in the wire shape the strict
+    decoder accepts: every known lane exactly once, observation_only set."""
+    lane_contracts = {
+        "board_attention_exact": (
+            "Judges one durable Board candidate for Keeper attention.",
+            True,
+        ),
+        "hitl_auto_judge": (
+            "Produces the structured judgment for one held approval.",
+            True,
+        ),
+        "librarian_exact": (
+            "Selects the next Memory OS snapshot from immutable Keeper history.",
+            False,
+        ),
+        "workspace_curator_exact": (
+            "Synthesizes attributed proposals after committed workspace memory "
+            "changes; semantic verification is not performed.",
+            False,
+        ),
+        "candle_appraiser": (
+            "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+            False,
+        ),
+        "verifier_exact": (
+            "Reviews Task completion and Goal proof evidence.",
+            False,
+        ),
+        "browser_stagehand_exact": (
+            "Answers structured model requests from the Stagehand browser lane; "
+            "run records are not retained yet.",
+            False,
+        ),
+    }
+    purpose, required = lane_contracts[lane_id]
+    row = {
+        "lane_id": lane_id,
+        "label": label,
+        "purpose": purpose,
+        "required": required,
+        "observation_only": True,
+        "configured": True,
+        "configuration_state": "ready",
+        "declared_slots": ["glm-coding.glm-5-turbo"],
+        "declared_cli_slots": [],
+        "admitted_slots": ["glm-coding.glm-5-turbo"],
+        # The projection writes both declared lists and their admission
+        # readings. Omitting any list fails the row decode, and the
+        # whole snapshot with it, so the observation matrix simply never
+        # draws -- the surface has no per-row gap to show.
+        "cli_slots": [],
+        "dropped_slots": [],
+        "admission_error": None,
+        "status": status,
+        "retained_run_count": retained,
+        "running_count": 0,
+        "succeeded_count": retained,
+        "failed_count": 0,
+        "cancelled_count": 0,
+        "last_started_at": 1787557600.0 if retained else None,
+        "last_terminal_at": 1787557660.0 if retained else None,
+        "last_outcome": "succeeded" if retained else None,
+        "p50_elapsed_s": 8.0 if retained else None,
+        "selected_slots": (
+            [{"slot_id": "glm-coding.glm-5-turbo", "count": retained}]
+            if retained
+            else []
+        ),
+        "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
+    }
+    if lane_id == "board_attention_exact":
+        row["jev"] = {"state": "off"}
+    return row
+
+
+def standalone_lanes_response() -> HttpResponse:
+    return (
+        200,
+        {
+            "schema": "masc.standalone_llm_lanes.v2",
+            "generated_at": "2026-08-27T20:36:29Z",
+            "observed_at_unix": 1787557669.715736,
+            "exact_run_projection_count": 60,
+            "exact_run_source_total": 60,
+            "exact_run_projection_truncated": False,
+            "observation_only": True,
+            "lanes": [
+                standalone_lane_fixture(
+                    "board_attention_exact", "Board Attention", status="running"
+                ),
+                standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
+                standalone_lane_fixture("librarian_exact", "Librarian"),
+                # The decoder takes the registry's lane list as the wire contract
+                # and refuses a snapshot missing one (#35688 added this lane), so
+                # the fixture lists it where the server projection does.
+                standalone_lane_fixture(
+                    "workspace_curator_exact", "Workspace Curator"
+                ),
+                standalone_lane_fixture("verifier_exact", "Verifier"),
+                standalone_lane_fixture(
+                    "browser_stagehand_exact", "Browser Stagehand",
+                    status="no_retained_observation", retained=0,
+                ),
+                standalone_lane_fixture("candle_appraiser", "Candle Appraiser"),
+            ],
+        },
+    )
+
+
+def keeper_lanes_response(lanes: list[dict[str, object]]) -> HttpResponse:
+    return (
+        200,
+        {
+            "generated_at": 1787557669.715736,
+            "count": len(lanes),
+            "snapshots": lanes,
+        },
+    )
+
+
+WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/children?path=&limit=2000"
+
+
+WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=2000"
+
+
+WORKSPACE_FILE_AML_PATH = "/api/v1/workspace/file?path=lib/a.ml"
+
+
+def code_lane_fixtures() -> HttpFixtures:
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures[WORKSPACE_TREE_ROOT_PATH] = (
+        200,
+        [
+            {"path": "lib", "label": "lib", "depth": 0, "parent": "",
+             "hasChildren": True, "diff": None, "keeperId": None,
+             "hueIndex": None},
+            {"path": "README.md", "label": "README.md", "depth": 0,
+             "parent": "", "hasChildren": False, "diff": None,
+             "keeperId": None, "hueIndex": None},
+        ],
+    )
+    fixtures[WORKSPACE_CHILDREN_LIB_PATH] = (
+        200,
+        [
+            {"path": "lib/a.ml", "label": "a.ml", "depth": 1, "parent": "lib",
+             "hasChildren": False, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    file_response = (
+        200, {"ok": True, "content": "let x = 1\n(* hi *)\nlet y = x\n"})
+    fixtures[WORKSPACE_FILE_AML_PATH] = file_response
+    # uri's Query_value encoding may or may not spell the slash; serve both.
+    fixtures["/api/v1/workspace/file?path=lib%2Fa.ml"] = file_response
+    history_response = (
+        200,
+        {
+            "ok": True,
+            "commits": [
+                {"hash": "abc1234", "timestamp_ms": 1787000000000,
+                 "author": "keeper-alpha", "subject": "feat: add x"},
+                {"hash": "def5678", "timestamp_ms": 1786900000000,
+                 "author": "vincent", "subject": "chore: seed the file"},
+            ],
+        },
+    )
+    fixtures["/api/v1/git/log?path=lib/a.ml&limit=50"] = history_response
+    fixtures["/api/v1/git/log?path=lib%2Fa.ml&limit=50"] = history_response
+    diff_response = (
+        200,
+        {
+            "has_changes": True,
+            "unified": [
+                {"kind": "delete", "oldLine": 1, "newLine": None,
+                 "text": "let a = 1"},
+                # The added row is the working tree's line 1, so its text
+                # agrees with the file fixture -- the renderer now resolves
+                # it back to the lexed row by that number.
+                {"kind": "add", "oldLine": None, "newLine": 1,
+                 "text": "let x = 1"},
+            ],
+        },
+    )
+    for diff_path in (
+        "/api/v1/git/diff?path=lib/a.ml&base_ref=HEAD",
+        "/api/v1/git/diff?path=lib%2Fa.ml&base_ref=HEAD",
+    ):
+        fixtures[diff_path] = diff_response
+    hover_response = (200, {"ok": True, "data": {"kind": "hover", "text": "int"}})
+    definition_response = (
+        200,
+        {"ok": True, "data": {"kind": "locations", "locations": [
+            {"path": "lib/a.ml", "inside_workspace": True, "line": 2,
+             "character": 1},
+        ]}},
+    )
+    y_definition_response = (
+        200,
+        {"ok": True, "data": {"kind": "locations", "locations": [
+            {"path": "lib/a.ml", "inside_workspace": True, "line": 1,
+             "character": 5},
+        ]}},
+    )
+    for enc in ("lib/a.ml", "lib%2Fa.ml"):
+        fixtures[
+            f"/api/v1/lsp/question?question=hover&path={enc}&line=1&symbol=x"
+        ] = hover_response
+        fixtures[
+            f"/api/v1/lsp/question?question=definition&path={enc}&line=1&symbol=x"
+        ] = definition_response
+        fixtures[
+            f"/api/v1/lsp/question?question=definition&path={enc}&line=3&symbol=y"
+        ] = y_definition_response
+    return fixtures
+
+
+RUNTIME_PROBE_PATH = "/api/v1/dashboard/runtime-probe"
+
+
+RUNTIME_PROBE_FORCE_PATH = f"{RUNTIME_PROBE_PATH}?force=1"
+
+
+RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
+
+
+RUNTIME_CONFIG_RAW_PATH = "/api/v1/runtime/config/raw"
+
+
+def runtime_config_read_metadata() -> dict[str, object]:
+    return {
+        "ok": True,
+        "source_revision": "fixture-read-revision",
+        "validation": {
+            "valid": True, "schema_version": 1, "current_schema_version": 1,
+            "forward_schema": False, "issues": [],
+        },
+        "application": {
+            "operation": "read",
+            "routing": {"status": "active", "requires_restart": False},
+            "keeper_overlay": {
+                "status": "pending_restart", "configured_count": 1,
+                "requires_restart": True, "pending_keys": ["keeper.pending"],
+                "applied_keys": [], "preempted_keys": [],
+            },
+        },
+    }
+
+
+def runtime_probe_provider(
+    runtime_id: str,
+    *,
+    status: str,
+) -> dict[str, object]:
+    cli = status == "skipped_cli"
+    reachable = status == "reachable"
+    failed = not cli and not reachable
+    return {
+        "runtime_id": runtime_id,
+        "provider_id": f"probe-{runtime_id}",
+        "provider_display_name": "Probe label must not render",
+        "model_id": f"probe-model-{runtime_id}",
+        "model_api_name": f"probe-api-{runtime_id}",
+        "protocol": "openai",
+        "runtime_kind": "cli" if cli else "http",
+        "transport": "cli" if cli else "http",
+        "auth_kind": "none",
+        "credential_required": False,
+        "auth_present": False,
+        "status": status,
+        "reachable": None if cli else reachable,
+        "http_status": 200 if reachable else None,
+        "latency_ms": None if cli else (18.0 if reachable else 41.0),
+        "model_count": 4 if reachable else None,
+        "content_type": "application/json" if reachable else None,
+        "downloaded_bytes": 256 if reachable else None,
+        "endpoint_url": None if cli else "https://runtime.invalid/v1",
+        "probe_url": None if cli else "https://runtime.invalid/v1/models",
+        "error": (
+            "CLI runtimes do not expose an HTTP reachability endpoint"
+            if cli
+            else ("connection refused" if failed else None)
+        ),
+        "checked_at": "2026-08-24T10:20:00Z",
+    }
+
+
+def runtime_probe_response(*, fresh: bool) -> HttpResponse:
+    providers = [
+        runtime_probe_provider("runtime-a", status="reachable"),
+        runtime_probe_provider("runtime-b", status="skipped_cli"),
+        runtime_probe_provider(
+            "runtime-c",
+            status="reachable" if fresh else "network_error",
+        ),
+    ]
+    failed = 0 if fresh else 1
+    return (
+        200,
+        {
+            "generated_at": "2026-08-24T10:20:01Z",
+            "refreshed_at_unix": 1787566800.0,
+            "cache_ttl_sec": 15.0,
+            "cache_age_sec": 1.0 if fresh else 16.0,
+            "cache_hit": fresh,
+            "refresh_state": "fresh" if fresh else "served_stale",
+            "probe": {
+                "source": "runtime.toml",
+                # The overall probe status is written from Health_status, which
+                # spells the healthy reading "ok". "reachable" belongs to the
+                # per-provider vocabulary a few lines below and is not a word
+                # this field can carry, so a fixture using it here fails the
+                # snapshot decode -- and that failure is an inner result, so
+                # the surface keeps the previous reading and only marks the
+                # header "read failed" rather than saying what broke.
+                "status": "ok" if fresh else "degraded",
+                "probe_ok": fresh,
+                "checked_at": "2026-08-24T10:20:00Z",
+                "summary": {
+                    "runtimes": 3,
+                    "probed": 2,
+                    "reachable": 2 if fresh else 1,
+                    "failed": failed,
+                    "skipped": 1,
+                    "default_runtime_id": "runtime-a",
+                },
+                "providers": providers,
+                "errors": [] if fresh else ["runtime-c: network_error"],
+                "observations": ["provider metadata endpoints only"],
+                "limitations": ["no completion request", "CLI execution skipped"],
+            },
+        },
+    )
+
+
+def runtime_resolved_runtime(
+    runtime_id: str,
+    provider: str,
+    model: str,
+    *,
+    provider_id: str = "fixture-provider",
+) -> dict[str, object]:
+    return {
+        "id": runtime_id,
+        "provider": provider,
+        # The [providers.<id>] table key; "provider" is its display name.
+        "provider_id": provider_id,
+        "model": model,
+        "exact_slot_group": "slots",
+        "effective_max_context": 200_000,
+        "max_context_source": "capability",
+        "max_output_tokens": 8192,
+        "declared_reasoning_effort": None,
+        "is_local": False,
+        # This binding flag is independent of the fleet's top-level default.
+        "is_default": False,
+        "rate_limited": False,
+        "rate_limit_resets_at": None,
+    }
+
+
+def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpResponse:
+    runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
+    return (
+        200,
+        {
+            "generated_at_iso": "2026-08-24T10:20:02Z",
+            "source": RUNTIME_RESOLVED_PATH,
+            "config_path": "/workspace/config/runtime.toml",
+            "default_runtime": runtime_a,
+            # The two routes that are not lanes. Both lists are required by
+            # the decoder; empty is a configuration (no vision runtimes), and
+            # the declared list is what the editor writes back.
+            "media_failover": [],
+            "media_failover_declared": [],
+            # The Overview's Providers section decodes these two strictly.
+            "provider_usage_windows_since": 1790179140.2,
+            "provider_usage_windows": [],
+            "runtimes": [
+                runtime_a,
+                runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),
+                runtime_resolved_runtime("runtime-c", "Resolved C", "model-c"),
+                runtime_resolved_runtime("runtime-d", "Resolved D", "model-d"),
+                runtime_resolved_runtime("runtime-e", "Resolved E", "model-e"),
+            ],
+            "lanes": [
+                {
+                    "id": "primary",
+                    "runtime_ids": ["runtime-a", "runtime-b"],
+                    "declared": True,
+                },
+                {
+                    "id": "degraded",
+                    # Off by default. With it on, runtime-a is here as well as
+                    # in "primary", which is what gives the two doors into the
+                    # runtime detail -- a lane's candidate row and the catalog
+                    # row -- something to disagree about. It adds a row to the
+                    # lane listing, and other scripts walk that listing by row:
+                    # test_tui_runtime_lane_editor.py and
+                    # test_tui_selection_visibility.py both call this function
+                    # and count on its shape. The only caller that turns it on
+                    # is runtime_http_fixtures, which feeds nothing but
+                    # runtime_surface_interaction -- the interaction that makes
+                    # the comparison. Two runners register that interaction,
+                    # run_keyboard_regression and run_runtime_regression, and
+                    # both want the extra lane.
+                    "runtime_ids": (
+                        ["runtime-c", "runtime-a"]
+                        if runtime_a_in_two_lanes
+                        else ["runtime-c"]
+                    ),
+                    "declared": True,
+                },
+                {
+                    "id": "unobserved",
+                    "runtime_ids": ["runtime-d"],
+                    "declared": True,
+                },
+            ],
+            "assignments": [
+                {
+                    "keeper": "sangsu",
+                    "assignment_source": "default",
+                    "resolved": {"kind": "lane", "id": "primary"},
+                }
+            ],
+        },
+    )
+
+
+def runtime_http_fixtures() -> tuple[
+    HttpFixtures,
+    GatedHttpResponse,
+    SequencedHttpResponse,
+]:
+    fixtures = overview_event_http_fixtures()
+    initial_probe = GatedHttpResponse(
+        runtime_probe_response(fresh=False),
+        subsequent_response=runtime_probe_response(fresh=True),
+    )
+    force_probe = SequencedHttpResponse(
+        [(503, {"error": "forced probe refresh failed"})]
+    )
+    fixtures[RUNTIME_PROBE_PATH] = initial_probe
+    fixtures[RUNTIME_PROBE_FORCE_PATH] = force_probe
+    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response(
+        runtime_a_in_two_lanes=True
+    )
+    return fixtures, initial_probe, force_probe

@@ -682,6 +682,14 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
     | Some tokens, _ | None, Some tokens -> Some tokens
     | None, None -> spec.max_context in
   let spec = { spec with max_context } in
+  (* The provider's run limit orders the queue for its permits. A binding
+     without [max-concurrent] runs outside that queue, so it carries no run
+     limit; runtime_toml refuses a run limit that no binding can use. *)
+  let admission_priority_run_limit =
+    match max_concurrent_requests with
+    | Some _ -> provider.admission_priority_run_limit
+    | None -> None
+  in
   let ( let* ) = Result.bind in
   let* () = validate_parallel_tool_policy provider ~model_id:spec.id
       ~disable_parallel_tool_use in
@@ -784,7 +792,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
-            ?admission_priority_run_limit:provider.admission_priority_run_limit
+            ?admission_priority_run_limit
             ?max_tokens
             ())
      | Error reason -> Error reason)
@@ -841,7 +849,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
-            ?admission_priority_run_limit:provider.admission_priority_run_limit
+            ?admission_priority_run_limit
             ?max_tokens
             ())
      | Error reason -> Error reason)

@@ -625,11 +625,11 @@ val start_attempt : ready_plan -> (attempt, start_attempt_error) result
     for each frozen candidate. This performs no credential selection, request
     admission, call identity allocation, callback, or network effect. A new
     invocation always creates a new flow; restart resume belongs to the
-    caller's authenticated durable journal. [admission_class] (default
-    [Standard]) is the queue every candidate of this flow joins while its
-    endpoint's permits are all held; see {!Provider_admission}. *)
+    caller's authenticated durable journal. [admission_class] is the queue
+    every candidate of this flow joins while its endpoint's permits are all
+    held; see {!Provider_admission}. Every caller names it. *)
 val start_flow
-  :  ?admission_class:Admission_class.t
+  :  admission_class:Admission_class.t
   -> flow_snapshot
   -> (flow_attempt, flow_start_error) result
 

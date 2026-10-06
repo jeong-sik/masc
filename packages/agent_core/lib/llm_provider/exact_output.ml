@@ -485,7 +485,7 @@ let start_attempt (ready : ready_plan) =
     Ok { ready; receipt }
 ;;
 
-let start_flow ?(admission_class = Admission_class.Standard) (ready : flow_snapshot) =
+let start_flow ~admission_class (ready : flow_snapshot) =
   match Random_id.create () with
   | Error detail -> Error (Flow_id_generation_failed detail)
   | Ok raw_flow_id ->

@@ -278,9 +278,10 @@ connect-timeout-s = 1200.0
 # comment for what the key bounds.
 exact-body-timeout-s = 1200.0
 # Judgment requests (verifier, board attention, hitl auto judge) take a freed
-# admission permit ahead of Keeper turns, at most 3 in a row while a Keeper
-# turn waits. Every glm-coding binding below declares max-concurrent, which
-# this key needs (RFC judgment-lanes-take-account-admission-before-keeper-turns).
+# admission permit ahead of other requests (Keeper turns, librarian), at most
+# 3 in a row while one of those waits. It orders the permits of the bindings
+# below that declare max-concurrent (RFC
+# judgment-lanes-take-account-admission-before-keeper-turns).
 admission-priority-run-limit = 3
 
 [providers.glm-coding.healthcheck]

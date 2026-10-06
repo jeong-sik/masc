@@ -250,7 +250,7 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
       ~messages:[ Agent_core.Types.user_msg "Return one JSON object." ]
       requirement
     |> require_ok "snapshot rejection flow"
-    |> Exact_output.start_flow
+    |> Exact_output.start_flow ~admission_class:Llm_provider.Admission_class.Standard
     |> require_ok "start rejection flow"
   in
   Eio_main.run @@ fun env ->

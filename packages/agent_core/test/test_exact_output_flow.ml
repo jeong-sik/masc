@@ -326,7 +326,7 @@ let frozen_flow ?messages snapshot ids =
 ;;
 
 let start_flow ready =
-  match EO.start_flow ready with
+  match EO.start_flow ~admission_class:Llm_provider.Admission_class.Standard ready with
   | Ok flow -> flow
   | Error (EO.Flow_id_generation_failed detail) ->
     failf "flow identity allocation failed: %s" detail

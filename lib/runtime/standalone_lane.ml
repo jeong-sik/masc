@@ -41,8 +41,8 @@ let obligation = function
 (* Other work waits on these three verdicts: a task's completion on the
    verifier, an operator's confirmation on the HITL judge, and what a Keeper
    looks at next on board attention. The librarian's requests are large and
-   nothing waits on them; a priority permit held by one would stall the
-   judgment lanes again (RFC judgment-lanes-take-account-admission-before-
+   nothing waits on them; a priority permit held by one would keep the
+   judgment lanes waiting (RFC judgment-lanes-take-account-admission-before-
    keeper-turns). *)
 let admission_class : t -> Llm_provider.Admission_class.t = function
   | Verifier | Hitl_auto_judge | Board_attention -> Priority

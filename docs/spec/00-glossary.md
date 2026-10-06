@@ -230,8 +230,9 @@ status: reference
   먼저 허가를 받되, `Standard`가 기다리는 동안에는 그 수만큼만 연달아 받는다.
   masc에서는 runtime.toml provider 표의 `admission-priority-run-limit`이 이 값이고,
   verifier·HITL auto judge·board attention 레인이 `Priority`다
-  (`Standalone_lane.admission_class`). 이 키를 둔 provider의 binding은 모두
-  `max-concurrent`를 선언해야 설정을 읽을 수 있다.
+  (`Standalone_lane.admission_class`). 이 값은 그 provider에서 `max-concurrent`를
+  선언한 binding에만 붙는다. 그런 binding이 없거나 공식 클라이언트 provider이면
+  설정을 읽을 때 거절한다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
   `Binding Admission`과 다른 단계다.
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·

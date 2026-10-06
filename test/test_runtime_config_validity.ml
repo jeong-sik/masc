@@ -2753,80 +2753,6 @@ let test_runtime_toml_rejects_non_positive_repeat_penalty () =
            String.equal err.path "local.sample.repeat-penalty")
          errs)
 
-(* -1 is Ollama's "the whole context"; anything below it has no meaning. *)
-(* [admission-priority-run-limit] is declared once on the provider. Its
-   bindings need [max-concurrent]: that is the permit queue the limit orders. *)
-let run_limit_config ~run_limit ~second_binding =
-  Printf.sprintf
-    "[providers.local]\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://127.0.0.1:11434\"\n\
-     admission-priority-run-limit = %s\n\
-     \n\
-     [models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.other]\n\
-     api-name = \"other\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.sample]\n\
-     max-concurrent = 2\n\
-     \n\
-     [local.other]\n\
-     %s\n\
-     \n\
-     [runtime]\n\
-     default = \"local.sample\"\n"
-    run_limit
-    second_binding
-
-let render_parse_errors errs =
-  errs
-  |> List.map (fun (err : Runtime_toml.parse_error) ->
-    Printf.sprintf "%s: %s" err.path err.message)
-  |> String.concat "\n"
-
-let test_runtime_toml_parses_the_provider_priority_run_limit () =
-  match
-    Runtime_toml.parse_string
-      (run_limit_config ~run_limit:"3" ~second_binding:"max-concurrent = 2")
-  with
-  | Error errs ->
-    failf "a run limit over bindings with max-concurrent should parse:\n%s"
-      (render_parse_errors errs)
-  | Ok cfg ->
-    (match cfg.Runtime_schema.providers with
-     | [ provider ] ->
-       check (option int) "the provider carries the run limit" (Some 3)
-         provider.Runtime_schema.admission_priority_run_limit
-     | providers -> failf "expected one provider, got %d" (List.length providers))
-
-let test_runtime_toml_rejects_a_priority_run_limit_below_one () =
-  match
-    Runtime_toml.parse_string
-      (run_limit_config ~run_limit:"0" ~second_binding:"max-concurrent = 2")
-  with
-  | Ok _ -> failf "admission-priority-run-limit = 0 should be rejected"
-  | Error errs ->
-    check bool "names the offending key" true
-      (List.exists
-         (fun (err : Runtime_toml.parse_error) ->
-            String.ends_with ~suffix:".admission-priority-run-limit" err.path)
-         errs)
-
-let test_runtime_toml_rejects_a_priority_run_limit_over_a_binding_without_max_concurrent () =
-  match
-    Runtime_toml.parse_string (run_limit_config ~run_limit:"3" ~second_binding:"")
-  with
-  | Ok _ ->
-    failf "a run limit over a binding without max-concurrent should be rejected"
-  | Error errs ->
-    check (list string) "names only the binding without max-concurrent"
-      [ "local.other" ]
-      (List.map (fun (err : Runtime_toml.parse_error) -> err.path) errs)
-
 (* The RFC's table, read from the one function the lanes' call sites use. *)
 let test_judgment_lanes_join_the_priority_queue () =
   check
@@ -2878,6 +2804,7 @@ let test_repo_glm_coding_runtimes_carry_the_priority_run_limit () =
            (Llm_provider.Admission_class.to_string config.admission_class))
       glm_configs
 
+(* -1 is Ollama's "the whole context"; anything below it has no meaning. *)
 let test_runtime_toml_rejects_repeat_last_n_below_minus_one () =
   let content = "[providers.local]\n\
      protocol = \"ollama-http\"\n\
@@ -3268,6 +3195,135 @@ let render_parse_errors errs =
   |> List.map (fun (err : Runtime_toml.parse_error) ->
     Printf.sprintf "%s: %s" err.path err.message)
   |> String.concat "\n"
+;;
+
+(* [admission-priority-run-limit] is declared once on the provider and orders
+   the permit queue of the bindings that declare [max-concurrent]. *)
+let run_limit_config ~run_limit ~sample_binding ~lane_binding =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     admission-priority-run-limit = %s\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.lane]\n\
+     api-name = \"lane\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     %s\n\
+     \n\
+     [local.lane]\n\
+     %s\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+    run_limit
+    sample_binding
+    lane_binding
+;;
+
+let run_limit_error_paths content =
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "the run limit declaration should be refused"
+  | Error errs -> List.map (fun (err : Runtime_toml.parse_error) -> err.path) errs
+;;
+
+let test_runtime_toml_parses_the_provider_priority_run_limit () =
+  match
+    Runtime_toml.parse_string
+      (run_limit_config
+         ~run_limit:"3"
+         ~sample_binding:"max-concurrent = 2"
+         ~lane_binding:"max-concurrent = 2")
+  with
+  | Error errs ->
+    failf "a run limit over bindings with max-concurrent should parse:\n%s"
+      (render_parse_errors errs)
+  | Ok cfg ->
+    (match cfg.Runtime_schema.providers with
+     | [ provider ] ->
+       check (option int) "the provider carries the run limit" (Some 3)
+         provider.Runtime_schema.admission_priority_run_limit
+     | providers -> failf "expected one provider, got %d" (List.length providers))
+;;
+
+let test_runtime_toml_rejects_a_priority_run_limit_below_one () =
+  check bool "names the offending key" true
+    (List.exists
+       (String.ends_with ~suffix:".admission-priority-run-limit")
+       (run_limit_error_paths
+          (run_limit_config
+             ~run_limit:"0"
+             ~sample_binding:"max-concurrent = 2"
+             ~lane_binding:"max-concurrent = 2")))
+;;
+
+(* A binding without [max-concurrent] runs outside admission, so the run
+   limit stays on the binding that has a permit queue. *)
+let test_a_priority_run_limit_reaches_only_bindings_with_max_concurrent () =
+  with_config_save_model_catalog @@ fun () ->
+  let path = Filename.temp_file "priority_run_limit_" ".toml" in
+  let oc = open_out path in
+  output_string
+    oc
+    (run_limit_config ~run_limit:"3" ~sample_binding:"max-concurrent = 2" ~lane_binding:"");
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match load_list_text ~config_path:path with
+       | Error msg -> failf "a run limit with one admitted binding should load: %s" msg
+       | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+         let allowance id =
+           match
+             List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id)
+               runtimes
+           with
+           | None -> failf "runtime %s should load" id
+           | Some runtime ->
+             let config = agent_core_provider_config runtime in
+             ( config.Llm_provider.Provider_config.max_concurrent_requests
+             , config.admission_priority_run_limit )
+         in
+         check (pair (option int) (option int)) "the admitted binding carries the limit"
+           (Some 2, Some 3) (allowance "local.sample");
+         check (pair (option int) (option int)) "the unadmitted binding carries none"
+           (None, None) (allowance "local.lane"))
+;;
+
+let test_runtime_toml_rejects_a_priority_run_limit_no_binding_can_use () =
+  check (list string) "names the provider's key"
+    [ "providers.local.admission-priority-run-limit" ]
+    (run_limit_error_paths
+       (run_limit_config ~run_limit:"3" ~sample_binding:"" ~lane_binding:""))
+;;
+
+let test_runtime_toml_rejects_a_priority_run_limit_on_an_official_client () =
+  check (list string) "names the provider's key"
+    [ "providers.subscription.admission-priority-run-limit" ]
+    (run_limit_error_paths
+       "[providers.subscription]\n\
+        protocol = \"claude-code\"\n\
+        command = \"/usr/bin/true\"\n\
+        is-non-interactive = true\n\
+        admission-priority-run-limit = 3\n\
+        \n\
+        [models.seeded]\n\
+        api-name = \"seeded\"\n\
+        max-context = 1024\n\
+        \n\
+        [subscription.seeded]\n\
+        max-concurrent = 2\n\
+        \n\
+        [runtime]\n\
+        default = \"subscription.seeded\"\n")
 ;;
 
 let sample_binding (cfg : Runtime_schema.config) =
@@ -6806,9 +6862,12 @@ let () =
             test_runtime_toml_parses_the_provider_priority_run_limit;
           test_case "a priority run limit below one is rejected" `Quick
             test_runtime_toml_rejects_a_priority_run_limit_below_one;
-          test_case "a priority run limit over a binding without max-concurrent is rejected"
-            `Quick
-            test_runtime_toml_rejects_a_priority_run_limit_over_a_binding_without_max_concurrent;
+          test_case "a priority run limit reaches only bindings with max-concurrent" `Quick
+            test_a_priority_run_limit_reaches_only_bindings_with_max_concurrent;
+          test_case "a priority run limit no binding can use is rejected" `Quick
+            test_runtime_toml_rejects_a_priority_run_limit_no_binding_can_use;
+          test_case "a priority run limit on an official client is rejected" `Quick
+            test_runtime_toml_rejects_a_priority_run_limit_on_an_official_client;
           test_case "repo glm-coding runtimes carry the priority run limit" `Quick
             test_repo_glm_coding_runtimes_carry_the_priority_run_limit;
           test_case "judgment lanes join the priority queue" `Quick

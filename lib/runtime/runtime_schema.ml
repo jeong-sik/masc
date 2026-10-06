@@ -207,11 +207,12 @@ type provider =
         ordinary Keeper per-call body deadlines. *)
   ; admission_priority_run_limit : int option
     (** [admission-priority-run-limit]: how many admission permits in a row
-        this provider account may hand to judgment requests while a Keeper
-        turn waits for one. [None] keeps one arrival-order queue. Declared on
-        the provider because the permits are counted per account; every
-        binding of the provider must then declare [max-concurrent], or the
-        config is refused at load. *)
+        this provider account may hand to [Priority] requests (the judgment
+        lanes) while a [Standard] request waits for one. [None] keeps one
+        arrival-order queue. Declared on the provider because the permits are
+        counted per account. It reaches only the bindings that declare
+        [max-concurrent]; a provider where no binding can use it, or an
+        official-client provider, is refused at load. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)

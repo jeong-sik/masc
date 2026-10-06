@@ -1,0 +1,365 @@
+{
+  "finding_family": [
+    "B1",
+    "B2",
+    "B3"
+  ],
+  "reviewer": "/root/config_review_response",
+  "reviewed_at": "2026-10-04T05:27:59.897403+00:00",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-runtime-edit-draft-20261004",
+  "base": "dd5e691f2ce78a3dbd10c22965107344c3b39248",
+  "head": "dd5e691f2ce78a3dbd10c22965107344c3b39248",
+  "state": "uncommitted integration working tree; file hashes define review identity",
+  "verdict": "PASS_scope_only",
+  "threshold": "고정한 TUI + Web production source 및 직접 test/doc 소비자 범위에서 열린 P0/P1/P2 없음. P2 fixture 및 domain-separated revision mismatch는 해결 확인. dependency concern은 오탐으로 철회했다.",
+  "independence": {
+    "tui_author": false,
+    "backend_author": true,
+    "backend_independent_review": false,
+    "github_approval": false,
+    "full_pr_review": false
+  },
+  "scope": {
+    "full_bin_diff_reviewed": true,
+    "new_edit_module_ml_mli_reviewed": true,
+    "excluded": [
+      "lib/runtime/runtime.ml/.mli backend changes authored by this reviewer (shared pre-existing config_observation hash contract was read only as client dependency)",
+      "lib/server raw-save implementation authored by this reviewer",
+      "commit/PR/stack admission",
+      "generated evidence logs and screenshots; no independent execution verification"
+    ],
+    "extra_consumers": [
+      "test/test_tui_runtime_account_form_pty.py",
+      "test/test_tui_remote_workspace_history_pty.py changed raw read fixture",
+      "test/test_tui_runtime_config_edit.ml (complete)",
+      "test/test_tui_runtime_config_draft_pty.py (complete)",
+      "test/dune added two test targets and dependencies",
+      "dashboard raw save API and editor changed tests",
+      "docs/TUI-GUIDE.md and docs/TOML-RELOAD-MATRIX.md changed paragraphs",
+      "existing workspace request authority, viewport, HTTP and Web API core consumers"
+    ],
+    "workflow": "Constitution and contributor workflow already read fully for unchanged base; no changed contract diff in this worktree. No product edits, native compiler/tests, Dune, PTY, CI, or GitHub operations by this reviewer.",
+    "full_changed_web_production_diff_reviewed": true
+  },
+  "identity": {
+    "scoped_tracked_diff_full_index_binary_sha256": "8dd0bd538f4e08d035afb82fdaa2a490b4a908dd3cf4d3e12c191b94a86fd0b5",
+    "note": "Tracked diff omits untracked new files. File hashes bind all 24 reviewed paths, including new modules/tests. Head remains base and changes are uncommitted.",
+    "files": [
+      {
+        "path": "bin/dune",
+        "sha256": "6c7e39c6b7a62a2d4a1e998b855ec71d10fe6159f7e509b467b737fbe9dbbef1"
+      },
+      {
+        "path": "bin/masc_tui.ml",
+        "sha256": "a61cffa07383a7c24ececee72023e49e9535388328bc6c53a864eb0fd1f7cb10"
+      },
+      {
+        "path": "bin/masc_tui_async_protocol.ml",
+        "sha256": "d8af19a5082436da288c9dfe63d7584e14430fd5b05874a285c9c5e04c2d76d1"
+      },
+      {
+        "path": "bin/masc_tui_async_protocol.mli",
+        "sha256": "d8af19a5082436da288c9dfe63d7584e14430fd5b05874a285c9c5e04c2d76d1"
+      },
+      {
+        "path": "bin/masc_tui_http.ml",
+        "sha256": "1e59cee4b76d5adffbc3b8ea8ac2622ec8a4d6f2899ae7841fc21aff2b0db314"
+      },
+      {
+        "path": "bin/masc_tui_keys.ml",
+        "sha256": "b052f1213791a7f30fc3b1eee9546eea42f76c430b135edac550dff3fd5be3ef"
+      },
+      {
+        "path": "bin/masc_tui_loader.ml",
+        "sha256": "0d72f03a5ad684dca3c9ed8a39659c150ab291900c7c56936d38b32743960191"
+      },
+      {
+        "path": "bin/masc_tui_render.ml",
+        "sha256": "7c1dc83b684350180e6444e26368b95de381f8a35655cc3db05d171e5057e465"
+      },
+      {
+        "path": "bin/masc_tui_runtime_config_edit.ml",
+        "sha256": "ad8a30519fd0be019c333766b76cb91181b1322c90cc8b7c05a4dd5514192c39"
+      },
+      {
+        "path": "bin/masc_tui_runtime_config_edit.mli",
+        "sha256": "ab52c36136370980930c5b0746f896b64c8c3aef9e77d962258fe6bcb4a8bf96"
+      },
+      {
+        "path": "bin/masc_tui_types.ml",
+        "sha256": "7590904d5a0ca53be03e907a7ff993c3355ec850306a17b7542d32b3a543d26a"
+      },
+      {
+        "path": "dashboard/src/api/dashboard-runtime-raw-save.test.ts",
+        "sha256": "049f5c67b0c6dc706ce59af5cb78a79041e67777f8f88ed383f296754519ab4f"
+      },
+      {
+        "path": "dashboard/src/api/dashboard-runtime.ts",
+        "sha256": "241c9c7e4076162efb1ffa920a26502320fefa1673e2839275ab2d64271a5f60"
+      },
+      {
+        "path": "dashboard/src/api/dashboard.test.ts",
+        "sha256": "79a0132577d984bddf45d563da877b5219667bf1b12fb722ac90073c0d808033"
+      },
+      {
+        "path": "dashboard/src/api/dashboard.ts",
+        "sha256": "1f64fbaeccab930204f195070d55a733af015363321cb9853f207d47de9c6e60"
+      },
+      {
+        "path": "dashboard/src/components/runtime-toml-editor.test.ts",
+        "sha256": "ced6b976869a52312016cf8daa9ee87b3ecda9f97f6bd43c5d012e49fb81b6f3"
+      },
+      {
+        "path": "dashboard/src/components/runtime-toml-editor.ts",
+        "sha256": "42e23909c5e9a9426a85150793c7d83109cfd2f693d78162b4b2408cb0f4d699"
+      },
+      {
+        "path": "docs/TOML-RELOAD-MATRIX.md",
+        "sha256": "ac80a8b4ad39447a2f55a3f3f992d86e2f6320c91c6c930662e5d5ab1d3dd071"
+      },
+      {
+        "path": "docs/TUI-GUIDE.md",
+        "sha256": "1d14eee2a5d9f7c6d9c30ef9c3005dd1279aafbf75bd3d2966c057dab73124f2"
+      },
+      {
+        "path": "test/dune",
+        "sha256": "def104e7026fd02792094af68f1eaad7b3c39ac38e9fafb3757ac493f6c44ef9"
+      },
+      {
+        "path": "test/test_tui_remote_workspace_history_pty.py",
+        "sha256": "326caa7406957b0ca26afdbf008bfe49d91ccaa0253d54de1f914e6a0901514a"
+      },
+      {
+        "path": "test/test_tui_runtime_account_form_pty.py",
+        "sha256": "1cabef1dc9803300bb79a161bbcd0144d0b54f21d775a4b1e7e5a5c8c1716c50"
+      },
+      {
+        "path": "test/test_tui_runtime_config_draft_pty.py",
+        "sha256": "0ab46c99cc99adac8195bf369891252c13b84ae5690a81ddc5925b4ba4b65c0d"
+      },
+      {
+        "path": "test/test_tui_runtime_config_edit.ml",
+        "sha256": "89d67d9d78406b1f7ef4edb4a09e61d078321e93846e2109a6f5ec519a79edfd"
+      }
+    ]
+  },
+  "findings": [],
+  "resolved_findings": [
+    {
+      "id": "RAW-TUI-R1",
+      "severity": "P2",
+      "title": "계정 폼 PTY의 고정 source-8 receipt가 새 source hash 검사를 통과할 수 없음",
+      "initial_refs": [
+        "test/test_tui_runtime_account_form_pty.py:60-92",
+        "bin/masc_tui_http.ml:2958-2962"
+      ],
+      "trigger": "계정 폼 저장 시 fake receipt.source_revision=source-8을 실제 제출원문 SHA256과 비교한다.",
+      "initial_actual": "client가 Runtime_config_save_unconfirmed를 반환하므로 runtime.toml saved 대기가 timeout한다. fixture GET revision과 CAS 검사도 실제 계약과 달랐다.",
+      "resolution": "commit_receipt(source_text), fixture GET, locked POST comparison 및 제출 revision assertion이 모두 runtime_config_source NUL prefix와 실제 source UTF-8 bytes의 domain-separated SHA256을 쓴다. 실제 서버 source identity와 같은 규약을 직접 대조했다.",
+      "status": "resolved_in_reviewed_working_tree",
+      "evidence": "수정 fixture 60-132 및 172-181 직접 읽음; PTY 미실행"
+    },
+    {
+      "id": "RAW-TUI-R3",
+      "severity": "P2",
+      "origin": "another independent UI reviewer; response verified here",
+      "title": "TUI의 plain SHA256 검사와 서버의 domain-separated source revision이 불일치함",
+      "initial_actual": "정상 commit receipt와 정상 conflict current를 plain source SHA256으로 비교하면 server revision과 달라 unconfirmed 처리한다. 초기 리뷰에서 이 불일치를 놓쳤다.",
+      "status": "resolved_in_reviewed_working_tree",
+      "resolution": "HTTP helper runtime_config_text_revision이 Runtime.config_observation ~path source_text와 config_source_revision_to_string을 직접 사용한다. source revision은 runtime_config_source\\x00 prefix를 포함하며 path는 해시에 들어가지 않으므로 submitted text 확인용 빈 path도 동일 revision을 만든다. account-form/remote-workspace/new draft PTY fixture의 prefix도 일치한다.",
+      "refs": [
+        "bin/masc_tui_http.ml:2922-2924,2938,2963",
+        "lib/runtime/runtime.ml:198-203 (shared immutable identity contract only)",
+        "test/test_tui_runtime_account_form_pty.py:68,91,119,178",
+        "test/test_tui_remote_workspace_history_pty.py:917",
+        "test/test_tui_runtime_config_draft_pty.py:29-30"
+      ]
+    }
+  ],
+  "checked": [
+    {
+      "topic": "원문/typed HTTP 결과",
+      "refs": [
+        "bin/masc_tui_loader.ml:2021-2028",
+        "bin/masc_tui_async_protocol.ml:448",
+        "bin/masc_tui_async_protocol.mli:448",
+        "bin/masc_tui_http.ml:2911-2963"
+      ],
+      "result": "loader/async payload는 전체 reading을 유지하며 원문을 색상/sanitize된 rows에서 복원하지 않는다. POST는 revision을 필수 인자로 받으며 409 current 문서는 path/원문/SHA 일치를 검사한다. 4xx refusal과 transport/5xx/malformed/mismatched-receipt의 outcome uncertainty가 typed error로 나뉜다. 기존 credential refresh는 http_post_request 안에 유지된다."
+    },
+    {
+      "topic": "draft lifecycle과 workspace 경계",
+      "refs": [
+        "bin/masc_tui_runtime_config_edit.ml",
+        "bin/masc_tui_runtime_config_edit.mli",
+        "bin/masc_tui_types.ml:9480-9543",
+        "bin/masc_tui.ml:10032-10036",
+        "bin/masc_tui.ml:17498-17583"
+      ],
+      "result": "세션은 base document/text/current/error를 분리한다. GET/conflict observe는 base/text를 바꾸지 않는다. explicit u/U만 revision/text를 바꾸고 S는 현재 base revision으로 저장한다. durable matching-source receipt만 draft를 정리하며 validation/transport/uncertain 결과는 보존한다. 저장목록은 canonical workspace base+masc root와 exact config path로 격리된다. authority withdrawal은 현재 reading을 비우되 draft 목록은 유지한다."
+    },
+    {
+      "topic": "화면과 key/scroll 소비자",
+      "refs": [
+        "bin/masc_tui_types.ml:9517-9543",
+        "bin/masc_tui_types.ml:11353-11364",
+        "bin/masc_tui_render.ml:12151-12164",
+        "bin/masc_tui_render.ml:12670-12730",
+        "bin/masc_tui.ml:265-273",
+        "bin/masc_tui.ml:21754-21757",
+        "bin/masc_tui_keys.ml:74-88"
+      ],
+      "result": "draft/current 표시가 active rows를 통해 rendering/cursor/section jump에 연결된다. error가 있어도 이전 reading과 draft는 남는다. wrapped draft notice 행 수와 read-error 행을 renderer heading 및 scrolled chrome에 반영한다. draft keys는 status view 및 account form을 침범하지 않는 guard가 있고 별도 help 표가 있다."
+    },
+    {
+      "topic": "계정 폼 CAS",
+      "refs": [
+        "bin/masc_tui.ml:19779-19839"
+      ],
+      "result": "제출 시 현재 reading을 재조회하고 declare_on에 그 source_text를 전달하며 같은 reading.metadata.source_revision으로 저장한다. 충돌/불확실 결과는 폼과 입력을 남기고 typed error 메시지를 표시한다. 원문 draft와 account form 상태는 따로 보존된다."
+    },
+    {
+      "topic": "native compile 위험의 소스 확인",
+      "refs": [
+        "bin/dune",
+        "bin/masc_tui_types.ml:4634-4648",
+        "bin/masc_tui_types.ml:5244-5245",
+        "bin/masc_tui_types.ml:8189-8190",
+        "test/dune runtime_config_edit stanza"
+      ],
+      "result": "new Edit library는 wrapped=false이고 types 및 executable 직접 deps가 있다. Digestif deps는 base에도 있어 오탐으로 철회했다. 최신 HTTP는 기존 executable dependency인 Runtime의 공용 source identity API를 쓴다. runtime_config_reading의 유일한 product constructor에 rcv_source_text가 추가됐고 state create에도 edits가 있다. async ml/mli payload, loader 결과, consumer pattern이 일치한다. post_runtime_config_raw와 config_heading_rows의 직접 호출은 새 필수 인자를 제공한다. code_lexer/frame/message_layout 의존성은 기존 types stanza에 이미 있다. 이는 소스 검토이며 type/link 성공 주장은 아니다."
+    },
+    {
+      "topic": "Web API 및 직접 호출자",
+      "refs": [
+        "dashboard/src/api/dashboard-runtime.ts:2298-2351",
+        "dashboard/src/api/dashboard.ts exports",
+        "dashboard/src/components/runtime-toml-editor.ts:301-338"
+      ],
+      "result": "saveRuntimeTomlConfig는 expectedSourceRevision을 필수로 받고 lowercase 64-hex를 검증한 뒤 POST에 그대로 보낸다. ApiRequestError의 409/code/current shape만 typed RuntimeTomlRevisionConflict로 바꾸고 자동 재시도하지 않는다. 모든 production/test 직접 호출이 revision 인자를 제공하며 imports/re-exports가 연결된다. Web client는 server revision을 opaque 값으로 유지한다."
+    },
+    {
+      "topic": "Web draft/conflict recovery",
+      "refs": [
+        "dashboard/src/components/runtime-toml-editor.ts:321-377,841-863"
+      ],
+      "result": "conflict는 config.path가 맞을 때 currentSource로 분리하고 draft/base를 유지한다. read-current도 같은 경로만 비교로 받으며 자동 revision adoption을 하지 않는다. 별도 keep-draft/adopt와 replace-draft 동작이 있고 다음 저장은 현재 파일을 초안으로 교체한다는 설명이 있다. 비교 중 raw save, shortcut handler 및 직접 routing/assignment/exact slot writes를 차단한다. 일반 실패에도 기존 base/draft를 유지하므로 재시도는 동일 guard로 간다."
+    },
+    {
+      "topic": "직접 TUI 테스트와 문서",
+      "refs": [
+        "test/test_tui_runtime_config_edit.ml",
+        "test/test_tui_runtime_config_draft_pty.py",
+        "test/dune:9310-9325",
+        "docs/TUI-GUIDE.md changed paragraphs",
+        "docs/TOML-RELOAD-MATRIX.md changed paragraphs"
+      ],
+      "result": "순수 3-case 테스트는 failed draft→observe→explicit adoption, explicit replacement, foreign path refusal를 검사한다. 새 PTY는 scripted EDITOR 재오픈 bytes, preview 실패 후 무쓰기, 다른 writer의 실제 source 변화, 원래 revision으로 인한409, C/u/S 후 guarded retry를 실제 TUI에 수행하도록 작성됐다. 실제 fixture lock에서 CAS하고 domain prefix를 쓰며 imported Python modules 및 binary deps가 stanza에 있다. Guide의 세션 생존 범위/명시적 u/U/X/preview boundary는 현재 소스와 맞는다. PTY는 실행하지 않았다."
+    }
+  ],
+  "evidence": {
+    "diff_check": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "executed": [
+      "local source/diff/caller/dependency reads",
+      "tracked bin diff whitespace check",
+      "reviewed file SHA256 capture"
+    ],
+    "not_executed": [
+      "OCaml parser/typecheck/native tests",
+      "Dune",
+      "Python AST/PTY",
+      "Vitest/TypeScript compiler/browser",
+      "CI",
+      "GitHub operations"
+    ],
+    "new_test_source": "New pure flow and draft PTY source both reviewed, including existing fixture dependencies and newly declared test targets. Unrun by reviewer.",
+    "author_reported_not_reproduced": {
+      "pure_flow_tests": "Parent reports OCaml 5.5.1 3/3 cases compiled and executed. Reviewer read source only; did not inspect all captured execution evidence or rerun.",
+      "syntax": "Parent reports 17 OCaml parsing and 3 Python AST PASS. Reviewer did not execute these.",
+      "web_tests": "Tests were reviewed as source; no reviewer-run Vitest/typecheck/browser evidence."
+    }
+  },
+  "limits": [
+    "This is a scoped independent source review of the identified uncommitted TUI/Web snapshot, not future commit approval.",
+    "Backend implementation was authored by this reviewer and is excluded from independent approval.",
+    "No reviewer-run native/PTy/browser/typecheck tests. Parent-reported execution results remain separate."
+  ],
+  "history": [
+    {
+      "reviewed_at": "2026-10-04T05:23:34.843909+00:00",
+      "verdict": "PASS_scope_only",
+      "identity": {
+        "tracked_bin_diff_full_index_binary_sha256": "f67cfa67dec26b31b51b2d00e8cb26a93d7916d20e6f252deb3dd74d6bcb984b",
+        "note": "Tracked diff hash excludes two untracked module files; individual SHA256 below binds every reviewed bin file.",
+        "files": [
+          {
+            "path": "bin/dune",
+            "sha256": "6c7e39c6b7a62a2d4a1e998b855ec71d10fe6159f7e509b467b737fbe9dbbef1"
+          },
+          {
+            "path": "bin/masc_tui.ml",
+            "sha256": "a61cffa07383a7c24ececee72023e49e9535388328bc6c53a864eb0fd1f7cb10"
+          },
+          {
+            "path": "bin/masc_tui_async_protocol.ml",
+            "sha256": "d8af19a5082436da288c9dfe63d7584e14430fd5b05874a285c9c5e04c2d76d1"
+          },
+          {
+            "path": "bin/masc_tui_async_protocol.mli",
+            "sha256": "d8af19a5082436da288c9dfe63d7584e14430fd5b05874a285c9c5e04c2d76d1"
+          },
+          {
+            "path": "bin/masc_tui_http.ml",
+            "sha256": "1e59cee4b76d5adffbc3b8ea8ac2622ec8a4d6f2899ae7841fc21aff2b0db314"
+          },
+          {
+            "path": "bin/masc_tui_keys.ml",
+            "sha256": "b052f1213791a7f30fc3b1eee9546eea42f76c430b135edac550dff3fd5be3ef"
+          },
+          {
+            "path": "bin/masc_tui_loader.ml",
+            "sha256": "0d72f03a5ad684dca3c9ed8a39659c150ab291900c7c56936d38b32743960191"
+          },
+          {
+            "path": "bin/masc_tui_render.ml",
+            "sha256": "7c1dc83b684350180e6444e26368b95de381f8a35655cc3db05d171e5057e465"
+          },
+          {
+            "path": "bin/masc_tui_runtime_config_edit.ml",
+            "sha256": "ad8a30519fd0be019c333766b76cb91181b1322c90cc8b7c05a4dd5514192c39"
+          },
+          {
+            "path": "bin/masc_tui_runtime_config_edit.mli",
+            "sha256": "ab52c36136370980930c5b0746f896b64c8c3aef9e77d962258fe6bcb4a8bf96"
+          },
+          {
+            "path": "bin/masc_tui_types.ml",
+            "sha256": "7590904d5a0ca53be03e907a7ff993c3355ec850306a17b7542d32b3a543d26a"
+          }
+        ]
+      },
+      "correction": "이전 기록의 RAW-TUI-R2 의존성 누락은 base stanza 확인을 놓친 오탐. digestif는 base executable에 이미 있었으므로 해결이 아니라 철회다. 당시 TUI의 domain-separated source revision mismatch도 놓쳤으며 다른 독립 리뷰어 finding을 받아 공용 Runtime.config_observation 사용으로 수정된 delta를 직접 재검토했다."
+    }
+  ],
+  "withdrawn_findings": [
+    {
+      "id": "RAW-TUI-R2",
+      "severity": "P2",
+      "title": "새 Digestif 직접 참조에 대한 masc_tui executable 의존성 누락",
+      "initial_refs": [
+        "bin/masc_tui_http.ml:2934",
+        "bin/masc_tui_http.ml:2959",
+        "bin/dune executable masc_tui libraries",
+        "dune-project implicit_transitive_deps false"
+      ],
+      "trigger": "새 HTTP source hash 검사와 conflict 검증을 포함한 masc_tui executable type checking.",
+      "initial_actual": "Digestif는 다른 library deps에만 있었고 masc_tui executable deps에 없었다. implicit_transitive_deps=false에서 직접 참조를 해결하지 못한다.",
+      "resolution": "git show dd5e691f:bin/dune의 masc_tui executable libraries에 digestif가 이미 명시돼 있다. bin/dune diff에는 digestif 추가가 없으며 관련 dependency fix는 필요하지 않았다.",
+      "status": "withdrawn_false_positive",
+      "evidence": "source dependency graph 확인만; native compile 미실행"
+    }
+  ]
+}

@@ -93,6 +93,32 @@ let mcp_call_with_id id =
 
 let mcp_call = mcp_call_with_id "1"
 
+let mcp_tool_call ~request_id ~tool_name ~arguments =
+  let message =
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `String request_id
+      ; "method", `String "tools/call"
+      ; "params",
+        `Assoc
+          [ "name", `String tool_name
+          ; "arguments", arguments
+          ]
+      ]
+  in
+  `Assoc
+    [ "type", `String "control_request"
+    ; "request_id", `String ("mcp-call-" ^ request_id)
+    ; "request",
+      `Assoc
+        [ "subtype", `String "mcp_message"
+        ; "server_name", `String "masc"
+        ; "message", message
+        ]
+    ]
+  |> Yojson.Safe.to_string
+;;
+
 let native_tool_call_block ~turn_id ~call_id ~tool_name =
   Printf.sprintf
     {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"%s","name":"%s"}]}}|}
@@ -320,7 +346,9 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
     ~base_path ~sandbox_profile:None "claude-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
        with_runtime_config ~tools_support cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
@@ -387,6 +415,289 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                      | _, None -> run ()
                      | None, Some _ ->
                        invalid_arg "event_capture requires event_bus"))))))
+;;
+
+let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
+  let keeper_name = "claude-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "activation_mode", `String "autonomous"
+          ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
+  in
+  let shared_context = Agent_core.Context.create () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_runtime_config cli_path (fun runtime_path ->
+         Eio_main.run (fun env ->
+           Eio.Switch.run (fun sw ->
+             Eio_context.set_env env;
+             Eio_context.with_test_env
+               ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env)
+               ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw
+               (fun () ->
+                  Masc_test_deps.init_eio_clock ~sw env;
+                  Fs_compat.set_fs (Eio.Stdenv.fs env);
+                  let config = Workspace.default_config base_path in
+                  ignore (Workspace.init config ~agent_name:None);
+                  (* The real call ledger is initialized only by the server
+                     bootstrap (server_bootstrap_maintenance.ml), which no unit
+                     fixture runs; without this every turn-level log_call here
+                     degrades to Commit_required_but_store_unavailable and the
+                     cross-cycle ledger assertions below would have no rows to
+                     read even after the repetition fix lands. *)
+                  Keeper_tool_call_log.init ~base_path:config.base_path ();
+                  Masc_test_deps.declare_fixture_keeper
+                    ~base_path
+                    ~sandbox_profile:(Some Masc.Keeper_types_profile.Docker)
+                    keeper_name;
+                  let keeper_config_path =
+                    Config_dir_resolver.keeper_toml_path_for_base_path
+                      ~base_path
+                      keeper_name
+                  in
+                  let keeper_config = Fs_compat.load_file keeper_config_path in
+                  Fs_compat.save_file keeper_config_path
+                    (keeper_config
+                     ^ "sandbox_image = \"base\"\n");
+                  Masc_test_deps.init_unified_tool_registry ();
+                  (* The unified cycle resolves turn resources from the
+                     in-memory Keeper_registry, not the TOML file, so the
+                     fixture keeper must be registered before the cycle. *)
+                  ignore
+                    (Masc.Keeper_registry.For_testing.register
+                       ~base_path:config.base_path
+                       meta.name
+                       meta
+                      : Masc.Keeper_registry.registry_entry);
+                  (match
+                     Masc.Keeper_meta_store.replace_snapshot config meta
+                   with
+                   | Ok () -> ()
+                   | Error detail -> fail detail);
+                  match Runtime.init_default ~config_path:runtime_path with
+                  | Error error -> fail error
+                  | Ok () ->
+                    (match
+                       Masc.Keeper_owner_registry.install_from_store
+                         ~sw
+                         ~operation_runner:None
+                         ~on_turn_slot_released:None
+                         config
+                     with
+                     | Ok _count -> ()
+                     | Error error ->
+                       fail
+                         (Masc.Keeper_owner_registry.install_error_to_string
+                            error));
+                    let trace_id =
+                      Keeper_id.Trace_id.to_string meta.runtime.trace_id
+                    in
+                    let checkpoint_path =
+                      Keeper_checkpoint_store.agent_core_checkpoint_path
+                        ~session_dir:
+                          (Keeper_types_support.keeper_session_dir config trace_id)
+                        ~session_id:trace_id
+                    in
+                    check bool
+                      "fresh fixture has no AGENT_CORE checkpoint"
+                      false
+                      (Sys.file_exists checkpoint_path);
+                    let run meta =
+                      let observation =
+                        Keeper_world_observation.observe
+                          ~pending_board_events:(Some [])
+                          ~config
+                          ~meta
+                      in
+                      let turn_decision =
+                        Keeper_world_observation.keeper_cycle_decision
+                          ~wake:Keeper_world_observation.Periodic_tick
+                          ~meta
+                          observation
+                      in
+                      check bool
+                        "the periodic autonomous cycle is admitted"
+                        true
+                        turn_decision.should_run;
+                      let turn_input =
+                        Keeper_heartbeat_source_batch.for_turn
+                          ~reactive:false
+                          Keeper_heartbeat_source_batch.empty
+                      in
+                      Keeper_unified_turn.run_keeper_cycle
+                        ~before_dispatch_authority:(fun () -> Ok ())
+                        ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
+                        ~config
+                        ~meta
+                        ~publication_recovery_provider:
+                          Keeper_publication_recovery_availability.non_runtime_provider
+                        ~observation
+                        ~turn_input
+                        ~turn_decision
+                        ~shared_context
+                        ()
+                    in
+                    match run meta with
+                    | Error failure ->
+                      fail (Agent_core.Error.to_string failure.error)
+                    | Ok (Keeper_unified_turn.Turn_completed { meta = next_meta; _ }) ->
+                      check bool
+                        "normal official-client cycle writes no AGENT_CORE checkpoint"
+                        false
+                        (Sys.file_exists checkpoint_path);
+                      (* The repetition fix is not in yet, so cycle two below
+                         still completes; prove the ledger fixture independent
+                         of that open gap by reading cycle one's rows now. *)
+                      (match
+                         Keeper_tool_call_log.read_recent ~keeper_name ~n:100 ()
+                       with
+                       | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+                         fail detail
+                       | Ok rows ->
+                         let task_rows =
+                           List.filter
+                             (fun row ->
+                                Yojson.Safe.Util.(
+                                  member "tool" row = `String "keeper_tasks_list"
+                                  && member "trace_id" row = `String trace_id))
+                             rows
+                         in
+                         check int
+                           "cycle one persists both task reads to the real call ledger"
+                           2
+                           (List.length task_rows);
+                         check (list int)
+                           "both cycle-one ledger rows carry keeper_turn_id 1"
+                           [ 1; 1 ]
+                           (List.map
+                              (fun row ->
+                                 Yojson.Safe.Util.(
+                                   member "keeper_turn_id" row
+                                   |> function `Int n -> n | _ -> -1))
+                              task_rows));
+                      (match run next_meta with
+                       | Error failure ->
+                         fail (Agent_core.Error.to_string failure.error)
+                       | Ok
+                           (Keeper_unified_turn.Turn_checkpointed
+                             { checkpoint_reason =
+                                 Keeper_unified_turn.Repeated_tool_call
+                                   { tool_name; repeated_count }
+                             ; _
+                             }) ->
+                         check bool
+                           "checkpointless repeated-call cycle also writes no AGENT_CORE checkpoint"
+                           false
+                           (Sys.file_exists checkpoint_path);
+                         check string
+                           "third exact MASC task read is the repeated tool"
+                           "keeper_tasks_list"
+                           tool_name;
+                         check int
+                           "two calls from cycle one plus the current call"
+                           3
+                           repeated_count;
+                         let trace_id =
+                           Keeper_id.Trace_id.to_string meta.runtime.trace_id
+                         in
+                         let rows =
+                           match
+                             Keeper_tool_call_log.read_recent
+                               ~keeper_name
+                               ~n:100
+                               ()
+                           with
+                           | Ok rows -> rows
+                           | Error
+                               (Keeper_tool_call_log.Index_unavailable detail) ->
+                             fail detail
+                         in
+                         let task_calls =
+                           rows
+                           |> List.filter (fun row ->
+                                Yojson.Safe.Util.(
+                                  member "tool" row
+                                  = `String "keeper_tasks_list"
+                                  && member "trace_id" row = `String trace_id))
+                         in
+                         let turn_ids =
+                           List.map
+                             (fun row ->
+                                Yojson.Safe.Util.(
+                                  member "keeper_turn_id" row |> to_int))
+                             task_calls
+                         in
+                         check (list int)
+                           "the real call ledger assigns both earlier reads to cycle one"
+                           [ 1; 1; 2 ]
+                           turn_ids;
+                         let inputs =
+                           List.map
+                             (fun row ->
+                                Yojson.Safe.Util.member "input" row
+                                |> Yojson.Safe.to_string)
+                             task_calls
+                         in
+                         (match inputs with
+                          | [ first; second; third ] ->
+                            check bool
+                              "all three successful reads have identical input"
+                              true
+                              (String.equal first second && String.equal second third)
+                          | _ ->
+                            fail "the real call ledger did not record three task reads");
+                         let outputs =
+                           List.map
+                             (fun row ->
+                                Yojson.Safe.Util.member "output" row
+                                |> Yojson.Safe.to_string)
+                             task_calls
+                         in
+                         (match outputs with
+                          | [ first; second; third ] ->
+                            check bool
+                              "all three successful reads have identical output"
+                              true
+                              (String.equal first second && String.equal second third)
+                          | _ ->
+                            fail "the real call ledger did not record three task results");
+                         check (list string)
+                           "the repeated lookups all completed successfully"
+                           [ "ok"; "ok"; "ok" ]
+                           (List.map
+                              (fun row ->
+                                 Yojson.Safe.Util.(member "wire_outcome" row |> to_string))
+                              task_calls)
+                       | Ok (Keeper_unified_turn.Turn_checkpointed _) ->
+                         fail "cycle one unexpectedly checkpointed"
+                       | Ok (Keeper_unified_turn.Turn_completed _) ->
+                         fail "cycle two did not stop at the third exact call"
+                       | Ok (Keeper_unified_turn.Turn_input_required _) ->
+                         fail "cycle two requested input instead of detecting repetition"
+                       | Ok (Keeper_unified_turn.Turn_cancelled _) ->
+                         fail "cycle two was unexpectedly cancelled"
+                       | Ok (Keeper_unified_turn.Turn_skipped _) ->
+                         fail "cycle two was unexpectedly skipped")
+                    | Ok (Keeper_unified_turn.Turn_checkpointed _) ->
+                      fail "cycle one unexpectedly checkpointed"
+                    | Ok (Keeper_unified_turn.Turn_input_required _) ->
+                      fail "cycle one requested input"
+                    | Ok (Keeper_unified_turn.Turn_cancelled _) ->
+                      fail "cycle one was unexpectedly cancelled"
+                    | Ok (Keeper_unified_turn.Turn_skipped _) ->
+                      fail "cycle one was unexpectedly skipped")))))
 ;;
 
 let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
@@ -863,6 +1174,51 @@ let test_keeper_projects_masc_tool () =
                "RAW trace contains tool output"
                true
                (String_util.contains_substring raw "MASC_TOOL_RESULT")))
+;;
+
+let test_official_client_repetition_crosses_unified_autonomous_cycles () =
+  let base_path = temp_workspace () in
+  let query =
+    `Assoc
+      [ "status", `String "todo"
+      ; "limit", `Int 10
+      ; "projection", `String "compact"
+      ]
+  in
+  let call request_id =
+    mcp_tool_call
+      ~request_id
+      ~tool_name:"keeper_tasks_list"
+      ~arguments:query
+  in
+  let first_lines =
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read (call "tasks-1")
+    ; Emit_and_read (call "tasks-2")
+    ; Emit (assistant ~turn_id:"unified-turn-1" "POLL_TURN_ONE_COMPLETE")
+    ; Emit (result ~turn_id:"unified-turn-1" "POLL_TURN_ONE_COMPLETE")
+    ]
+  in
+  let second_lines =
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read (call "tasks-3")
+    ; Emit (assistant ~turn_id:"unified-turn-2" "POLL_TURN_TWO_COMPLETE")
+    ; Emit (result ~turn_id:"unified-turn-2" "POLL_TURN_TWO_COMPLETE")
+    ]
+  in
+  Masc_test_deps.with_process_env
+    "MASC_KEEPER_AUTONOMOUS_ENABLED"
+    (Some "true")
+    (fun () ->
+       Fun.protect
+         ~finally:(fun () -> cleanup_tree base_path)
+         (fun () ->
+            with_fixture_sequence first_lines second_lines (fun cli_path ->
+              run_unified_autonomous_cycle_pair ~base_path ~cli_path)))
 ;;
 
 (* WP1 completion trigger (native tool provenance): each official-client
@@ -2218,7 +2574,9 @@ let run_direct_attempt
     ~base_path ~sandbox_profile:None "claude-pre-dispatch";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
        with_runtime_config cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
@@ -3335,6 +3693,10 @@ let () =
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
         ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
+        ; test_case
+            "checkpointless polling repetition crosses unified autonomous cycles"
+            `Quick
+            test_official_client_repetition_crosses_unified_autonomous_cycles
         ; test_case
             "distinguishes native and MASC tool provenance"
             `Quick

@@ -1272,12 +1272,17 @@ let load_approvals ~(host : string) ~(port : int) :
 let load_runtime_resolved ~(host : string) ~(port : int) :
     ( Tui_decode.runtime_option list
       * Tui_decode.runtime_resolved_lane list
-      * Tui_decode.runtime_assignment list,
+      * Tui_decode.runtime_assignment list
+      * string option,
       string )
     result =
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_runtime_resolved_full json
+  | Ok json ->
+      let ( let* ) = Result.bind in
+      let* runtimes, lanes, assignments = Tui_decode.decode_runtime_resolved_full json in
+      let* snapshot = Tui_decode.decode_runtime_resolved_snapshot json in
+      Ok (runtimes, lanes, assignments, snapshot.rrs_default_route)
 
 (** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
     and the provider usage windows. The two decode apart, and a failed fetch
@@ -1667,13 +1672,13 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
         | Error err -> Error err
         | Ok projections -> Ok (lanes, projections)))
 
-(** Load the standalone lane matrix independently from Keeper lane rows so a
+(** Load the common Lane inventory independently from Keeper lane rows so a
     failure on either observation does not erase the last good other one. *)
-let load_standalone_lanes ~(host : string) ~(port : int) :
-    (Tui_decode.standalone_lanes_snapshot, string) result =
-  match fetch_standalone_lanes ~host ~port with
+let load_lane_inventory ~(host : string) ~(port : int) :
+    (Masc.Tui_decode_lane_inventory.snapshot, string) result =
+  match fetch_lane_inventory ~host ~port with
   | Error err -> Error err
-  | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
+  | Ok json -> Masc.Tui_decode_lane_inventory.decode json
 
 (** Load the clients roster from /api/v1/dashboard/clients *)
 let load_clients ~(host : string) ~(port : int) :
@@ -2023,11 +2028,10 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
             rows))
 
 let load_runtime_config_view ~(host : string) ~(port : int) :
-    (string * string list * Masc_tui_runtime_config_view.metadata, string) result =
+    (Masc_tui_runtime_config_view.reading, string) result =
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
   | Error err -> Error ("fetch: " ^ err)
   | Ok json ->
       match Masc_tui_runtime_config_view.decode json with
       | Error detail -> Error ("decode: " ^ detail)
-      | Ok reading -> Ok (reading.path,
-          sanitize_view_lines (String.split_on_char '\n' reading.source_text), reading.metadata)
+      | Ok reading -> Ok reading

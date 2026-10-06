@@ -807,6 +807,96 @@ let test_published_appraiser_repair_releases_rejected_payout ~in_flight () =
     check int "later pulse appends no second payment" 1 (List.length (paid config waiting.goal_id));
     check int "later pulse does not appraise paid debt" 5 (F.post_count repaired))
 
+(* Use the HTTP mutation boundary and real payout worker. Only model judgment
+   is controlled; failed persistence and unrelated edits must not release debt. *)
+let test_prompt_mutation_retries_rejected_payout ?(preset=false) ~clear () =
+  List.iter (fun key ->
+    with_workspace @@ fun env config ->
+    let bad = "fixture refusal {{appraisal_input}}" in
+    let good = "fixture repaired {{appraisal_input}}" in
+    let apply request = Server_prompt_override_mutation.apply ~base_path:config.base_path request in
+    let applied request = match apply request with
+      | Ok _ -> ()
+      | Error (Server_prompt_override_mutation.Validation detail
+          | Server_prompt_override_mutation.Persistence detail) -> fail detail in
+    Fun.protect ~finally:(fun () -> Prompt_registry.clear_prompt_override key) (fun () ->
+      if preset then (
+        if clear then applied (Server_prompt_override_request.Clear {key})
+        else applied (Server_prompt_override_request.Set {key;value=good});
+        let snapshot = ok (Prompt_preset.capture ~base_path:config.base_path
+          ~name:"repaired" ~description:"repaired appraisal prompt") in
+        ok (Prompt_preset.save ~base_path:config.base_path snapshot));
+      applied (Server_prompt_override_request.Set {key;value=bad});
+      let unchanged_key = if key = Prompt_names.candle_appraiser_grade
+        then Prompt_names.candle_appraiser_relation else Prompt_names.candle_appraiser_grade in
+      applied (Server_prompt_override_request.Clear {key=unchanged_key});
+      if preset then (
+        let snapshot = ok (Prompt_preset.capture ~base_path:config.base_path
+          ~name:"unchanged" ~description:"unchanged refused appraisal prompt") in
+        ok (Prompt_preset.save ~base_path:config.base_path snapshot));
+      let waiting = prepared config "prompt-recovery" in
+      let calls = ref [] and refusals = ref 0 in
+      let appraise ~identity request =
+        let prompt_key = match request with
+          | A.Grade _ -> Prompt_names.candle_appraiser_grade
+          | A.Relation _ -> Prompt_names.candle_appraiser_relation
+          | A.Weights _ -> Prompt_names.candle_appraiser_weights in
+        if String.equal prompt_key key
+           && String.equal (Prompt_registry.resolve_prompt key).effective bad
+        then (incr refusals; Error (A.Invalid_response "fixture prompt refusal"))
+        else make_runner calls ~identity request in
+      Eio.Switch.run (fun sw ->
+        Candle_payout_worker.start ~sw ~config ~appraise ();
+        await env "prompt refusal" (fun () -> !refusals = 1);
+        idle env;
+        Candle_payout_worker.pulse ();
+        idle env;
+        check int "unchanged prompt stays rejected" 1 !refusals;
+        applied (Server_prompt_override_request.Set {key;value=bad});
+        idle env;
+        check int "identical successful save does not retry rejection" 1 !refusals;
+        applied (Server_prompt_override_request.Clear {key=unchanged_key});
+        idle env;
+        check int "clearing an already default appraisal prompt does not retry" 1 !refusals;
+        if preset then (
+          ignore (ok (Prompt_preset.restore ~base_path:config.base_path "unchanged"));
+          idle env;
+          check int "identical preset restore does not retry" 1 !refusals);
+        applied (Server_prompt_override_request.Clear {key=Prompt_names.keeper});
+        idle env;
+        check int "unrelated successful mutation does not retry" 1 !refusals;
+        (match apply (Server_prompt_override_request.Set {key;value=""}) with
+         | Error (Server_prompt_override_mutation.Validation _) -> ()
+         | _ -> fail "invalid prompt mutation was not refused");
+        idle env;
+        check int "invalid mutation does not retry" 1 !refusals;
+        let repair = if clear then Server_prompt_override_request.Clear {key}
+          else Server_prompt_override_request.Set {key;value=good} in
+        let path = Filename.concat (Workspace.masc_dir config) "prompt_overrides.json" in
+        let backup = path ^ ".fixture-backup" in
+        Sys.rename path backup;
+        Unix.mkdir path 0o700;
+        Fun.protect ~finally:(fun () -> Unix.rmdir path; Sys.rename backup path) (fun () ->
+          (match apply repair with
+           | Error (Server_prompt_override_mutation.Persistence _) -> ()
+           | _ -> fail "unwritable override store did not refuse mutation");
+          idle env;
+          check int "failed persistence does not retry" 1 !refusals);
+        if preset then (
+          let report = ok (Prompt_preset.restore ~base_path:config.base_path "repaired") in
+          check int "preset prompt repairs persist" 0 (List.length report.prompt_overrides_result.skipped))
+        else applied repair;
+        await env "same rejected payout after prompt repair" (fun () -> paid config waiting.goal_id <> []);
+        idle env;
+        let payment = one_payment config waiting.goal_id in
+        check string "repair retains original obligation" waiting.request_id payment.identity.request_id;
+        check int "refused prompt is not dispatched again" 1 !refusals;
+        Candle_payout_worker.pulse ();
+        idle env;
+        check int "later pulse does not duplicate payment" 1 (List.length (paid config waiting.goal_id)))))
+    [Prompt_names.candle_appraiser_grade; Prompt_names.candle_appraiser_relation;
+     Prompt_names.candle_appraiser_weights]
+
 let test_declaration_probe_retains_usable_baseline () =
   with_workspace @@ fun _env config ->
   let module F = Exact_output_fixture in
@@ -899,6 +989,12 @@ let () =
   run "candle_appraisal_flow"
     ["payout",
       [test_case "configured grade and distribution reach ledger" `Quick test_configured_grade_and_distribution_reach_the_ledger
+      ;test_case "persisted appraisal prompt set retries rejected payout" `Quick (test_prompt_mutation_retries_rejected_payout ~clear:false)
+      ;test_case "preset appraisal prompt set retries rejected payout" `Quick
+        (test_prompt_mutation_retries_rejected_payout ~preset:true ~clear:false)
+      ;test_case "preset appraisal prompt clear retries rejected payout" `Quick
+        (test_prompt_mutation_retries_rejected_payout ~preset:true ~clear:true)
+      ;test_case "persisted appraisal prompt clear retries rejected payout" `Quick (test_prompt_mutation_retries_rejected_payout ~clear:true)
       ;test_case "published appraiser repair releases rejected payout" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:false)
       ;test_case "publication during refusal retains recovery event" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:true)
       ;test_case "declaration probe retains usable baseline" `Quick test_declaration_probe_retains_usable_baseline

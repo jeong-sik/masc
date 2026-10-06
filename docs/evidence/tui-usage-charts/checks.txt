@@ -1,0 +1,28 @@
+Testing `tui_overview_providers'.
+This run has ID `M0M28KYK'.
+
+  [OK]          providers          0   exact quota window history join.
+  [OK]          providers          1   account summary and reported gauges.
+  [OK]          providers          2   eighth-block meter.
+  [OK]          providers          3   values read in one unit.
+  [OK]          providers          4   failed read is one line.
+  [OK]          providers          5   empty read names missing usage.
+  [OK]          providers          6   unknown state is rejected.
+  [OK]          providers          7   history uses reported points.
+  [OK]          providers          8   trend is built from the answer.
+  [OK]          providers          9   scope id is the server's.
+  [OK]          providers         10   a silent account draws only its exhaus...
+  [OK]          providers         11   meter width is bounded.
+  [OK]          providers         12   observation clock follows local dates.
+  [OK]          providers         13   a window that gates nothing is not an ...
+  [OK]          providers         14   unknown role is rejected.
+  [OK]          providers         15   account emails name their accounts.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/tui-usage-charts/_build/_tests/tui_overview_providers'.
+Test Successful in 0.014s. 16 tests run.
+BROWSER_PTY_FRAME_MATCH=PASS plan-wide
+BROWSER_PTY_FRAME_MATCH=PASS plan-compact
+BROWSER_PTY_FRAME_MATCH=PASS trend
+BROWSER_PTY_FRAME_MATCH=PASS trend-compact
+BROWSER_PTY_FRAME_MATCH=PASS live-snapshot-plan
+BROWSER_PTY_FRAME_MATCH=PASS live-snapshot-trend

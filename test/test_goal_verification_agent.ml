@@ -274,10 +274,10 @@ let drain config =
   | Error failure -> fail ("drain_once: " ^ Agent.scan_failure_to_string failure)
 ;;
 
-(* (a) A pending proof drains to a proven verdict: the goal completes, the
+(* (a) A pending proof drains to a proven verdict: the goal awaits confirmation, the
    ledger carries the fixed verifier identity and the model's stated reason
    as evidence. *)
-let test_proof_pending_drains_to_completed () =
+let test_proof_pending_drains_to_awaiting_confirmation () =
   with_workspace
   @@ fun config ->
   let ctx = workspace_ctx config in
@@ -292,7 +292,7 @@ let test_proof_pending_drains_to_completed () =
     ~slots:(fun () -> Ok [ "verifier-a" ])
     ~reviewer:(recording_reviewer (ref []) [ "verifier-a", Stub_approve "all 3 services verified" ])
     (fun () -> drain config);
-  check string "goal completed via the drained proof" "awaiting_confirmation"
+  check string "proven goal still awaits human confirmation" "awaiting_confirmation"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven verdict ->
@@ -304,9 +304,9 @@ let test_proof_pending_drains_to_completed () =
       (Masc_domain.completion_authority_kind verdict.Goal_verification.authority);
     (* The Keeper that asked for completion has to be able to learn the answer
        without going and looking for it. *)
-    let announced =
+    let announcements =
       Workspace.get_all_messages_raw config ~since_seq:0
-      |> List.exists (fun (message : Masc_domain.message) ->
+      |> List.filter (fun (message : Masc_domain.message) ->
         String_util.string_contains_substring
           ~needle:"[goal_verdict]"
           message.content
@@ -315,7 +315,16 @@ let test_proof_pending_drains_to_completed () =
              ~needle:"all 3 services verified"
              message.content)
     in
-    check bool "the verdict is announced to the workspace" true announced
+    (match announcements with
+     | [message] ->
+       check bool "announcement carries the authoritative postcommit phase" true
+         (String_util.string_contains_substring
+           ~needle:("phase: " ^ stored_phase config goal_id) message.content);
+       check bool "proof announcement preserves the pending human boundary" true
+         (String_util.string_contains_substring
+           ~needle:"human confirmation required"
+           message.content)
+     | _ -> fail "expected one proven verdict announcement")
   | _ -> fail "ledger must hold the proven verdict"
 ;;
 
@@ -1892,8 +1901,8 @@ let () =
             test_reopen_from_verifying_cancels_a_hung_review
         ; test_case "new request rejects an old answer for identical criteria" `Quick
             test_new_request_rejects_old_answer_for_same_criterion
-        ; test_case "proof pending drains to completed" `Quick
-            test_proof_pending_drains_to_completed
+        ; test_case "proof pending drains to awaiting confirmation" `Quick
+            test_proof_pending_drains_to_awaiting_confirmation
         ; test_case "goal proof reads the workspace playground" `Quick
             test_goal_proof_reads_the_workspace_playground
         ; test_case "a refuted goal can request proof again and pass" `Quick

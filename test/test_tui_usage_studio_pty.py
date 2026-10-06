@@ -12,6 +12,7 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 
+
 def fixtures():
     now = time.time()
     result = _keyboard_harness.keeper_runtime_http_fixtures()
@@ -62,9 +63,12 @@ def fixtures():
             "days": days, "generated_at": now,
             "sampling": "latest_provider_report_per_utc_day", "unreadable_reports": 0, "reported_no_windows": [],
             "points": [{"scope_id": scope["scope_id"], "kind": "five_hour",
-                        "limit_id": None, "unit": "fraction", "value": 0.4,
-                        "observed_at": now, "source": "fixture", "resets_at": None}
-                       for scope in scopes]})
+                        "limit_id": None, "unit": "fraction", "value": value,
+                        "observed_at": now - (6 - offset) * 86400,
+                        "source": "fixture", "resets_at": None}
+                       for scope in scopes
+                       for offset, value in enumerate((0.0, 0.15, None, 0.35, 0.6, 0.9, 0.4))
+                       if value is not None and 6 - offset < days]})
     result["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
         "keepers": [], "window_minutes": 1440, "generated_at": now,
         "cache": {"state": "fresh", "generated_at": now}})
@@ -91,10 +95,11 @@ def journey(executable, no_color=False):
         _keyboard_harness.tab_until(process, fd, output, b"MASC Usage")
         _keyboard_harness.wait_for_output(process, fd, output, b"catalogue reopens", start=0, timeout=10)
         wide = capture(process, fd, output, "plan-wide-no-color" if no_color else "plan-wide",
-                       48, 220, b"claude@example.com")
+                       80, 220, b"claude@example.com")
         for value in (b"Plan usage", b"Used   0%", b"Used  25%", b"Used  33%", b"Reset",
                       b"Last report", b"Model call limit", b"Other use", b"does not block model calls",
-                      b"Unclassified limit", b"Catalogue", b"reported", b"claude@example.com"):
+                      b"Unclassified limit", b"Catalogue", b"reported", b"claude@example.com",
+                      b"Remaining", b"At limit (reported)", b"Blocked (observed)", b"Trend 14 UTC days"):
             if value not in wide:
                 raise AssertionError(f"Plan omitted {value!r}: {wide!r}")
         if b"Quota scope trend" in wide or b"Keeper usage" in wide:
@@ -129,7 +134,19 @@ def journey(executable, no_color=False):
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"Claude")
         capture(process, fd, output, "plan-restored", 30, 120, b"Claude")
         _keyboard_harness.send_and_wait(process, fd, output, b"v", b"UTC days reported")
-        capture(process, fd, output, "trend", 30, 120, b"UTC days reported")
+        trend = capture(process, fd, output, "trend", 60, 220, b"UTC days reported")
+        for value in (b"100%", b"75%", b"50%", b"25%", b"UTC", b"Latest report", b"6/14 UTC days reported"):
+            if value not in trend:
+                raise AssertionError(f"Trend omitted chart evidence {value!r}: {trend!r}")
+        if not any(b"Antigravity" in line and "팀 계정".encode() in line for line in trend.splitlines()):
+            raise AssertionError("wide Trend did not place account charts side by side")
+        compact_trend = capture(process, fd, output, "trend-compact", 30, 80, b"UTC days reported")
+        if b"100%" not in compact_trend or b"Latest report" not in compact_trend:
+            raise AssertionError("compact Trend hid the measurement or its scale")
+        for reading in (trend, compact_trend):
+            for meaning in ("↓ below zero", "↑ above limit"):
+                if meaning.encode() not in reading:
+                    raise AssertionError(f"Trend omitted range meaning {meaning!r}")
         _keyboard_harness.send_and_wait(process, fd, output, b"w", b"1 UTC days")
         _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Keeper usage")
         capture(process, fd, output, "keepers", 30, 120, b"Keeper usage")

@@ -1,0 +1,28 @@
+{
+  "head": "2e34863666dde7dd334adb47dee397b81358f928",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "4ee7979f446eb1ccbb2c35af853623315bbd909825ce1807e56f01d127f267a3",
+    "test/test_lane_addon_worker.ml": "2ab5b9ab47ff99997ded7e1c11669d006dfc34422457b866f365a7d1ccdf5de9"
+  },
+  "artifact_sha256": {
+    "red-build.log": "c9befef475c80865a98eea5ec6c138dc09217f13aa8552d0717082a145207997",
+    "red-final-build.log": "78c7c8f8affd2e569af20aa902d5f1c242fbd2e1a6dac8f96d99e16cc6d8e048",
+    "green-tests.log": "b5880fe214f7396955d2f25833c2a6c43a417968dc9ba503045462c95637df22",
+    "clean-red-build.log": "4e4971582fa4bdc97a2026d60d7d63a300eb7f9a61305eae215151ec418c6cdf",
+    "clean-red-tests.log": "3fc88bbd64aa6d27facfd239262f8f19949cae5228fdd07aa1370e5bc6e78869",
+    "clean-red-case0.log": "160546f7bc31027ef0b4062e0cdb16fc3bde2556b9ad2389b80f2afbc8e8bd90",
+    "clean-red-case1.log": "d707e5ccbfd5f231e00b8227d58c2aac808eaacf7fc7e7c1df0fff0f9714bfe9",
+    "clean-red-case2.log": "d707e5ccbfd5f231e00b8227d58c2aac808eaacf7fc7e7c1df0fff0f9714bfe9",
+    "clean-red-identities.json": "ac9817f1c1e386b9bd6179e90f071c70660ec85e2964f7d9f7c400d1d41ac5fb",
+    "qualified-build.log": "4e4971582fa4bdc97a2026d60d7d63a300eb7f9a61305eae215151ec418c6cdf",
+    "qualified-tests.log": "902a4aff46eef06aff380a94a0c96ea18661733490debd7b10cc4fba7bbfe693"
+  },
+  "binary_sha256": "0cfead30b3f989380fe80cf32a760d91941cbad98558460373b7e8b490d0b886",
+  "results": {
+    "clean_red_selected": 3,
+    "clean_red_failures": 3,
+    "qualified_worker_tests": 32,
+    "qualified_worker_exit": 0
+  },
+  "limits": "No new full-RPC sizing implementation; published downstream40991 owns that API. P1 history maintenance and stdio readiness remain separate pending work."
+}

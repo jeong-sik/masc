@@ -301,12 +301,12 @@ let resolve_program ?boot ~base_path name =
   let trimmed = String.trim name in
   match boot with
   | Some b when escapes b ->
-    Error (Printf.sprintf "boot %S is a file name inside the directory: no paths, and no dots" b)
+    Error (Printf.sprintf "boot %S is a file name inside the directory: no paths, drives, or leading dots" b)
   | Some _ | None ->
   if trimmed = "" then Error "name a program"
   else if escapes trimmed then
     Error
-      (Printf.sprintf "%S is not a name in the inventory: no paths, and no dots"
+      (Printf.sprintf "%S is not a name in the inventory: no paths, drives, or leading dots"
          trimmed)
   else if not (Sys.file_exists (Filename.concat root trimmed)) then
     Error (Printf.sprintf "no program named %S: put it under %s" trimmed root)

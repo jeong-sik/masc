@@ -277,6 +277,7 @@ function makeRuntimeResolved(
     generated_at_iso: '2026-06-21T00:00:00Z',
     source: '/api/v1/runtime/resolved',
     config_path: '/cfg/runtime.toml',
+    default_route: 'rt-a',
     default_runtime: {
       id: 'rt-a', provider: 'P', model: 'm1',
       effective_max_context: 128000, max_context_source: 'override',
@@ -2220,9 +2221,12 @@ describe('SettingsSurface', () => {
     setConfirm(realConfirm)
   })
 
-  it('routing section exposes a required default lane without an empty option and patches it', async () => {
+  it('routing section writes a declared default lane route', async () => {
     apiMock.fetchRuntimeDefaults.mockReset()
     apiMock.fetchRuntimeDefaults.mockResolvedValue(makeRuntimeDefaults())
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [{ id: 'lane-fast', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
+    }))
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
@@ -2235,15 +2239,34 @@ describe('SettingsSurface', () => {
     const select = container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement
     const optionValues = Array.from(select.options).map(o => o.value)
     expect(optionValues).not.toContain('')
+    expect(optionValues).toContain('lane-fast')
 
-    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await fireEvent.input(select, { target: { value: 'lane-fast' } })
     await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b', expect.objectContaining({ beforeDispatch: expect.any(Function) }))
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'lane-fast', expect.objectContaining({ beforeDispatch: expect.any(Function) }))
       expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
         .toContain('Skill catalog 게시됨')
       expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
         .toContain('파일 내구성 확인됨')
     })
+  })
+
+  it('keeps a declared default lane distinct from its entry runtime', async () => {
+    stubRuntimeResolved(makeRuntimeResolved({
+      default_route: 'lane-fast',
+      lanes: [{ id: 'lane-fast', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
+    }))
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await waitFor(() => {
+      const select = container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement | null
+      expect(select?.value).toBe('lane-fast')
+    })
+    const select = container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement
+    expect(Array.from(select.options).map(option => option.value)).toContain('lane-fast')
+    expect(container.querySelector('[data-testid="runtime-default-entry"]')?.textContent).toBe('rt-a')
+    expect(apiMock.patchRuntimeRouting).not.toHaveBeenCalled()
   })
 
   it('runtime section default runtime is a writable selector that patches the default lane', async () => {
@@ -2465,7 +2488,8 @@ describe('SettingsSurface', () => {
       const committed = config.source_text + '# committed\n'
       await act(async () => { await editor.write(authority, async () => committedRuntimeTomlConfigFixture({ ...config, source_text: committed }), committed) })
       await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBeenCalledTimes(2))
-      const fresh = makeRuntimeResolved({ default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c', model: 'workspace-B-runtime' },
+      const fresh = makeRuntimeResolved({ default_route: 'rt-c',
+        default_runtime: { ...makeRuntimeResolved().default_runtime!, id: 'rt-c', model: 'workspace-B-runtime' },
         lanes: [{ id: 'only_b', declared: true, runtime_ids: ['rt-c'] }] })
       apiMock.fetchRuntimeDefaults.mockResolvedValue(makeRuntimeDefaults({ default_runtime_id: 'rt-c' }))
       apiMock.fetchRuntimeResolved.mockResolvedValue(fresh)

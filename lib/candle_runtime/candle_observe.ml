@@ -35,6 +35,7 @@ let ready_account_revision ~events ~policy ~balance ~keeper =
     | Candle_event.Paid payment -> List.exists (fun (allocation : Candle_payment.allocation) ->
         String.equal allocation.keeper keeper) payment.allocations
     | Candle_event.Purchased purchase -> String.equal purchase.keeper keeper
+    | Candle_event.Granted granted -> String.equal granted.keeper keeper
     | Candle_event.Equipped choice -> String.equal choice.keeper keeper
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Unattributed _ | Candle_event.Payout_failed _ -> false in

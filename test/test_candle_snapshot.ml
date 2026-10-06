@@ -186,7 +186,8 @@ let goal_ids events =
        | Candle_event.Payout_failed { goal_id; _ } -> Some goal_id
        | Candle_event.Paid p -> Some p.identity.goal_id
        | Candle_event.Half_life_set _ -> None
-       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no Goal identity"
+       | Candle_event.Granted _ -> Alcotest.fail "a grant has no Goal identity")
     events
 ;;
 

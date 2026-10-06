@@ -8,7 +8,7 @@ let candidate_tasks (w : Candle_payout.waiting) events =
   List.find_map (fun (event : E.t) -> match event.body with
     | E.Candidates c when c.goal_id = w.goal_id && c.request_id = w.request_id
         && c.verification_run_id = w.verification_run_id -> Some c.tasks
-    | E.Half_life_set _ | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None) events
+    | E.Half_life_set _ | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Payout_failed _ -> None) events
 let call ~(appraise : A.runner) ~identity request =
   let* answer = appraise ~identity request in
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
@@ -103,7 +103,9 @@ let preparation_error ~at ~events error =
     | Candle_balance.Unowned_equipment _
     | Candle_balance.Wrong_equipment_slot _
     | Candle_balance.Already_owned _
-    | Candle_balance.Insufficient_balance _) as error -> invalid error
+    | Candle_balance.Insufficient_balance _
+    | Candle_balance.Invalid_grant _
+    | Candle_balance.Duplicate_grant _) as error -> invalid error
 
 let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.waiting) =
   let* body = decide ~appraise ~policy events waiting in
@@ -126,7 +128,7 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
         |> Result.map_error (fun detail -> A.Invalid_response detail) in
       let credit = match body with
         | E.Paid payment -> Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ())
-        | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
+        | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
       (match credit, current_policy.half_life with
        | Ok (), (Candle_decay.Off | Candle_decay.Hours _) ->
          Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)
@@ -146,7 +148,9 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
            | Candle_balance.Unowned_equipment _
            | Candle_balance.Wrong_equipment_slot _
            | Candle_balance.Already_owned _
-           | Candle_balance.Insufficient_balance _) as error),
+           | Candle_balance.Insufficient_balance _
+           | Candle_balance.Invalid_grant _
+           | Candle_balance.Duplicate_grant _) as error),
          (Candle_decay.Off | Candle_decay.Hours _) ->
          Error (A.Invalid_response (Candle_balance.error_to_string error)))
     | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled -> Ok ([], Superseded waiting.goal_id))

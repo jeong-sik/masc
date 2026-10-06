@@ -110,6 +110,15 @@ def checked_frame(output: bytearray) -> dict[int, bytes]:
         }
         if actual != expected:
             raise AssertionError(f"{name} column mismatch: {actual!r} != {expected!r}")
+    # RECURRENCE is measured from the page: "every 30 minutes" must read whole,
+    # not as "eve… minutes", on a frame with room to spare (task-2123).
+    after = next(label for label in ("BY", "REQUESTED", "WHAT") if label in header)
+    recurrence_bounds = (header.index("RECURRENCE"), header.index(after))
+    for name in positions:
+        text = rows[positions[name]].decode()
+        recurrence = text[recurrence_bounds[0] : recurrence_bounds[1]].strip()
+        if recurrence != "every 30 minutes":
+            raise AssertionError(f"{name} RECURRENCE was cut: {recurrence!r}")
     held = cells(rows[positions["held-proof"]])
     if held != {"STATUS": "due", "TRIGGERED": "—", "OUTCOME": "—", "RECEIVED": "—"}:
         raise AssertionError(f"Held row reused previous occurrence cells: {held!r}")

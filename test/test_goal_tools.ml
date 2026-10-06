@@ -1022,7 +1022,12 @@ let test_callers_share_a_goal_without_private_delivery () =
    | [ message ] ->
      check string "the verifier announces to the workspace" "verifier_exact" message.from_agent;
      check bool "the shared announcement carries the evidence" true
-       (has_substring ~needle:evidence message.content)
+       (has_substring ~needle:evidence message.content);
+     check bool "refutation announces its committed phase" true
+       (has_substring ~needle:("phase: " ^ get_string_field (member "goal" refuted) "phase")
+          message.content);
+     check bool "refutation does not ask for completion confirmation" false
+       (has_substring ~needle:"human confirmation required" message.content)
    | _ -> fail "the workspace must receive one proof verdict announcement");
   let primary, mirror = goal_files config in
   List.iter (fun (label, bytes) ->

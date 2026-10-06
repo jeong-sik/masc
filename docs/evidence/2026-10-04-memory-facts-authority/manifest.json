@@ -1,0 +1,17 @@
+{
+  "files": {
+    "README.md": "0f3489ed986c221b9284c329de132a485f77cbcf243c2f436a9cfe1adab2552e",
+    "pr41179-baseline-pyright.json": "3369f3976a184bc798603efd4b4f0991baeb0c161652158e3a54ddb9197476d1",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pr41179-pyright.json": "d9f59b5d9b86f50e4e167cedee38d92b25a1aaf73abe95de3a3b7c492b33c3da",
+    "pr41179-final-green-build.log": "f848845e0f3b79429076f837aea9e8f8c746fa88b16265592e367c9ba482ded9",
+    "pr41179-red-pty3.log": "7230906806b1cf9a969c08db2c9daeb48256c64615199ecf4a573f8e1eeaf272",
+    "pr41179-final-green-pty2.log": "75882d992a924169f6a9fcf602430915d4201dee31022a4512186a6c447df7cb",
+    "pr41179-navigation-red-final-pty.log": "1030b8f9476e70ee089899eb2754756c6829f94cbc6f49e55a0fa1294e4989e7"
+  },
+  "source_and_binary_sha256": {
+    "bin/masc_tui.ml": "d54a4c416ac0a2ea8ed38302cda4a115e7143718fe017ea9bd3ce327d4469d5b",
+    "test/test_tui_memory_facts_authority_pty.py": "15f388d5b5ba213dd2f0938bd7f6a310e9441b37e60258cdfc478237ebfd6fb5",
+    "_build/default/bin/masc_tui.exe": "95d6ffcfc37d11d93eb936af86cbadbd96609855a8115c9c96d7ad51eb209d20"
+  }
+}

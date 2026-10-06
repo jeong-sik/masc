@@ -14,8 +14,11 @@ import { announceRuntimeTomlCommitted } from './runtime-toml-session'
 
 type Document = RuntimeTomlCurrentSource
 type Draft = { base: Document; enabled: boolean }
+/** `previewing` has sent no write. `saving` begins once the save POST passes
+ * its dispatch check, so an interrupted save is uncertain only from there. */
+type Phase = 'idle' | 'reading' | 'previewing' | 'saving' | 'followup'
 type State = {
-  draft: Draft | null; current: Document | null; phase: 'idle' | 'reading' | 'saving' | 'followup';
+  draft: Draft | null; current: Document | null; phase: Phase;
   error: string | null; notice: string | null; followupError: string | null;
   receipt: CommittedRuntimeTomlConfig | null; uncertain: boolean;
 }
@@ -141,15 +144,15 @@ export class BrowserLaneActivitySession {
     try { source = writeBrowserActivity(draft.base.source_text, this.lane, draft.enabled) }
     catch (error) { this.update({ error: errorToString(error) }); return false }
     const version = ++this.version, options = this.options(authority, version)
-    let sent = false, committed = false
+    let committed = false
     const sourceGeneration = runtimeTomlSourceGeneration.peek()
-    this.update({ phase: 'saving', error: null, notice: null, followupError: null })
+    this.update({ phase: 'previewing', error: null, notice: null, followupError: null })
     try {
       const preview = await previewRuntimeTomlConfig(source, options)
       if (!this.owns(authority, version)) return false
       if (!preview.ok || !preview.can_save) throw new Error('설정 검증에서 저장을 거절했습니다. Runtime 설정에서 원문과 오류를 확인하세요.')
-      sent = true
-      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, { ...options, expectedSourcePath: draft.base.source_path })
+      const receipt = await saveRuntimeTomlConfig(source, draft.base.source_revision, { expectedSourcePath: draft.base.source_path,
+        beforeDispatch: () => { options.beforeDispatch(); this.update({ phase: 'saving' }) } })
       if (!this.owns(authority, version)) return false
       const saved = document(receipt)
       if (saved.source_path !== draft.base.source_path || saved.source_text !== source || receipt.commit.source_revision !== saved.source_revision)
@@ -168,6 +171,7 @@ export class BrowserLaneActivitySession {
         [this.state.peek().followupError, `설정 저장 후 목록 갱신 실패: ${errorToString(error)}`].filter(Boolean).join(' ') }) }
     } catch (error) {
       if (this.owns(authority, version)) {
+        const sent = this.state.peek().phase !== 'previewing'
         if (error instanceof RuntimeTomlRevisionConflict) {
           try {
             const current = sourceGeneration === runtimeTomlSourceGeneration.peek() ? error.current : null

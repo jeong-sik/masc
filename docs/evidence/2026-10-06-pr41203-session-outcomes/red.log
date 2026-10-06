@@ -1,0 +1,105 @@
+compdef:153: _comps: assignment to invalid subscript range
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/p2-41203/dashboard
+
+ ❯ src/components/machine-lane-activity-panel.test.ts (61 tests | 5 failed | 55 skipped) 5227ms
+   ❯ Machine activity operator flow (27)
+     × settles a late raw refusal for a save sent before a workspace switch 59ms
+     × settles a late revision conflict without adopting its file after a workspace switch 53ms
+     × keeps an unsent save certain when authority changes during the preview wait 2ms
+     × keeps an unsent save certain when authority changes during the save token wait 51ms
+   ❯ Machine inventory and backend isolation (14)
+     × settles an editable file read while the server observation is still pending 5006ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > settles a late raw refusal for a save sent before a workspace switch
+AssertionError: expected true to be null
+
+- Expected:
+null
+
++ Received:
+true
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:187:43
+    185|     expect(session.state.value.uncertain).not.toBeNull()
+    186|     answer.resolve(); expect(await saving).toBe(false)
+    187|     expect(session.state.value.uncertain).toBeNull()
+       |                                           ^
+    188|     expect(session.state.value.current).toBeNull()
+    189|     const fresh = workspace('/fixture/A')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > settles a late revision conflict without adopting its file after a workspace switch
+AssertionError: expected true to be null
+
+- Expected:
+null
+
++ Received:
+true
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:207:43
+    205|     workspace('/fixture/B')
+    206|     answer.resolve(); expect(await saving).toBe(false)
+    207|     expect(session.state.value.uncertain).toBeNull()
+       |                                           ^
+    208|     expect(session.state.value.current).toBeNull()
+    209|     const fresh = workspace('/fixture/A')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > keeps an unsent save certain when authority changes during the preview wait
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > keeps an unsent save certain when authority changes during the save token wait
+AssertionError: expected true to be null
+
+- Expected:
+null
+
++ Received:
+true
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:370:43
+    368|     await waitFor(() => expect(wait === 'preview' ? api.previewRuntime…
+    369|     workspace('/fixture/B')
+    370|     expect(session.state.value.uncertain).toBeNull()
+       |                                           ^
+    371|     gate.resolve(); expect(await saving).toBe(false)
+    372|     expect(api.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine inventory and backend isolation > settles an editable file read while the server observation is still pending
+AssertionError: expected 'reading' to be 'idle' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body />[39m
+[36m</html>[39m
+
+Expected: "idle"
+Received: "reading"
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:461:59
+    459|     inventoryApi.fetchLaneInventory.mockReturnValueOnce(slow.promise)
+    460|     const reading = session.read(authority)
+    461|     await waitFor(() => expect(session.state.value.phase).toBe('idle'))
+       |                                                           ^
+    462|     expect(session.state.value.current?.source_text).toBe(source)
+    463|     expect(session.state.value.observation).toEqual({ kind: 'reading' …
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed | 55 skipped (61)
+   Start at  10:07:33
+   Duration  6.47s (tests 82%, transform 8%, import 7%, environment 2%, setup 2%)
+
+vitest_exit=1

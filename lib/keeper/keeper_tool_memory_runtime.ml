@@ -1756,6 +1756,40 @@ let memory_write_identity_receipt = function
     ; "what_committed", `String "The existing current fact was re-observed; its observation or support was refreshed. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
 ;;
 
+(* The receipt fields that say what a write did. [revision] and [recorded_at]
+   stamp the snapshot the write landed in and move on every write, including
+   a re-observation that changed nothing, so the repeat guard reads the answer
+   without them (sangsu 2026-10-05: twelve claims rewritten 1,861 times, each
+   receipt different only there). A field this list does not name stays out
+   of the answer: a new stamp then cannot hide a loop, and a new field that
+   does carry a change costs at most one resume. *)
+let memory_write_answer_fields =
+  [ "ok"
+  ; "error_kind"
+  ; "effect_disposition"
+  ; "detail"
+  ; "outcome"
+  ; "store"
+  ; "memory_id"
+  ; "identity_disposition"
+  ; "basis"
+  ; "superseded_memory_id"
+  ; "supersedes"
+  ; "supersedes_already_removed"
+  ; "source_path"
+  ; "source_sha256"
+  ]
+;;
+
+let memory_write_answer_of_output output_text =
+  let names_answer (key, _) = List.exists (String.equal key) memory_write_answer_fields in
+  match Yojson.Safe.from_string output_text with
+  | `Assoc fields when List.exists (fun (key, _) -> String.equal key "ok") fields ->
+    Some (`Assoc (List.filter names_answer fields))
+  | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
 let keeper_memory_write_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)

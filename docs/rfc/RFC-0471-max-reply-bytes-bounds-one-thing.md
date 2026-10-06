@@ -55,8 +55,33 @@ README(`addons/README.md`)는 그중 3가지만 적어 두었다. 아래는 코�
   따로 설정한다. 로그는 kubelet 설정이다. 컨테이너마다 선언하지 않는다
   ([logging architecture](https://kubernetes.io/docs/concepts/cluster-administration/logging)).
 
-공통점: 한도는 **받는 방향의 메모리 보호**에 걸고, 자기가 만드는 데이터와 저장에는 같은 숫자를 쓰지 않는다.
-저장은 별도의 운영 설정이 맡는다.
+### 에이전트 제품 (Hermes Agent, OpenClaw)
+
+masc 와 가장 가까운 제품이라 설정 문서를 직접 읽었다. 둘 다 한도마다 이름이 있고, 이름이 막는 대상을 말한다.
+
+| 막는 대상 | Hermes Agent | OpenClaw |
+|---|---|---|
+| 명령 출력 | `tool_output.max_bytes` 50000 (넘으면 앞 40%, 뒤 60% 를 남긴다) | `toolResultMaxChars` (모델 context 크기에서 자동 계산) |
+| 파일 읽기 | `file_read_max_chars` 100000, `tool_output.max_lines` 2000 | `memoryGetMaxChars` 12000 |
+| MCP 도구 결과 | `tool_budget.mcp_result_size_chars` 50000 (넘으면 "spillover") | — |
+| 이미지, 첨부 | — | `imageMaxDimensionPx` 1200, `mediaMaxMb` 5, `pdfMaxBytesMb` 10 |
+| 컨테이너 자원 | `container_cpu` 1, `container_memory` 5120 MB, `container_disk` 51200 MB | `docker.cpus` 1, `docker.memory` 1g, `docker.pidsLimit` 256 |
+
+출처: [Hermes 설정](https://hermes-agent.nousresearch.com/docs/user-guide/configuration),
+[OpenClaw 설정](https://openclaw.cc/en/gateway/config-agents). 값은 각 제품의 기본값이고, 그 값이 어떻게 정해졌는지는 문서에 없다.
+
+masc 에 쓸 만한 것은 값이 아니라 모양이다.
+
+- 한도 하나가 한 가지만 막는다. 명령 출력, 파일 읽기, MCP 결과, 이미지가 각자 이름을 가진다.
+- 컨테이너 자원은 제품 전체의 기본값이다. 패키지마다 적지 않는다. OpenClaw 는 에이전트별 덮어쓰기를 허용한다.
+  masc 는 `cpus`, `memory_bytes`, `pids` 를 11개 매니페스트에 모두 적게 하고, 그중 10개가 같은 값이다.
+- 한도를 넘으면 거절하지 않고 줄이거나 따로 둔다(앞뒤만 남기기, 파일로 spillover). 이 점은 masc 에 그대로 쓸 수 없다.
+  masc 는 결과를 증거로 남기고 다른 패키지가 그 증거를 검증한다. 일부만 남기면 증거가 바뀐다. 줄이는 쪽이 아니라
+  "거절하거나 별도 증거 blob 으로 두는" 쪽이 맞다(열린 질문 5).
+- 두 제품은 에러 메시지가 프레임에 들어가는지 재지 않는다.
+
+공통점(인프라와 에이전트 제품 모두): 한도는 **받는 방향의 메모리 보호**에 걸고, 자기가 만드는 데이터와 저장에는 같은
+숫자를 쓰지 않는다. 저장과 자원은 별도의 운영 설정이 맡는다.
 
 ## 3. 제안
 
@@ -69,6 +94,10 @@ README(`addons/README.md`)는 그중 3가지만 적어 두었다. 아래는 코�
 | 5. 모델 요청·결과 blob | 이 한도를 쓰지 않는다. 텍스트 응답은 `maxTokens` 가 이미 상한이다. 이미지 응답을 얼마나 남길지는 아래 열린 질문 |
 | 6. 증거 읽기 합계 | 디스크에서 다시 읽어 대조하지 않는다. 한 관측 안에서 broker 가 발급한 요청 참조를 메모리에 두고 대조한다 |
 | 7. Docker 출력 | 한도를 걸지 않거나 host 고정 상수 하나로 둔다. host 가 직접 실행한 CLI 이고 출력이 몇십~몇 KB 다. `recover_stop` 에 `max_reply_bytes` 를 넘기는 배선도 같이 사라진다 |
+
+이 표와 별개로 하나 더 있다. `cpus`, `memory_bytes`, `pids` 는 host 기본값을 하나 두고 매니페스트는 바꿀 때만 적게 한다
+(위 두 제품과 같은 모양). 지금은 4개 필드가 모두 필수라서 10개 패키지가 같은 값을 복사해 둔다. 이 값들은 매니페스트와 함께
+revision 해시에 들어가므로, 기본값을 바꾸면 해시가 바뀐다. 따로 판단한다.
 
 저장된 바인딩에는 이미 `max_reply_bytes` 가 들어 있다. 이 변경은 값의 의미를 줄이기만 하고 필드는 바꾸지 않는다.
 따라서 호환 코드는 필요 없다. 필드 이름을 `max_message_bytes` 로 바꾸는 일은 이 RFC 범위가 아니다. 이름 변경은 revision
@@ -87,6 +116,9 @@ README(`addons/README.md`)는 그중 3가지만 적어 두었다. 아래는 코�
 4. #41197 의 매니페스트 최소값: 이 RFC 의 입장에서는 필요하지 않다. 값이 너무 작으면 첫 사용 지점
    (`lane_addon_sources.ml`, `lane_addon_runtime.ml`, `addons/protocol.py`)이 이미 명확한 에러로 거부한다.
    실제 하한은 소스 개수와 식별자 길이에 달려 있어서 고정 숫자가 추측값이 된다.
+
+5. 한도를 넘는 결과를 거절할지, 별도 증거 blob 으로 두고 참조만 줄지. Hermes 의 spillover 와 같은 모양이다. 증거가 바뀌면 안 되므로
+   일부만 남기는 방식은 쓸 수 없다. 모델 응답과 소스 스냅샷에 적용할 수 있는지 정해야 한다.
 
 ## 5. 검증
 

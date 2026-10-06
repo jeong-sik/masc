@@ -32,6 +32,12 @@ from tui_keyboard_harness import (
 def cells(text: str) -> int:
     total = 0
     for char in text:
+        if unicodedata.combining(char) or unicodedata.category(char) in (
+            "Mn",
+            "Me",
+            "Cf",
+        ):
+            continue
         total += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
     return total
 
@@ -39,6 +45,11 @@ def cells(text: str) -> int:
 def audit(output: bytearray, surface: str, evidence: dict, columns: int = 70) -> None:
     rows = screen_rows(bytes(output))
     drawn = {row: text for row, text in rows.items() if text.strip()}
+    if len(drawn) < 6:
+        raise AssertionError(
+            f"{surface}: only {len(drawn)} rows drawn -- the surface never"
+            " rendered a table, so a width assertion over it would be vacuous"
+        )
     widest = 0
     for row, raw in drawn.items():
         text = raw.decode("utf-8", "replace")

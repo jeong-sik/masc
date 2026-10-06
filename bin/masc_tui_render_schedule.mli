@@ -322,10 +322,11 @@ val schedule_layout :
 
 val schedule_floor_width : wake_width:int -> int
 (** The least inner width the schedules list reads at (task-2025): the state
-    word -- the last column the narrow list gives up -- the due stamp, the
-    target and recurrence at their minimums, the wake at the width the
-    caller measured from its page, and the delivery at the least reading any
-    page gives it. Below it the list is stacked, not cut. *)
+    word goes last in the drop order, so the floor leaves it -- full state
+    is in the detail -- while the due stamp, the target and recurrence at
+    their minimums, the wake at the width the caller measured from its
+    page, and the delivery at the least reading any page gives it all stay.
+    Below it the list is stacked, not cut. *)
 
 val schedule_header_row : layout:schedule_layout -> string
 

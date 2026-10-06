@@ -2957,7 +2957,10 @@ let test_the_narrow_floors_the_lists_are_read_to () =
   check_floor "keeper automation"
     (Schedule.kauto_floor_width ~status_width:7 ~clock_width:16, 60);
   check_floor "verification"
-    (Schedule.verification_floor_width ~submitter_width:14, 56)
+    (* Sixteen: the least submitter width the render measures at
+       (render.ml -- the fold floors at 16), the reading the RFC's
+       ledger row states. *)
+    (Schedule.verification_floor_width ~submitter_width:16, 58)
 
 let () =
   run "tui_render_schedule"

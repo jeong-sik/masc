@@ -759,11 +759,12 @@ let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
   ; sl_delivery_width = delivery_width
   }
 
-(* The schedules list at its floor (task-2025). The state word is the last
-   thing the narrow list gives up, so the floor keeps it; the wake rides in
-   at the width the caller measured from the page, like the target and the
-   delivery, and the rest count at the least reading any page gives them --
-   the due stamp at its three-cell floor, the narrow pane's own rule. *)
+(* The schedules list at its floor (task-2025). The drop order ends with the
+   state word, so the floor leaves it -- full state is in the detail; the
+   wake rides in at the width the caller measured from the page, like the
+   target and the delivery, and the rest count at the least reading any
+   page gives them -- the due stamp at its three-cell floor, the narrow
+   pane's own rule. *)
 let schedule_floor_width ~wake_width =
   Table.floor
     ~width:(function

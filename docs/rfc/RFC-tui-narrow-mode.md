@@ -75,7 +75,7 @@ implementation_prs: []
 | 4 | Runtime(모드별) | render.ml:9407 | LANE 모드: LANE·CANDIDATE·ROUTE(54) / all 모드: RUNTIME·ROUTE(43) | 54·43 | frame cut |
 | 5 | Repositories | render_schedule:417 | NAME·STATUS·PATH | 37 | frame cut |
 | 6 | System log | render_schedule:515 | TIME·LEVEL·MESSAGE | 29 | frame cut |
-| 7 | Schedules | render_schedule:730 | STATUS·DUE·TARGET·RECURRENCE | 33 | frame cut |
+| 7 | Schedules | render_schedule:730 | DUE·TARGET·RECURRENCE (STATUS는 drop 순서 끝이라 바닥에서 내려놓음) | 33 | frame cut |
 | 8 | Keeper Automation | render.ml:6140 | MARK·STATUS·TRIGGERED·RECEIVED·WHAT | 62¹ | frame cut |
 | 9 | Lane runs | render_schedule:1080 | SUBJECT·STATUS·SLOT | 53 | frame cut |
 | 10 | Changes | render_schedule:1184 | FILE·SUMMARY | 51 | frame cut |

@@ -1437,8 +1437,42 @@ let application_reads_preserve_editor () =
   check bool "explicit action invalidates prior response" true
     (UI.Application.value stale.application_reading=UI.Application.value after.application_reading)
 
+let application_follows_decoded_observations () =
+  let configuration ?(issues="[]") application = UI.decode_configuration (Yojson.Safe.from_string
+    (Printf.sprintf {|{"configuration":{"directory":"/config","complete":true,"issues":%s,
+      "declarations":[{"id":"research","source_path":"/config/research.toml","enabled":true,
+      "source_revision":"on-bytes","desired_revision":"inputs","applied_revision":null,
+      "instance_id":null,"application":%s}]}}|} issues application)) |> ok in
+  let base : Draft.document = {file_name="research.toml";source_path="/config/research.toml";
+    source_text="id=\"research\"\nenabled=true\n";source_revision="on-bytes";
+    desired_revision=Some "inputs";valid=true;messages=[]} in
+  let application document configuration =
+    let session = Draft.from_document document in
+    UI.lines ~width:240 (UI.receive_application_inventory
+      {UI.initial with documents=[session];document_key=Some session.file_name;editor_ready=true}
+      (Ok configuration))
+    |> List.find_opt (String.starts_with ~prefix:"Accepted file application · ") in
+  let failed = configuration
+    ~issues:{|[{"source_path":"/config/research.toml","id":"research","message":"image reconciliation failed"},
+      {"source_path":"/config/broken.toml","id":null,"message":"expected a TOML table"}]|}
+    {|{"kind":"failed","messages":["image reconciliation failed"]}|} in
+  check (option string) "a reported failure stays a failure"
+    (Some "Accepted file application · Application failed: image reconciliation failed")
+    (application base failed);
+  let broken = {base with file_name="broken.toml";source_path="/config/broken.toml";
+    source_text="id=\"broken\"\nenabled=true\n"} in
+  check (option string) "a file without an observation shows its raw issue"
+    (Some "Accepted file application · Application unknown: expected a TOML table")
+    (application broken failed);
+  let partial_read = {base with valid=false;messages=["configuration inventory is incomplete"]} in
+  check (option string) "a complete refresh tracks a file first read during a partial inventory"
+    (Some "Accepted file application · Applied · worker worker-1")
+    (application partial_read (configuration {|{"kind":"applied","instance_id":"worker-1"}|}))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "application reads preserve editor and save diagnostics" `Quick application_reads_preserve_editor;
+  test_case "application lines follow decoded observations and complete refreshes" `Quick
+    application_follows_decoded_observations;
   test_case "empty completed results show capability, identity and input details" `Quick
     empty_completed_results_keep_capability_identity_and_input_details;
   test_case "declared layers use exact configured owners" `Quick

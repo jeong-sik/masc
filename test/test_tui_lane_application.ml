@@ -73,6 +73,20 @@ let edits_keep_saved_identity () =
   check bool "unsaved creation has no applied identity" true
     (Result.is_error (D.application_target (D.create "new.toml" |> ok)))
 
+let read_validation_is_not_application () =
+  let read : D.document = {file_name="research.toml";source_path=target.source_path;
+    source_text="id = \"research\"\nenabled = true\n";source_revision=target.source_revision;
+    desired_revision=Some target.desired_revision;valid=false;
+    messages=["configuration inventory is incomplete"]} in
+  check bool "a read during an incomplete inventory keeps its target" true
+    (D.application_target (D.from_document read) |> ok = target);
+  check bool "a collision at read time leaves the outcome to the current inventory" true
+    (D.application_target (D.from_document
+      {read with messages=["another declaration has the same installation id"]}) |> ok = target);
+  check bool "a file the server could not parse has no target" true
+    (Result.is_error (D.application_target (D.from_document
+      {read with desired_revision=None;messages=["manifest_path requires a string"]})))
+
 let observation_ownership () =
   let start generation reading = match A.start ~generation reading with
     | Some result -> result | None -> fail "expected a new read" in
@@ -103,4 +117,5 @@ let () = run "TUI saved Lane application" ["operator flows",[
   test_case "changed and unavailable observations" `Quick changed_or_unreadable;
   test_case "strict server contract" `Quick strict_wire;
   test_case "draft, comparison, adoption and save" `Quick edits_keep_saved_identity;
+  test_case "read-time validation does not decide application" `Quick read_validation_is_not_application;
   test_case "overlapping reads, save and workspace reset" `Quick observation_ownership]]

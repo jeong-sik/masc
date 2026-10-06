@@ -617,9 +617,16 @@ let track_application view target =
   | None -> Application.Unavailable "Waiting for an application observation"
   | Some (Error detail) -> Application.Unavailable detail
   | Some (Ok configuration) ->
+      (* The server folds a parsed declaration's issues into its own application
+         observation, which a complete inventory reports as Failed. Only a file
+         that has no observation, because it could not be parsed, answers with
+         its raw issues. *)
       let issues = List.concat_map (fun (d : declaration) ->
-        if d.source_path=target.Application.source_path
-           || d.installation_id=Some target.installation_id then d.issues else []) configuration.declarations in
+        match d.application with
+        | Some _ -> []
+        | None ->
+            if d.source_path=target.Application.source_path
+               || d.installation_id=Some target.installation_id then d.issues else []) configuration.declarations in
       if issues <> [] then Application.Unavailable (String.concat "; " issues)
       else Application.track ~target ~complete:configuration.complete
         (List.filter_map (fun (d : declaration) -> d.application) configuration.declarations)

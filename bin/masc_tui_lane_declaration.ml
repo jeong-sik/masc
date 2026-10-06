@@ -139,7 +139,10 @@ let parse_source text =
 let application_target (session : session) =
   match session.base with
   | None -> Error "Save this draft before tracking application"
-  | Some document when not document.valid -> Error "Accepted file is not a valid declaration"
+  (* [valid] also carries inventory facts from the moment of the read, such as
+     an incomplete inventory or an ID collision. The application observation
+     reports those as they are now; the server sends a desired revision only
+     for a file it could parse. *)
   | Some document ->
       let* fields = parse_source document.source_text in
       let* installation_id = match List.assoc_opt "id" fields with

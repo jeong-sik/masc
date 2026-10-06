@@ -94,10 +94,28 @@ it('retries the selected declaration file after its installation identity is res
   await waitFor(() => expect(addons.fetchLaneAddons).toHaveBeenCalledTimes(2))
   await waitFor(() => expect(files.fetchLaneDeclaration.mock.calls.length).toBeGreaterThan(previousReads))
   await screen.findByRole('region', { name: 'Lane TOML editor' })
-  // Reading a restored identity does not silently adopt its new save basis.
-  await screen.findByRole('region', { name: 'Current file comparison' })
-  expect((screen.getByLabelText('TOML source') as HTMLTextAreaElement).value).toBe('id = "replacement"\n')
-  expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(true)
+  // The rejected replacement was never kept, so the restored file opens as itself.
+  expect((screen.getByLabelText('TOML source') as HTMLTextAreaElement).value).toBe('id = "pkg"\n')
+  expect(screen.queryByRole('region', { name: 'Current file comparison' })).toBeNull()
+  expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
+
+it('keeps a replacement file out of the retained editor after the target identity check rejects it', async () => {
+  const directory = '/fixture/navigation/.masc/config/lane-addons', path = `${directory}/pkg.toml`
+  addons.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ configuration: { directory, complete: true,
+    issues: [], declarations: [{ id: 'pkg', source_path: path, enabled: true, desired_revision: 'semantic',
+      applied_revision: null, instance_id: null }] }, instances: [], rows: [], coverage: [] }))
+  // The path was given to another installation after the inventory read.
+  files.fetchLaneDeclaration.mockResolvedValue({ file_name: 'pkg.toml', source_path: path, source_text: 'id = "replacement"\n',
+    source_revision: 'r1', desired_revision: 'semantic', validation: { valid: true, messages: [] } })
+  replaceRoute('monitoring', laneTargetParams({ kind: 'declaration', workspace: '/fixture/navigation', path, installation: 'pkg' }))
+  render(html`<${LaneAddonsPanel} />`)
+  await screen.findByText('The file read belongs to a different installation. The replacement was not opened.')
+  fireEvent.click(screen.getByRole('button', { name: 'Open this workspace without the target' }))
+  await waitFor(() => expect(route.value.params.lane_target).toBeUndefined())
+  await screen.findByRole('region', { name: 'Lane Add-ons' })
+  expect(screen.queryByRole('region', { name: 'Lane TOML editor' })).toBeNull()
+  expect(screen.queryByDisplayValue('id = "replacement"\n')).toBeNull()
   expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
 })
 

@@ -25,6 +25,10 @@ val context : string -> Yojson.Safe.t
 val validate_schema : Yojson.Safe.t -> (unit, string) result
 val validate_value_schema : Yojson.Safe.t -> (unit, string) result
 val validate_value : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
+(** Check an input against a schema that [validate_schema] already accepted. *)
+val validate_input : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
 val validate : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val input_digest : Yojson.Safe.t -> string
 val decode_result : store:Lane_addon_store.t -> Yojson.Safe.t -> (package_result, string) result

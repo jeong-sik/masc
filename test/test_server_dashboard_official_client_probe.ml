@@ -213,7 +213,7 @@ let test_cli_unavailable_is_measured_login_evidence () =
     let response = probe "missing.missing" in
     check string
       "login status"
-      "cli_unavailable"
+      "invalid_config"
       (json_string [ "login"; "status" ] response);
     check bool
       "not authenticated"

@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 import sys
 import threading
+from typing import Any
 
 import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_chat as _keyboard_chat
@@ -99,7 +100,7 @@ class WorkspaceWire:
         return _keyboard_harness.RawHttpResponse(200, json.dumps(payload).encode(),
                                  content_type="application/json")
 
-    def roster(self):
+    def roster(self) -> tuple[int, Any]:
         with self.lock:
             phase = self.phase
             self.events.append({"event": "roster", "phase": phase})

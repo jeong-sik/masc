@@ -538,7 +538,8 @@ def goal_drop_arm_withdrawal_journey(executable):
     fixtures = cards.fixtures_with_held([])
     requests = []
     goal = dict(h.planning_goal("goal-arm-40176", "Goal arm workspace proof"),
-                phase="awaiting_confirmation", criterion_revision="r1")
+                phase="awaiting_confirmation", criterion_revision="r1",
+                created_at="2026-09-29T00:00:00Z", updated_at="2026-09-29T00:00:00Z")
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
     state = {"foreign": False, "after_foreign": False}
     foreign_read = threading.Event()
@@ -574,6 +575,10 @@ def goal_drop_arm_withdrawal_journey(executable):
                        for path, _body in requests), requests
 
     def interact(process, fd, _slave, output, _base):
+        # Fit the full identity badge before arming; no key is sent afterward
+        # until the periodic identity read withdraws the pending decision.
+        h.resize_and_wait(process, fd, output, rows=40, columns=160,
+                          needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
         h.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
         cards.select_home(process, fd, output, b"goal-arm-40176", destinations=3)
         h.send_and_wait(process, fd, output, b"\r", b"Goal arm workspace proof")
@@ -588,7 +593,7 @@ def goal_drop_arm_withdrawal_journey(executable):
         h.wait_for_output(process, fd, output, b"[workspace mismatch]",
                           start=start, timeout=10)
         withdrawn = h.resize_and_wait(
-            process, fd, output, rows=40, columns=121,
+            process, fd, output, rows=40, columns=161,
             needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -601,7 +606,7 @@ def goal_drop_arm_withdrawal_journey(executable):
         h.wait_for_output(process, fd, output, b"Goal arm workspace proof",
                           start=recovered_start, timeout=10)
         recovered = h.resize_and_wait(
-            process, fd, output, rows=40, columns=121,
+            process, fd, output, rows=40, columns=162,
             needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -609,11 +614,11 @@ def goal_drop_arm_withdrawal_journey(executable):
         assert b"MASC Dashboard" in recovered_visible, recovered_visible
         assert b"Goal arm workspace proof" in recovered_visible, recovered_visible
         assert b"[workspace mismatch]" not in recovered_visible, recovered_visible
-        # The Home request reconciler closes the vanished Goal detail to
-        # Overview. Right reopens it from Overview, where the Planning-only
-        # generic key disarm does not run; the first x therefore tests the
-        # identity/reconciliation reset itself.
-        h.send_and_wait(process, fd, output, b"\x1b[C", b"goal-arm-40176")
+        # Re-select the recovered Home card. Its Enter handler runs from
+        # Overview, so the Planning-only generic key disarm does not run;
+        # the first x still tests the identity/reconciliation reset itself.
+        cards.select_home(process, fd, output, b"goal-arm-40176", destinations=3)
+        h.send_and_wait(process, fd, output, b"\r", b"goal-arm-40176")
         h.send_and_wait(process, fd, output, b"x", b"press x again")
         assert_no_drop()
         os.write(fd, b"q")

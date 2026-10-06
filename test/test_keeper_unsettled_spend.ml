@@ -98,6 +98,41 @@ let raw
     ()
 ;;
 
+(* A raw row whose observation this build cannot decode, as a kind a later
+   build adds would be. *)
+let undecodable_observation ~masc_root ~turn ~ordinal ~run () =
+  let payload =
+    Keeper_hooks_agent_core.cost_event_payload
+      ~agent_name:keeper
+      ~task_id:(Some "task-lost")
+      ~trace_id:trace
+      ~keeper_turn_id:turn
+      ~agent_core_turn_ordinal:ordinal
+      ~model:"glm-fixture"
+      ~input_tokens:100
+      ~output_tokens:10
+      ~cost_usd:0.0
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~spend_observation:
+        (Keeper_spend_observation.Agent_core_response
+           { response_id = ""; ordinal; model = "glm-fixture"; usage = Some (sample 100) })
+      ~runtime_attempt:(run, "glm-coding.fixture", 0)
+      ()
+  in
+  match payload with
+  | `Assoc fields ->
+    Dated_jsonl.append
+      (Cost_ledger.store_of_masc_root masc_root)
+      (`Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key Keeper_spend_observation.field
+                then key, `Assoc [ "kind", `String "from_a_later_build" ]
+                else key, value)
+             fields))
+  | _ -> fail "a cost payload is an object"
+;;
+
 (* What a commit writes for its turn: the resolved spend of its last reading. *)
 let committed ~masc_root ?(agent = keeper) ~turn ~ordinal ~input () =
   Keeper_hooks_agent_core.emit_cost_event
@@ -123,8 +158,17 @@ let rows masc_root =
     | Error error -> failf "ledger row: %s" (Cost_ledger.decode_error_to_string error))
 ;;
 
+(* The rows that decode, for a ledger a case seeded with one that does not. *)
+let decodable_rows masc_root =
+  Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 1000
+  |> List.filter_map (fun json ->
+    match Cost_ledger.of_json json with
+    | Ok row -> Some (row, json)
+    | Error _ -> None)
+;;
+
 (* (turn, run, lane, reading, input, cache read) of every settled reading. *)
-let settled masc_root =
+let settled ?(rows = rows) masc_root =
   List.filter_map
     (fun ((row : Cost_ledger.t), json) ->
        match row.source, row.usage_projection, row.usage with
@@ -273,6 +317,30 @@ let test_a_row_without_its_observation_is_not_settled () =
       (flatten [ 11, "run-b", 0, 0, 200, 100 ]) (flatten (settled masc_root)))
 ;;
 
+(* A row that does not decode -- as its observation or as a cost row -- is
+   not settled and is named with why, apart from rows that carry nothing to
+   settle. The rows around it still settle. *)
+let test_a_row_that_does_not_decode_is_named () =
+  with_ledger (fun masc_root ->
+    committed ~masc_root ~turn:10 ~ordinal:4 ~input:90 ();
+    undecodable_observation ~masc_root ~turn:11 ~ordinal:5 ~run:"run-b" ();
+    raw ~masc_root ~recorded:false ~turn:11 ~ordinal:6 ~run:"run-b" ~input:150 ();
+    raw ~masc_root ~turn:11 ~ordinal:7 ~run:"run-b" ~input:200 ();
+    Dated_jsonl.append
+      (Cost_ledger.store_of_masc_root masc_root)
+      (`Assoc [ "agent", `String keeper; "usage_projection", `String "raw_observation" ]);
+    let outcome = settle masc_root in
+    check int "the decodable reading" 1 outcome.settled_readings;
+    check int "the row without an observation" 1 outcome.unplaced_rows;
+    check int "both rows that do not decode" 2 (List.length outcome.undecodable);
+    check string "the oldest, and why"
+      "spend_observation: unknown observation kind \"from_a_later_build\""
+      (List.hd outcome.undecodable);
+    check settled_entry "the decodable reading"
+      (flatten [ 11, "run-b", 0, 0, 200, 100 ])
+      (flatten (settled ~rows:decodable_rows masc_root)))
+;;
+
 let resolution_statuses masc_root =
   List.filter_map
     (fun ((row : Cost_ledger.t), json) ->
@@ -412,6 +480,8 @@ let () =
             test_two_cancelled_runs_of_one_turn_keep_distinct_keys
         ; test_case "a row without its observation is not settled" `Quick
             test_a_row_without_its_observation_is_not_settled
+        ; test_case "a row that does not decode is named" `Quick
+            test_a_row_that_does_not_decode_is_named
         ; test_case "a reported cost is kept apart from no report" `Quick
             test_a_reported_cost_is_kept_apart_from_no_report
         ; test_case "a replaced client count is observed as replaced" `Quick

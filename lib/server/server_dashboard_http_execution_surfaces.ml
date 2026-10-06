@@ -702,7 +702,9 @@ let with_execution_metadata ~config ?cache_key ~query json =
    the lock choose what to do; this builds what they chose. *)
 let build_default_light_response_json ~config =
   Server_dashboard_http_cache.cached_surface_json execution_cache
-  |> Dashboard_projection_cache.with_current_keeper_observations ~config
+  |> (match Dashboard_execution_helpers.execution_fixture_name () with
+      | Some _ -> Fun.id
+      | None -> Dashboard_projection_cache.with_current_keeper_observations ~config)
   |> with_execution_metadata
        ~config
        ~cache_key:execution_default_light_cache_key
@@ -799,7 +801,9 @@ let refresh_execution_default_light_http_body ~config =
    lock, so a completed purchase/equip is not replaced by an older snapshot. *)
 let prepare_execution_snapshot_broadcast ~config () =
   refresh_execution_default_light_http_body ~config
-  |> Dashboard_projection_cache.with_current_keeper_observations ~config
+  |> (match Dashboard_execution_helpers.execution_fixture_name () with
+      | Some _ -> Fun.id
+      | None -> Dashboard_projection_cache.with_current_keeper_observations ~config)
 ;;
 
 type execution_read =
@@ -1224,6 +1228,7 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 ;;
 
 let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
+  if Option.is_none (Dashboard_execution_helpers.execution_fixture_name ()) then
   let patch =
     with_execution_publication_lock (fun () ->
       incr execution_publication_generation;
@@ -1309,7 +1314,9 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
           ~config:workspace_config
           (fun ~config ~sw ->
              Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-             |> patch_surface_json_for_running_keepers config
+             |> (match Dashboard_execution_helpers.execution_fixture_name () with
+                 | Some _ -> Fun.id
+                 | None -> patch_surface_json_for_running_keepers config)
              |> Server_dashboard_http_core_cache.with_projection_diagnostics
                   ~surface:"execution"
                   ~started_at
@@ -1384,7 +1391,7 @@ let execution_cached_http_representation ~(config : Workspace.config)
     Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture ()
   in
   match fixture, actor, full_mode, force with
-  | None, None, false, false ->
+  | None, None, false, false when requested_fixture = None ->
     let selected = with_execution_publication_lock (fun () ->
       match !execution_default_light_http with
       | Ready payload
@@ -1541,7 +1548,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       ~fixture
       ~full_mode
       ~light
-      ~default_light_request:(fixture = None && actor = None && not full_mode && not force)
+      ~default_light_request:(requested_fixture = None && fixture = None && actor = None && not full_mode && not force)
       ~force
   in
   let compute ?actor ~light () =
@@ -1563,7 +1570,9 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
            ~clock
            ~proc_mgr:state.Mcp_server.proc_mgr
            ()
-         |> patch_surface_json_for_running_keepers config
+         |> (match fixture with
+             | Some _ -> Fun.id
+             | None -> patch_surface_json_for_running_keepers config)
          |> Server_dashboard_http_core_cache.with_projection_diagnostics
               ~surface:"execution"
               ~started_at
@@ -1572,7 +1581,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
                 ])
   in
   match fixture, actor, full_mode with
-  | None, None, false when force ->
+  | None, None, false when requested_fixture = None && force ->
     let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
     let attempt = ref None in
     let publish_failure exn =
@@ -1637,7 +1646,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          ~cache_key:execution_default_light_cache_key
          ~query
     |> fun json -> Execution_json json
-  | None, None, false ->
+  | None, None, false when requested_fixture = None ->
     (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)

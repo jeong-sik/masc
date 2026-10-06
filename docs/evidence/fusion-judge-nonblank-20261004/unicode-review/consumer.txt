@@ -1,0 +1,26 @@
+ASSERT fusion decision variants
+ASSERT fusion judge required fields
+ASSERT synthesis branch explicitly forbids additional properties
+ASSERT nonblank conclusion requires a string
+ASSERT conclusion excludes Unicode White_Space
+ASSERT nonblank conclusion requires a string
+ASSERT conclusion excludes Unicode White_Space
+ASSERT consensus text remains a string
+ASSERT position stance remains a string
+ASSERT fusion judge required fields
+ASSERT synthesis branch explicitly forbids additional properties
+ASSERT nonblank conclusion requires a string
+ASSERT conclusion excludes Unicode White_Space
+ASSERT nonblank conclusion requires a string
+ASSERT conclusion excludes Unicode White_Space
+ASSERT nonblank conclusion requires a string
+ASSERT conclusion excludes Unicode White_Space
+ASSERT consensus text remains a string
+ASSERT position stance remains a string
+ASSERT fusion judge required fields
+ASSERT synthesis branch explicitly forbids additional properties
+ASSERT insufficient conclusion remains a string
+ASSERT insufficient need not invent an answer
+ASSERT consensus text remains a string
+ASSERT position stance remains a string
+Consumer PASS

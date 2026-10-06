@@ -1072,6 +1072,91 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
    The seed from checkpoint history stops where the previous repetition
    yield already judged, so a keeper that reads the same idle screen three
    times in a day is not stopped on every later read of it. *)
+(* task-627 / #26088 — the ledger seed's dedup seam. A checkpoint-resumed
+   lane has both records of the same call: the checkpoint history holds the
+   ToolUse/ToolResult pair, and the call ledger holds the row the hook
+   wrote for the same execution. The seed must count that call once, so
+   rows whose tool_use_id the history already represents are dropped.
+   Without the drop the resumed run's detector would fold the same call
+   twice and a 2+2 restart shape would fire on the second live call —
+   one call earlier than the threshold. *)
+let test_ledger_seed_drops_rows_the_history_already_represents () =
+  let open Agent_core.Types in
+  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
+  let tool_use id name input =
+    ToolUse { id; name; input = `Assoc [ ("argv", `List [ `String input ]) ] }
+  in
+  let tool_result id output =
+    ToolResult
+      { tool_use_id = id
+      ; content = output
+      ; outcome = Tool_succeeded
+      ; json = None
+      ; content_blocks = None
+      }
+  in
+  (* The checkpoint history holds one answered call, tool_use_id "u1". *)
+  let history =
+    [ message Assistant [ tool_use "u1" "keeper_tasks_list" "list" ]
+    ; message User [ tool_result "u1" "{\"ok\":true}" ]
+    ]
+  in
+  let history_ids =
+    Masc.Keeper_run_tools_setup.history_tool_use_ids history
+  in
+  check (list string) "the history's tool_use ids are collected" [ "u1" ] history_ids;
+  (* (tool_use_id, fingerprints) as the row should be written: the last one
+     is a pre-fingerprint-era row and carries none. *)
+  let rows =
+    [ Some "u1", Some ("in-u1", "out-u1")   (* the history already holds this call *)
+    ; Some "u2", Some ("in-u2", "out-u2")   (* a call only the ledger holds *)
+    ; None,      Some ("in-none", "out-none") (* no join key: cannot be proven represented *)
+    ; None,      None                       (* no fingerprints: skipped *)
+    ]
+  in
+  let store = Filename.temp_file "task-627-ledger-seed-" "" in
+  Sys.remove store;
+  Unix.mkdir store 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       (* Point the ledger at the fixture store without Eio: the seeder only
+          reads rows back, and the synchronous append path needs no fiber. *)
+       let dir = Filename.concat store ".masc" in
+       Unix.mkdir dir 0o755;
+       let config_dir = Filename.concat dir "config" in
+       Unix.mkdir config_dir 0o755;
+       Masc.Keeper_tool_call_log.init ~base_path:store ();
+       List.iter
+         (fun (tool_use_id, fingerprints) ->
+            let tool = "keeper_tasks_list" in
+            let input_fingerprint, output_fingerprint =
+              match fingerprints with
+              | Some (input, output) -> Some input, Some output
+              | None -> None, None
+            in
+            Masc.Keeper_tool_call_log.log_call
+              ~keeper_name:"dedup-fixture" ~tool_name:tool
+              ~input:(`Assoc []) ~output_text:"{}"
+              ~wire_outcome:Tool_result.Ok ~duration_ms:1.0
+              ?tool_use_id
+              ?input_fingerprint ?output_fingerprint ())
+         rows;
+       Masc.Keeper_tool_call_log.flush_now ();
+       let seeded =
+         Masc.Keeper_run_tools_setup.seed_tool_calls_from_ledger
+           ~history_tool_use_ids:history_ids
+           ~keeper_name:"dedup-fixture"
+           ()
+       in
+       check int "only the ledger-only calls seed" 2 (List.length seeded);
+       check string "the newest seeded call is the ledger-only one" "in-u2"
+         (match seeded with
+          | detail :: _ -> Option.value ~default:"" detail.input_fingerprint
+          | [] -> fail "unexpected seed shape"))
+;;
+
 let test_seed_stops_where_a_yield_already_judged () =
   let pairs = List.init 5 (fun i -> tool_call ~input:(Some (string_of_int i)) "Read") in
   let names calls =
@@ -1772,6 +1857,8 @@ let () =
             test_checkpoint_history_is_not_current_tool_execution;
           test_case "repeated exact tool call seeded from checkpoint history" `Quick
             test_repeated_exact_tool_call_seeded_from_checkpoint_history;
+          test_case "ledger seed drops rows the history already represents" `Quick
+            test_ledger_seed_drops_rows_the_history_already_represents;
           test_case "history memo answers a purged body from its new bytes" `Quick
             test_history_memo_answers_a_purged_body_from_its_new_bytes;
           test_case "tool io digest is keyed on the bytes" `Quick

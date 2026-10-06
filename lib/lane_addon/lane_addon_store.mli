@@ -2,12 +2,18 @@
     no cached query result is authoritative. All paths are below [root]. *)
 type t
 val create : root:string -> t
+(** Resolve a relative root against the working directory at creation. The
+    resulting absolute ownership boundary is retained by the store. *)
 val root : t -> string
 val digest : string -> string
 val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
+val write_sampling_blob : t -> string -> (Lane_addon_types.evidence, string) result
+(** Publish a terminal sampling blob, using an independently writable recovery
+    directory if the ordinary blob location fails. Both readers resolve the
+    same immutable address. Success requires a durable write. *)
 val read_blob : ?max_bytes:int -> t -> Lane_addon_types.evidence -> (string, string) result
 (** [max_bytes] rejects a retained file before allocating its complete body. *)
 type read_budget

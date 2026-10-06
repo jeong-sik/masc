@@ -38,6 +38,32 @@ let runner_tick_sec = 1.0
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
+(* Direct execution (not through dune) does not inherit the (env ...) block in
+   test/dune, so the sandbox preflight would default on and every config POST
+   would answer docker_preflight_failed in a Docker-less sandbox. Pin the same
+   value the dune stanza uses, unless the caller set it explicitly. *)
+let () =
+  match Sys.getenv_opt "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" with
+  | Some _ -> ()
+  | None -> Unix.putenv "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false"
+
+(* Resolve a checkout-root-relative path no matter where the binary is launched
+   from: dune exports DUNE_SOURCEROOT, and a direct run walks up from the
+   working directory to the checkout root (the directory holding dune-project). *)
+let checkout_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when String.length root > 0 -> root
+  | _ ->
+    let rec up dir =
+      if Sys.file_exists (Filename.concat dir "dune-project") then dir
+      else
+        let parent = Filename.dirname dir in
+        if String.equal parent dir then dir else up parent
+    in
+    up (Sys.getcwd ())
+
+let checkout_file path = Filename.concat (checkout_root ()) path
+
 module Lib = Masc
 module Auth = Auth
 module Workspace = Masc.Workspace
@@ -1944,7 +1970,7 @@ let test_schedule_exact_lookup_rejects_blank_id () =
     (field "generated_at")
 
 let schedule_lookup_dashboard_fixture =
-  "../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"
+  checkout_file "dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"
 
 (* The Dashboard reads this envelope with an exact key list. #32273 added the
    wake history to it without touching the Dashboard, and from then on every
@@ -3311,12 +3337,12 @@ let test_execution_fixture_selection_isolates_prepared_live_bytes () =
       (Option.is_none (Surface.dashboard_execution_cached_http_representation
         (context query))))
     [ ""; "?fixture="; "?fixture=execution_smoke" ];
-  check bool "explicit unknown suppresses the environment fixture" true
-    (Option.is_some (Surface.dashboard_execution_cached_http_representation
+  check bool "explicit unknown uses its own parameterized response" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation
       (context "?fixture=unknown")));
   with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
-    check bool "disabled fixture retains the live representation" true
-      (Option.is_some (Surface.dashboard_execution_cached_http_representation
+    check bool "disabled explicit fixture uses its own parameterized response" true
+      (Option.is_none (Surface.dashboard_execution_cached_http_representation
         (context "?fixture=execution_smoke"))))
 
 let test_execution_first_compute_reuses_prepared_bytes () =
@@ -3659,6 +3685,33 @@ let test_execution_parameterized_payload_reuses_decorated_bytes () =
   in
   check bool "JSON accessor shares the same decorated snapshot" true
     (json == first.json)
+
+let test_execution_fixture_broadcast_and_unknown_override () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let config = Lib.Mcp_server.workspace_config state in
+  let expected = Dashboard_execution_fixture.execution_smoke_fixture_json () in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
+  let seeded = match expected with `Assoc fields ->
+    `Assoc (("cache_marker",`String "synthetic-seed") :: fields) | _ -> expected in
+  with_cached_surface_success Surface.execution_cache seeded @@ fun () ->
+  Surface.patch_keeper_dependent_caches ~keeper_name:"dm-keeper"
+    ~event:(Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped);
+  check bool "live lifecycle event preserves the fixture cache" true
+    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = seeded);
+  let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+  List.iter (fun field ->
+    check bool ("broadcast preserves fixture " ^ field) true
+      (Yojson.Safe.Util.member field broadcast = Yojson.Safe.Util.member field expected))
+    ["candle";"keepers";"continuity_briefs"];
+  let unknown_request = request "/api/v1/dashboard/execution?fixture=unknown" in
+  check bool "explicit unknown cannot take prepared default bytes" true
+    (Option.is_none (Surface.For_testing.cached_representation ~config unknown_request));
+  let actual = Surface.dashboard_execution_http_json ~state ~sw ~clock:(Eio.Stdenv.clock env)
+    unknown_request in
+  check bool "explicit unknown does not reuse the fixture-seeded cache" true
+    (Yojson.Safe.Util.member "cache_marker" actual = `Null)
 
 let test_execution_parameterized_payload_separates_request_queries () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -7737,6 +7790,8 @@ let () =
             test_warm_dashboard_responses_follow_equipment_authority;
           test_case "Item account revision follows free purchase and price edit" `Quick
             test_candle_account_revision_tracks_free_purchase_and_price_edit;
+          test_case "execution fixture broadcast and unknown override" `Quick
+            test_execution_fixture_broadcast_and_unknown_override;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick

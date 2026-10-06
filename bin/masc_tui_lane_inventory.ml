@@ -23,6 +23,14 @@ let browser_activity_label = function
   | Browser_enabled -> "on"
   | Browser_disabled -> "off; configuration retained"
   | Browser_unobserved -> "activity unavailable"
+let machine_activity_label = function
+  | Machine_enabled -> "on"
+  | Machine_disabled -> "off; machine state retained"
+  | Machine_unobserved -> "activity unavailable"
+let machine_publication_label = function
+  | No_screen -> "no screen published"
+  | Stable -> "screen stable"
+  | Running -> "machine running"
 let row_summary (row : row) = match row.state with
   | Exact_state (Disabled _) -> "off; candidates retained"
   | Exact_state (Unconfigured _) -> "unconfigured"
@@ -34,9 +42,7 @@ let row_summary (row : row) = match row.state with
   | Browser_clients (activity,n) -> browser_activity_label activity ^ "; " ^ Printf.sprintf "%d connected clients" n
   | Browser_executor (activity,registered) -> browser_activity_label activity ^ "; "
       ^ (if registered then "executor registered" else "executor not registered")
-  | Machine_state No_screen -> "no screen published"
-  | Machine_state Stable -> "screen stable"
-  | Machine_state Running -> "machine running"
+  | Machine_state (activity,publication) -> machine_activity_label activity ^ "; " ^ machine_publication_label publication
   | Package_state {declaration;instances} ->
       let declared = match declaration, instances with
         | None, _ -> "manual attachment"
@@ -56,7 +62,7 @@ let detail_lines (row : row) =
   @ (match row.selection with
      | Exact _ -> ["Exact-output admission and retained run evidence are separate readings."]
      | Browser _ -> ["Opening this row reads the selected browser backend; it does not open a new session."]
-     | Machine _ -> ["Published machine state only; opening this row watches the machine."]
+     | Machine _ -> ["Activity configuration and the last published screen are separate readings."]
      | Declaration path -> ["TOML: " ^ path]
      | Manual_instance _ -> ["No declaration file; this is a manual attachment."])
   @ (match row.state with
@@ -74,7 +80,8 @@ let detail_lines (row : row) =
      | Browser_executor _ -> ["Off retains configuration and sessions; status and close remain available.";
          "Registration does not prove browser process health or an open session.";
          "Activity follows saved settings; executable and profile paths are installed at server startup."]
-     | Machine_state _ -> []
+     | Machine_state _ -> ["Off refuses new execution and input; existing machine state and checkpoints are retained.";
+         "Dedicated activity controls are not available here; edit and save runtime.toml."]
      | Package_state {declaration;instances} ->
          (match declaration with
           | None -> []

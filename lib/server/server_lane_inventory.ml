@@ -14,7 +14,7 @@ type state =
   | Exact_state of Exact_projection.lane_configuration
   | Browser_clients of Browser_lane.activity * int
   | Browser_executor of Browser_lane.activity * bool
-  | Machine_state of machine_publication
+  | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of { declaration : declaration option; instances : Addon.inventory_instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
 type t = {
@@ -74,9 +74,9 @@ let snapshot ~config =
           Browser id,(match Browser_lane.inventory_observation ~observed_activity:(browser_activity id) id with
             | {Browser_lane.activity; backend=Live_clients count} -> Browser_clients (activity,count)
             | {Browser_lane.activity; backend=Executor_registered registered} -> Browser_executor (activity,registered))
-      | Lane_id.Machine id -> Machine id,Machine_state (match id with
-          | Machine_lane.Msx -> machine_publication (Msx_lane.current_publication ())
-          | Machine_lane.Dos -> machine_publication (Dos_lane.current_publication ())) in
+      | Lane_id.Machine id -> Machine id,(match id with
+          | Machine_lane.Msx -> Machine_state (Msx_lane.activity (), machine_publication (Msx_lane.current_publication ()))
+          | Machine_lane.Dos -> Machine_state (Dos_lane.activity (), machine_publication (Dos_lane.current_publication ()))) in
     {id=Lane_id.to_wire (Lane_id.Builtin lane); label=Lane_manifest.label lane;
      purpose=Lane_manifest.purpose lane; selection; state}) in
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
@@ -132,7 +132,8 @@ let state_json = function
   | Exact_state configuration -> `Assoc ["kind",str "exact";"configuration",configuration_json configuration]
   | Browser_clients (activity,count) -> `Assoc ["kind",str "browser_clients";"activity",browser_activity_json activity;"connected_clients",`Int count]
   | Browser_executor (activity,registered) -> `Assoc ["kind",str "browser_executor";"activity",browser_activity_json activity;"registered",`Bool registered]
-  | Machine_state publication -> `Assoc ["kind",str "machine";
+  | Machine_state (activity,publication) -> `Assoc ["kind",str "machine";
+      "activity",str (Machine_configuration.activity_to_wire activity);
       "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running")]
   | Package_state {declaration;instances} -> `Assoc ["kind",str "package";
       "declaration",optional declaration_json declaration;"instances",`List (List.map instance_json instances)]

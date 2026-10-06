@@ -1,0 +1,467 @@
+{
+  "checked_at": "2026-10-04T17:22:29.373659+00:00",
+  "passed": true,
+  "source_root": "/Users/dancer/me/workspace/yousleepwhen/masc-machine-lane-activity-20261005",
+  "base": "5d673773d03b1cf9008a01543cb1e3833c9f02ea",
+  "scratch": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-machine-activity-rtmtd9ic",
+  "sources": {
+    "lib/machine_configuration/machine_configuration.ml": "da03d9ae527fea8b2c05df3b2ca06c81c8b315af6ebe876fafaabf6ea4ce526c",
+    "lib/machine_configuration/machine_configuration.mli": "6e8d900c270f239d645ab0e19df47fd49380020b49e6bbf6fe23045e55b4e456",
+    "lib/runtime_toml_namespace/runtime_toml_namespace.ml": "b857b8b3ac3b4d9d2f15c2eff4fd662f2ba0cbcf51f9d8012a74d8baa4361291",
+    "lib/runtime_toml_namespace/runtime_toml_namespace.mli": "5e93626163b77fe372ae31942a0034d2df6196536bb27a87be81beb011dbc186",
+    "lib/msx_lane/msx_lane.ml": "67fb44a27643e6ada09b34de9064ef9ca296b95de645f792afdb65c1f8f453fd",
+    "lib/msx_lane/msx_lane.mli": "1cacca8ce8850d34a3d88ab204b642aa443199aaa4d5b711dd21950fda19b444",
+    "lib/msx_lane/screen_change.ml": "c6d458e5fd1921fc97bdc576b22a4dd1afa00d39417bf2405ca81c9520e15de7",
+    "lib/msx_lane/screen_change.mli": "0b283a519716c9d7474ad4acbd1e7b1e310ed4dab04e581b5fa07ef94c9b7fc9",
+    "lib/machine_live_publication/machine_live_publication.ml": "de473dae251f7908c48e66e369e60718ad4e6ee2c8d09b0fd5ce8518dc4e9d11",
+    "lib/machine_live_publication/machine_live_publication.mli": "823fbecc5f84bd574e8b854f0e8271c2574c4be2646703ac7fafbbb80fd20143",
+    "lib/random_id/random_id.ml": "38e4be0d403d504e62694f680f2f593904e84e20fbf077e07ade9ac69a023ae2",
+    "lib/random_id/random_id.mli": "84d449379cf5b15e262842273228c056ad4b59e1de02cade34b05878cbaa0a8e",
+    "lib/crypto_rng/crypto_rng.ml": "7b57304ba6c389fb525ccba3fc7bfeb39c31330b130c07037f3bc62d9cf6e823",
+    "lib/crypto_rng/crypto_rng.mli": "531a9b90ebb515b021be8a3dc390137eedbfa4edc752501b275767ba3821466d",
+    "lib/time_compat/time_compat.ml": "302ce315d41cf190079307b4214383e5a73d0dec449a4ad1a4a276bec01ac0be",
+    "lib/time_compat/time_compat.mli": "ba98e154ef933fcaef1e9572826e865715f27e96f5f9df848eab162a478d7689",
+    "lib/lane_activity/lane_activity.ml": "2efca8dab21cf15f9927e0be06157b0322cf95042daea11f300175871a0d960a",
+    "lib/lane_activity/lane_activity.mli": "35e1b65d160d4adb69429449f72aa5c3a63b6b8cbd944f55fc24703a5f71b7a1",
+    "lib/dos_lane/dos_lane.ml": "83df3024ca70f78320decaf640679d41dddd8a0872a61f4bc8ba221bc628d88a",
+    "lib/dos_lane/dos_lane.mli": "982adf8a1fd262bb3a67b1e4db830f92c8f59dc7819304f41bc70b5bd9d52056",
+    "lib/machine_checkpoint/machine_checkpoint.mli": "1050b69ab8e296abd6f7601620fa3f35d5855ddb7d2937e26b13e4173220ff44",
+    "test/test_msx_lane_activity.ml": "915c9fe846ab58bd9e8ea4c8780f247384922c5522aeaafef50d63dde60f3718",
+    "test/test_dos_lane_activity.ml": "92f87437bad2a78979957d186f2d0e16b52cfadf025ac3f774602223e415b0b7"
+  },
+  "commands": [
+    {
+      "command": [
+        "ocamlc",
+        "-version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-where"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "query",
+        "-format",
+        "%p %v %d",
+        "ocaml-msx.msx",
+        "ocaml-dos.dosmachine",
+        "ocaml-dos.core-identity"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamldep",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-sort",
+        "crypto_rng.ml",
+        "crypto_rng.mli",
+        "dos_lane.ml",
+        "dos_lane.mli",
+        "lane_activity.ml",
+        "lane_activity.mli",
+        "machine_checkpoint.mli",
+        "machine_configuration.ml",
+        "machine_configuration.mli",
+        "machine_live_publication.ml",
+        "machine_live_publication.mli",
+        "msx_lane.ml",
+        "msx_lane.mli",
+        "random_id.ml",
+        "random_id.mli",
+        "runtime_toml_namespace.ml",
+        "runtime_toml_namespace.mli",
+        "screen_change.ml",
+        "screen_change.mli",
+        "test_dos_lane_activity.ml",
+        "test_msx_lane_activity.ml",
+        "time_compat.ml",
+        "time_compat.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "crypto_rng.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "lane_activity.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "machine_checkpoint.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "machine_configuration.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "machine_live_publication.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "random_id.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "runtime_toml_namespace.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "screen_change.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "time_compat.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "time_compat.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "screen_change.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "runtime_toml_namespace.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "msx_lane.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "machine_live_publication.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "machine_configuration.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "lane_activity.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "dos_lane.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "crypto_rng.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "random_id.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "msx_lane.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "dos_lane.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "test_dos_lane_activity.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-c",
+        "test_msx_lane_activity.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity",
+        "-linkpkg",
+        "time_compat.cmo",
+        "screen_change.cmo",
+        "runtime_toml_namespace.cmo",
+        "machine_live_publication.cmo",
+        "machine_configuration.cmo",
+        "lane_activity.cmo",
+        "crypto_rng.cmo",
+        "random_id.cmo",
+        "msx_lane.cmo",
+        "test_msx_lane_activity.cmo",
+        "-o",
+        "msx-test.exe"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "./msx-test.exe"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "scope": "Actual MSX/config and dependencies compiled, linked and executed. DOS owner/test source typechecked against actual checkpoint interface and installed core, not linked/executed. No substitute product modules. No Runtime publication, HTTP, full native TUI/PTY, CI or deployment proof."
+}

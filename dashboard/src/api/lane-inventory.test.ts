@@ -3,6 +3,26 @@ import { parseLaneInventory } from './lane-inventory'
 import fixture from './fixtures/lane-inventory.json'
 
 describe('common Lane inventory wire', () => {
+  it('keeps every machine activity independent of publication and rejects missing or malformed activity', () => {
+    for (const id of ['machine/msx', 'machine/dos']) {
+      for (const activity of ['on', 'off', 'unobserved']) {
+        for (const publication of ['no_screen', 'stable', 'running']) {
+          const raw = structuredClone(fixture)
+          Object.assign(raw.rows.find(item => item.id === id)!.state, { activity, publication })
+          expect(parseLaneInventory(raw).rows.find(item => item.id === id)?.state)
+            .toEqual({ kind: 'machine', activity, publication })
+        }
+      }
+      for (const activity of [undefined, null, true, 'enabled', '', 1]) {
+        const raw = structuredClone(fixture)
+        Object.assign(raw.rows.find(item => item.id === id)!.state, { activity })
+        expect(() => parseLaneInventory(raw)).toThrow()
+      }
+      const raw = structuredClone(fixture)
+      Reflect.deleteProperty(raw.rows.find(item => item.id === id)!.state, 'activity')
+      expect(() => parseLaneInventory(raw)).toThrow()
+    }
+  })
   it('preserves browser activity independently of registration and requires an explicit observation', () => {
     for (const activity of ['on', 'off', 'unobserved']) {
       const raw = structuredClone(fixture)

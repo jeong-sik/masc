@@ -25,6 +25,7 @@ let with_machine f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Fun.protect
     ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
       (match Dos_lane.screen () with
        | Ok { controller = Some who; _ } ->
          ignore (Dos_lane.eject ~who ~announce:ignore ())
@@ -34,6 +35,7 @@ let with_machine f =
       Fs_compat.remove_tree base_path;
       Fs_compat.clear_fs ())
     (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       Auth.save_auth_config base_path
         { Masc_domain.default_auth_config with enabled = true; require_token = true };
       let token, credential = auth_ok

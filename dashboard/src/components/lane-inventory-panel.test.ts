@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseLaneInventory } from '../api/lane-inventory'
 import fixture from '../api/fixtures/lane-inventory.json'
@@ -16,6 +16,24 @@ function workspace(root: string) {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 beforeEach(() => { invalidateExecutionSnapshotGeneration(epoch, 0); generation = 0; workspace('/fixture/default') })
 describe('operator Lane inventory', () => {
+  it('shows off and unknown machine activity alongside retained screen observations without offering an activity toggle', async () => {
+    const raw = structuredClone(fixture)
+    Object.assign(raw.rows.find(item => item.id === 'machine/msx')!.state, { activity: 'off', publication: 'stable' })
+    Object.assign(raw.rows.find(item => item.id === 'machine/dos')!.state, { activity: 'unobserved', publication: 'running' })
+    api.fetchLaneInventory.mockResolvedValue(parseLaneInventory(raw))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect MSX' }))
+    let detail = within(screen.getByRole('region', { name: 'Details for MSX' }))
+    expect(detail.getByText('Off · machine state retained')).toBeTruthy()
+    expect(detail.getByText('Stable screen published')).toBeTruthy()
+    expect(detail.queryByRole('switch')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect DOS' }))
+    detail = within(screen.getByRole('region', { name: 'Details for DOS' }))
+    expect(detail.getByText('Activity configuration unavailable')).toBeTruthy()
+    expect(detail.getByText('Machine running')).toBeTruthy()
+    expect(detail.queryByRole('switch')).toBeNull()
+    expect(api.fetchLaneInventory).toHaveBeenCalledTimes(1)
+  })
   it('shows browser off and unavailable without losing executor or live observations', async () => {
     const raw = structuredClone(fixture)
     const automation = raw.rows.find(item => item.id === 'browser/automation')!

@@ -72,6 +72,7 @@
   masc.browser_lane
   masc.slack_lane
   masc.machine_live_publication
+  masc.machine_configuration
   masc.msx_lane
   masc.dos_lane
   masc.machine_checkpoint

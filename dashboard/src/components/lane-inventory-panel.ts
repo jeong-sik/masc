@@ -11,6 +11,8 @@ import { browserLaneObservationRevision } from '../lib/browser-lane-observation'
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
 const browserActivityText = { on: 'New requests enabled', off: 'Off · configuration and sessions retained',
   unobserved: 'Activity configuration unavailable' }
+const machineActivityText = { on: 'New execution and input enabled', off: 'Off · machine state retained',
+  unobserved: 'Activity configuration unavailable' }
 function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   const state = row.state
   switch (state.kind) {
@@ -29,7 +31,8 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
     case 'browser_executor': return [browserActivityText[state.activity],
       state.registered ? 'Executor registered · session activity unverified' : 'Executor not registered',
       'Status and close remain available while off. Executable and profile paths apply at server startup.']
-    case 'machine': return [{ no_screen: 'No screen observed', stable: 'Stable screen published', running: 'Machine running' }[state.publication]]
+    case 'machine': return [machineActivityText[state.activity],
+      { no_screen: 'No screen observed', stable: 'Stable screen published', running: 'Machine running' }[state.publication]]
     case 'package': {
       const declared = state.declaration
       const desired = declared === null ? 'Manual attachment'
@@ -59,7 +62,9 @@ function LaneDetails({ row, snapshot }: { row: LaneInventoryRow; snapshot: LaneI
       ${selection.kind === 'declaration' ? html`<p class="break-all">${selection.source_path}</p>` : html`<p>Incarnation: ${selection.incarnation}</p>`}
       <${RouteLink} tab="monitoring" params=${{ section: 'lane-addons' }}>Manage package declarations and retained observations<//>
     </div>` : selection.kind === 'browser' ? html`<${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Runtime settings · Browser paths<//>`
-      : html`<p>Manage this machine through its TUI detail or operator tools.</p>`}
+      : html`<p>Manage this machine through its TUI detail or operator tools.</p>
+        <p>Off refuses new execution and input; existing machine state and checkpoints are retained.</p>
+        <p>Dedicated activity controls are not available here; edit and save runtime.toml.</p>`}
     <details><summary>Observed configuration and worker details</summary>
       <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.state, null, 2)}</pre>
     </details>

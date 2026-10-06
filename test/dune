@@ -173,13 +173,13 @@
 (test
  (name test_msx_vision)
  (modules test_msx_vision)
- (libraries alcotest unix base64 yojson fs_compat masc masc_test_deps
+ (libraries masc.machine_configuration alcotest unix base64 yojson fs_compat masc masc_test_deps
    masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
 
 (test
  (name test_dos_vision)
  (modules test_dos_vision)
- (libraries alcotest unix yojson fs_compat masc masc_test_deps
+ (libraries masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
    masc.dos_lane masc.multimodal masc.tool_types))
 
 (test
@@ -8065,12 +8065,12 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -8175,7 +8175,7 @@
        ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
        ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)
- (libraries masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
 (include stanzas/test_lane_fusion_compute_packages.inc)
@@ -9417,6 +9417,17 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_browser_activity_pty)))
+
+(test
+ (name test_msx_lane_activity)
+ (modules test_msx_lane_activity)
+ (libraries alcotest unix otoml ocaml-msx.msx masc.msx_lane
+  masc.machine_configuration masc.runtime_toml_namespace))
+
+(test
+ (name test_dos_lane_activity)
+ (modules test_dos_lane_activity)
+ (libraries alcotest unix masc.dos_lane masc.machine_checkpoint masc.machine_configuration))
 
 (test
  (name test_tui_model_form)

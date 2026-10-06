@@ -1,0 +1,10 @@
+RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-machine-lane-activity-20261005/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  82 passed (82)
+   Start at  02:11:54
+   Duration  4.79s (import 36%, tests 24%, transform 15%, environment 14%, setup 10%)
+
+    Isolate  4 workers spawned · ~252ms startup each (spawn + environment, per file)
+             at least ~756ms faster with isolate: false — reuses workers across files instead of one per file

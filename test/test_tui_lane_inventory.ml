@@ -37,7 +37,7 @@ let builtin_rows = Lane_id.all_of_builtin |> List.map (fun lane ->
         (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"activity",str "on";"connected_clients",`Int 0]
         | Automation | Stagehand -> object_ ["kind",str "browser_executor";"activity",str "on";"registered",`Bool true])
     | Lane_id.Machine id -> object_ ["kind",str "machine";"machine",str (Machine_lane.to_wire id)],
-        object_ ["kind",str "machine";"publication",str "stable"] in
+        object_ ["kind",str "machine";"activity",str "on";"publication",str "stable"] in
   row (Lane_id.to_wire (Lane_id.Builtin lane)) selection state)
 let package_state declaration instances = object_ ["kind",str "package";"declaration",declaration;"instances",`List instances]
 let instance ?(revision=`String "applied") ?(presence="live") ?(phase="observing") id =
@@ -91,6 +91,25 @@ let browser_activity_and_backend_are_independent () =
       set "state" (object_ ["kind",str "browser_clients";"connected_clients",`Int 0]) row
     else row) builtin_rows)) payload in
   rejects "missing activity is not enabled" missing
+let machine_activity_and_publication_are_independent () =
+  let make id state = snapshot [] |> set "rows" (`List (List.map (fun row ->
+    if get "id" row = str id then set "state" state row else row) builtin_rows)) in
+  List.iter (fun id ->
+    List.iter (fun (activity,expected,label) ->
+      List.iter (fun (publication,published,screen) ->
+        let state = object_ ["kind",str "machine";"activity",str activity;"publication",str publication] in
+        let row = find id (ok (Decode.decode (make id state))) in
+        Alcotest.(check bool) "activity does not replace publication" true
+          (row.state = Decode.Machine_state (expected,published));
+        Alcotest.(check string) "activity and publication both visible" (label ^ "; " ^ screen) (Display.row_summary row))
+        ["no_screen",Decode.No_screen,"no screen published";"stable",Decode.Stable,"screen stable";"running",Decode.Running,"machine running"])
+      ["on",Decode.Machine_enabled,"on";"off",Decode.Machine_disabled,"off; machine state retained";
+       "unobserved",Decode.Machine_unobserved,"activity unavailable"];
+    List.iter (fun activity -> rejects "invalid machine activity cannot infer on" (make id
+      (object_ ["kind",str "machine";"activity",activity;"publication",str "stable"])))
+      [`Null;`Bool true;str "enabled";str "";`Int 1];
+    rejects "missing machine activity cannot infer on" (make id (object_ ["kind",str "machine";"publication",str "stable"])))
+    ["machine/msx";"machine/dos"]
 let invalid_and_running () =
   let target = declared ~instances:[instance "running"] (object_ ["kind",str "invalid";"messages",strings ["bad TOML"]]) in
   let decoded = ok (Decode.decode (snapshot [target])) in
@@ -213,6 +232,7 @@ let disabled_exact_keeps_candidates_and_finishing_work () =
   rejects "off declarations must agree" (make (off |> set "declared_slots" (strings ["other"])))
 
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
+  Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
   Alcotest.test_case "browser activity and registration remain independent" `Quick browser_activity_and_backend_are_independent;
   Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;
   Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;

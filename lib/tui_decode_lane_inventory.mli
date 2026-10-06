@@ -36,12 +36,13 @@ type instance = {
   presence : presence; phase : phase; applied_revision : string option;
 }
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
+type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running
 type state =
   | Exact_state of configuration
   | Browser_clients of browser_activity * int
   | Browser_executor of browser_activity * bool
-  | Machine_state of machine_publication
+  | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
 type package_read = {

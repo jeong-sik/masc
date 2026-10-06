@@ -462,6 +462,8 @@ type config =
         non-empty array of strings, is refused at load. *)
   ; browser : Browser_configuration.t
     (** Browser backend paths and per-lane activity from the same TOML snapshot. *)
+  ; machines : Machine_configuration.t
+    (** MSX and DOS activity from the same TOML snapshot. *)
   ; typesafeai : typesafeai
     (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list

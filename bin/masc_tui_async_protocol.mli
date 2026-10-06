@@ -78,7 +78,7 @@ type preset_sink =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int }
+type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.
@@ -120,7 +120,9 @@ type async_msg =
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
-      * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
+      * (Masc_tui_msx_tick.response, string) result
+  | Msx_activity_loaded of msx_poll_request
+      * (Masc_tui_msx_tick.activity * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result, string) result
   | Msx_live_loaded of machine_live_request
       * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   | Dos_live_loaded of machine_live_request

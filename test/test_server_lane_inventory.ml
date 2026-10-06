@@ -171,6 +171,18 @@ let operator_route () = with_fixture (fun env sw config root _directory ->
   check bool "admin GET does not construct the package manager" false (Addon.inventory ~config).owner_present;
   check bool "HTTP inventory leaves workspace bytes unchanged" true (before=files root))
 
+let machine_wire_preserves_both_readings () =
+  List.iter (fun machine ->
+    List.iter (fun (activity,wire) -> List.iter (fun (publication,published) ->
+      let row : Inventory.row = {id="machine/" ^ Machine_lane.to_wire machine; label="fixture";purpose="fixture";
+        selection=Inventory.Machine machine;state=Inventory.Machine_state (activity,publication)} in
+      let state = member "state" (Inventory.For_testing.row_to_json row) in
+      check string "activity" wire (text "activity" state);
+      check string "publication retained" published (text "publication" state))
+      [Inventory.No_screen,"no_screen";Stable,"stable";Running,"running"])
+      [Machine_configuration.Enabled,"on";Disabled,"off";Unobserved,"unobserved"])
+    [Machine_lane.Msx;Dos]
+
 let h2_read ~sw ~clock ~state token =
   let trust_policy = match Server_request_authority.make_trust_policy
     ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None with
@@ -317,6 +329,7 @@ enabled=%b
     ["off";"off";"off"] (activities (Inventory.snapshot ~config |> Inventory.to_json)))
 
 let () = run "operator lane inventory" ["read boundaries",[
+  test_case "machine activity and publication serialize independently" `Quick machine_wire_preserves_both_readings;
   test_case "Browser activity captures one configuration" `Quick browser_activity_snapshot;
   test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;
   test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;

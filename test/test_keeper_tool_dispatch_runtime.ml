@@ -7880,8 +7880,11 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
            ()
        in
        Fun.protect
-         ~finally:bundle.cleanup
+         ~finally:(fun () ->
+           Msx_lane.install_activity_observer None;
+           bundle.cleanup ())
          (fun () ->
+            Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
@@ -8933,11 +8936,13 @@ let test_composable_outputs_satisfy_declared_schema () =
        Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
        Browser_lane.install_automation_executor (Some (Driver.execute driver));
        Fun.protect ~finally:(fun () ->
+         Msx_lane.install_activity_observer None;
          Browser_lane.install_activity_observer None;
          Browser_lane.install_automation_executor None;
          ignore (Driver.close driver);
          ignore (Msx_lane.eject ()))
        @@ fun () ->
+       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
        List.iter (fun verb -> match Driver.execute driver verb with
          | Browser_lane.Answered _ -> ()
          | _ -> fail "browser producer fixture initialization failed")

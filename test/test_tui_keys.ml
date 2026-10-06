@@ -2613,7 +2613,7 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
         state=Inventory.Exact_state (Inventory.Unconfigured "fixture has no admitted slots") })
       four_standalone_lanes in
   let machine = { Inventory.id="machine/dos"; label="DOS"; purpose="Shared machine";
-    selection=Inventory.Machine Masc.Machine_lane.Dos; state=Inventory.Machine_state Inventory.Stable } in
+    selection=Inventory.Machine Masc.Machine_lane.Dos; state=Inventory.Machine_state (Inventory.Machine_enabled, Inventory.Stable) } in
   state.lane_inventory <- Some { Inventory.observed_at=0.; exact_snapshot;
     rows=exact_rows @ [machine]; package_read={directory="/fixture/lane-addons";
       complete=true;owner_present=true;issues=[]} };

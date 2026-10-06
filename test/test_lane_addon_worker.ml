@@ -786,17 +786,21 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check int "out-of-observation callback never invokes provider" before_outside !calls;
   check bool "out-of-observation callback creates no durable request" true
     (before_records = sampling_requests store ~instance_id:"sampling-worker");
-  let tiny_package = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=1}} in
-  let bounded = match Masc.Lane_addon_sampling.create ~store ~package:tiny_package
+  (* A file where the evidence directory belongs makes every blob write fail,
+     whoever runs the test. *)
+  let unretainable = Masc.Lane_addon_store.create ~root:(Filename.concat dir "unretainable-model-evidence") in
+  Unix.mkdir (Masc.Lane_addon_store.root unretainable) 0o700;
+  write (Filename.concat (Masc.Lane_addon_store.root unretainable) "evidence") "not a directory";
+  let sampling_package = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let bounded = match Masc.Lane_addon_sampling.create ~store:unretainable ~package:sampling_package
       ~instance_id:"bounded-model" ~route:"fixture-route" ~invoke () with
     | Ok handler -> handler | Error detail -> fail detail in
   let before = !calls in
-  check bool "unretained oversized request is refused before invocation" true
+  check bool "unretained request is refused before invocation" true
     (Result.is_error (Masc.Lane_addon_sampling.with_observation bounded
       ~binding:(`Assoc []) ~sources:(`List []) ~on_error:Fun.id (fun () ->
       Result.map (fun _ -> {Types.rows=[];coverage=[]}) ((match Masc.Lane_addon_sampling.for_worker bounded
-        ~package:tiny_package ~instance_id:"bounded-model" with
+        ~package:sampling_package ~instance_id:"bounded-model" with
         | Ok handler -> handler | Error detail -> fail detail) params))));
   check int "retention is required before the model is called" before !calls;
   let argv = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".json"))
@@ -1210,6 +1214,35 @@ let test_sampling_receipt_requires_durable_journal () = with_fixture (fun _env _
   check int "durably repaired terminal can project its answer" 1 (List.length receipts);
   check string "projection carries the retained outcome" "answered"
     Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "status" |> to_string))
+
+(* The reply the worker receives is measured against its bound. The outcome the
+   host stores for itself carries the same answer plus its identity fields, so
+   it is larger, and that larger record must not turn a deliverable answer
+   into a refusal. *)
+let test_stored_outcome_is_not_measured_against_the_reply_bound () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module S = Mcp_protocol.Sampling in
+  let store = Store.create ~root:(Filename.concat dir "stored-outcome") in
+  let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  let answer : S.create_message_result = {role=Assistant;
+    content=Text {type_="text";text=String.make 700 'x'};model="model";stop_reason=None;_meta=None} in
+  let placeholder = Types.evidence_to_json (Store.blob_reference "") in
+  let reply = {answer with _meta=Some (`Assoc ["masc.lane_sampling",
+    `Assoc ["request",placeholder;"outcome",placeholder]])} in
+  let reply_size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson reply)) in
+  let p = {(package dir "sampling") with model_access=Types.Host_sampling;
+    resources={(package dir "sampling").resources with max_reply_bytes=reply_size}} in
+  (* The stored outcome also names its route, which the worker's reply does not. *)
+  let long_route = String.make 400 'r' in
+  let broker = match Sampling.create ~store ~package:p ~instance_id:"stored-outcome" ~route:long_route
+    ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) () with
+    | Ok value -> value | Error detail -> fail detail in
+  let handler = match Sampling.for_worker broker ~package:p ~instance_id:"stored-outcome" with
+    | Ok value -> value | Error detail -> fail detail in
+  check bool "an answer whose reply fits the bound is delivered" true
+    (Result.is_ok (run_sampling_observation broker handler params)))
 
 let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
@@ -1760,6 +1793,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
+  test_case "stored outcome is not measured against the reply bound" `Quick test_stored_outcome_is_not_measured_against_the_reply_bound;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling refuses nonfinite retained evidence" `Quick test_sampling_refuses_nonfinite_evidence;
   test_case "sampling recovery reports unreadable pending index" `Quick test_sampling_recovery_reports_unreadable_pending_index;

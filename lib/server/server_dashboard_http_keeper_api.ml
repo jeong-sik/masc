@@ -1845,18 +1845,11 @@ let handle_keeper_get_subroutes state req request reqd =
           ~keepalive_interval_s
       in
       let store = Keeper_types_support.keeper_turn_record_store config name in
-      let raw_rows = Dated_jsonl.read_recent store limit in
-      (* Strict decode: malformed rows are counted and reported, never
-         repaired or silently dropped (RFC-0233 §4). *)
-      let records_rev, skipped_rows =
-        List.fold_left
-          (fun (acc, skipped) json ->
-            match Turn_record.of_json json with
-            | Ok record -> (record :: acc, skipped)
-            | Error _ -> (acc, skipped + 1))
-          ([], 0) raw_rows
-      in
-      let records = List.rev records_rev in
+      (match Server_keeper_turn_records.read ~store ~limit with
+       | Error error ->
+         Http.Response.json_value ~status:`Internal_server_error
+           (`Assoc ["error", `String (Dated_jsonl.read_error_to_string error)]) reqd
+       | Ok (records, skipped_rows) ->
       let block_json = Turn_record.prompt_block_to_json in
       let entries =
         Turn_record.entries_with_diffs records
@@ -1952,7 +1945,7 @@ let handle_keeper_get_subroutes state req request reqd =
             ~keeper_id:name );
         ("entries", `List entries);
       ] in
-      Http.Response.json_value ~compress:true ~request:req json reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd)
   else if ends_with "/turn-transcript" then
     (* RFC-0233 §7: serve one keeper turn's operator request + keeper
        response by an exact join on the persisted chat row turn_ref

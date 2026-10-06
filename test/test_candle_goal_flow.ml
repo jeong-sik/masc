@@ -108,7 +108,8 @@ let rows config =
          Some (Candle_event.kind event.body, goal_id, request_id)
        | Candle_event.Paid p -> Some (Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id)
        | Candle_event.Half_life_set _ -> None
-       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request"
+       | Candle_event.Granted _ -> Alcotest.fail "a grant has no verification request")
     (ledger_events config)
 ;;
 
@@ -692,7 +693,8 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       | Candle_event.Paid payment -> Some payment
       | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
       | Candle_event.Unattributed _ | Candle_event.Payout_failed _
-      | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _ -> None) (ledger_events config)
+      | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Granted _
+      | Candle_event.Equipped _ -> None) (ledger_events config)
 
     with
     | [payment] -> payment
@@ -796,7 +798,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       | Candle_event.Half_life_set _ -> false
       | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
       | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
-      | Candle_event.Purchased _ | Candle_event.Equipped _ -> true) (ledger_events config) in
+      | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Equipped _ -> true) (ledger_events config) in
     (match payout_events with
      | [ {Candle_event.body=Candle_event.Snapshot snapshot;_}
        ; {Candle_event.body=Candle_event.Payout_owed owed;_}

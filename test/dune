@@ -2469,6 +2469,8 @@
 (include stanzas/test_candle_tasks.inc)
 (include stanzas/test_candle_payout_worker.inc)
 (include stanzas/test_candle_goal_flow.inc)
+(include stanzas/test_candle_grant.inc)
+(include stanzas/test_candle_grant_cli.inc)
 
 (include stanzas/test_candle_config.inc)
 

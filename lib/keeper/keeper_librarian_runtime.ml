@@ -1389,9 +1389,11 @@ let run_best_effort
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
              let* (answer, exact_output), served_slot =
-               (* Judged by what the prompt shows. A running Keeper always
-                  carries an execution basis, so comparing the record with
-                  [empty] admitted no live pass at all. *)
+               (* Judged by what the prompt shows. Once a Keeper has any
+                  working-context snapshot, [previous] is [Some] on every
+                  capture, and a running Keeper usually carries an execution
+                  basis too; neither reaches the prompt without a source, yet
+                  comparing the record with [empty] refused every live pass. *)
                let eligible = match pass with
                  | Memory_pass None ->
                    Keeper_librarian_context.shows_no_working_context

@@ -75,8 +75,9 @@ reading overlay.
 `test/test_keeper_librarian_preflight.exe` exercises the actual effect boundary
 with synthetic HTTP and an official-client runner: no-change skips generation,
 preserves Memory and records its normal receipt; generation-needed, uncertain,
-invalid and failed responses call the full lane; opt-out, excluded and context
-units do not call JEV. Fixture decisions establish routing, not JEV quality.
+invalid and failed responses call the full lane; opt-out, excluded, pending-source,
+unavailable-source and context units do not call JEV. A running Keeper with
+nothing pending is judged, and both routes retire its consumed contexts. Fixture decisions establish routing, not JEV quality.
 
 Measure performance with the same frozen inputs and configuration for baseline
 and preflight, recording actual generation calls, paired end-to-end timings,

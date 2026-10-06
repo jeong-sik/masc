@@ -125,8 +125,16 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
        if expected_llm = 0 then Alcotest.(check int) "no-change keeps revision"
          stored.revision snapshot.revision
      | Ok None -> Alcotest.fail "snapshot missing" | Error detail -> Alcotest.fail detail));
-  (match context with
-   | Live_nothing_pending ->
+  (match context, context_only with
+   | No_context, false ->
+     (* The empty input has no snapshot yet; every route writes the first. *)
+     (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
+      | Ok (Some snapshot) ->
+        Alcotest.(check int) "first working context written" 1 snapshot.revision;
+        Alcotest.(check int) "with no context" 0 (List.length snapshot.pockets)
+      | Ok None -> Alcotest.fail "working context missing"
+      | Error detail -> Alcotest.fail detail)
+   | Live_nothing_pending, _ ->
      (* Both routes write the only valid organization of nothing pending,
         which retires the consumed source's context. *)
      (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
@@ -135,12 +143,24 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
         Alcotest.(check int) "consumed context retired" 0 (List.length snapshot.pockets)
       | Ok None -> Alcotest.fail "working context missing"
       | Error detail -> Alcotest.fail detail)
-   | No_context | Pending_source | Unavailable_source -> ());
+   | No_context, true | (Pending_source | Unavailable_source), _ -> ());
   let run = List.filter (fun (run : Runs.run) -> run.actor = name) (Runs.list_runs registry) in
   match run with
-  | [{Runs.status=Runs.Completed {outcome=Runs.Succeeded;selected_slot;_};_}] ->
+  | [{Runs.status=Runs.Completed {outcome=Runs.Succeeded;selected_slot;_};run_id;_}] ->
     Alcotest.(check (option string)) "JEV never claims a catalog or CLI slot"
-      (if expected_llm = 0 then None else Some Fixture.cli_primary_runtime) selected_slot
+      (if expected_llm = 0 then None else Some Fixture.cli_primary_runtime) selected_slot;
+    (match context, context_only with
+     | (No_context | Live_nothing_pending), false ->
+       (* The listing omits payloads; one run is read whole. *)
+       let output = match Runs.get registry ~run_id with
+         | Some {Runs.status=Runs.Completed {output;_};_} -> output
+         | Some _ | None -> Alcotest.fail "completed run not readable" in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "the run records the working-context write" "committed"
+         (output |> member "context_write" |> member "status" |> to_string);
+       Alcotest.(check string) "an empty organization needs no review" "no_contexts"
+         (output |> member "context_review" |> member "reason" |> to_string)
+     | (No_context | Live_nothing_pending), true | (Pending_source | Unavailable_source), _ -> ())
   | _ -> Alcotest.fail "expected one successful terminal run"
 
 let () =

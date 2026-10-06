@@ -64,8 +64,10 @@ let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
-  | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason ->
-    make_workflow_err ~tool_name ~start_time reason
+  | Browser_lane.Rejected_before_effect reason ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect reason
+  | Browser_lane.Refused reason -> make_workflow_err ~tool_name ~start_time reason
 ;;
 
 let tool_request args =
@@ -100,28 +102,34 @@ let no_client_retry host =
    until resolution succeeds, including when a formerly pinned client vanished,
    and a browser that leaves after resolution is answered the same way. *)
 let selection_error ~base_path ~tool_name ~start_time error =
-  let clients = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
+  let clients () = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
   let rejection fields =
-    let data = `Assoc (("error", `String (Browser_lane.selection_error_code error))
-                       :: ("clients", `List clients) :: fields) in
+    let data = `Assoc (("error", `String (Browser_lane.selection_error_code error)) :: fields) in
     Tool_result.make_err ~tool_name ~start_time
-      ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data) in
+      ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+      ~data (Yojson.Safe.to_string data) in
   let observe () =
     Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
   match error with
+  | Browser_lane.Activity_rejected refusal ->
+    rejection ["message", `String (Browser_lane.activity_rejection_message refusal)]
   | Browser_lane.No_live_client ->
+    let clients = clients () in
     let host = observe () in
-    rejection ["host", Browser_lane_launcher.to_json host; "retry", `String (no_client_retry host)]
+    rejection ["clients", `List clients; "host", Browser_lane_launcher.to_json host;
+               "retry", `String (no_client_retry host)]
   | Browser_lane.Selected_client_disconnected client_id ->
+    let clients = clients () in
     let host = observe () in
     let retry = match clients with
       | _ :: _ -> "That browser is no longer connected. Choose a browser from clients and retry \
                    with its clientId. No browser command was dispatched."
       | [] -> "That browser is no longer connected and none is. " ^ no_client_retry host in
-    rejection ["clientId", `String (Browser_lane.client_id_to_string client_id);
+    rejection ["clients", `List clients; "clientId", `String (Browser_lane.client_id_to_string client_id);
                "host", Browser_lane_launcher.to_json host; "retry", `String retry]
   | Browser_lane.Ambiguous_clients _ ->
-    rejection ["retry", `String "Choose a connected browser and retry with its clientId. No \
+    rejection ["clients", `List (clients ());
+               "retry", `String "Choose a connected browser and retry with its clientId. No \
                                  browser command was dispatched."]
 
 let read_failure ~base_path ~tool_name ~start_time = function
@@ -132,7 +140,7 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with
   | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
-    match Browser_lane.resolve_target request.route with
+    match Browser_lane.resolve_target ~verb:Browser_lane.Tabs_list request.route with
     | Error error -> selection_error ~base_path ~tool_name ~start_time error
     | Ok target ->
       match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec with
@@ -287,7 +295,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
       match verb with
       | Error detail -> make_input_err ~tool_name ~start_time detail
       | Ok verb ->
-        (match Browser_lane.resolve_target request.route with
+        (match Browser_lane.resolve_target ~verb request.route with
          | Error error -> selection_error ~base_path ~tool_name ~start_time error
          | Ok target ->
            match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
@@ -336,8 +344,9 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
       | Browser_lane.Action.On_tab ({interaction=Upload {selector;_};_} as target), Some paths ->
         Browser_lane.Action.On_tab {target with interaction=Upload {selector;paths}}
       | _ -> action in
-    let issued = Result.bind (Browser_lane.resolve_target route) (fun target ->
-      Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_act action) ~timeout_sec:60.) in
+    let verb = Browser_lane.Page_act action in
+    let issued = Result.bind (Browser_lane.resolve_target ~verb route) (fun target ->
+      Browser_lane.issue_for ~target ~verb ~timeout_sec:60.) in
     match issued with
     | Error error ->
       selection_error ~base_path ~tool_name ~start_time error, Tool_result.Proven_pre_effect
@@ -356,10 +365,10 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
   match Browser_interaction.parse args with
   | Error error -> make_input_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect
   | Ok request ->
-    let issued = Result.bind (Browser_lane.resolve_target request.route) (fun target ->
-      Browser_lane.issue_for ~target
-        ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
-          expected_url=request.expected_url; action=request.action})
+    let verb = Browser_lane.Page_interact {tab_id=request.tab_id;
+      expected_url=request.expected_url; action=request.action} in
+    let issued = Result.bind (Browser_lane.resolve_target ~verb request.route) (fun target ->
+      Browser_lane.issue_for ~target ~verb
         ~timeout_sec:default_timeout_sec
       |> Result.map (fun answer -> target, answer)) in
     (match issued with

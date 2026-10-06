@@ -1,0 +1,20 @@
+{
+  "typecheck": {
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0
+  },
+  "lint": {
+    "command": [
+      "node",
+      "node_modules/eslint/bin/eslint.js",
+      "src/components/lane-addons-panel.ts",
+      "src/components/lane-addons-reads.test.ts",
+      "src/components/lane-package-activity-panel.test.ts"
+    ],
+    "exit_code": 0
+  }
+}

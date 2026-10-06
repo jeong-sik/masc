@@ -1234,16 +1234,16 @@ def lane_inventory_response(
             "id": "browser/" + lane, "label": label,
             "purpose": "Browser backend observation.",
             "selection": {"kind": "browser", "lane": lane},
-            "state": ({"kind": "browser_clients", "connected_clients": 0}
+            "state": ({"kind": "browser_clients", "activity": "on", "connected_clients": 0}
                       if lane == "live" else
-                      {"kind": "browser_executor", "registered": False}),
+                      {"kind": "browser_executor", "activity": "on", "registered": False}),
         })
     for machine in ("msx", "dos"):
         rows.append({
             "id": "machine/" + machine, "label": machine.upper(),
             "purpose": "Published machine state.",
             "selection": {"kind": "machine", "machine": machine},
-            "state": {"kind": "machine", "publication": "no_screen"},
+            "state": {"kind": "machine", "activity": "on", "publication": "no_screen"},
         })
     return 200, {
         "schema": "masc.lane-inventory/v1",

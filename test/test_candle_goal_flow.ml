@@ -147,7 +147,9 @@ let make_goal config =
 
 let transition config goal_id action =
   ignore
-    (dispatch config ~name:"masc_goal_transition" [ "goal_id", `String goal_id; "action", `String action ]
+    (dispatch config ~name:"masc_goal_transition"
+       ([ "goal_id", `String goal_id; "action", `String action ]
+        @ (if action = "drop" then [ "note", `String "scenario no longer needs this Goal" ] else []))
      : Tool_result.result)
 ;;
 

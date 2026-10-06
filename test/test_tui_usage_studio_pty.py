@@ -13,6 +13,7 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 
+
 def fixtures():
     now = time.time()
     result = _keyboard_harness.keeper_runtime_http_fixtures()
@@ -187,8 +188,8 @@ def keeper_comparison(executable, no_color=False, unreported_cost=False):
                 "cost_unreported_samples": missing, "cost_unread_samples": 0,
                 "metrics_read": {"state": "failed", "reason": "fixture read failure"} if failed
                                 else {"state": "read", "malformed_rows": malformed, "unread_turn_rows": unread}}
-    keeper_rows = [row("alpha", 1000, 1.0), row("beta-partial", 500, 0.25, missing=3, unread=2),
-                   row("gamma-missing", None, None, missing=10),
+    keeper_rows = [row("alpha", 1000, 1.0), row("beta-partial", 500, 0.25, missing=3, malformed=2, unread=3),
+                   row("gamma-missing", None, None, missing=10, unread=4),
                    row("delta-failed", 900000, 900.0, failed=True), row("epsilon-zero", 0, 0.0)]
     responses["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
         "keepers": keeper_rows,
@@ -210,7 +211,8 @@ def keeper_comparison(executable, no_color=False, unreported_cost=False):
                        70, 120, b"epsilon-zero")
         for text in ("Scale: tokens 1000", "cost unreported" if unreported_cost else "cost $1.0000", "As of 2026-10-03 00:00 UTC",
                      "120s old", "refresh failed: fixture refresh failure",
-                     "partial (0 malformed rows, 2 unread turn rows)", "7 reported, 3 missing",
+                     "partial (2 malformed rows, 3 unread turn rows)",
+                     "partial (0 malformed rows, 4 unread turn rows)", "reported totals are lower bounds", "7 reported, 3 missing",
                      "unreported", "fixture read failure", "bars are not quota",
                      "[unavailable", "[" + "░" * 32 + "] 0"):
             assert text.encode() in wide, f"Keeper comparison evidence missing: {text}"

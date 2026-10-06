@@ -1,0 +1,4 @@
+(node:1429) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+7:42:20 PM [vite] (client) Re-optimizing dependencies because vite config has changed
+PASS: 8 runtime workspace browser assertions; zero writes and page errors

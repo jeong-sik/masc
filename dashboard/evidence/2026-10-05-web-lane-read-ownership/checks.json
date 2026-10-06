@@ -1,0 +1,36 @@
+{
+  "base": "8c68daa7f7c2f98c3c1e0da1b4df0a3c227ddac5",
+  "executed_source_checkpoint": "8195bfdeab4d6bcf45195ec8c08c24df9abb97c7",
+  "baseline": {
+    "product_source": "8c68daa7f7c2f98c3c1e0da1b4df0a3c227ddac5",
+    "tests": 24,
+    "failed": 8,
+    "passed": 16,
+    "scope": "two component test files; final no-data wording test was added afterward"
+  },
+  "final": {
+    "files": 5,
+    "tests": 82,
+    "passed": 82,
+    "command": "node node_modules/vitest/vitest.mjs run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-reads.test.ts src/components/lane-addons-panel.test.ts src/components/lane-addons-workspace.test.ts src/components/lane-package-activity-panel.test.ts src/components/lane-navigation-flow.test.ts"
+  },
+  "browser": {
+    "flows": 8,
+    "reads": 19,
+    "writes": 1,
+    "page_errors": 0,
+    "unexpected_routes": 0,
+    "scope": "Synthetic HTTP with actual styled Status/router/panel/decoders; explicit save writes only to fixture interception"
+  },
+  "source_hashes": {
+    "dashboard/src/components/lane-addons-panel.ts": "9859b7e1f82fe71773dec8f53c93c2b69c40bd450618abdf0dd1a80130c0d78d",
+    "dashboard/src/components/lane-addons-reads.test.ts": "b8ffa44fd0179cbf0f99f0531669626784cc720979f4052157b169bd83b50480",
+    "dashboard/src/components/lane-package-activity-panel.test.ts": "a3158c0995b5157ee130581a95c9f54def8ae1ffef65c5d537bcf7944fcfc190"
+  },
+  "limitations": [
+    "F8 worker application and historical cleanup tracking remains unimplemented",
+    "No native TUI, OCaml backend or provider/worker execution",
+    "No full SPA bootstrap, main integration, CI or deployment proof",
+    "The baseline missing pending-Slice label is one of 8 failed assertions, not a separate data-loss regression"
+  ]
+}

@@ -1,0 +1,7 @@
+RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-settings-runtime-workspace-20261005/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  01:03:08
+   Duration  407ms (environment 35%, transform 29%, setup 26%, import 7%, tests 2%, worker 1%)

@@ -1,3 +1,4 @@
+import { confirmRuntimeTestWorkspace } from '../../lib/runtime-workspace.test-fixture'
 import { html } from 'htm/preact'
 import { render, cleanup, fireEvent, waitFor, act } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -5,16 +6,19 @@ import { get, post } from '../../api/core'
 import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
-import { reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
-vi.mock('../../api/core', () => ({ get: vi.fn(), post: vi.fn() }))
+import { reloadRuntimeCatalog } from '../../lib/runtime-catalog-resource'
+vi.mock('../../api/core', async original => ({
+  ...await original<typeof import('../../api/core')>(), get: vi.fn(), post: vi.fn(),
+}))
 vi.mock('../../api/dev-token', () => ({ ensureDevToken: vi.fn(async () => {}) }))
+const catalogMock = vi.hoisted(() => ({ value: { status: 'idle' } as (typeof import('../../lib/runtime-catalog-resource').runtimeCatalogState)['value'] }))
 vi.mock('../../lib/runtime-catalog-resource', () => ({
-  runtimeCatalogState: { value: { status: 'idle' } },
+  runtimeCatalogState: catalogMock,
   loadRuntimeCatalog: vi.fn(),
   reloadRuntimeCatalog: vi.fn(async () => {}),
 }))
-afterEach(() => { cleanup(); runtimeCatalogState.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
-beforeEach(() => { vi.mocked(reloadRuntimeCatalog).mockResolvedValue(undefined) })
+afterEach(() => { cleanup(); catalogMock.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+beforeEach(() => { confirmRuntimeTestWorkspace(); vi.mocked(reloadRuntimeCatalog).mockResolvedValue(undefined) })
 const response = { window_minutes: 60,
   cost_ledger_read: { state: 'available', malformed_rows: 0, schema_violation_rows: 2, identity_conflict_rows: 1 },
   models: [{ model_id: 'runtime_lane_example', success_count: 8, error_count: 2,
@@ -24,7 +28,7 @@ const response = { window_minutes: 60,
 it.each([false, true])('reads and renders HTTP dollar usage with official clients present=%s', async mixed => {
   const http = { provider: 'openrouter.one', runtime_id: 'openrouter.one', provider_id: 'openrouter',
     provider_display_name: 'OpenRouter account', protocol: 'openai-compatible-http', usage_read_configured: true, models: [] }
-  runtimeCatalogState.value = { status: 'loaded', data: [http,
+  catalogMock.value = { status: 'loaded', data: [http,
     { ...http, provider: 'openrouter.two', runtime_id: 'openrouter.two' },
     ...(mixed ? [{ provider: 'codex.one', provider_id: 'codex', protocol: 'codex-app-server', models: [] }] : []),
   ] }
@@ -49,7 +53,7 @@ it.each([false, true])('reads and renders HTTP dollar usage with official client
   expect(post).not.toHaveBeenCalled()
 })
 it('shows each official client account once with its provider-reported usage', async () => {
-  runtimeCatalogState.value = { status: 'loaded', data: [
+  catalogMock.value = { status: 'loaded', data: [
     { provider: 'claude_one.shared', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
     { provider: 'claude_one.other', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
     { provider: 'claude_alias.shared', provider_id: 'claude_alias', provider_display_name: 'Claude · alias', protocol: 'claude-code', available: true, models: [] },
@@ -100,7 +104,7 @@ it('shows each official client account once with its provider-reported usage', a
   expect(post).toHaveBeenCalledWith('/api/v1/runtime/official-client/probe', { runtime_id: 'claude_one.shared' })
 })
 it('omits ordinary HTTP/local and Muse rows without a usage-window producer', async () => {
-  runtimeCatalogState.value = { status: 'loaded', data: [
+  catalogMock.value = { status: 'loaded', data: [
     { provider: 'plain.model', provider_id: 'plain', protocol: 'openai-compatible-http', usage_read_configured: false, models: [] },
     { provider: 'local.model', provider_id: 'local', protocol: 'ollama-http', models: [] },
     { provider: 'muse.model', provider_id: 'muse', protocol: 'muse-serve', models: [] },
@@ -114,7 +118,7 @@ it('omits ordinary HTTP/local and Muse rows without a usage-window producer', as
 })
 
 it('shows a catalog failure instead of silently omitting account monitoring', async () => {
-  runtimeCatalogState.value = { status: 'error', message: 'HTTP 503' }
+  catalogMock.value = { status: 'error', message: 'HTTP 503' }
   vi.mocked(get).mockResolvedValue(response)
   const view = render(html`<${OverviewRuntimeStats} />`)
   await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())

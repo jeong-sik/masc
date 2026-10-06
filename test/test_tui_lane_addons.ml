@@ -110,7 +110,7 @@ let configuration_and_ports () =
       "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills"}}],
     "configuration":{"directory":"/config/lane-addons","complete":false,
       "declarations":[{"id":"custom","source_path":"/config/lane-addons/custom.toml",
-        "enabled":true,"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
+        "enabled":true,"source_revision":"source-1","application":{"kind":"starting"},"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
       "issues":[{"id":null,"source_path":"/config/lane-addons/broken.toml","message":"invalid TOML"},
         {"id":null,"source_path":"/config/lane-addons","message":"inventory unavailable"},
         {"id":null,"source_path":"/config/lane-addons/nested/a.toml","message":"nested file"},
@@ -140,14 +140,14 @@ let configuration_and_ports () =
     (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";instance_id=None}] true));
   check bool "same ID issue elsewhere blocks removal" true
     (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";
-      desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only}] true));
+      desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only;application=None}] true));
   check bool "invalid owned file with no recoverable ID blocks removal" true
     (Option.is_some (removal [{owned with installation_id=None;desired=None;applied=None;
-      instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true));
+      instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true));
   check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
   check (option string) "unrelated invalid declaration does not block cleanup" None
     (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
-      enabled=None;desired=None;applied=None;instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}] true);
+      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true);
   check (option string) "manual cleanup remains available" None
     (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
 
@@ -463,7 +463,7 @@ let context_flow_uses_declared_connections () =
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
       instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
-      enabled=Some true;origin=UI.Parsed_declaration} in
+      enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -536,10 +536,12 @@ let guided_installation () =
     (match Install.handle ~key:"enter" path |> ok with Preview path -> path | _ -> fail "expected preview");
   let schema = Yojson.Safe.from_string
     {|{"type":"object","properties":{"topic":{"type":"string","minLength":1}},"required":["topic"],"additionalProperties":false}|} in
-  let preview image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
+  let preview ?(binding_schema=schema) image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
     "image",image;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
-      "image",`String "worker:revision-1";"binding_schema",schema]] in
-  let response = preview (`Assoc ["state",`String "unverified";"detail",`String "engine offline"]) in
+      "image",`String "worker:revision-1";"binding_schema",binding_schema]] in
+  let unverified = `Assoc ["state",`String "unverified";"detail",`String "engine offline"] in
+  let response = preview unverified in
+  let schemaless = preview ~binding_schema:`Null unverified in
   let pending = Install.begin_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" path |> ok in
   let reopened = Install.create () |> ok in
   check bool "canceled preview cannot replace a freshly opened wizard" true
@@ -556,8 +558,55 @@ let guided_installation () =
   let form,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
     (Ok response) pending |> Option.get in
   check (option string) "matching preview advances without error" None error;
+  let typed,detail = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Ok schemaless) pending |> Option.get in
+  check (option string) "typed path refusal names keys that work there"
+    (Some "Package has no binding schema; Esc back to the Add-ons list, then n for an advanced TOML declaration.") detail;
+  check bool "n does not open the editor from the typed path" true
+    (match Install.handle ~key:"n" typed |> ok with Updated _ -> true | _ -> false);
+  let rec closes presses state = presses>0 && (match Install.handle ~key:"esc" state |> ok with
+    | Install.Cancel -> true | Updated next -> closes (presses-1) next | _ -> false) in
+  check bool "Esc leads from the typed path back to the Add-ons list" true (closes 3 typed);
   check bool "failed image inspection remains explicit" true
     (List.mem "Image unverified: engine offline" (Install.lines form));
+  let module Catalog = Masc.Lane_addon_catalog in
+  let catalog=Catalog.{directory="/packages";parent=None;
+    entries=[Package {manifest_path="/packages/arbitrary/lane.toml";
+      metadata={title="Previously listed title";revision="older-revision";description=None}}]} in
+  let browser=Install.browse () in
+  let pending_catalog=Install.begin_catalog ~request_id:20 ~directory:None browser |> ok in
+  check bool "canceled catalog response cannot reopen installer" true
+    (Option.is_none (Install.receive_catalog ~request_id:20 ~directory:None (Ok (Catalog.to_json catalog)) (Install.browse ())));
+  check bool "different directory response ignored" true
+    (Option.is_none (Install.receive_catalog ~request_id:20 ~directory:(Some "/other") (Ok (Catalog.to_json catalog)) pending_catalog));
+  let failed,detail=Install.receive_catalog ~request_id:20 ~directory:None (Error "cannot read folder") pending_catalog |> Option.get in
+  check (option string) "catalog read failure remains explicit" (Some "cannot read folder") detail;
+  check bool "failed catalog can retry" true (Result.is_ok (Install.begin_catalog ~request_id:21 ~directory:None failed));
+  let browser,detail=Install.receive_catalog ~request_id:20 ~directory:None (Ok (Catalog.to_json catalog)) pending_catalog |> Option.get in
+  check (option string) "catalog succeeds" None detail;
+  check (option string) "remember resolved folder" (Some "/packages") (Install.directory browser);
+  check string "Enter selects actual package" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" browser |> ok with Preview path -> path | _ -> fail "missing catalog preview");
+  let pending=Install.begin_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" browser |> ok in
+  let restored,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Error "manifest changed") pending |> Option.get in
+  check (option string) "preview failure preserves folder" (Some "/packages") (Install.directory restored);
+  check (option string) "preview failure shown" (Some "manifest changed") detail;
+  let listed,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok schemaless) pending |> Option.get in
+  check (option string) "browser refusal names n"
+    (Some "Package has no binding schema; use n for an advanced TOML declaration.") detail;
+  check bool "n in the browser opens the raw TOML declaration editor" true
+    (Install.handle ~key:"n" listed = Ok Install.Declare);
+  let remembered=Install.browse ~directory:"/packages/removed" () in
+  let pending_remembered=Install.begin_catalog ~request_id:23 ~directory:(Some "/packages/removed") remembered |> ok in
+  let unread,detail=Install.receive_catalog ~request_id:23 ~directory:(Some "/packages/removed")
+    (Error "folder not found") pending_remembered |> Option.get in
+  check (option string) "remembered folder read failure shown" (Some "folder not found") detail;
+  check bool "Left leaves an unread remembered folder for the workspace root" true
+    (Install.handle ~key:"left" unread = Ok (Install.Browse None));
+  let form,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending |> Option.get in
+  check (option string) "selected package preview accepted" None detail;
+  check bool "preview rereads title and revision" true
+    (List.mem "Install Arbitrary observer · revision revision-1" (Install.lines form));
   let reviewed = form |> Install.paste ~text:"research-observer" |> edit "tab"
     |> Install.paste ~text:"project-run" |> edit "tab"
     |> Install.paste ~text:"quoted \"topic\" and 한국어" |> edit "\019" in
@@ -749,7 +798,7 @@ let refresh_preserves_operator_target () =
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -815,7 +864,7 @@ let detail_keeps_installation_ownership () =
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
+    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
@@ -1095,7 +1144,7 @@ let empty_completed_results_keep_capability_identity_and_input_details () =
   let declaration name (item : UI.instance) : UI.declaration = {
     source_path=Option.get item.source_path;installation_id=Some name;
     desired=Some "1";applied=Some "1";instance_id=Some item.id;
-    issues=[];enabled=Some true;origin=UI.Parsed_declaration} in
+    issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let coverage : UI.Row.coverage = {source_id="panel-input";incarnation="unobserved";
     cursor=None;complete=false;detail=Some "Waiting for supplied input observations"} in
   let snapshot : UI.snapshot = {instances=[judge;panel];complete=None;
@@ -1143,7 +1192,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
   let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
     desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
-    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration} in
+    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
   let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
     kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";
@@ -1228,7 +1277,7 @@ let declared_layers_use_exact_configured_owners () =
   let declaration id (item : UI.instance) : UI.declaration = {
     source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
     instance_id=Some item.id;desired=Some "1";applied=Some "1";issues=[];
-    enabled=Some true;origin=UI.Parsed_declaration} in
+    enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let roots = [worker "a" [];worker "b" []] in
   let branches = [worker "c" ["a"];worker "d" ["a";"b"]] in
   let joined = worker "e" ["c";"d"] in
@@ -1349,7 +1398,81 @@ let declared_layers_use_exact_configured_owners () =
     (List.mem "Stored bindings · producer incarnations are not reconstructed as current layers" history
      && not (List.mem "Layer 0" history))
 
+let application_reads_preserve_editor () =
+  let configuration kind = UI.decode_configuration (Yojson.Safe.from_string
+    (Printf.sprintf {|{"configuration":{"directory":"/config","complete":true,"issues":[],
+      "declarations":[{"id":"research","source_path":"/config/research.toml","enabled":false,
+      "source_revision":"off-bytes","desired_revision":"inputs","applied_revision":null,
+      "instance_id":null,"application":{"kind":"%s"}}]}}|} kind)) |> ok in
+  let base : Draft.document = {file_name="research.toml";source_path="/config/research.toml";
+    source_text="id=\"research\"\nenabled=false\n";source_revision="off-bytes";
+    desired_revision=Some "inputs";valid=true;messages=[]} in
+  let session = {(Draft.from_document base) with text="id=\"research\"\nenabled=true\n";
+    message=Some "last save receipt retained"} in
+  let frozen : UI.snapshot = {instances=[];configuration=Some (configuration "cleaning");
+    output={UI.Row.rows=[];coverage=[]};complete=Some false} in
+  let before = {UI.initial with generation=7;snapshot=Some frozen;documents=[session];
+    document_key=Some session.file_name;editor_ready=true;scroll=19;
+    receipt=Some (`String "receipt");error=Some (UI.Request_failure "last save failed")} in
+  let pending,ticket = match UI.begin_application_read before with
+    | Some pair -> pair | None -> fail "editor must permit an independent observation" in
+  check bool "observation never takes foreground loading" false pending.loading;
+  let after = UI.finish_application_read pending ticket (Ok (configuration "inactive")) in
+  check bool "draft, editor, receipt and request failure survive" true
+    (after.documents=before.documents && after.document_key=before.document_key
+     && after.editor_ready && after.receipt=before.receipt && after.error=before.error
+     && after.scroll=before.scroll && after.snapshot=before.snapshot);
+  let visible = UI.lines ~width:240 after in
+  check bool "saved Off can finish while unsaved On stays editable" true
+    (List.exists (String.starts_with ~prefix:"Accepted file application · Off · worker cleanup confirmed") visible);
+  let pending,ticket = Option.get (UI.begin_application_read after) in
+  let failed = UI.finish_application_read pending ticket (Error "application endpoint unavailable") in
+  check bool "read failure leaves saved receipt and draft intact" true
+    (failed.documents=after.documents && failed.receipt=after.receipt && failed.error=after.error);
+  check bool "read failure replaces application completion" true
+    (List.exists (String.starts_with ~prefix:"Accepted file application · Application unknown:")
+      (UI.lines ~width:240 failed));
+  let stale = UI.finish_application_read {pending with generation=8}
+      ticket (Ok (configuration "inactive")) in
+  check bool "explicit action invalidates prior response" true
+    (UI.Application.value stale.application_reading=UI.Application.value after.application_reading)
+
+let application_follows_decoded_observations () =
+  let configuration ?(issues="[]") application = UI.decode_configuration (Yojson.Safe.from_string
+    (Printf.sprintf {|{"configuration":{"directory":"/config","complete":true,"issues":%s,
+      "declarations":[{"id":"research","source_path":"/config/research.toml","enabled":true,
+      "source_revision":"on-bytes","desired_revision":"inputs","applied_revision":null,
+      "instance_id":null,"application":%s}]}}|} issues application)) |> ok in
+  let base : Draft.document = {file_name="research.toml";source_path="/config/research.toml";
+    source_text="id=\"research\"\nenabled=true\n";source_revision="on-bytes";
+    desired_revision=Some "inputs";valid=true;messages=[]} in
+  let application document configuration =
+    let session = Draft.from_document document in
+    UI.lines ~width:240 (UI.receive_application_inventory
+      {UI.initial with documents=[session];document_key=Some session.file_name;editor_ready=true}
+      (Ok configuration))
+    |> List.find_opt (String.starts_with ~prefix:"Accepted file application · ") in
+  let failed = configuration
+    ~issues:{|[{"source_path":"/config/research.toml","id":"research","message":"image reconciliation failed"},
+      {"source_path":"/config/broken.toml","id":null,"message":"expected a TOML table"}]|}
+    {|{"kind":"failed","messages":["image reconciliation failed"]}|} in
+  check (option string) "a reported failure stays a failure"
+    (Some "Accepted file application · Application failed: image reconciliation failed")
+    (application base failed);
+  let broken = {base with file_name="broken.toml";source_path="/config/broken.toml";
+    source_text="id=\"broken\"\nenabled=true\n"} in
+  check (option string) "a file without an observation shows its raw issue"
+    (Some "Accepted file application · Application unknown: expected a TOML table")
+    (application broken failed);
+  let partial_read = {base with valid=false;messages=["configuration inventory is incomplete"]} in
+  check (option string) "a complete refresh tracks a file first read during a partial inventory"
+    (Some "Accepted file application · Applied · worker worker-1")
+    (application partial_read (configuration {|{"kind":"applied","instance_id":"worker-1"}|}))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "application reads preserve editor and save diagnostics" `Quick application_reads_preserve_editor;
+  test_case "application lines follow decoded observations and complete refreshes" `Quick
+    application_follows_decoded_observations;
   test_case "empty completed results show capability, identity and input details" `Quick
     empty_completed_results_keep_capability_identity_and_input_details;
   test_case "declared layers use exact configured owners" `Quick

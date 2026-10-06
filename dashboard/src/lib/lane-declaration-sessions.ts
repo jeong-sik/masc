@@ -13,6 +13,9 @@ export type LaneDeclarationDraft = {
   retainedCreateDrafts: { text: string; sourceRevision: string }[];
 }
 const template = 'id = ""\nrun_id = ""\nmanifest_path = ""\n\n[binding]\nsources = []\n'
+const emptyDraft = (sourcePath: string | null): LaneDeclarationDraft => ({ fileName: '', sourcePath,
+  text: sourcePath === null ? template : '', document: null, current: null, phase: 'idle', error: null, notice: null,
+  needsRead: false, retainedCreateDrafts: [] })
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const sessions = new Map<string, LaneDeclarationSession>()
 let guardingUnload = false
@@ -33,7 +36,8 @@ function syncUnloadGuard() {
 export class LaneDeclarationSession {
   private authority: ExecutionWorkspaceAuthority | null = null
   readonly state = signal<{ target: LaneDeclarationEditorTarget | null; newEditorKey: string;
-    drafts: Record<string, LaneDeclarationDraft> }>({ target: null, newEditorKey: crypto.randomUUID(), drafts: {} })
+    activityTarget: { sourcePath: string; installationId: string } | null;
+    drafts: Record<string, LaneDeclarationDraft> }>({ target: null, activityTarget: null, newEditorKey: crypto.randomUUID(), drafts: {} })
   constructor(readonly workspaceRoot: string, readonly directory: string) {}
 
   attach(authority: ExecutionWorkspaceAuthority) {
@@ -74,12 +78,56 @@ export class LaneDeclarationSession {
     if (!this.admits(authority)) return
     const state = this.state.peek(), key = sourcePath ?? state.newEditorKey
     this.state.value = { ...state, target: { key, sourcePath }, drafts: state.drafts[key] ? state.drafts : {
-      ...state.drafts, [key]: { fileName: '', sourcePath, text: sourcePath === null ? template : '', document: null,
-        current: null, phase: 'idle', error: null, notice: null, needsRead: false, retainedCreateDrafts: [] },
-    } }
+      ...state.drafts, [key]: emptyDraft(sourcePath) } }
     if (!state.drafts[key] && sourcePath !== null) void this.read(key, sourcePath, authority, true)
   }
+  /** Read the file first and open it only when `accept` returns null. A
+   * rejected read changes nothing: no target, no draft and no current
+   * revision, so a file that now belongs to someone else never reaches the
+   * editor or its save basis. */
+  async openAccepted(sourcePath: string, authority: ExecutionWorkspaceAuthority,
+    accept: (document: LaneDeclarationDocument) => string | null): Promise<{ opened: true } | { opened: false; error: string }> {
+    if (!this.admits(authority)) return { opened: false, error: 'Workspace changed. Open the file from the current workspace.' }
+    let document: LaneDeclarationDocument
+    try { document = await fetchLaneDeclaration(sourcePath) } catch (error) { return { opened: false, error: message(error) } }
+    if (!this.admits(authority)) return { opened: false, error: 'Workspace authority changed while the file was read. Open the file from the current workspace.' }
+    const rejection = accept(document)
+    if (rejection !== null) return { opened: false, error: rejection }
+    const state = this.state.peek(), draft = state.drafts[sourcePath]
+    if (draft && draft.phase !== 'idle') return { opened: false, error: 'The open draft is still reading or saving. Retry once it settles.' }
+    this.state.value = { ...state, target: { key: sourcePath, sourcePath }, drafts: draft ? state.drafts : {
+      ...state.drafts, [sourcePath]: emptyDraft(sourcePath) } }
+    this.install(sourcePath, document, draft?.document == null)
+    return { opened: true }
+  }
   close() { this.state.value = { ...this.state.peek(), target: null } }
+
+  openActivity(sourcePath: string, installationId: string, authority: ExecutionWorkspaceAuthority) {
+    if (this.admits(authority)) this.state.value = { ...this.state.peek(), activityTarget: { sourcePath, installationId } }
+  }
+  closeActivity(authority: ExecutionWorkspaceAuthority) {
+    if (this.admits(authority)) this.state.value = { ...this.state.peek(), activityTarget: null }
+  }
+
+  prepare(fileName: string, text: string, authority: ExecutionWorkspaceAuthority): string {
+    if (!this.admits(authority)) throw new Error('Workspace changed. Review this package in the current workspace before preparing a draft.')
+    if (this.pathFor(fileName) === null) throw new Error('Installation ID must produce a file name without path separators or NUL characters.')
+    const state = this.state.peek()
+    if (Object.values(state.drafts).some(draft => draft.fileName === fileName)) {
+      throw new Error('A draft with this file name is already open. Open that draft or choose another installation ID.')
+    }
+    const key = crypto.randomUUID()
+    this.state.value = { ...state, target: { key, sourcePath: null }, drafts: { ...state.drafts,
+      [key]: { fileName, sourcePath: null, text, document: null, current: null, phase: 'idle',
+        error: null, notice: 'Local package draft only. Review the TOML, then Save TOML explicitly.', needsRead: false, retainedCreateDrafts: [] } } }
+    syncUnloadGuard()
+    return key
+  }
+  selectDraft(key: string, authority: ExecutionWorkspaceAuthority) {
+    if (!this.admits(authority)) return
+    const state = this.state.peek(), draft = state.drafts[key]
+    if (draft) this.state.value = { ...state, target: { key, sourcePath: draft.document?.source_path ?? draft.sourcePath } }
+  }
 
   async read(key: string, sourcePath: string, authority: ExecutionWorkspaceAuthority, initial = false) {
     const draft = this.state.peek().drafts[key]
@@ -89,15 +137,21 @@ export class LaneDeclarationSession {
     try {
       const document = await fetchLaneDeclaration(sourcePath, controller.signal)
       if (!this.admits(authority)) { this.changedAuthority(key); return }
-      this.update(key, value => initial
-        ? { ...value, fileName: document.file_name, text: document.source_text, document, phase: 'idle', needsRead: false }
-        : { ...value, current: document, phase: 'idle', notice: 'Current file read. Your draft is unchanged. Select its revision before saving.' })
+      this.install(key, document, initial)
     } catch (error) {
       if (!this.admits(authority)) { this.changedAuthority(key); return }
       this.update(key, value => ({ ...value, phase: 'idle', error: message(error),
         needsRead: value.document === null && value.sourcePath === null
           && error instanceof LaneDeclarationError && error.failure.code === 'not_found' ? false : value.needsRead }))
     }
+  }
+  private install(key: string, document: LaneDeclarationDocument, initial: boolean) {
+    this.update(key, value => initial
+      ? { ...value, fileName: document.file_name, text: document.source_text, document, phase: 'idle', needsRead: false }
+      : document.source_path === value.document?.source_path && document.source_revision === value.document.source_revision
+      ? { ...value, document, current: null, phase: 'idle', needsRead: false,
+        notice: 'Current file still matches your saved revision. Your draft is unchanged.' }
+      : { ...value, current: document, phase: 'idle', notice: 'Current file read. Your draft is unchanged. Select its revision before saving.' })
   }
 
   async save(key: string, authority: ExecutionWorkspaceAuthority): Promise<LaneDeclarationDocument | null> {
@@ -133,7 +187,7 @@ export class LaneDeclarationSession {
           ...(value.text !== request.source_text && value.text !== destination.text
             ? [{ text: value.text, sourceRevision: receipt.document.source_revision }] : [])] }
       } else remaining[savedKey] = next
-      this.state.value = { drafts: remaining,
+      this.state.value = { ...state, drafts: remaining,
         target: state.target?.key === key ? { key: savedKey, sourcePath: savedKey } : state.target,
         newEditorKey: state.newEditorKey === key ? crypto.randomUUID() : state.newEditorKey }
       syncUnloadGuard()

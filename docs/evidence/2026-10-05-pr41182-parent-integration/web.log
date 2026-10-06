@@ -1,0 +1,17 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41182-observation-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/runtime-observation-workspace.test.ts src/components/overview/runtime-stats.test.ts src/components/tools/config-resolution-panel.test.ts src/lib/runtime-catalog-resource.test.ts src/lib/runtime-workspace-resource.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41182-observation-integration-20261005/dashboard
+
+
+ Test Files  7 passed (7)
+      Tests  210 passed (210)
+   Start at  01:52:44
+   Duration  9.45s (tests 41%, import 26%, transform 13%, environment 11%, setup 8%)
+
+     Import  256 modules were evaluated 896 times · 2.27s total, 26% of tracked time
+             ~1.62s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

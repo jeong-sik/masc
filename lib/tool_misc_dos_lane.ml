@@ -176,6 +176,10 @@ let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
     in
     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+  | Error ((Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved) as error) ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect ~start_time
+      (Dos_lane.error_to_string error)
   | Error
       (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Other_program _
        | Dos_lane.Checkpoint_refused

@@ -1,6 +1,7 @@
 (** Plain, unwrapped display text. The renderer sanitizes terminal text and
     measures/wraps cells. These functions perform no I/O or state mutation. *)
 val row_summary : Masc.Tui_decode_lane_inventory.row -> string
+(** Machine activity is displayed independently of its retained publication. *)
 val detail_lines : Masc.Tui_decode_lane_inventory.row -> string list
 val overview_notices : Masc.Tui_decode_lane_inventory.snapshot -> string list
 (** Owner/completeness notices and an issue count; full diagnostics stay in

@@ -61,6 +61,8 @@ let%test "gemini_url sync no api_key" =
     ; previous_response_id = None
     ; connect_timeout_s = None
     ; max_concurrent_requests = None
+    ; admission_priority_run_limit = None
+    ; admission_class = Admission_class.Standard
     ; repeat_penalty = None
     ; repeat_last_n = None
     }
@@ -108,6 +110,8 @@ let%test "gemini_url sync with api_key" =
     ; previous_response_id = None
     ; connect_timeout_s = None
     ; max_concurrent_requests = None
+    ; admission_priority_run_limit = None
+    ; admission_class = Admission_class.Standard
     ; repeat_penalty = None
     ; repeat_last_n = None
     }
@@ -155,6 +159,8 @@ let%test "gemini_url stream with api_key" =
     ; previous_response_id = None
     ; connect_timeout_s = None
     ; max_concurrent_requests = None
+    ; admission_priority_run_limit = None
+    ; admission_class = Admission_class.Standard
     ; repeat_penalty = None
     ; repeat_last_n = None
     }
@@ -203,6 +209,8 @@ let%test "gemini_url stream no api_key" =
     ; previous_response_id = None
     ; connect_timeout_s = None
     ; max_concurrent_requests = None
+    ; admission_priority_run_limit = None
+    ; admission_class = Admission_class.Standard
     ; repeat_penalty = None
     ; repeat_last_n = None
     }
@@ -251,6 +259,8 @@ let%test "gemini_url never leaks api_key even when set" =
     ; previous_response_id = None
     ; connect_timeout_s = None
     ; max_concurrent_requests = None
+    ; admission_priority_run_limit = None
+    ; admission_class = Admission_class.Standard
     ; repeat_penalty = None
     ; repeat_last_n = None
     }
@@ -302,6 +312,8 @@ let%test "gemini_url empty base_url no trailing slash" =
     ; previous_response_id = None
     ; connect_timeout_s = None
     ; max_concurrent_requests = None
+    ; admission_priority_run_limit = None
+    ; admission_class = Admission_class.Standard
     ; repeat_penalty = None
     ; repeat_last_n = None
     }

@@ -174,7 +174,7 @@ let anything_running ~turns ~live_transcript ~lanes ~awaiting_detail_read =
   | Some snapshot ->
       List.exists
         (fun (lane : Tui_decode.standalone_lane) ->
-          lane.sl_status = Tui_decode.Standalone_running)
+          lane.sl_running_count > 0)
         snapshot.Tui_decode.sls_lanes
 ;;
 

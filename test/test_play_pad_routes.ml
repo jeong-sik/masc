@@ -107,8 +107,11 @@ let eject_quietly () =
 let with_machine ~saves_name f =
   let dir = Filename.temp_dir "play-pad-dos-" "" in
   Fun.protect
-    ~finally:(fun () -> eject_quietly (); remove_tree dir)
+    ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
+      eject_quietly (); remove_tree dir)
     (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       dos_ok "load"
         (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
            ~saves_dir:(Filename.concat (Filename.concat dir "saves") saves_name)

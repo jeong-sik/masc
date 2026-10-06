@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { parseLaneAddonSnapshot, parseLaneAddonSlice, parseLaneAddonActionReceipt } from '../api/lane-addons'
 
 const api = vi.hoisted(() => ({
@@ -48,6 +49,13 @@ const actionReceipt = {
   executor: null, input_sha256: 'receipt-input-digest', action: actionRequest.action,
   state: 'queued', result: null, detail: null,
 }
+let workspaceEpoch = 0
+beforeEach(() => {
+  const epoch = `lane-panel-${++workspaceEpoch}`
+  invalidateExecutionSnapshotGeneration(epoch, 0)
+  hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+    status: { project: 'fixture', workspace_root: '/workspace' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
+})
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
@@ -55,7 +63,7 @@ describe('optional Lane Add-on surface', () => {
     const sourcePath = '/config/.toml'
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
       configuration: { directory: '/config', complete: true, issues: [], declarations: [
-        { id: 'suffix-only', source_path: sourcePath, desired_revision: 'r1', applied_revision: null, instance_id: null },
+        { id: 'suffix-only', source_path: sourcePath, enabled: true, desired_revision: 'r1', applied_revision: null, instance_id: null },
       ] }, instances: [],
     }))
     const view = render(html`<${LaneAddonsPanel} />`)
@@ -326,10 +334,10 @@ describe('optional Lane Add-on surface', () => {
     ['partial inventory', false, [], []],
     ['invalid owned file', true, [], [{ source_path: '/config/site.toml', id: null, message: 'invalid TOML' }]],
     ['same ID issue elsewhere', true, [], [{ source_path: '/config/other.toml', id: 'website', message: 'duplicate ID' }]],
-    ['owned file renamed to another ID', true, [{ id: 'renamed', source_path: '/config/site.toml', desired_revision: 'r2', applied_revision: null, instance_id: null }], []],
+    ['owned file renamed to another ID', true, [{ id: 'renamed', source_path: '/config/site.toml', enabled: true, desired_revision: 'r2', applied_revision: null, instance_id: null }], []],
     ['duplicate ID declarations', true, [
-      { id: 'website', source_path: '/config/site.toml', desired_revision: 'r1', applied_revision: 'r1', instance_id: 'instance-1' },
-      { id: 'website', source_path: '/config/other.toml', desired_revision: 'r1', applied_revision: null, instance_id: null },
+      { id: 'website', source_path: '/config/site.toml', enabled: true, desired_revision: 'r1', applied_revision: 'r1', instance_id: 'instance-1' },
+      { id: 'website', source_path: '/config/other.toml', enabled: true, desired_revision: 'r1', applied_revision: null, instance_id: null },
     ], []],
   ] as const)('blocks removal for backend refusal: %s', async (_name, complete, declarations, issues) => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,

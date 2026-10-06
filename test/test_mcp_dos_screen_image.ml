@@ -64,9 +64,11 @@ let with_machine f =
   eject ();
   Fun.protect
     ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
       eject ();
       remove_tree dir)
     (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       (match
          Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
            ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")

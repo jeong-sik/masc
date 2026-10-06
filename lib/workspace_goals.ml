@@ -784,11 +784,85 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
              ; "verification", Goal_verification.record_to_yojson_for_goal ~goal proof_record ])
 ;;
 
+(* The work a dropped Goal leaves behind. A Task also linked to a Goal that is
+   not dropped still serves that Goal and is left alone. Of the rest, unclaimed
+   ones are cancelled once the drop commits; held ones keep running, because
+   cancelling would discard their work, and the drop notice names them so their
+   holders can finish, release or cancel them. *)
+type dropped_goal_work = {
+  unclaimed : string list;
+  held : (string * string) list;
+}
+
+let dropped_goal_work config ~goal_id =
+  let ( let* ) = Result.bind in
+  let* links = Workspace_goal_index.read_goal_task_links_r config in
+  let* goals = match Goal_store.load_source config with
+    | Goal_store.Available state -> Ok state.goals
+    | Goal_store.Uninitialized -> Ok []
+    | Goal_store.Unavailable error -> Error (Goal_store.unavailable_to_string error) in
+  let* tasks =
+    try Ok (Workspace.get_tasks_raw config) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn) in
+  let dropped id =
+    String.equal id goal_id
+    || List.exists (fun (goal : Goal_store.goal) ->
+        String.equal goal.id id && goal.phase = Goal_phase.Dropped) goals in
+  let linked = Option.value ~default:[] (List.assoc_opt goal_id links) in
+  let orphaned (task : Masc_domain.task) =
+    List.mem task.id linked
+    && List.for_all (fun (id, task_ids) -> not (List.mem task.id task_ids) || dropped id) links in
+  Ok (List.fold_right (fun (task : Masc_domain.task) work ->
+      if not (orphaned task) then work
+      else match task.task_status with
+        | Masc_domain.Todo -> { work with unclaimed = task.id :: work.unclaimed }
+        | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
+            (match Masc_domain.task_assignee_of_status task.task_status with
+             | Some holder -> { work with held = (task.id, holder) :: work.held }
+             | None -> work)
+        | Masc_domain.Done _ | Masc_domain.Cancelled _ -> work)
+    tasks { unclaimed = []; held = [] })
+;;
+
+let dropped_goal_notice ~(goal : Goal_store.goal) held =
+  Printf.sprintf
+    "[goal_dropped] %s — %s\nThese Tasks are still held and serve no live Goal. Finish, release or cancel them:\n%s"
+    goal.id goal.title
+    (String.concat "\n" (List.map (fun (task_id, holder) -> Printf.sprintf "- %s (%s)" task_id holder) held))
+;;
+
+let cancel_dropped_goal_todos (ctx : context) ~goal_id ~reason task_ids =
+  let reason = Printf.sprintf "Goal %s was dropped: %s" goal_id reason in
+  List.partition_map (fun task_id ->
+      match Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+              ~action:Masc_domain.Cancel ~reason () with
+      | Ok _ -> Either.Left task_id
+      | Error error -> Either.Right (task_id, Masc_domain.masc_error_to_string error))
+    task_ids
+;;
+
+let dropped_goal_tasks_json ctx ~goal_id ~reason = function
+  | Error detail -> `Assoc [ "unread", `String detail ]
+  | Ok work ->
+      let cancelled, failed = cancel_dropped_goal_todos ctx ~goal_id ~reason work.unclaimed in
+      `Assoc
+        [ "cancelled", `List (List.map (fun id -> `String id) cancelled)
+        ; "cancel_failed", `List (List.map (fun (id, error) ->
+              `Assoc [ "task_id", `String id; "error", `String error ]) failed)
+        ; "held", `List (List.map (fun (id, holder) ->
+              `Assoc [ "task_id", `String id; "holder", `String holder ]) work.held) ]
+;;
+
 (* The cancellation and its audit intent share the Goal transaction. Decide
    from the locked row, including its current review metadata, rather than
    applying a phase calculated from the earlier tool-level read. Delivery is
-   retryable even when a subsequent call finds the Goal already dropped. *)
-let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~note =
+   retryable even when a subsequent call finds the Goal already dropped. The
+   Tasks the drop leaves behind are read before the transaction, so no task
+   store read happens under the Goal lock. The reason becomes the Goal's
+   review note and the sentence each cancelled Task's author is told. *)
+let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
+  let work = dropped_goal_work ctx.config ~goal_id in
   let effects (goal : Goal_store.goal) changed : Goal_store.transition_effects =
     if not changed then no_goal_effects
     else
@@ -796,17 +870,17 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~note =
           `Assoc [ "phase", `String (Goal_phase.to_string goal.phase)
                  ; "resume_phase", Goal_phase.resume_phase_to_yojson goal.phase
                  ; "actor", `String ctx.agent_name ] ]
-      ; notifications = [] }
+      ; notifications = match work with
+          | Ok { held = _ :: _ as held; _ } -> [ ctx.agent_name, dropped_goal_notice ~goal held ]
+          | Ok { held = []; _ } | Error _ -> [] }
   in
   match Goal_store.transact_goal ~effects ctx.config ~goal_id (fun goal ->
     match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Drop with
     | Error detail -> Error detail
     | Ok (Goal_phase.Already _) -> Ok (goal, false)
     | Ok (Goal_phase.Move_to phase) ->
-        let last_review_note, last_review_at = match note with
-          | None -> goal.last_review_note, goal.last_review_at
-          | Some value -> Some value, Some (Masc_domain.now_iso ()) in
-        Ok ({ goal with phase; last_review_note; last_review_at }, true)) with
+        Ok ({ goal with phase; last_review_note = Some reason
+                      ; last_review_at = Some (Masc_domain.now_iso ()) }, true)) with
   | Error (Goal_store.Store_unavailable unavailable) ->
       unavailable_result ~tool_name ~start_time unavailable
   | Error (Goal_store.Goal_not_found _ as error) ->
@@ -819,14 +893,16 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~note =
         (Goal_store.write_error_to_string error)
   | Ok (goal, changed) ->
       if changed then notify_goal_verification_abandoned ctx ~goal_id;
+      let tasks = if changed then [ "tasks", dropped_goal_tasks_json ctx ~goal_id ~reason work ] else [] in
       let delivery = deliver_goal_effects ctx.config in
       ok_result ~tool_name ~start_time
-        [ "goal_id", `String goal_id
-        ; "action", `String (Goal_phase.action_to_string Goal_phase.Drop)
-        ; "noop", `Bool (not changed)
-        ; "phase", Goal_phase.to_yojson goal.phase
-        ; "goal", Goal_store.goal_to_yojson goal
-        ; "effect_delivery", delivery ]
+        ([ "goal_id", `String goal_id
+         ; "action", `String (Goal_phase.action_to_string Goal_phase.Drop)
+         ; "noop", `Bool (not changed)
+         ; "phase", Goal_phase.to_yojson goal.phase
+         ; "goal", Goal_store.goal_to_yojson goal
+         ; "effect_delivery", delivery ]
+         @ tasks)
 ;;
 
 let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
@@ -912,6 +988,14 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
   | Ok goal_id, Ok (Some public_action) ->
     let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
+    (* A drop cancels Tasks whose authors are told why, so it must say why. *)
+    let drop () = match Option.map String.trim note with
+      | Some reason when not (String.equal reason "") ->
+          finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~reason
+      | Some _ | None ->
+          error_result_typed ~tool_name ~start_time ~code:Validation_error
+            "drop needs a note that says why the Goal is dropped: it becomes the Goal's review \
+             note and the reason every author of a cancelled Task is told" in
     (match public_action with
      | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
      | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
@@ -958,7 +1042,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
            | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
              finish_goal_suspension ~tool_name ~start_time ctx ~goal_id ~action ~note
            | Goal_phase.Public_action.Drop ->
-             finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~note)
+             drop ())
         | Ok (Goal_phase.Move_to _) ->
           (match public_action with
            | Goal_phase.Public_action.Request_complete ->
@@ -989,7 +1073,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
            | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
              finish_goal_suspension ~tool_name ~start_time ctx ~goal_id ~action ~note
            | Goal_phase.Public_action.Drop ->
-                finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~note))))
+                drop ()))))
   | Ok _, Ok None ->
     validation_error_result
       ~tool_name

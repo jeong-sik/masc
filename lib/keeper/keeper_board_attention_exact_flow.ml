@@ -192,7 +192,9 @@ let prepare ~base_path ~keeper_name ~net candidate =
           Exact_output.snapshot_flow ~first ~rest ~messages requirement
           |> Result.map_error (fun _ -> Flow_snapshot_failed)
         in
-        Exact_output.start_flow snapshot
+        Exact_output.start_flow
+          ~admission_class:(Standalone_lane.admission_class Board_attention)
+          snapshot
         |> Result.map (fun attempt -> Http_flow (attempt, resolved))
         |> Result.map_error (fun _ -> Flow_start_failed)
     in

@@ -53,7 +53,7 @@ val stop : t -> (unit, error) result
 val recover_stop :
   clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr ->
-  instance_id:string -> container_id:string option -> max_reply_bytes:int ->
+  instance_id:string -> container_id:string option ->
   ?docker_command:string -> unit -> (unit, error) result
 
 val action_schema : t -> Yojson.Safe.t option

@@ -1,0 +1,32 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [overview-demo]  16:30:48  HTTP [connected]                  
+ ────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                      
+   Health: ok                                                                   
+   Work: 0 currently done in the last 24h · details in Work                     
+                                                                                
+   Needs your decision                                                          
+    Approvals and questions: not fully read · confirm queue, held calls, Gate…  
+                                                                                
+   Continue                                                                     
+    Create a Keeper  · choose who will take the work                            
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  q:quit  …?
+ Choose a Keeper before writing · i:choose                                      

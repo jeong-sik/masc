@@ -35,4 +35,7 @@ val decode_response : request -> status:int -> body:string -> (response, string)
 val after_response : session -> response -> session
 val use_current_revision : session -> (session, string) result
 val replace_with_current : session -> (session, string) result
+val application_target : session -> (Masc_tui_lane_application.target, string) result
+(** Identity of the accepted base file, never of unsaved draft text. A comparison
+    read does not change this target until the user accepts that revision. *)
 val summary : session -> string list

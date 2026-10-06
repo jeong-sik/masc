@@ -11,6 +11,12 @@ SHA for verification. Main advancing is not a reason to change this candidate.
 Do not merge or rebase main, bulk-update dependencies, add features, refactor
 unrelated code, or import unrelated test cleanup into a frozen release.
 
+The release PR and its candidate ledger own the selected SHA, admitted repairs,
+run and result. Read that record before preparing a repair or assessing evidence;
+this runbook does not carry a second current-candidate identity.
+An initial freeze, a replacement candidate and a successful verification are
+separate entries; none is inferred from the others.
+
 During the v0.49.0 preparation, the operator explicitly stopped main inflow.
 Historical candidate `1123d7bebf45983f6222caeb171896e8469335a6` and RC
 [37136996120](https://github.com/jeong-sik/masc/actions/runs/37136996120) identify

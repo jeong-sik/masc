@@ -1,0 +1,4 @@
+Compact Browser help hidden key: b'?'
+Compact Browser help hidden key: b'\x1b'
+Browser activity focused PTY: PASS (synthetic HTTP)
+Browser compact quit PTY: PASS (synthetic HTTP)

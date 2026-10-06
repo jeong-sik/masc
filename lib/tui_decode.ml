@@ -178,6 +178,7 @@ type keeper_lanes_snapshot = {
 }
 
 type standalone_lane_status =
+  | Standalone_off
   | Standalone_running
   | Standalone_idle
   | Standalone_degraded
@@ -185,6 +186,7 @@ type standalone_lane_status =
   | Standalone_unavailable
 
 type standalone_lane_configuration =
+  | Lane_off
   | Lane_ready
   | Lane_slotless
   | Lane_unconfigured
@@ -3237,6 +3239,7 @@ let decode_keeper_lanes_snapshot json =
   Ok { kls_generated_at; kls_count; kls_lanes }
 
 let standalone_lane_configuration_of_string = function
+  | "off" -> Ok Lane_off
   | "ready" -> Ok Lane_ready
   (* The server calls this one "degraded": configured, but nothing admitted.
      The word it shares with the status axis means something else there, so
@@ -3253,6 +3256,7 @@ let standalone_lane_configuration_of_string = function
    and the other two read "configuration no slot admitted" and "configuration
    registry unreadable". The sentence is written in one place now, here. *)
 let standalone_lane_configuration_phrase = function
+  | Lane_off -> "off; candidate configuration retained"
   | Lane_ready -> "configuration ready"
   | Lane_slotless -> "configured, but no slot admitted"
   | Lane_unconfigured -> "not configured"
@@ -3320,6 +3324,7 @@ let standalone_lane_answer (lane : standalone_lane) =
     }
 
 let standalone_lane_status_of_string = function
+  | "off" -> Ok Standalone_off
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
   | "degraded" -> Ok Standalone_degraded
@@ -3328,6 +3333,7 @@ let standalone_lane_status_of_string = function
   | other -> Error ("standalone lane status: unknown value " ^ other)
 
 let standalone_lane_status_to_string = function
+  | Standalone_off -> "off"
   | Standalone_running -> "running"
   | Standalone_idle -> "idle"
   | Standalone_degraded -> "degraded"
@@ -3398,7 +3404,7 @@ let decode_standalone_lane json =
     if observation_only then Ok ()
     else Error "standalone lane row is not observation-only"
   in
-  let* _configured = required_nullable_bool_field json "configured" in
+  let* configured = required_nullable_bool_field json "configured" in
   let* configuration_state = required_string_field json "configuration_state" in
   let* sl_configuration_state =
     standalone_lane_configuration_of_string configuration_state
@@ -3464,6 +3470,15 @@ let decode_standalone_lane json =
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
+  let* () = match sl_configuration_state, sl_status with
+    | Lane_off, Standalone_off when configured = Some true && not sl_required
+        && sl_admitted_slots=[] && sl_cli_slots=[] && sl_dropped_slots=[]
+        && sl_admission_error=None -> Ok ()
+    | Lane_off, _ | _, Standalone_off -> Error "off lane has inconsistent admission state"
+    | (Lane_ready | Lane_slotless | Lane_unconfigured | Lane_registry_unavailable),
+      (Standalone_running | Standalone_idle | Standalone_degraded
+      | Standalone_no_retained_observation | Standalone_unavailable) -> Ok ()
+  in
   let* sl_retained_run_count = required_int_field json "retained_run_count" in
   let* sl_running_count = required_int_field json "running_count" in
   let* sl_succeeded_count = required_int_field json "succeeded_count" in

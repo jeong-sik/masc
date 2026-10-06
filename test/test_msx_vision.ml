@@ -71,10 +71,12 @@ let test_keeper_capture () =
   Unix.putenv "MASC_BASE_PATH" base;
   Config_dir_resolver.reset ();
   Fun.protect ~finally:(fun () ->
+    Msx_lane.install_activity_observer None;
     ignore (Msx_lane.eject ());
     Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
     Config_dir_resolver.reset ();
     Fs_compat.remove_tree base) (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       let config = Workspace.default_config base in
       let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "vision-player"]) with
         | Ok meta -> meta | Error e -> fail e in

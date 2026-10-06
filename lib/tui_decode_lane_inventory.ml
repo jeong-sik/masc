@@ -11,6 +11,7 @@ type configuration =
       declared_slots : string list; declared_cli_slots : string list;
       dropped_slots : string list; admission_error : string option;
     }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
   | Unconfigured of string
   | Registry_unavailable of string
 
@@ -30,12 +31,14 @@ type instance = {
   package_id : string; title : string; package_revision : string;
   presence : presence; phase : phase; applied_revision : string option;
 }
+type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
+type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running
 type state =
   | Exact_state of configuration
-  | Browser_clients of int
-  | Browser_executor of bool
-  | Machine_state of machine_publication
+  | Browser_clients of browser_activity * int
+  | Browser_executor of browser_activity * bool
+  | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
 type package_read = {
@@ -104,6 +107,11 @@ let selection json =
 let configuration json =
   let* tag = kind json in
   match tag with
+  | "off" ->
+      let* f = fields ["kind";"declared_slots";"declared_cli_slots"] json in
+      let* declared_slots = get (list nonblank) "declared_slots" f in
+      let* declared_cli_slots = get (list nonblank) "declared_cli_slots" f in
+      Ok (Disabled { declared_slots; declared_cli_slots })
   | "configured" ->
       let* f = fields ["kind";"admitted_slots";"cli_slots";"declared_slots";"declared_cli_slots";"dropped_slots";"admission_error"] json in
       let* admitted_slots = get (list nonblank) "admitted_slots" f in
@@ -144,15 +152,32 @@ let instance json =
   let* applied_revision = get (nullable nonblank) "applied_revision" f in
   Ok {instance_id;incarnation;run_id;package_id;title;package_revision;presence;phase;applied_revision}
 
+let browser_activity = function
+  | `String "on" -> Ok Browser_enabled
+  | `String "off" -> Ok Browser_disabled
+  | `String "unobserved" -> Ok Browser_unobserved
+  | _ -> error "unknown Browser activity"
+
+let machine_activity = function
+  | `String "on" -> Ok Machine_enabled
+  | `String "off" -> Ok Machine_disabled
+  | `String "unobserved" -> Ok Machine_unobserved
+  | _ -> error "unknown Machine activity"
+
 let state json =
   let* tag = kind json in
   match tag with
   | "exact" -> let* f = fields ["kind";"configuration"] json in Result.map (fun c -> Exact_state c) (get configuration "configuration" f)
-  | "browser_clients" -> let* f = fields ["kind";"connected_clients"] json in Result.map (fun n -> Browser_clients n) (get count "connected_clients" f)
-  | "browser_executor" -> let* f = fields ["kind";"registered"] json in Result.map (fun value -> Browser_executor value) (get bool "registered" f)
-  | "machine" -> let* f = fields ["kind";"publication"] json in
+  | "browser_clients" -> let* f = fields ["kind";"activity";"connected_clients"] json in
+      let* activity = get browser_activity "activity" f in
+      Result.map (fun n -> Browser_clients (activity,n)) (get count "connected_clients" f)
+  | "browser_executor" -> let* f = fields ["kind";"activity";"registered"] json in
+      let* activity = get browser_activity "activity" f in
+      Result.map (fun value -> Browser_executor (activity,value)) (get bool "registered" f)
+  | "machine" -> let* f = fields ["kind";"activity";"publication"] json in
+      let* activity = get machine_activity "activity" f in
       let* value = get (function `String "no_screen" -> Ok No_screen | `String "stable" -> Ok Stable | `String "running" -> Ok Running | _ -> error "unknown machine publication") "publication" f in
-      Ok (Machine_state value)
+      Ok (Machine_state (activity,value))
   | "package" -> let* f = fields ["kind";"declaration";"instances"] json in
       let* declaration = get (nullable declaration) "declaration" f in let* instances = get (list instance) "instances" f in
       Ok (Package_state {declaration;instances})
@@ -196,6 +221,11 @@ let exact_matches snapshot (row : row) = match row.selection,row.state with
        | None -> false
        | Some item ->
            match configuration with
+           | Disabled c -> item.sl_configuration_state=Tui_decode.Lane_off
+               && item.sl_status=Tui_decode.Standalone_off
+               && item.sl_declared_slots=c.declared_slots && item.sl_declared_cli_slots=c.declared_cli_slots
+               && item.sl_admitted_slots=[] && item.sl_cli_slots=[] && item.sl_dropped_slots=[]
+               && item.sl_admission_error=None
            | Unconfigured detail -> item.sl_configuration_state=Tui_decode.Lane_unconfigured
                && item.sl_admission_error=Some detail
            | Registry_unavailable detail -> item.sl_configuration_state=Tui_decode.Lane_registry_unavailable

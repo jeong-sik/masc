@@ -1,0 +1,45 @@
++ ocamlc -version
+5.5.1
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c standalone_lane.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c machine_lane.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c browser_lane_name.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c browser_lane.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c declaration_file.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c lane_id.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c json_kind.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c shared_types.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c json_util.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c tui_decode_fields.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c tui_decode.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c lane_addon_types.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c tui_decode_lane_inventory.mli
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c tui_decode_lane_inventory.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c masc.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c masc_tui_lane_inventory.mli
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c masc_tui_lane_inventory.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -c test_tui_lane_inventory.ml
++ ocamlfind ocamlc -package yojson,alcotest,ppx_enumerate -linkpkg standalone_lane.cmo machine_lane.cmo browser_lane_name.cmo browser_lane.cmo declaration_file.cmo lane_id.cmo json_kind.cmo shared_types.cmo json_util.cmo tui_decode_fields.cmo tui_decode.cmo lane_addon_types.cmo tui_decode_lane_inventory.cmo masc.cmo masc_tui_lane_inventory.cmo test_tui_lane_inventory.cmo -o test.exe
++ ./test.exe
+Testing `TUI Lane inventory'.
+This run has ID `ZXOEOGYP'.
+
+  [OK]          wire and display          0   machine activity and publicatio...
+  [OK]          wire and display          1   browser activity and registrati...
+  [OK]          wire and display          2   exact off retains candidates an...
+  [OK]          wire and display          3   disabled intent keeps unfinishe...
+  [OK]          wire and display          4   running observation survives in...
+  [OK]          wire and display          5   bounded run reading remains vis...
+  [OK]          wire and display          6   all builtins and manual identity.
+  [OK]          wire and display          7   invalid declaration and live wo...
+  [OK]          wire and display          8   partial reading and unknown owner.
+  [OK]          wire and display          9   absent declaration and failed c...
+  [OK]          wire and display         10   unknown wire rejected.
+  [OK]          wire and display         11   missing and duplicate rejected.
+  [OK]          wire and display         12   targets remain coherent.
+  [OK]          wire and display         13   embedded exact decoder retained.
+  [OK]          wire and display         14   overview agrees with exact detail.
+  [OK]          wire and display         15   instance ownership unique.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-machine-inventory-isolated-xe7afdjv/_build/_tests/TUI Lane inventory'.
+Test Successful in 0.031s. 16 tests run.
+ISOLATED_DIR=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-machine-inventory-isolated-xe7afdjv

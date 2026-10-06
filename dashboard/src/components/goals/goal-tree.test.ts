@@ -275,6 +275,44 @@ describe('GoalTree', () => {
       .toContain('Request completion applied')
   })
 
+  it('drops a Goal only with the reason the operator writes', async () => {
+    const goal = makeGoal('goal-drop', 'Goal to drop')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Drop' })).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Drop' }))
+    const reason = document.querySelector<HTMLTextAreaElement>('[data-goal-drop-reason] textarea')
+    expect(reason).not.toBeNull()
+    const submit = screen.getByRole('button', { name: 'Drop goal' }) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.input(reason!, { target: { value: '   ' } })
+    expect(submit.disabled).toBe(true)
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.querySelector('[data-goal-drop-reason]')).toBeNull()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!,
+      { target: { value: '  superseded by goal-next  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
+      goal_id: 'goal-drop', action: 'drop', note: 'superseded by goal-next',
+      actor: { id: 'dashboard-test', display_name: 'dashboard-test' },
+    }))
+    await waitFor(() => expect(document.querySelector('[data-goal-drop-reason]')).toBeNull())
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['paused', 'resume', 'Resume', 'verifying'],
     ['blocked', 'unblock', 'Unblock', 'awaiting_confirmation'],

@@ -1,0 +1,7 @@
+{
+  "error": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('switch') to be visible\u001b[22m\n",
+  "errors": [],
+  "unexpected": [],
+  "mutations": [],
+  "body": "Synthetic HTTP · actual Status, Lane activity, raw editor, router and API · no backend/model execution\n\nFixture All LanesFixture Runtime\nKeeper FleetInternal AgentsTool MonitorRuntimeObservatorySkillsAll LanesLane Add-onsLane · Queue\nMonitor›\nRuntime\nRUNTIME\n\nRuntime lane health.\n\n전체런타임runtime.toml\n고급 / 진단\n비용 / 지연감사형식검증\nRUNTIME.TOML\nIDLE\n설정 재개\n\n재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.\n\nOPERATOR\n런타임 편집기\nconfig/runtime.toml\n◷라우팅⇄Lane 후보◇프로바이더▤모델◈바인딩 · 런타임 id⊙keeper 배정{ }runtime.toml\n— 런타임 · — 프로바이더\n라우팅\npath\nruntime.toml\n경로\n되돌리기\n새로고침현재 파일 읽고 비교\n저장/적용\n1 lines0 charssynced\nER유효하지 않은 runtime provider protocol inventory 초안과 저장 기준은 유지됩니다.\nruntime.toml직접 편집 가능 · routing 즉시 적용 / Keeper overlay 재시작 적용복사\n1\n재시작 없이 적용됩니다. 기본값은 환경변수에서 오고, 바꾼 값만.masc/runtime_params.json 에 남습니다.\n등록된 설정 없음"
+}

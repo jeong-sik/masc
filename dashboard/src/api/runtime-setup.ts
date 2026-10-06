@@ -1,5 +1,6 @@
 import { postControlPlane } from './core'
 import { isRecord } from '../lib/type-guards'
+import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string; credential_kind?: string; enabled?: boolean }
 export interface Source { integration_id: string; endpoint?: string; api_key?: string; account_ref?: string }
 export interface Model { id: string; label: string; context: number | null; tools: boolean | null; supports_image_input?: boolean; source?: string
@@ -92,6 +93,9 @@ export async function saveSetupSelections(revision: string, choices: Selection[]
     return { connection: index, model: 0 }
   })
   const response = await postControlPlane<unknown>('/api/v1/setup/connections', { revision, connections, selection }, undefined, options)
+  // A commit record proves runtime.toml changed even when the rest of the
+  // answer is unreadable, so every screen hears it before the checks below.
+  if (isRecord(response) && isRecord(response.commit)) announceRuntimeTomlWritten()
   if (!isRecord(response) || response.configured !== true
     || !Array.isArray(response.runtime_ids) || response.runtime_ids.length === 0 || response.runtime_ids.length > choices.length
     || new Set(response.runtime_ids).size !== response.runtime_ids.length

@@ -1,0 +1,35 @@
+{
+  "baseline": "6e22126d8325d61cc627461a8e05402b70fc9fc4",
+  "docs_commit": "9107d5a75c3744512e12cb465d7df45f46b135f2",
+  "source_sha256": {
+    "bin/masc_tui_browser_activity.ml": "3c90286e8995fc1d278bc4daec433da5562638af6935dff468cabbd1baeb3a76",
+    "test/test_tui_browser_activity.ml": "1bfe7c74ba0ba8a38b52cba74f34ed9a407b847080cd8d7bcc73749460f9efa2",
+    "docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md": "5d8c5a4d7f50989f9c3837b1740ffecb9eb1196663f9e249f103e83d3890e0a0",
+    "docs/TOML-RELOAD-MATRIX.md": "27e85b9c5f330269d24e5befd931b2265e0a34df303028ce428c16f4a2cf6fa8"
+  },
+  "raw_sha256": {
+    "pr41187-comments-red-build.log": "2ec73e80b4e6ace390b8152abb181d9817ab83d9ece29002e9f2db383a1e33dd",
+    "pr41187-comments-red.log": "8448fc3b423c87421aa59fd5560db12a6c4a380a216f30f04f3fef8e9790efa1",
+    "pr41187-comments-final-build.log": "2788be449f243310feb412ab78b90f9ccdea5af1b2f602b9cb3d94feb0dedc53",
+    "pr41187-comments-green.log": "1d8f5628ecc6093cc586cf928471afbb0d8c379fc465b2143c439530ea069f31"
+  },
+  "binary_sha256": "47a5785b8f7540625537954a672e272c13d6d4f5bb6a168e5a51f15e01475d6c",
+  "red": {
+    "handle": 44621,
+    "exit": 1,
+    "failed": 1,
+    "passed": 16,
+    "missing_comment": "# pinned driver"
+  },
+  "final_build": {
+    "handle": 45418,
+    "exit": 0
+  },
+  "green": {
+    "exit": 0,
+    "tests": 17
+  },
+  "pty_run": false,
+  "full_suite": false,
+  "TerminalBench": "unrun"
+}

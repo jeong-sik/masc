@@ -1,0 +1,18 @@
+{
+  "profile": "release-essential-v1",
+  "suites": [
+    "test_tui_chat_queue_wiring",
+    "test_tui_chat_input_pty",
+    "test_tui_remote_workspace_history_pty",
+    "test_keeper_turn_interrupt",
+    "test_keeper_chat_operation_http",
+    "test_keeper_chat_delivery_identity",
+    "test_mcp_session_task_lifecycle",
+    "keeper_chat_operations/test_keeper_chat_operation_store",
+    "test_goal_tools",
+    "test_goal_verification_agent",
+    "test_workspace_memory_ledger",
+    "test_keeper_librarian_continuity",
+    "test_schedule_store"
+  ]
+}

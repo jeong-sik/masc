@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* The Stagehand lane end to end in a real Chromium (RFC-browser-lane-stagehand
    §6.2): the server's own opener, backend, executor and Keeper tool handlers,
    with a scripted model in place of a provider, since CI holds no provider
@@ -154,7 +157,7 @@ let () =
   Time_compat.set_clock clock;
   Eio.Switch.run
   @@ fun sw ->
-  let config = { Masc.Browser_configuration.chrome; extension; profile = None } in
+  let config = { Browser_configuration.chrome; extension; profile = None } in
   let opened_session = ref None in
   let backend =
     Backend.create ~sw ~clock
@@ -167,6 +170,8 @@ let () =
       ~call:(fun stagehand -> Session.call (Server_browser_stagehand.session stagehand))
       ~pid:Server_browser_stagehand.pid ~log:Server_browser_stagehand.log_event
   in
+  Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+  Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None);
   Browser_lane.install_stagehand_executor (Some (Backend.execute backend));
   let args fields = `Assoc fields in
   let lane = "lane", `String "stagehand" in

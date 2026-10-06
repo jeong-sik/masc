@@ -257,8 +257,8 @@ claim that a build or runtime check ran.
 ## Issues
 
 Issue classification comes from a `masc-triage` block in the issue body, and
-nothing else. Labels are a projection of that block, applied by the
-`Issue Taxonomy` workflow. The vocabulary is `.github/issue-taxonomy.json`; a
+nothing else. Labels are a projection of that block, applied at issue creation.
+The vocabulary is `.github/issue-taxonomy.json`; a
 value that is not in that file does not exist.
 
 ````text

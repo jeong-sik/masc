@@ -33,6 +33,7 @@ import { RuntimeHealthSnapshot } from './runtime-health-snapshot'
 import { RuntimeMonitor } from './runtime-monitor'
 import { RuntimeParamsPanel } from './runtime-params-panel'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { useLaneNavigation, LaneNavigationNotice } from './lane-navigation'
 import { RuntimeObservablesPanel } from './runtime-observables-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 import { TelemetryPanel, isTelemetryView, TELEMETRY_VIEW_CHIPS } from './telemetry-panel'
@@ -131,7 +132,13 @@ function HiddenDiagnosticsLinks() {
 }
 
 export function RuntimePanel() {
+  const navigation = useLaneNavigation(['exact', 'browser', 'machine'])
+  if (navigation.error || navigation.pending) return html`<${LaneNavigationNotice}
+    message=${navigation.error ?? 'Verify the workspace before opening this Lane target.'} pending=${navigation.pending} />`
   const view = activeView.value
+  const target = navigation.target
+  const runtimeTarget = target && (target.kind === 'exact' || target.kind === 'browser' || target.kind === 'machine') ? target : undefined
+  if (runtimeTarget && view !== 'config') return html`<${LaneNavigationNotice} message="This Lane link requires the Runtime configuration view." />`
 
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-4">
@@ -162,7 +169,7 @@ export function RuntimePanel() {
           `
         : view === 'config'
           ? html`
-            <${RuntimeTomlEditor} />
+            <${RuntimeTomlEditor} navigationTarget=${runtimeTarget} />
             <${RuntimeParamsPanel} />
           `
         : isTelemetryView(view)

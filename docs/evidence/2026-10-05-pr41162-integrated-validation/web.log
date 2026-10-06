@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-standalone-lanes.test.ts src/api/lane-inventory.test.ts src/components/lane-inventory-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  13 passed (13)
+   Start at  00:42:52
+   Duration  2.61s (import 33%, transform 22%, environment 21%, setup 18%, tests 6%)
+
+    Isolate  3 workers spawned · ~257ms startup each (spawn + environment, per file)
+             at least ~515ms faster with isolate: false — reuses workers across files instead of one per file
+

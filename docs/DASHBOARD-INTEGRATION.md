@@ -208,3 +208,6 @@ status: reference
 - Removed legacy batch endpoint
   - `410 Gone`
   - `{"error":"dashboard batch contract removed", ...}`
+
+Settings Runtime configuration ownership and navigation behavior are described in
+[Settings Runtime workspace changes](guides/settings-runtime-workspace.md).

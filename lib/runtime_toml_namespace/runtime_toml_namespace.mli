@@ -33,6 +33,7 @@ type t =
   | Discord  (** the Discord connector *)
   | Repositories  (** the pull-request reader *)
   | Browser  (** the browser lane *)
+  | Machines  (** activity of the workspace MSX and DOS machines *)
   | Memory_os  (** read by scripts/memory_os_judge_eval.py *)
 [@@deriving enumerate]
 (* [all] is generated, so a table added to [t] is in it. *)

@@ -34,10 +34,10 @@ let builtin_rows = Lane_id.all_of_builtin |> List.map (fun lane ->
     | Lane_id.Exact id -> object_ ["kind",str "exact";"lane_id",str (Standalone_lane.to_id id)],
         object_ ["kind",str "exact";"configuration",configuration]
     | Lane_id.Browser id -> object_ ["kind",str "browser";"lane",str (Browser_lane.Lane_name.to_wire id)],
-        (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"connected_clients",`Int 0]
-        | Automation | Stagehand -> object_ ["kind",str "browser_executor";"registered",`Bool true])
+        (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"activity",str "on";"connected_clients",`Int 0]
+        | Automation | Stagehand -> object_ ["kind",str "browser_executor";"activity",str "on";"registered",`Bool true])
     | Lane_id.Machine id -> object_ ["kind",str "machine";"machine",str (Machine_lane.to_wire id)],
-        object_ ["kind",str "machine";"publication",str "stable"] in
+        object_ ["kind",str "machine";"activity",str "on";"publication",str "stable"] in
   row (Lane_id.to_wire (Lane_id.Builtin lane)) selection state)
 let package_state declaration instances = object_ ["kind",str "package";"declaration",declaration;"instances",`List instances]
 let instance ?(revision=`String "applied") ?(presence="live") ?(phase="observing") id =
@@ -65,8 +65,51 @@ let complete_inventory () =
   (match (find "instance/manual" snapshot).selection with
    | Decode.Manual_instance {instance_id="manual";incarnation="manual-incarnation"} -> ()
    | _ -> Alcotest.fail "manual selection identity lost");
-  Alcotest.(check string) "registration is not session health" "executor registered"
+  Alcotest.(check string) "registration is not session health" "on; executor registered"
     (Display.row_summary (find "browser/automation" snapshot))
+
+let browser_activity_and_backend_are_independent () =
+  let make activity = snapshot [] |> set "rows" (`List (List.map (fun row ->
+    match get "id" row with
+    | `String ("browser/live" | "browser/automation" | "browser/stagehand") ->
+        set "state" (set "activity" (str activity) (get "state" row)) row
+    | _ -> row) builtin_rows)) in
+  let off = ok (Decode.decode (make "off")) in
+  Alcotest.(check string) "off keeps executor observation"
+    "off; configuration retained; executor registered"
+    (Display.row_summary (find "browser/automation" off));
+  Alcotest.(check string) "live off does not imply disconnect"
+    "off; configuration retained; 0 connected clients"
+    (Display.row_summary (find "browser/live" off));
+  let unavailable = ok (Decode.decode (make "unobserved")) in
+  Alcotest.(check string) "unknown activity is not inferred from registration"
+    "activity unavailable; executor registered"
+    (Display.row_summary (find "browser/stagehand" unavailable));
+  rejects "unknown activity is not enabled" (make "enabled");
+  let missing = make "on" |> fun payload -> set "rows" (`List (List.map (fun row ->
+    if get "id" row = str "browser/live" then
+      set "state" (object_ ["kind",str "browser_clients";"connected_clients",`Int 0]) row
+    else row) builtin_rows)) payload in
+  rejects "missing activity is not enabled" missing
+let machine_activity_and_publication_are_independent () =
+  let make id state = snapshot [] |> set "rows" (`List (List.map (fun row ->
+    if get "id" row = str id then set "state" state row else row) builtin_rows)) in
+  List.iter (fun id ->
+    List.iter (fun (activity,expected,label) ->
+      List.iter (fun (publication,published,screen) ->
+        let state = object_ ["kind",str "machine";"activity",str activity;"publication",str publication] in
+        let row = find id (ok (Decode.decode (make id state))) in
+        Alcotest.(check bool) "activity does not replace publication" true
+          (row.state = Decode.Machine_state (expected,published));
+        Alcotest.(check string) "activity and publication both visible" (label ^ "; " ^ screen) (Display.row_summary row))
+        ["no_screen",Decode.No_screen,"no screen published";"stable",Decode.Stable,"screen stable";"running",Decode.Running,"machine running"])
+      ["on",Decode.Machine_enabled,"on";"off",Decode.Machine_disabled,"off; machine state retained";
+       "unobserved",Decode.Machine_unobserved,"activity unavailable"];
+    List.iter (fun activity -> rejects "invalid machine activity cannot infer on" (make id
+      (object_ ["kind",str "machine";"activity",activity;"publication",str "stable"])))
+      [`Null;`Bool true;str "enabled";str "";`Int 1];
+    rejects "missing machine activity cannot infer on" (make id (object_ ["kind",str "machine";"publication",str "stable"])))
+    ["machine/msx";"machine/dos"]
 let invalid_and_running () =
   let target = declared ~instances:[instance "running"] (object_ ["kind",str "invalid";"messages",strings ["bad TOML"]]) in
   let decoded = ok (Decode.decode (snapshot [target])) in
@@ -107,7 +150,7 @@ let missing_and_duplicate () =
   rejects "missing builtin" (set "rows" (`List (List.tl builtin_rows)) payload)
 let invalid_targets () =
   rejects "mismatched id" (replace_first (set "id" (str "exact/verifier_exact")) (snapshot []));
-  rejects "wrong family state" (replace_first (set "state" (object_ ["kind",str "browser_clients";"connected_clients",`Int 1])) (snapshot []));
+  rejects "wrong family state" (replace_first (set "state" (object_ ["kind",str "browser_clients";"activity",str "on";"connected_clients",`Int 1])) (snapshot []));
   let wrong = set "selection" (object_ ["kind",str "manual_instance";"instance_id",str "manual";"incarnation",str "another-incarnation"]) manual in
   rejects "manual incarnation mismatch" (snapshot [wrong]);
   rejects "manual declaration owner is not invented" (snapshot [set "state" (package_state `Null [instance "manual"]) manual]);
@@ -164,7 +207,34 @@ let disabled_is_desired_not_cleanup_proof () =
   let invalid = set "enabled" (str "false") (declaration false) in
   rejects "nonboolean desired activity is not coerced" (snapshot [declared invalid])
 
+let disabled_exact_keeps_candidates_and_finishing_work () =
+  let off = exact_lane Standalone_lane.Librarian
+    |> set "configuration_state" (str "off") |> set "status" (str "off")
+    |> set "admitted_slots" (strings []) |> set "cli_slots" (strings [])
+    |> set "declared_slots" (strings ["first";"second"])
+    |> set "declared_cli_slots" (strings ["cli"]) |> set "running_count" (`Int 1) in
+  let make off =
+    let observed = exact_snapshot |> set "lanes" (`List (List.map (fun lane ->
+      if Standalone_lane.equal lane Librarian then off else exact_lane lane) Standalone_lane.all)) in
+    snapshot [] |> set "exact_snapshot" observed |> set "rows" (`List (List.map (fun row ->
+      if get "id" row = str "exact/librarian_exact" then
+        set "state" (object_ ["kind",str "exact";"configuration",object_
+          ["kind",str "off";"declared_slots",strings ["first";"second"];"declared_cli_slots",strings ["cli"]]]) row
+      else row) builtin_rows)) in
+  let observed = ok (Decode.decode (make off)) in
+  let row = find "exact/librarian_exact" observed in
+  Alcotest.(check string) "off preserves observation of accepted work"
+    "off · 1 finishing · off; candidates retained" (Display.row_summary_in observed row);
+  Alcotest.(check bool) "candidate order available in detail" true
+    (List.mem "Declared HTTP slots: first, second" (Display.detail_lines row));
+  rejects "off must not admit new candidates" (make (off |> set "admitted_slots" (strings ["first"])));
+  rejects "off and running status contradict" (make (off |> set "status" (str "running")));
+  rejects "off declarations must agree" (make (off |> set "declared_slots" (strings ["other"])))
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
+  Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
+  Alcotest.test_case "browser activity and registration remain independent" `Quick browser_activity_and_backend_are_independent;
+  Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;
   Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;
     Alcotest.test_case "running observation survives inventory" `Quick running_observation_survives_inventory;
   Alcotest.test_case "bounded run reading remains visible" `Quick bounded_run_reading_is_visible;

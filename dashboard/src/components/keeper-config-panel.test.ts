@@ -1,3 +1,4 @@
+import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1256,10 +1257,13 @@ vi.mock('../api/keeper', () => ({
   wakeKeeper: mocks.wakeKeeper,
 }))
 
-vi.mock('../store', () => ({
-  keepers: storeMocks.keepers,
-  refreshKeeperRuntimeStatus: mocks.refreshKeeperRuntimeStatus,
-}))
+vi.mock('../store', async importOriginal => {
+  const original = await importOriginal<typeof import('../store')>()
+  return { keepers: storeMocks.keepers, refreshKeeperRuntimeStatus: mocks.refreshKeeperRuntimeStatus,
+    executionWorkspaceAuthority: original.executionWorkspaceAuthority,
+    hydrateExecutionSnapshot: original.hydrateExecutionSnapshot,
+    invalidateExecutionSnapshotGeneration: original.invalidateExecutionSnapshotGeneration }
+})
 
 vi.mock('./common/toast', () => ({
   showToast: mocks.showToast,
@@ -2784,3 +2788,5 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     expect(container.textContent).toContain('remote_endpoint 는 remote_ssh 에서만 쓸 수 있습니다')
   })
 })
+
+beforeEach(() => { confirmRuntimeTestWorkspace() })

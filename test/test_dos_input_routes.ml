@@ -146,10 +146,12 @@ let test_a_person_plays_in_turn () =
       let dir = Filename.temp_dir "dos-input-machine-" "" in
       Fun.protect
         ~finally:(fun () ->
+          Dos_lane.install_activity_observer None;
           (match Dos_lane.eject ~who:(Option.value (controller_opt ()) ~default:"operator") ~announce:ignore () with
            | Ok () | Error _ -> ());
           remove_tree dir)
         (fun () ->
+          Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
           dos_ok "load"
             (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                ~saves_dir:(Filename.concat dir "saves")
@@ -215,10 +217,12 @@ let test_expired_credential_releases_controller_on_next_move role () =
       let dir = Filename.temp_dir "dos-expired-machine-" "" in
       Fun.protect
         ~finally:(fun () ->
+          Dos_lane.install_activity_observer None;
           (match Dos_lane.eject ~who:(Option.value (controller_opt ()) ~default:"operator") ~announce:ignore () with
            | Ok () | Error _ -> ());
           remove_tree dir)
         (fun () ->
+          Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
           dos_ok "load"
             (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                ~saves_dir:(Filename.concat dir "saves")

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import {
   fetchRuntimeModelMetrics,
   fetchRuntimeResolved,
@@ -12,6 +12,7 @@ import type { ProviderUsageScope, ProviderUsageWindow, RuntimeResolvedResponse }
 import { loadRuntimeCatalog, reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 import { setupVisibleAutoRefresh, DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { RouteLink } from '../common/route-link'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string }
   | { kind: 'ready' | 'pending'; value: DashboardRuntimeModelMetricsResponse; receivedAt: Date }
@@ -55,39 +56,45 @@ function reportsUsageWindows(provider: DashboardRuntimeProviderSnapshot): boolea
     || provider.protocol === 'antigravity-cli'
 }
 
-function ProviderAccount({ client, usage }: { client: DashboardRuntimeProviderSnapshot; usage: UsageState }) {
+type LoginState = { kind: 'loading' } | { kind: 'error'; message: string }
+  | { kind: 'ready'; value: DashboardOfficialClientProbeResponse }
+
+function ProviderAccount({ client, usage, authority }: {
+  client: DashboardRuntimeProviderSnapshot; usage: UsageState; authority: ExecutionWorkspaceAuthority
+}) {
   const runtimeId = client.runtime_id ?? client.provider
   const providerId = client.provider_id ?? client.provider
   const canProbeLogin = client.protocol === 'claude-code' || client.protocol === 'codex-app-server'
   const scope: ProviderUsageScope | undefined = usage.kind === 'ready'
     ? usage.value.provider_usage_windows?.find(row => row.providers.some(provider => provider.id === providerId))
     : undefined
-  const [measured, setMeasured] = useState<DashboardOfficialClientProbeResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [reading, setReading] = useState<{
+    authority: ExecutionWorkspaceAuthority; client: DashboardRuntimeProviderSnapshot; state: LoginState
+  } | null>(null)
+  const state = reading?.authority === authority && reading.client === client ? reading.state : null
+  const measured = state?.kind === 'ready' ? state.value : null
+  const loading = state?.kind === 'loading'
+  const error = state?.kind === 'error' ? state.message : null
   const requestVersion = useRef(0)
-  useEffect(() => {
+  // Retire old requests before the new account can be clicked. A passive
+  // effect could invalidate that account's first click after it starts.
+  useLayoutEffect(() => {
     requestVersion.current += 1
-    setMeasured(null)
-    setLoading(false)
-    setError(null)
-  }, [client])
+    return () => { requestVersion.current += 1 }
+  }, [client, authority])
   const checkLogin = async () => {
-    if (loading) return
+    if (loading || executionWorkspaceAuthority.peek() !== authority) return
     const version = ++requestVersion.current
-    setLoading(true)
-    setError(null)
+    const current = () => version === requestVersion.current && executionWorkspaceAuthority.peek() === authority
+    setReading({ authority, client, state: { kind: 'loading' } })
     try {
       const result = await probeOfficialClientLogin(runtimeId)
-      if (version !== requestVersion.current) return
+      if (!current()) return
       if (result.runtime_id !== runtimeId) throw new Error('런타임 인증 검사 응답 불일치')
-      setMeasured(result)
+      setReading({ authority, client, state: { kind: 'ready', value: result } })
     } catch (cause) {
-      if (version !== requestVersion.current) return
-      setMeasured(null)
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      if (version === requestVersion.current) setLoading(false)
+      if (!current()) return
+      setReading({ authority, client, state: { kind: 'error', message: cause instanceof Error ? cause.message : String(cause) } })
     }
   }
   return html`
@@ -117,52 +124,66 @@ function ProviderAccount({ client, usage }: { client: DashboardRuntimeProviderSn
 }
 
 export function OverviewRuntimeStats() {
+  const authority = executionWorkspaceAuthority.value
   const [windowMinutes, setWindowMinutes] = useState(60)
   const [generation, setGeneration] = useState(0)
-  const [state, setState] = useState<State>({ kind: 'loading' })
-  const [usage, setUsage] = useState<UsageState>({ kind: 'loading' })
+  const [reading, setReading] = useState<{ authority: ExecutionWorkspaceAuthority; state: State } | null>(null)
+  const [usageReading, setUsageReading] = useState<{
+    authority: ExecutionWorkspaceAuthority; catalog: DashboardRuntimeProviderSnapshot[]; state: UsageState
+  } | null>(null)
   useEffect(() => { loadRuntimeCatalog() }, [])
   const catalog = runtimeCatalogState.value
+  const usageCatalog = catalog.status === 'loaded' ? catalog.data : null
+  const state: State = authority === null
+    ? { kind: 'error', message: '작업공간을 확인한 뒤 통계를 읽을 수 있습니다.' }
+    : reading?.authority === authority ? reading.state : { kind: 'loading' }
+  const usage: UsageState = usageReading?.authority === authority && usageReading?.catalog === usageCatalog
+    ? usageReading.state : { kind: 'loading' }
   useEffect(() => {
-    if (catalog.status !== 'loaded' || !catalog.data.some(reportsUsageWindows)) return
+    if (authority === null || usageCatalog === null || !usageCatalog.some(reportsUsageWindows)) return
     const controller = new AbortController()
+    const current = () => !controller.signal.aborted && executionWorkspaceAuthority.peek() === authority
     let inFlight = false
-    setUsage({ kind: 'loading' })
+    const publish = (state: UsageState) => { if (current()) setUsageReading({ authority, catalog: usageCatalog, state }) }
+    publish({ kind: 'loading' })
     const refresh = async () => {
-      if (controller.signal.aborted || inFlight) return
+      if (!current() || inFlight) return
       inFlight = true
       try {
         const value = await fetchRuntimeResolved({ signal: controller.signal })
-        if (!controller.signal.aborted) setUsage({ kind: 'ready', value })
+        publish({ kind: 'ready', value })
       } catch (error) {
-        if (!controller.signal.aborted) setUsage({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+        publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
       } finally { inFlight = false }
     }
     void refresh()
     const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
     return () => { stopRefresh(); controller.abort() }
-  }, [catalog, generation])
+  }, [authority, usageCatalog, generation])
   useEffect(() => {
+    if (authority === null) return
     const controller = new AbortController()
+    const current = () => !controller.signal.aborted && executionWorkspaceAuthority.peek() === authority
     let inFlight = false
-    setState({ kind: 'loading' })
+    const publish = (state: State) => { if (current()) setReading({ authority, state }) }
+    publish({ kind: 'loading' })
     const refresh = async () => {
-      if (controller.signal.aborted || inFlight) return
+      if (!current() || inFlight) return
       inFlight = true
       try {
         const value = await fetchRuntimeModelMetrics(windowMinutes, 0, { signal: controller.signal })
-        if (!controller.signal.aborted) setState({
+        publish({
           kind: value.cost_ledger_read?.state === 'pending' ? 'pending' : 'ready',
           value, receivedAt: new Date(),
         })
       } catch (error) {
-        if (!controller.signal.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+        publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
       } finally { inFlight = false }
     }
     void refresh()
     const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
     return () => { stopRefresh(); controller.abort() }
-  }, [windowMinutes, generation])
+  }, [authority, windowMinutes, generation])
   const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()
   if (catalog.status === 'loaded') {
     for (const provider of catalog.data) {
@@ -195,10 +216,10 @@ export function OverviewRuntimeStats() {
     <p class="text-sm text-text-muted">Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.</p>
     ${catalog.status === 'error' ? html`<p role="alert">제공자 계정 목록을 읽지 못했습니다: ${catalog.message}</p>` : null}
     ${catalog.status === 'loaded' && clients.length === 0 ? html`<p>사용량 창을 보고할 수 있는 제공자 계정이 없습니다.</p>` : null}
-    ${clients.length > 0 ? html`
+    ${authority !== null && clients.length > 0 ? html`
       <div class="flex flex-wrap gap-2" aria-label="제공자 계정별 런타임" data-testid="overview-provider-accounts">
         ${clients.map(client => html`<${ProviderAccount}
-          key=${client.runtime_id ?? client.provider} client=${client} usage=${usage} />`)}
+          key=${client.runtime_id ?? client.provider} client=${client} usage=${usage} authority=${authority} />`)}
       </div>
       <p class="text-xs text-text-muted">로그인 확인은 지원되는 공식 CLI 계정에만 표시하며 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.</p>
     ` : null}

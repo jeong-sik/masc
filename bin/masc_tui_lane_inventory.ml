@@ -19,20 +19,30 @@ let declaration_summary = function
   | Invalid _ -> "declaration invalid"
   | Absent -> "declaration absent"
   | Unobserved -> "declaration not observed"
+let browser_activity_label = function
+  | Browser_enabled -> "on"
+  | Browser_disabled -> "off; configuration retained"
+  | Browser_unobserved -> "activity unavailable"
+let machine_activity_label = function
+  | Machine_enabled -> "on"
+  | Machine_disabled -> "off; machine state retained"
+  | Machine_unobserved -> "activity unavailable"
+let machine_publication_label = function
+  | No_screen -> "no screen published"
+  | Stable -> "screen stable"
+  | Running -> "machine running"
 let row_summary (row : row) = match row.state with
+  | Exact_state (Disabled _) -> "off; candidates retained"
   | Exact_state (Unconfigured _) -> "unconfigured"
   | Exact_state (Registry_unavailable _) -> "registry unavailable"
   | Exact_state (Configured c) ->
       if c.admitted_slots=[] && c.cli_slots=[] then "no admitted slots"
       else if Option.is_some c.admission_error then "admission issue"
       else Printf.sprintf "%d admitted slots" (List.length c.admitted_slots + List.length c.cli_slots)
-  | Browser_clients 0 -> "no connected clients"
-  | Browser_clients n -> Printf.sprintf "%d connected clients" n
-  | Browser_executor true -> "executor registered"
-  | Browser_executor false -> "executor not registered"
-  | Machine_state No_screen -> "no screen published"
-  | Machine_state Stable -> "screen stable"
-  | Machine_state Running -> "machine running"
+  | Browser_clients (activity,n) -> browser_activity_label activity ^ "; " ^ Printf.sprintf "%d connected clients" n
+  | Browser_executor (activity,registered) -> browser_activity_label activity ^ "; "
+      ^ (if registered then "executor registered" else "executor not registered")
+  | Machine_state (activity,publication) -> machine_activity_label activity ^ "; " ^ machine_publication_label publication
   | Package_state {declaration;instances} ->
       let declared = match declaration, instances with
         | None, _ -> "manual attachment"
@@ -52,19 +62,26 @@ let detail_lines (row : row) =
   @ (match row.selection with
      | Exact _ -> ["Exact-output admission and retained run evidence are separate readings."]
      | Browser _ -> ["Opening this row reads the selected browser backend; it does not open a new session."]
-     | Machine _ -> ["Published machine state only; opening this row watches the machine."]
+     | Machine _ -> ["Activity configuration and the last published screen are separate readings."]
      | Declaration path -> ["TOML: " ^ path]
      | Manual_instance _ -> ["No declaration file; this is a manual attachment."])
   @ (match row.state with
+     | Exact_state (Disabled c) ->
+         ["New work is off; accepted runs finish with their acquired candidates.";
+          "Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
+          "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
      | Exact_state (Configured c) ->
          ["Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
           "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
          @ (match c.dropped_slots with [] -> [] | values -> ["Dropped HTTP slots: " ^ String.concat ", " values])
          @ (match c.admission_error with None -> [] | Some detail -> ["Admission: " ^ detail])
      | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [detail]
-     | Browser_clients _ -> []
-     | Browser_executor _ -> ["Registration does not prove browser process health or an open session."]
-     | Machine_state _ -> []
+     | Browser_clients _ -> ["Off refuses new requests while accepted requests finish."]
+     | Browser_executor _ -> ["Off retains configuration and sessions; status and close remain available.";
+         "Registration does not prove browser process health or an open session.";
+         "Activity follows saved settings; executable and profile paths are installed at server startup."]
+     | Machine_state _ -> ["Off refuses new execution and input; existing machine state and checkpoints are retained.";
+         "Select this machine in All Lanes and press Space for activity settings."]
      | Package_state {declaration;instances} ->
          (match declaration with
           | None -> []
@@ -105,6 +122,7 @@ let row_summary_in (snapshot : snapshot) (row : row) =
        | None -> admission
        | Some lane ->
            let observation = match lane.sl_status with
+             | Masc.Tui_decode.Standalone_off -> Printf.sprintf "off · %d finishing" lane.sl_running_count
              | Masc.Tui_decode.Standalone_running -> Printf.sprintf "%d running" lane.sl_running_count
              | Standalone_idle -> "idle"
              | Standalone_degraded -> "needs attention"

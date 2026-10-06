@@ -8,7 +8,7 @@
  ; The agent guide renders config/prompts/play.agent_guide.md.
  (deps (source_tree %{workspace_root}/config/prompts))
  (action (run %{test}))
- (libraries masc_test_deps alcotest yojson h2 bigstringaf unix eio eio_main masc.masc_core masc.dos_lane masc.server))
+ (libraries masc.machine_configuration masc_test_deps alcotest yojson h2 bigstringaf unix eio eio_main masc.masc_core masc.dos_lane masc.server))
 
 (rule
  (alias runtest-test_play_page_client)

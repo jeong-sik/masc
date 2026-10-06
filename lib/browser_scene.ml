@@ -245,9 +245,10 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
   let unobserved result = Result.map_error (fun detail -> Browser_surface.Unobserved detail) result in
   let* tab_id = match request.tab_id with
     | Some id -> Ok id | None -> Error (Browser_surface.Unobserved "scene requires tabId") in
-  let* target = Browser_lane.resolve_target request.route
+  let verb = Browser_lane.Page_scene {tab_id;max_chars;view;scope} in
+  let* target = Browser_lane.resolve_target ~verb request.route
     |> Result.map_error (fun error -> Browser_surface.Unselected error) in
-  let* answer = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
+  let* answer = Browser_lane.issue_for ~target ~verb
     ~timeout_sec:20. |> Result.map_error (fun error -> Browser_surface.Unselected error) in
   unobserved @@
   let* json = Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer in

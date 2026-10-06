@@ -1,0 +1,40 @@
+{
+  "head": "8a28d51ab930cff9f173f8b691c40b8307c5230c",
+  "base": "c0ac20139aeb02b789e4f9309e0b40f7a0df224e",
+  "comment": 4179480231,
+  "native_membership": "RESTstackomitted; freshfullstacklistno41172",
+  "source_sha256": {
+    "dashboard/src/components/onboarding-settings.ts": "833def55db1dc01198cf94a04d56b474d864efacec0ffc6477d1b28482689b63",
+    "dashboard/src/components/onboarding-settings.test.ts": "3193206032a034b6ca8bf2c46c32ea69f7b97c622833dff554ccad4c5859f0fb",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "d087dbaadec53c50ae41f15ba59603b2d06ca0d56aff8fcb59e74e796268e6dc"
+  },
+  "raw_sha256": {
+    "pr41172-onboarding-red.log": "814a5a491bb21afe348a4c79c52ad5ec78421e9708cf9d8e8b1a3e99eeaf6765",
+    "pr41172-onboarding-green.log": "14ecb687d87dba3f405b7bc49f07bd37ec669cc4f8089fb276ce7a9a9176772c",
+    "pr41172-onboarding-final-green.log": "c9cf68caf923c2ad1a2eb4f27a2746f27b5dec3d1762ac5232ee739c3d6d6e08",
+    "pr41172-onboarding-final-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41172-onboarding-final-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "red": {
+    "handle": 35097,
+    "exit": 1,
+    "failed": 2,
+    "passed_controls": 2
+  },
+  "initial_green": {
+    "handle": 46445,
+    "exit": 1,
+    "passed_tests": 142,
+    "failed_suite": "onboarding api/core mock omitted newly imported subscribeStoredTokenChanges"
+  },
+  "final": {
+    "handle": 16291,
+    "exit": 0,
+    "suites": 4,
+    "tests": 146,
+    "tsc_exit": 0,
+    "eslint_exit": 0
+  },
+  "full_suite": false,
+  "published": false
+}

@@ -537,6 +537,12 @@
  (modules test_slot_scheduler_deadline_ownership)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
 
+; How a freed slot is shared between Priority and Standard waiters.
+(test
+ (name test_slot_scheduler_priority)
+ (modules test_slot_scheduler_priority)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
 (test
  (name test_under_deadline)
  (modules test_under_deadline)

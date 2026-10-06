@@ -248,6 +248,20 @@ let test_accounts_using_a_shared_model_set_are_removed () =
       , [ "providers.codex_acct1"; "codex_acct1.\"gpt-5.6\"" ] )
     ]
 
+let test_disabled_exact_lane_can_lose_last_account () =
+  List.iter (fun key ->
+    let source = fixture ^ Printf.sprintf
+      "\n[runtime.exact_output_lanes.librarian_exact]\nenabled = false\n%s = [\"codex_acct1.gpt-5.6\"]\n" key in
+    let result = removed ~text:source "codex_acct1" in
+    let config = loaded result.text in
+    Alcotest.(check bool) "account provider removed" false
+      (List.exists (fun (p : S.provider) -> p.id="codex_acct1") config.providers);
+    let lane = List.find (fun (lane : S.exact_output_lane_decl) -> lane.id="librarian_exact") config.exact_output_lane_decls in
+    Alcotest.(check bool) "optional lane remains explicitly off" false lane.enabled;
+    Alcotest.(check (list string)) "HTTP candidates removed" [] lane.slot_ids;
+    Alcotest.(check (list string)) "CLI candidates removed" [] lane.cli_slot_ids)
+    ["slots";"cli_slots"]
+
 let test_what_has_no_replacement_is_refused () =
   let cases =
     [ ( "the default"
@@ -340,7 +354,9 @@ let test_only_an_official_client_account_is_removed () =
 let () =
   Alcotest.run "runtime_account_removal"
     [ ( "remove"
-      , [ Alcotest.test_case "the account and what routes to it go" `Quick
+      , [ Alcotest.test_case "disabled exact lane can lose last account" `Quick
+            test_disabled_exact_lane_can_lose_last_account
+        ; Alcotest.test_case "the account and what routes to it go" `Quick
             test_the_account_and_what_routes_to_it_go
         ; Alcotest.test_case "an antigravity account takes its credentials table" `Quick
             test_an_antigravity_account_takes_its_credentials_table

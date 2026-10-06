@@ -225,7 +225,16 @@ status: reference
 : 소비자가 `max_concurrent_requests`를 선언한 제공자 계정의 동시 완료 요청 수를
   제한하는 Agent Core의 진입 절차. 같은 `kind`·`base_url`·API 키 식별자를 쓰는
   Keeper turn과 Exact-output route의 발송이 프로세스 전체에서 허용량을 공유한다.
-  자리가 차면 FIFO 순서로 허가를 기다리고, 선언이 없으면 이 절차를 적용하지 않는다.
+  자리가 차면 도착 순서로 허가를 기다리고, 선언이 없으면 이 절차를 적용하지 않는다.
+  계정이 `admission_priority_run_limit`도 선언하면 `Priority` 요청이 `Standard` 요청보다
+  먼저 허가를 받되, `Standard`가 기다리는 동안에는 그 수만큼만 연달아 받는다.
+  masc에서는 runtime.toml provider 표의 `admission-priority-run-limit`이 이 값이고,
+  verifier·HITL auto judge·board attention 레인이 `Priority`다
+  (`Standalone_lane.admission_class`). 이 값은 그 provider에서 `max-concurrent`를
+  선언한 binding에만 붙는다. 그런 binding이 없거나 공식 클라이언트 provider이면
+  설정을 읽을 때 거절한다. 실행 중인 서버는 계정이 처음 받은 칸 수와 연속 한도를
+  재시작할 때까지 쓰므로, 허가 중인 계정의 두 값을 바꾸는 설정 저장과
+  `masc runtime-resume`은 거절된다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
   `Binding Admission`과 다른 단계다.
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·
@@ -1042,14 +1051,15 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 다섯
-  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
-  닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
-  이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
-  `Exact_lane_run_registry.lane`은 `Verifier`를 뺀 넷이고, `standalone_lane`·
-  `lane_of_standalone`으로 이 타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에
-  남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
-  Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
+: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 일곱
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`·
+  `Browser_stagehand`·`Candle_appraiser`)은 닫힌 타입 `Standalone_lane.t` 하나다.
+  `Standalone_lane.all`이 열거하고 `to_id`가 이름을 적는다. `Runtime.exact_lane`은
+  이 타입을 그대로 쓴다. 실행 기록의 `Exact_lane_run_registry.lane`은 `Verifier`와
+  `Browser_stagehand`를 뺀 다섯이고, `standalone_lane`·`lane_of_standalone`으로 이
+  타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에 남는다. 그 경로를 선언하는 설정은
+  `Exact-output route`이고, Keeper turn이 runtime 후보를 시도하는 순서
+  (`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
   공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
@@ -1061,6 +1071,34 @@ status: reference
   fallback하지 않고 typed 시작 오류 `Server_root_switch_unavailable`로 거절된다(#38426).
   Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Standalone_lane](../../lib/runtime/standalone_lane.mli) · [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+
+**Lane family (레인 가족)**
+: 운영자가 한 목록에서 함께 읽는 Lane 종류의 묶음. 닫힌 타입 `Lane_id.family` 하나이고
+  `Exact_family`·`Browser_family`·`Machine_family`·`Package_family` 넷이다(wire 문자열
+  `exact`·`browser`·`machine`·`package`). `Lane_id.t`는 `Builtin`(exact-output lane·
+  Browser Lane backend·machine)과 `Package`(Lane Add-on 선언 파일)로 나뉘고,
+  `Lane_id.family`가 그 id를 가족으로 접는다. wire id는 `family/name` 꼴이다
+  (`Lane_id.to_wire`, 구분자 `/`). TUI의 `Lanes` 개요는 모든 Lane family를 한 목록으로
+  읽고, 각 가족은 따로 읽히므로 이 목록은 가족을 가로지르는 원자적 트랜잭션이 아니다
+  (`docs/guides/lane-inventory.md`). 위의 **Lane**(고정 실행 경로)이나 **Standalone Lane**
+  (그 경로의 관찰)과 다른 층이다 — 이쪽은 운영자 목록의 행 분류다.
+  → [Lane_id](../../lib/lane_registry/lane_id.ml) · [lane-inventory guide](../guides/lane-inventory.md)
+
+**Chat Lane (채팅 레인)**
+: Keeper에게 대화 메시지가 들어오고 결과가 배달되는 표면. dashboard·커넥터
+  화자가 보낸 메시지는 `Keeper_msg_async`가 background fiber로 turn을 열고,
+  `Keeper_chat_store`가 Keeper마다 append-only JSONL
+  (`.masc/keeper_chat/<sanitized-name>.jsonl`)로 남긴다. Keeper는 다음 turn에서
+  `recent_direct_conversation` observation으로 이 대화를 읽는다. Fusion 심의
+  결론도 요청 Keeper의 *메인* chat lane에 authored 메시지로 남아 이 경로로
+  수령된다(`Fusion_sink`).
+  경계: 위의 **Lane**(고정 실행 경로)과 다른 층이다 — Lane은 모델이 도는
+  exact-output 작업의 경로이고, chat lane은 Keeper에게 대화가 들어오고 결과가
+  배달되는 표면이다. **Official Client Lane**(공식 클라이언트 실행 경로)과도
+  다르다. heartbeat가 여는 자율 turn과 함께 Keeper turn을 시작하는 두 진입
+  경로를 이룬다(RFC-0225).
+  → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
+  [Keeper_msg_async](../../lib/keeper/keeper_msg_async.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
@@ -1102,19 +1140,18 @@ status: reference
   → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
   [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
 
-**Max Prompt Bytes (최대 프롬프트 바이트)**
-: MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한
-  (`[models.<이름>].max-prompt-bytes`, `Runtime_schema.model.max_prompt_bytes`).
-  클라이언트는 자기 컨텍스트 창을 스스로 소유하고, 상한을 넘는 seed는 typed
-  terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
-  29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
-  10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
-  (#38740). Muse 는 넘친 입력을 거절하지 않고 조용히 요약으로 줄이므로, MASC 가
-  `max-context` 에서 `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(Muse Code
-  1.4.0 실측, `Runtime_muse_prompt_capacity`). 선언값은 이보다 작을 때만 쓴다.
-  운영자에게는 묻지 않는다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
-  MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
-  → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
+**Client Start-prompt Ceiling (클라이언트 시작 프롬프트 상한)**
+: MASC 가 공식 클라이언트의 첫 턴에 심는 history(시작 프롬프트)의 바이트 상한.
+  넘친 입력을 typed 오류로 알리지 않는 클라이언트에만 있다.
+  Antigravity 는 끝까지 간 실측 2,078,915 바이트와 `2 × max-context` 중 작은
+  값이다. 토큰당 2바이트는 보장이 아니라 어림값이다. agy 는 공개하지 않은
+  저장 한도를 넘으면 세션을 지우고(agy 1.2.6 changelog), 그 아래에서도 스스로
+  대화를 압축한다. Muse Code 는 넘친 입력을 조용히 요약하므로 상한을
+  `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(`Runtime_muse_prompt_capacity`).
+  Claude Code·Codex 는 이 상한이 없다. 넘치면 provider 가 typed overflow 로
+  알리고, keeper 는 이어 보낼 범위를 줄여 다시 보낸다. 운영자가 바이트 수를
+  적는 설정은 없다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다.
+  → [Runtime_client_prompt_ceiling](../../lib/runtime/runtime_client_prompt_ceiling.mli)
 
 **Attempt Dispatch (시도 파견 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
@@ -1138,9 +1175,9 @@ status: reference
   [keeper_turn_driver](../../lib/keeper/keeper_turn_driver.mli)
 
 **Standalone Lane**
-: TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
+: TUI의 `MASC Lanes` 인벤토리(`Lanes` 탭)가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (고정 실행 경로) 다섯을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
+  (고정 실행 경로) 일곱을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
   경로이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
   실행했는지의 관찰이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
@@ -1404,6 +1441,28 @@ status: reference
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.mli)
+
+**Lane application (Lane 적용)**
+: Lane Add-on 선언 하나가 실제로 적용됐는지에 대한 읽기 전용 관찰. 파일 저장과 worker
+  적용은 다른 사실이다 — 선언 파일을 저장해도 그 선언으로 도는 worker가 관측됐다는
+  뜻이 아니다. `Lane_addon_application.t`가 닫힌 여섯 값이다 — `Starting_worker`
+  (wire `starting`: 켜짐이 원하는 상태인데 받아들여진 실행 worker가 아직 관측되지 않음)·
+  `Cleaning_workers`(`cleaning`: 살아 있거나 보존된 소유자가 아직 정리를 마치지 못함)·
+  `Applied`(`applied` + `instance_id`: 소유자 하나가 기동을 마치고 돌며 다른 소유자는
+  멈춤)·`Inactive`(`inactive`: 꺼짐이 원하는 상태이고 모든 소유자의 정리가 확인됨)·
+  `Failed`(`failed` + `messages`)·`Unknown`(`unknown` + `messages`: 인벤토리가
+  불완전하거나 이 호출자가 운영자 적용 세부를 볼 수 없음). `Applied`는 실행 중인
+  소유자를 이름할 뿐 그 출력이나 Goal 성공을 보증하지 않는다. `observe`는
+  `complete=false`면 `Applied`·`Inactive`를 내지 않는다. 선언은 두 revision을 갖는다 —
+  `source_revision`(마지막 조정이 읽은 정확한 바이트의 SHA-256, `enabled`와 주석 포함)과
+  의미 revision(코드 `revision`, wire `desired_revision`: worker 입력을 이름하며
+  `enabled`·주석·파일명을 뺀다). 저장된 문서를 추적하는 UI는 workspace·path·
+  installation id·source revision·의미 revision이 모두 맞을 때만 적용 결과를 그 문서에
+  붙인다. 불일치는 제출한 의도가 아직 관측되지 않았다는 뜻이지 완료가 아니다. 적용
+  세부는 운영자 전용이고, 다른 호출자에게는 `unknown`과 고정 설명으로 보인다.
+  → [Lane_addon_application](../../lib/lane_addon/lane_addon_application.mli) ·
+  [Lane_addon_config](../../lib/lane_addon/lane_addon_config.mli) ·
+  [Declaration application observations](lane-application-observation.md)
 
 **Quiz Lane (퀴즈 레인)**
 : 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
@@ -1978,6 +2037,23 @@ status: reference
   채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
   → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
 
+**Keeper Delegate Completion Wake (위임 완료 깨움)**
+: 다른 Keeper에게 떼어 맡긴 turn(`masc_keeper_delegate`)의 답을 요청한 Keeper에게
+  되돌리는 durable 자극. `masc_keeper_delegate`는 operation id만 돌려주고 기다리지
+  않으므로, 이 자극이 없으면 답은 요청한 Keeper가 그 id를 다시 읽어야만 닿았다 —
+  2026-08-17..24 실측에서 위임 4건 중 상태 조회 0건이었다. 자극은
+  `Keeper_event_queue.Delegate_completed`이고 payload는 `delegate_completion`
+  (`dc_operation_id`·`dc_keeper`·`dc_terminal`)이다. `dc_terminal`은 닫힌 세 값이다 —
+  `Delegate_replied`(되돌릴 가시적 답을 나름)·`Delegate_no_reply`(되돌릴 텍스트 없이
+  turn이 끝남; 도구로 다른 곳에 썼는지 아무 말도 안 했는지는 가르지 않는다)·`Delegate_failed`
+  (실패 상세). 자극 id는 `keeper-delegate:<operation_id>`이고, 한 위임은 한 번만 답하므로
+  operation id 하나로 완전한 키다. 답은 먼저 커밋되고 그 뒤에 알린다 — 커밋은 HITL·Fusion과
+  같은 fail-closed durable 경로를 쓰고, 뒤따르는 live wake는 힌트일 뿐이라 `Running`
+  Keeper에게만 닿고 실패는 로그로 남긴다(자극은 이미 큐에 있어 다음 admitted turn에 읽힌다).
+  `Fusion_completed`·`Hitl_resolved`와 같은 부류다.
+  → [Keeper_delegate_completion_wake](../../lib/keeper/keeper_delegate_completion_wake.mli) ·
+  [Keeper_event_queue](../../lib/keeper_runtime/keeper_event_queue.mli)
+
 **Approval Queue Phase (승인 큐 진행 단계)**
 : Human-in-the-Loop (HITL) 승인 큐에서 각 승인 요청 항목이 거치고 있는 진행 단계를
   서버가 단일 wire 문자열로 투영한 닫힌 네 값(`approval_queue_phase`: `Phase_queued` ·
@@ -2427,6 +2503,9 @@ status: reference
   상태로 시작하므로, 매번 콜드 빌드 한 번을 치르는 대신 재시작 사이에 쌓인 빌드
   산출물이 다음 세션으로 새지 않는다. `container volume create`는 멱등이 아니므로
   존재 여부를 probe로 가리고, probe 결과가 애매하면 추측으로 지우지 않고 거절한다.
+  링크가 걸리기 전에 빌드해서 work volume 에 생긴 진짜 `_build` 는 게스트가 뜨기 전
+  trim helper 가 지운다(`build_output_removal_script`). `.masc-keep-build` 가 있는
+  체크아웃은 남긴다.
   → [Keeper_sandbox_microvm](../../lib/keeper/keeper_sandbox_microvm.mli)
 
 ## Continuity

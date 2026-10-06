@@ -35,6 +35,17 @@ def approval_rows(rows: dict[int, bytes]) -> list[bytes]:
     return found
 
 
+def positioned_rows(rows: dict[int, bytes]) -> list[tuple[bytes | None, bytes]]:
+    """The queue's rows with the `[i/n]` position a one-row window prefixes, if any."""
+    found = []
+    for line in rows.values():
+        match = re.match(
+            rb"^\s*>?\s*(?:\[(\d+/\d+)\]\s+)?masc-tui\s+(\w+)\s", line)
+        if match and match.group(2) in ROW_ACTIONS:
+            found.append((match.group(1), match.group(2)))
+    return found
+
+
 def window_line(rows: dict[int, bytes]) -> re.Match[bytes] | None:
     for line in rows.values():
         match = WINDOW_LINE.search(line)
@@ -94,6 +105,48 @@ def run(executable: str) -> None:
         executable,
         description="A short Approvals frame says which rows it draws",
         interact=short_frame,
+        http_fixtures=fixtures,
+        refresh=2.0,
+    )
+
+    def one_row_frame(process, fd, _slave, output, _base):
+        # 16 rows is the shortest frame that still draws the queue with a
+        # single row (15 is the TUI's floor): no row to spend on a window
+        # line, so the selected row carries its own `[i/n]` position.
+        h.resize_and_wait(process, fd, output, rows=16, columns=80,
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        h.drain_until_quiet(process, fd, output)
+        open_approvals(process, fd, output)
+        seen: list[bytes] = []
+        for step in range(3):
+            if step:
+                h.send_and_wait(process, fd, output, b"j", b"/3]")
+                h.drain_until_quiet(process, fd, output)
+            rows = last_frame(output)
+            drawn = positioned_rows(rows)
+            if len(drawn) != 1:
+                raise AssertionError(
+                    f"step {step}: a one-row window drew {len(drawn)} rows: {rows!r}")
+            position, action = drawn[0]
+            if position != f"{step + 1}/3".encode():
+                raise AssertionError(
+                    f"step {step}: the row says position {position!r}, "
+                    f"expected {step + 1}/3: {rows!r}")
+            if action != ROW_ACTIONS[step]:
+                raise AssertionError(
+                    f"step {step}: the row is {action!r}, expected {ROW_ACTIONS[step]!r}")
+            if window_line(rows) is not None:
+                raise AssertionError(
+                    f"step {step}: a window line is drawn with no row to spend: {rows!r}")
+            seen.append(action)
+        if tuple(seen) != ROW_ACTIONS:
+            raise AssertionError(f"the cursor never reached every approval: {seen!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="A one-row Approvals frame carries its own position",
+        interact=one_row_frame,
         http_fixtures=fixtures,
         refresh=2.0,
     )

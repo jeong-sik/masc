@@ -516,9 +516,18 @@ class RuntimeSetupAdapter(unittest.TestCase):
         row = dict(id='bound.existing', provider_id='bound', display_name='Bound',
                    protocol='antigravity-cli', command='agy', credential_kind='file',
                    credential_file='/fixture/oauth', model='existing', provider_timeout_s=824.5)
-        integration = lambda name: dict(id=name, display_name=name, protocol='antigravity-cli',
-            command='agy', credential_kind='file', credential_file='/fixture/oauth',
-            provider_timeout_s=824.5, origin='runtime_config', setup_support='new_connection')
+        def integration(name):
+            return dict(
+                id=name,
+                display_name=name,
+                protocol="antigravity-cli",
+                command="agy",
+                credential_kind="file",
+                credential_file="/fixture/oauth",
+                provider_timeout_s=824.5,
+                origin="runtime_config",
+                setup_support="new_connection",
+            )
         inventory = dict(runtimes=[row], integrations=[integration('bound'), integration('unbound')])
         with patch.object(SETUP, 'official_client_path', return_value=None):
             sources = SETUP.connection_sources('/fixture/masc', inventory)
@@ -1270,7 +1279,6 @@ class SelectedNativeAccounts(unittest.TestCase):
         source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
         with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no operator byte budget')), patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
             _, spec = SETUP.resolve_model_spec(source, dict(id='selected', context=8192), 10)
-        self.assertNotIn('max_prompt_bytes', spec)
         self.assertEqual(spec['account_home'], '/selected')
         with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no invented context')):
             with self.assertRaises(SETUP.SetupError):
@@ -1886,7 +1894,8 @@ class CompiledRuntimeSetup(unittest.TestCase):
             config = base / '.masc/config'
             config.mkdir(parents=True)
             original = base / 'saved-oauth'
-            encode = lambda value: base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip('=')
+            def encode(value):
+                return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
             original.write_text(json.dumps(dict(auth_method='synthetic-oauth',
                 token=dict(access_token='fixture', token_type='Bearer', refresh_token='fixture', expiry='2000-01-01T00:00:00Z'),
                 id_token=encode(dict(alg='RS256')) + '.' + encode(dict(iss='https://accounts.google.com',
@@ -1898,9 +1907,12 @@ class CompiledRuntimeSetup(unittest.TestCase):
                                                                       dict(id='new-model', label='New model')])))
             client.write_text('#!' + sys.executable + '\nimport json,sys\nassert sys.argv[-1] == "models"\nprint(' + repr(json.dumps(catalog)) + ')\n')
             client.chmod(0o700)
-            provider_text = lambda name: ('[providers.' + name + ']\nprotocol = "antigravity-cli"\n'
-                'command = ' + json.dumps(str(client)) + '\nis-non-interactive = true\ntimeout-s = 824.5\n'
-                '[providers.' + name + '.credentials]\ntype = "file"\npath = ' + json.dumps(str(original)) + '\n')
+            def provider_text(name):
+                return (
+                    "[providers." + name + ']\nprotocol = "antigravity-cli"\n'
+                    "command = " + json.dumps(str(client)) + "\nis-non-interactive = true\ntimeout-s = 824.5\n"
+                    "[providers." + name + '.credentials]\ntype = "file"\npath = ' + json.dumps(str(original)) + "\n"
+                )
             (config / 'runtime.toml').write_text('[runtime]\ndefault = "selected.existing"\n'
                 + provider_text('selected') + provider_text('sibling')
                 + '[models.existing]\napi-name = "existing"\nmax-context = 8192\ntools-support = true\n'

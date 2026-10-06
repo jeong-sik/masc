@@ -1,0 +1,12 @@
+{
+  "head": "ebf7e16b4f7651dc32b76ca7d1165c79c284b3cd",
+  "scope": "Actual component regression with pending save across unmount/remount; test was added after the product head",
+  "exit_code": 1,
+  "raw_log_sha256": "f2f8b29ac5201f01dbad6a9df3ae3d624e5d1c06e139b0c3155c079b5849e076",
+  "sha256": {
+    "dashboard/src/components/lane-package-activity-panel.test.ts": "9812497aebfcf21c11725c58b07dd67f55c9877f684daea299de33b6096e48ee",
+    "dashboard/src/components/lane-addons-panel.ts": "bdab6708f48ec0fee5280e595fa0558c823568ef68baa8fac902ee8118d0692c",
+    "dashboard/src/components/lane-package-activity-panel.ts": "ca0b123aad14a49d2b4fae2930c6d1d467c683e5f742d608462ce502bac75285",
+    "dashboard/src/lib/lane-package-activity-session.ts": "181d86674ebb3e440b03ee5bc00c924eb3dd9d9d0589f5e5c10f960412483480"
+  }
+}

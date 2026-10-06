@@ -74,7 +74,8 @@ val edit_table_int : string -> path:string -> key:string -> value:int -> string
 val edit_table_bool : string -> path:string -> key:string -> value:bool -> string
 (** Set a typed boolean while retaining unrelated lines and comments. Bare
     [true]/[false], not a quoted string: a reader that expects a boolean
-    refuses ["true"]. *)
+    refuses ["true"]. When replacing an existing boolean, its trailing
+    comment and preceding whitespace are retained. *)
 
 val edit_root_bool : string -> key:string -> value:bool -> string
 (** Update a boolean in the root table, before any table header. Unrelated

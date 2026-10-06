@@ -1,0 +1,92 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-04T18:59:54.187Z",
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status, Browser panel/session, raw editor, router and API with synthetic HTTP. No backend validation/publication, real Browser sessions, native TUI, CI or deployment.",
+  "checks": [
+    "opening and toggling make no writes",
+    "navigation retains Browser draft",
+    "CAS conflict keeps file and draft",
+    "explicit reapply/save migrates flat paths, preserves other backends and concurrent edit, refreshes activity separately from executor",
+    "independent raw draft retained, old write basis withdrawn",
+    "unconfigured Stagehand can be enabled without changing Automation or claiming an installed executor",
+    "mobile controls without horizontal overflow",
+    "only three explicit previews and saves, one conflict; no model resume, page errors or unexpected routes",
+    "special TOML namespaces preserve Object.prototype throughout actual Browser read/edit/save and remain in the source"
+  ],
+  "reads": 5,
+  "applied": 2,
+  "mutations": [
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "[__proto__.browser.automation]\nenabled=false\n[providers.__proto__]\npolluted_from_browser=\"canary\"\n# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "[__proto__.browser.automation]\nenabled=false\n[providers.__proto__]\npolluted_from_browser=\"canary\"\n# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "096bc7c1f5cf41bae1329a9467b4ed169d31ee721e8662ee12ff517492075a50"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "[__proto__.browser.automation]\nenabled=false\n[providers.__proto__]\npolluted_from_browser=\"canary\"\n# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "[__proto__.browser.automation]\nenabled=false\n[providers.__proto__]\npolluted_from_browser=\"canary\"\n# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=false\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "47fbaddfb12a8b929381794464f931bdb8f042fd4bc293e40f0120d28d1e6daf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "[__proto__.browser.automation]\nenabled=false\n[providers.__proto__]\npolluted_from_browser=\"canary\"\n# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=true\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "[__proto__.browser.automation]\nenabled=false\n[providers.__proto__]\npolluted_from_browser=\"canary\"\n# operator notes\n[browser]\n[browser.live]\nenabled=true # keep live comment\n[browser.stagehand]\nenabled=true\n[providers.fixture]\nlabel=\"untouched\"\n# concurrent change\n\n[browser.automation]\ngeckodriver = \"/tools/geckodriver\"\nbinary = \"/tools/firefox\"\nenabled = false",
+        "expected_source_revision": "6fa27df66367cad2f140dc90042ba10aa19ddcf35b0ddd5a0c91e6c3ab469132"
+      }
+    }
+  ],
+  "mobileControls": [
+    {
+      "text": "활동 설정 닫기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "활동 설정 저장",
+      "opacity": "0.38",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "현재 설정 읽기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 110.8125,
+      "height": 33.25
+    },
+    {
+      "text": "초안 버리기",
+      "opacity": "1",
+      "visibility": "visible",
+      "width": 94,
+      "height": 33.25
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

@@ -1,0 +1,36 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/settings-surface.test.ts src/components/runtime-toml-editor.test.ts src/components/exact-lane-activity-panel.test.ts src/components/browser-lane-activity-panel.test.ts src/components/lane-inventory-panel.test.ts src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/dashboard
+
+ ❯ src/components/settings-surface.test.ts (83 tests | 1 failed) 866ms
+   ❯ SettingsSurface (72)
+     × refreshes mounted Settings after a save, provider failure=true activity=false 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > refreshes mounted Settings after a save, provider failure=true activity=false
+AssertionError: expected null not to be null
+ ❯ src/components/settings-surface.test.ts:2563:86
+    2561|       await waitFor(() => expect(container.textContent).toContain('lat…
+    2562|       if (providerFailure) {
+    2563|         expect(container.querySelector('[data-testid="runtime-catalog-…
+       |                                                                                      ^
+    2564|       }
+    2565|       expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreat…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  1 failed | 324 passed (325)
+   Start at  04:28:48
+   Duration  11.08s (tests 44%, import 27%, transform 12%, environment 9%, setup 7%)
+
+     Import  269 modules were evaluated 1012 times · 2.84s total, 27% of tracked time
+             ~2.09s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+
+ ELIFECYCLE  Test failed. See above for more details.

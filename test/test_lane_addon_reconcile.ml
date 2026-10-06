@@ -47,6 +47,7 @@ type fake = {
   observations : (string * Yojson.Safe.t) list ref;
   recovery_barrier : unit Eio.Promise.t option ref;
   startup_available : bool ref;
+  startup_barrier : unit Eio.Promise.t option ref;
   cleanup_available : bool ref;
   image_available : bool ref;
 }
@@ -61,7 +62,7 @@ let output : Types.output = {
 
 let make_backend () =
   let state = { events = ref []; observations = ref []; recovery_barrier = ref None;
-                startup_available = ref true; cleanup_available = ref true;
+                startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
                 image_available = ref true } in
   let record event = state.events := event :: !(state.events) in
   let backend : Runtime.For_testing.backend = {
@@ -95,12 +96,13 @@ let make_backend () =
       end else begin
         record (Started instance_id);
         on_created connection;
+        Option.iter Eio.Promise.await !(state.startup_barrier);
         Ok connection
       end);
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
-    recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
+    recover_stop = (fun ~instance_id ~container_id ->
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
       then Error "persisted container does not belong to instance"
       else begin
@@ -157,6 +159,12 @@ let declared_instance config id =
 let starts state = List.filter_map (function Started id -> Some id | _ -> None) !(state.events)
 let stops state = List.filter_map (function Stopped id -> Some id | _ -> None) !(state.events)
 let reconcile config directory = unwrap (Runtime.reconcile_configuration ~config ~directory)
+let application config id =
+  let declaration = inspect config |> member "configuration" |> values "declarations"
+    |> List.find (fun item -> text "id" item = id) in
+  member "application" declaration
+let check_application config id expected =
+  check string "observed declaration application" expected (application config id |> text "kind")
 let await clock predicate =
   let rec loop () =
     if predicate () then () else (Eio.Time.sleep clock 0.001; loop ())
@@ -709,6 +717,7 @@ let test_historical_recovery_failure_waits_for_maintenance () =
     let first_retry = Eio.Stream.take sleeps in
     ignore (inspect config);
     check int "historical failure does not nudge itself at startup" 1 (requests ());
+    check_application config "observer" "failed";
     check bool "historical retry waits for a future beat" true
       (first_retry > Eio.Time.now clock);
     Eio_mock.Clock.set_time manual first_retry;
@@ -805,11 +814,15 @@ let test_disable_keeps_configuration_evidence_and_manual_workers () =
     write path off;
     let disabled = Lane_addon_config.load_file ~path |> unwrap in
     check string "activity flag does not invalidate worker inputs" initial.revision disabled.revision;
+    check bool "activity changes exact source identity" true (initial.source_revision <> disabled.source_revision);
     ignore (reconcile config directory);
     await_detached clock config id;
     check string "off keeps exact declaration bytes" off (In_channel.with_open_bin path In_channel.input_all);
     ignore (reconcile config directory);
     check int "repeated off never starts another worker" 2 (List.length (starts state));
+    check_application config "observer" "inactive";
+    let observed = inspect config |> member "configuration" |> values "declarations" |> List.hd in
+    check string "observation names exact off bytes" disabled.source_revision (text "source_revision" observed);
     check bool "manual attachment is untouched" false (List.mem manual (stops state));
     let retained = dispatch config Runtime.Slice ["run_id",`String "declared-world"] in
     check bool "off preserves existing evidence" true
@@ -840,6 +853,7 @@ let test_disabled_cleanup_failure_remains_owned_until_retry () =
     Eio_mock.Clock.set_time manual next;
     await_yield (fun () -> phase (instance config id) = "failed");
     check bool "failed cleanup keeps TOML" true (Sys.file_exists path);
+    check_application config "observer" "failed";
     write path (declaration ~enabled:true ~id:"observer" ~manifest ());
     let rec advance_until predicate =
       if not (predicate ()) then (
@@ -854,6 +868,7 @@ let test_disabled_cleanup_failure_remains_owned_until_retry () =
     let replacement = declared_instance config "observer" |> text "instance_id" in
     await_ready real_clock config replacement;
     check int "one replacement after confirmed cleanup" 2 (List.length (starts state));
+    check_application config "observer" "applied";
     detach real_clock config replacement)
 
 let test_disabled_intent_does_not_override_incomplete_inventory () =
@@ -873,12 +888,111 @@ let test_disabled_intent_does_not_override_incomplete_inventory () =
     check bool "desired off is still visible" false
       (values "declarations" status |> List.hd |> member "enabled" |> Yojson.Safe.Util.to_bool);
     check int "incomplete inventory cannot authorize cleanup" 0 (List.length (stops state));
+    check_application config "observer" "unknown";
     Unix.rmdir unreadable;
     ignore (reconcile config directory);
     await_detached clock config id;
     check bool "successful retry keeps declaration" true (Sys.file_exists path))
 
+let test_created_container_waits_for_start_acceptance () =
+  with_fixture (fun env _ config directory packages state ->
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    let waiting,release = Eio.Promise.create () in
+    state.startup_barrier := Some waiting;
+    Fun.protect ~finally:(fun () ->
+      if not (Eio.Promise.is_resolved waiting) then Eio.Promise.resolve release ()) (fun () ->
+      write path (declaration ~id:"observer" ~manifest ());
+      ignore (reconcile config directory);
+      await_yield (fun () -> starts state <> []);
+      let id = List.hd (starts state) in
+      check_application config "observer" "starting";
+      Eio.Promise.resolve release ();
+      await_ready (Eio.Stdenv.clock env) config id;
+      (* Inspect reads current runtime facts without another reconciliation. *)
+      check_application config "observer" "applied";
+      check string "accepted exact worker" id (application config "observer" |> text "instance_id");
+      detach (Eio.Stdenv.clock env) config id))
+
+let test_historical_publication_is_not_completion ~never_started ~cold_recovery () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    state.startup_available := not never_started;
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    if never_started then await clock (fun () -> phase (instance config id) = "failed")
+    else await_ready clock config id;
+    let captured = instance config id in
+    ignore (dispatch config Runtime.Detach ["instance_id",`String id]);
+    if never_started then await clock (fun () -> not (List.exists (fun item -> text "instance_id" item=id) (instances config)))
+    else await_detached clock config id;
+    Runtime.For_testing.reset ();
+    state.events := [];
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    unwrap (Store.save_binding store ~instance_id:id captured);
+    let off = declaration ~enabled:false ~id:"observer" ~manifest () in
+    write path off;
+    let mutex = Mutex.create () and condition = Condition.create () in
+    let released = ref false and staged = Atomic.make false and first = Atomic.make true in
+    let release () =
+      Mutex.lock mutex; released := true; Condition.broadcast condition; Mutex.unlock mutex in
+    let writer ~store ~instance_id terminal =
+      if Atomic.exchange first false then (
+        let result = match terminal with
+          | Some json ->
+              Result.bind (Store.save_binding store ~instance_id json) (fun () ->
+                Error "injected terminal publication uncertainty after replacement")
+          | None -> Store.For_testing.remove_binding
+              ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync","fixture parent"))) store ~instance_id in
+        Atomic.set staged true;
+        Mutex.lock mutex;
+        while not !released do Condition.wait condition mutex done;
+        Mutex.unlock mutex;
+        result)
+      else match terminal with
+        | Some json -> Store.save_binding store ~instance_id json
+        | None -> Store.remove_binding store ~instance_id in
+    Fun.protect ~finally:release (fun () ->
+      Runtime.For_testing.with_cleanup_writer writer (fun () ->
+        ignore (reconcile config directory);
+        await_yield (fun () -> Atomic.get staged);
+        check_application config "observer" "cleaning";
+        let observed = inspect config |> member "configuration" |> values "declarations" |> List.hd in
+        check bool "no live worker is not completion" true (member "instance_id" observed = `Null);
+        release ();
+        await clock (fun () -> text "kind" (application config "observer") = "failed");
+        let requests () = List.filter (function Recovery_requested _ -> true | _ -> false) !(state.events) |> List.length in
+        check int "resource cleanup happened once" 1 (requests ());
+        let root = Store.root store in
+        let unreadable = Store.For_testing.binding_inventory ~root
+          ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync","cold read parent"))) in
+        check bool "uncertain parent cannot authorize complete inventory" false unreadable.complete;
+        if cold_recovery then (
+          Runtime.For_testing.reset ();
+          let synced = ref false in
+          let confirmed = Store.For_testing.binding_inventory ~root ~sync_parent:(fun directory ->
+            let fd = Unix.openfile directory [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
+            Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
+            synced := true) in
+          check bool "cold read establishes publication durability" true (!synced && confirmed.complete));
+        ignore (reconcile config directory);
+        await clock (fun () -> text "kind" (application config "observer") = "inactive");
+        check int "publication retry never repeats successful cleanup" 1 (requests ());
+        check string "publication does not alter desired bytes" off (In_channel.with_open_bin path In_channel.input_all))))
+
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
+  test_case "created container waits for accepted startup" `Quick test_created_container_waits_for_start_acceptance;
+  test_case "historical replacement commit remains pending and retries publication only" `Quick
+    (test_historical_publication_is_not_completion ~never_started:false ~cold_recovery:false);
+  test_case "historical unlink sync failure retains owner and retries publication only" `Quick
+    (test_historical_publication_is_not_completion ~never_started:true ~cold_recovery:false);
+  test_case "cold read reestablishes terminal replacement durability" `Quick
+    (test_historical_publication_is_not_completion ~never_started:false ~cold_recovery:true);
+  test_case "cold read reestablishes missing binding durability" `Quick
+    (test_historical_publication_is_not_completion ~never_started:true ~cold_recovery:true);
   test_case "off preserves configuration, evidence and manual workers" `Quick test_disable_keeps_configuration_evidence_and_manual_workers;
   test_case "reenable waits for confirmed disabled cleanup" `Quick test_disabled_cleanup_failure_remains_owned_until_retry;
   test_case "disabled intent remains visible during incomplete inventory" `Quick test_disabled_intent_does_not_override_incomplete_inventory;

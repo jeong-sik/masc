@@ -416,7 +416,9 @@ let prepare_flow
     | _ ->
       let* snapshot = snapshot_resolved_lane
         ~messages:(messages_for_summary ~system_prompt ~context_bundle) resolved in
-      Exact_output.start_flow snapshot
+      Exact_output.start_flow
+        ~admission_class:(Standalone_lane.admission_class Hitl_auto_judge)
+        snapshot
       |> Result.map (fun attempt -> Http_attempt (attempt, resolved))
       |> Result.map_error (fun _ -> "HITL exact-output flow attempt allocation failed")
   in

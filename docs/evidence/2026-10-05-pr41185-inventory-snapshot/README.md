@@ -1,0 +1,9 @@
+# Coherent Browser inventory configuration
+
+Review comment4179544817 reproduced on the current published #41185 baseline recorded in checks.json. Each Browser inventory row previously called the installed observer independently, and that observer read Runtime again. A save between Live and Automation rows could produce a configuration that was never published.
+
+The server now captures one immutable Browser configuration before mapping built-in rows. The existing inventory observation accepts that typed activity value while continuing to read backend availability normally. Other callers retain the existing fresh observer default. Request admission still calls the observer afresh per request; no authorization or backend policy was broadened.
+
+The regression uses actual Runtime.init_default publications with a loopback:9 provider declaration (no provider call). It holds the Live clients mutex, starts the actual inventory snapshot, publishes all-Off while Live backend observation is waiting, then releases the mutex. Baseline returned [on,off,off] rather than [on,on,on]. The repaired read retains all-On, and the next snapshot observes all-Off. Runtime/startup/observer state is restored by fixture cleanup. An initial compile failure identified a missing direct masc.browser_lane test dependency; it is retained separately and is not behavioral RED.
+
+Focused commands: `DUNE_JOBS=2 opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_server_lane_inventory.exe test/test_browser_activity.exe test/test_browser_lane.exe`, followed by each executable from test/. Inventory9, Browser activity15 and Browser routing8 cases all passed (32 total). The focused wrapper build supplies OCaml compiler/type checks. Raw logs and six source/three binary hashes are in checks.json. No full Dune suite, actual backend/browser/provider operation, CI, release or TerminalBench was executed. No commit or push by this response owner.

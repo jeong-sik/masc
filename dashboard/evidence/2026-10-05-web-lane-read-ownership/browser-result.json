@@ -1,0 +1,118 @@
+{
+  "scope": "Synthetic HTTP, actual styled Status/router/panel/decoders; not live backend or native TUI",
+  "checks": [
+    "pending Slice survives manual inventory refresh and both results display",
+    "Slice completion leaves pending inventory request and loading state intact",
+    "Clear slice cancels only Slice; inventory completes and cancelled late Slice stays hidden",
+    "successful Slice preserves failed inventory evidence and stale-inventory notice",
+    "successful inventory refresh preserves Slice failure and its frozen data",
+    "explicit activity save triggers inventory refresh without cancelling pending Slice; receipt stays pending reconciliation",
+    "workspace transition aborts both readers and ignores old-workspace completions",
+    "initial inventory and Slice failure show both errors and honestly report no retained observations"
+  ],
+  "reads": [
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2Fpkg.toml"
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    }
+  ],
+  "writes": [
+    {
+      "path": "/api/v1/lane-addons/declaration",
+      "body": {
+        "mode": "save",
+        "file_name": "pkg.toml",
+        "source_text": "enabled = false\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\n",
+        "expected_source_revision": "r1"
+      }
+    }
+  ],
+  "errors": [],
+  "unexpected": [],
+  "cancelled": [
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "error": "net::ERR_ABORTED"
+    }
+  ]
+}

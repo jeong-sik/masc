@@ -294,6 +294,23 @@ let test_anti_rationalization_reviewer_config_reaches_glm () =
     (has_no_response_format reviewer)
 ;;
 
+(* A task's completion waits on the reviewer's verdict, so its requests take
+   a freed admission permit ahead of Keeper turns. The incoming runtime config
+   is [Standard]; only the reviewer's copy is [Priority]. *)
+let test_anti_rationalization_reviewer_config_is_priority () =
+  let runtime_config = glm_provider_config () in
+  let reviewer =
+    Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
+      runtime_config
+  in
+  check string "the runtime config stays standard" "standard"
+    (Llm_provider.Admission_class.to_string
+       runtime_config.Llm_provider.Provider_config.admission_class);
+  check string "the reviewer config is priority" "priority"
+    (Llm_provider.Admission_class.to_string
+       reviewer.Llm_provider.Provider_config.admission_class)
+;;
+
 let test_anti_rationalization_reviewer_config_clears_preset_response_format () =
   let preset =
     { (glm_provider_config ()) with
@@ -447,6 +464,10 @@ let () =
             "anti-rationalization reviewer config clears a pre-set response format"
             `Quick
             test_anti_rationalization_reviewer_config_clears_preset_response_format
+        ; test_case
+            "anti-rationalization reviewer config is priority"
+            `Quick
+            test_anti_rationalization_reviewer_config_is_priority
         ; test_case
             "Board attention batch schema uses contract SSOT"
             `Quick

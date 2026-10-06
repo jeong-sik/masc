@@ -464,13 +464,13 @@ let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~enviro
   let route = match selection with
     | Live client -> Browser_lane.Live_route (Some client)
     | Automation -> Browser_lane.Automation_route in
-  let* target = Browser_lane.resolve_target route
-    |> Result.map_error Browser_lane.selection_error_code in
+  let* target = Browser_lane.resolve_target ~verb:(Browser_lane.Page_document {tab_id}) route
+    |> Result.map_error Browser_lane.selection_error_message in
   (* Reuse the existing transport deadline; never create a new session, select
      a different document or wait for a primary browser action to finish. *)
   let* fields = match Browser_lane.issue_document_if_idle ~target ~tab_id
       ~timeout_sec:Tool_misc_browser_lane.default_timeout_sec with
-    | Error error -> Error (Browser_lane.selection_error_code error)
+    | Error error -> Error (Browser_lane.selection_error_message error)
     | Ok (Browser_lane.Answered (`Assoc envelope)) ->
         (match List.assoc_opt "ok" envelope, List.assoc_opt "data" envelope with
          | Some (`Bool true), Some (`Assoc fields) -> Ok fields

@@ -233,8 +233,11 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
 let test_native_input_history_is_frozen_with_capture () = with_store (fun dir store ->
   let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
   let ledger_dir = Filename.concat dir "machine" in
-  ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
-  Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+  Fun.protect ~finally:(fun () ->
+    Msx_lane.install_activity_observer None;
+    ignore (Msx_lane.eject ())) (fun () ->
+    Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+    ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
     let capture () =
       require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 16384)
@@ -290,8 +293,11 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
     ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")
     ~program_name:"HELLO.COM" ~program_bytes:hello
     ~files:[] ~announce:ignore)) in
-  load ();
-  Fun.protect ~finally:(fun () -> ignore (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ())) (fun () ->
+  Fun.protect ~finally:(fun () ->
+    Dos_lane.install_activity_observer None;
+    ignore (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ())) (fun () ->
+    Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+    load ();
     let capture () =
       require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 2_000_000)

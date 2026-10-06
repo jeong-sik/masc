@@ -15,6 +15,7 @@ type configuration =
       declared_slots : string list; declared_cli_slots : string list;
       dropped_slots : string list; admission_error : string option;
     }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
   | Unconfigured of string
   | Registry_unavailable of string
 
@@ -34,12 +35,14 @@ type instance = {
   package_id : string; title : string; package_revision : string;
   presence : presence; phase : phase; applied_revision : string option;
 }
+type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
+type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running
 type state =
   | Exact_state of configuration
-  | Browser_clients of int
-  | Browser_executor of bool
-  | Machine_state of machine_publication
+  | Browser_clients of browser_activity * int
+  | Browser_executor of browser_activity * bool
+  | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
 type package_read = {

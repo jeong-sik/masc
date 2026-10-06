@@ -4905,6 +4905,14 @@ type runtime_catalog_reading =
   | Runtime_catalog_read
   | Runtime_catalog_failed of string
 
+(* A goal lifecycle request the detail view holds before sending it. Most
+   actions arm for a second keypress. A drop instead collects the reason it
+   must state, because the Tasks it cancels tell their authors that sentence:
+   typing it is the confirmation, Enter sends it and Esc cancels. *)
+type goal_action_pending =
+  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t }
+  | Goal_drop_reason of { goal_id : string; reason : string }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5281,6 +5289,15 @@ type state = {
      surfaces read the same file the same way. Plain text is derived where it
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
+  mutable exact_activity_sessions: Masc_tui_exact_activity.t list;
+  mutable exact_activity_open: Masc_tui_exact_activity.owner option;
+  mutable exact_activity_generation: int;
+  mutable browser_activity_sessions: Masc_tui_browser_activity.t list;
+  mutable browser_activity_open: Masc_tui_browser_activity.owner option;
+  mutable browser_activity_generation: int;
+  mutable machine_activity_sessions: Masc_tui_machine_activity.t list;
+  mutable machine_activity_open: Masc_tui_machine_activity.owner option;
+  mutable machine_activity_generation: int;
   mutable runtime_config_view: runtime_config_reading option;
   mutable runtime_config_edits: runtime_config_edit_session list;
   mutable runtime_config_generation: int;
@@ -5716,11 +5733,11 @@ type state = {
      refetch. *)
   mutable planning_filter: planning_filter;
   mutable planning_sort: planning_sort;
-  (* A goal lifecycle request armed for a second keypress, and what the last
-     one answered. Arming rather than pressing keeps the detail view's plain
-     letters safe: c/x/o are lifecycle only once, and any other key disarms. *)
-  mutable goal_action_armed:
-    (string * Goal_phase.Public_action.t) option;
+  (* A goal lifecycle request waiting for the operator, and what the last one
+     answered. Arming rather than pressing keeps the detail view's plain
+     letters safe: c/x/o are lifecycle only once, and any other key disarms.
+     A drop waits for its typed reason instead. *)
+  mutable goal_action_pending: goal_action_pending option;
   mutable goal_action_error: string option;
   mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
@@ -5905,6 +5922,8 @@ type state = {
   mutable memory_health_inflight: bool;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
+  mutable memory_unit: Masc_tui_memory_usage.display_unit;
+  mutable memory_input: (string, Masc_tui_memory_usage.t) Masc_tui_fetched.t;
   (* The Memory fact browser. [memory_facts_keeper = None] draws the health
      table; [Some name] draws that keeper's fact listing over it. The
      category filter holds a category string exactly as the server spelled
@@ -6749,6 +6768,7 @@ type text_input_target =
   | Text_keeper_runtime_picker_filter
   | Text_identity_app_form
   | Text_identity_filter
+  | Text_goal_drop_reason
   | Text_github_token
   | Text_board_draft
 
@@ -6789,6 +6809,14 @@ let text_input_target (state : state) ~compact_viewport =
   in
   if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
+  (* A drop reason takes every key on the goal detail it was opened on, so
+     its letters never reach the lifecycle keys under it. *)
+  else if
+    state.view = Planning && not compact_viewport
+    && (match state.planning_mode, state.goal_action_pending with
+        | Planning_detail goal_id, Some (Goal_drop_reason entry) -> String.equal goal_id entry.goal_id
+        | (Planning_detail _ | Planning_list), _ -> false)
+  then Some Text_goal_drop_reason
   else if
     state.view = Config
     && state.config_pane = Config_presets
@@ -6872,7 +6900,7 @@ let quit_key_allowed_for = function
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
-      | Text_board_draft ) ->
+      | Text_board_draft | Text_goal_drop_reason ) ->
       false
   | None -> true
 ;;
@@ -7989,10 +8017,16 @@ let lanes_inventory_count state = List.length (lane_inventory_rows state)
     [Terminal_text] -- the sanitize guard counts every access, comparison
     included. *)
 let goal_action_armed_for (state : state) (goal_id : string) =
-  match state.goal_action_armed with
-  | Some (armed_goal, armed_action) when String.equal armed_goal goal_id ->
-      Some armed_action
-  | Some _ | None -> None
+  match state.goal_action_pending with
+  | Some (Goal_action_armed armed) when String.equal armed.goal_id goal_id ->
+      Some armed.action
+  | Some (Goal_action_armed _ | Goal_drop_reason _) | None -> None
+
+let goal_drop_reason_for (state : state) (goal_id : string) =
+  match state.goal_action_pending with
+  | Some (Goal_drop_reason entry) when String.equal entry.goal_id goal_id ->
+      Some entry.reason
+  | Some (Goal_action_armed _ | Goal_drop_reason _) | None -> None
 
 (* A compact Home never grows a feed just because the terminal grew. An
    explicit reader choice still applies on Home and survives surface changes. *)
@@ -8150,6 +8184,9 @@ let play_invite_forget current name =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || (state.view = Lanes && Option.is_some state.exact_activity_open)
+  || (state.view = Lanes && Option.is_some state.browser_activity_open)
+  || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
   || Option.is_some (play_card_shown state)
 
@@ -8180,6 +8217,9 @@ let close_key_modals (state : state) =
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
+  state.exact_activity_open <- None;
+  state.browser_activity_open <- None;
+  state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state
 
@@ -8353,6 +8393,15 @@ let create_state
   prompts_librarian_input = None;
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
+  exact_activity_sessions = [];
+  exact_activity_open = None;
+  exact_activity_generation = 0;
+  browser_activity_sessions = [];
+  browser_activity_open = None;
+  browser_activity_generation = 0;
+  machine_activity_sessions = [];
+  machine_activity_open = None;
+  machine_activity_generation = 0;
   runtime_config_view = None;
   runtime_config_edits = [];
   runtime_config_generation = 0;
@@ -8561,7 +8610,7 @@ let create_state
   planning_mode = Planning_list;
   planning_filter = Planning_filter_active;
   planning_sort = Planning_sort_phase_priority;
-  goal_action_armed = None;
+  goal_action_pending = None;
   goal_action_error = None;
   goal_confirmation_presented = None;
   goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
@@ -8684,6 +8733,8 @@ let create_state
   memory_health_inflight = false;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
+  memory_unit = Masc_tui_memory_usage.Tokens;
+  memory_input = Masc_tui_fetched.initial;
   memory_facts_keeper = None;
   memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;
@@ -9659,6 +9710,51 @@ let runtime_config_workspace (state : state) =
     canonical_path identity.Tui_decode.sid_base_path,
     canonical_path identity.Tui_decode.sid_masc_root) state.server_identity
 
+let browser_activity_session (state : state) owner =
+  List.find_opt (fun session -> Masc_tui_browser_activity.same_owner owner
+    (Masc_tui_browser_activity.owner session)) state.browser_activity_sessions
+
+let put_browser_activity (state : state) session =
+  state.browser_activity_sessions <- session :: List.filter (fun existing ->
+    not (Masc_tui_browser_activity.same_owner (Masc_tui_browser_activity.owner session)
+      (Masc_tui_browser_activity.owner existing))) state.browser_activity_sessions
+
+let shown_browser_activity (state : state) =
+  match state.browser_activity_open, runtime_config_workspace state with
+  | Some owner,Some workspace when owner.Masc_tui_browser_activity.workspace=workspace ->
+    browser_activity_session state owner
+  | None,_ | _,None | Some _,Some _ -> None
+
+let machine_activity_session (state : state) owner =
+  List.find_opt (fun session -> Masc_tui_machine_activity.same_owner owner
+    (Masc_tui_machine_activity.owner session)) state.machine_activity_sessions
+
+let put_machine_activity (state : state) session =
+  state.machine_activity_sessions <- session :: List.filter (fun existing ->
+    not (Masc_tui_machine_activity.same_owner (Masc_tui_machine_activity.owner session)
+      (Masc_tui_machine_activity.owner existing))) state.machine_activity_sessions
+
+let shown_machine_activity (state : state) =
+  match state.machine_activity_open, runtime_config_workspace state with
+  | Some owner,Some workspace when owner.Masc_tui_machine_activity.workspace=workspace ->
+    machine_activity_session state owner
+  | None,_ | _,None | Some _,Some _ -> None
+
+let exact_activity_session (state : state) owner =
+  List.find_opt (fun session -> Masc_tui_exact_activity.same_owner owner
+    (Masc_tui_exact_activity.owner session)) state.exact_activity_sessions
+
+let put_exact_activity (state : state) session =
+  state.exact_activity_sessions <- session :: List.filter (fun existing ->
+    not (Masc_tui_exact_activity.same_owner (Masc_tui_exact_activity.owner session)
+      (Masc_tui_exact_activity.owner existing))) state.exact_activity_sessions
+
+let shown_exact_activity (state : state) =
+  match state.exact_activity_open, runtime_config_workspace state with
+  | Some owner,Some workspace when owner.Masc_tui_exact_activity.workspace=workspace ->
+    exact_activity_session state owner
+  | None,_ | _,None | Some _,Some _ -> None
+
 let runtime_config_edit_session (state : state) =
   match runtime_config_workspace state, state.runtime_config_view with
   | Some workspace, Some reading ->
@@ -9923,6 +10019,27 @@ let visible_memory_keepers (state : state) =
 let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
+
+let apply_memory_health_snapshot (state : state) snapshot =
+  let selected_id =
+    Option.map
+      (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id)
+      (selected_memory_keeper state)
+  in
+  state.memory_health <- Some snapshot;
+  state.memory_health_error <- None;
+  let rows = visible_memory_keepers state in
+  (* A cadence read can change the current sort order. Follow the Keeper the
+     operator was reading, then clamp the old position if that row vanished. *)
+  state.memory_health_cursor <-
+    match Option.bind selected_id (fun keeper_id ->
+      List.find_index
+        (fun keeper ->
+          String.equal keeper.Masc.Tui_decode_memory_health.mkh_keeper_id keeper_id)
+        rows)
+    with
+    | Some index -> index
+    | None -> max 0 (min state.memory_health_cursor (List.length rows - 1))
 
 (* [header_rows] is how many rows the fleet header above the sort row takes,
    and [context_rows] how many the selected keeper's block below the list

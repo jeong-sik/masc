@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { confirmRuntimeTestWorkspace } from './runtime-workspace.test-fixture'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 
 const apiMock = vi.hoisted(() => ({
@@ -71,3 +72,5 @@ describe('runtime catalog resource', () => {
     })
   })
 })
+
+beforeEach(() => { confirmRuntimeTestWorkspace() })

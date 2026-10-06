@@ -182,8 +182,14 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    never ran and every task stayed nonterminal fleet-wide (live incident
    2026-07-21). Converges with the fusion-judge / consolidation /
    board-attention / librarian surfaces above: no wire
-   response format; the tool schema carries the verdict enum SSOT. *)
-let anti_rationalization_reviewer_provider_config = without_response_format
+   response format; the tool schema carries the verdict enum SSOT. Its
+   requests join the verifier lane's admission queue. *)
+let anti_rationalization_reviewer_provider_config provider_cfg =
+  { (without_response_format provider_cfg) with
+    Llm_provider.Provider_config.admission_class =
+      Standalone_lane.admission_class Verifier
+  }
+;;
 
 let for_deterministic_subcall ~max_tokens (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with

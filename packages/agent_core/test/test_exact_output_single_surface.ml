@@ -234,7 +234,7 @@ type single_execution =
   }
 
 let attempt ready =
-  match EO.start_flow ready with
+  match EO.start_flow ~admission_class:Llm_provider.Admission_class.Standard ready with
   | Ok flow -> { flow; receipt = Atomic.make None }
   | Error (EO.Flow_id_generation_failed detail) ->
     failf "exact flow identity allocation failed: %s" detail

@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41194-retained-parent-sync-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/settings-surface.test.ts -t 'actual dispatched|actual unknown|detached token intent'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41194-retained-parent-sync-20261005/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 79 skipped (82)
+   Start at  02:41:21
+   Duration  1.95s (transform 50%, import 32%, environment 9%, setup 7%, tests 3%)
+

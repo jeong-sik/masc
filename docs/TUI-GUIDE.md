@@ -629,7 +629,8 @@ Existing drafts are retained. `&` still opens the machine media menu.
 `d` reads the selected row's full observation; `i` reads inventory diagnostics.
 Both readers scroll, and Esc/Left returns to the list. `o` or `A`, `/addons`, and
 `go Lane Add-ons` keep the full package management surface available. Its `i`
-key opens the existing schema-based installation form; its scope differs from
+key opens the local package browser, followed by package preview and the existing
+schema-based installation form; its scope differs from
 the inventory's diagnostics key. See the [Lane Add-on guide](guides/tui-lane-addons.md).
 
 This inventory does not provide enable/disable controls. Browser registration
@@ -1647,6 +1648,15 @@ expired. A failed refresh leaves the prior reading visible under an explicit
 error instead of redrawing it as an empty result.
 
 ### Memory
+
+저장된 메모리 크기는 기본적으로 추정 토큰(≈)으로 표시한다. `u`로
+토큰과 바이트 단위(B/KiB/MiB)를 전환한다. Keeper를 선택하면 저장량 아래에
+전체 요청 입력의 `avg / max / min / last`도 표시한다. 범위는 최근 50개
+기록된 Keeper 턴이며, 각 턴의 마지막 요청 관측값을 사용한다. 토큰 모드는
+기록된 요청별 입력 토큰(런타임 추정값이 포함될 수 있음), KiB 모드는 별도로 관측한 요청 본문
+크기다. 측정된 표본 수를 함께 표시하며 누락값을 0으로 넣지 않는다.
+마지막 턴이 미보고이면 `last unreported`를 표시한다. `/context`에서
+같은 턴의 세부 구성을 확인할 수 있다.
 
 Keeper별 Memory OS 건강 상태를 한 표로 보여준다. ordinary current
 snapshot과 source-bound snapshot을 별도 열로 표시하며, 각 행은 두 저장소의

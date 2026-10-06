@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 open Alcotest
 module Surface = Masc.Browser_surface
 (* A workspace path nothing creates: these scenarios never reach an installed
@@ -208,6 +211,9 @@ let test_live_read_pins_client_between_hops () =
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
+      let current = ref Browser_lane.Enabled in
+      Browser_lane.install_activity_observer (Some (fun _ -> !current));
+      Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled)));
       let info raw browser : Browser_lane.client_info =
         let client_id = match Browser_lane.client_id_of_string raw with
           | Ok id -> id | Error error -> fail error in
@@ -223,6 +229,7 @@ let test_live_read_pins_client_between_hops () =
         | Ok (Some command) -> command | _ -> fail "selected client command missing" in
       let tabs_command = take first in
       ignore (Browser_lane.take_command ~client_info:second ~window_sec:0.001);
+      current := Browser_lane.Disabled;
       ignore (Browser_lane.deliver_result ~client_id:first.client_id ~id:tabs_command.id
         ~payload:(`Assoc ["ok", `Bool true; "data", `List [tab 1 "https://example.org/first" true]]));
       check bool "new client cannot consume next hop" true
@@ -234,6 +241,8 @@ let test_live_read_pins_client_between_hops () =
           "text", `String "first-owned"; "chars", `Int 11; "truncated", `Bool false]]));
       match Eio.Promise.await pending with
       | Ok (Ok data) ->
+        check bool "new live read is refused after off" true
+          (Result.is_error (Surface.read {route=Browser_lane.Live_route (Some first.client_id);tab_id=Some 1}));
         check bool "reply identifies the original single client" true
           (Yojson.Safe.Util.member "clientId" data = `String (Browser_lane.client_id_to_string first.client_id));
         check bool "page belongs to the pinned browser" true
@@ -266,6 +275,85 @@ let test_keeper_discovers_clients_without_dispatch () =
         (Yojson.Safe.from_string (Tool_result.message result) = data);
       List.iter (fun info -> check bool "no dispatch before explicit selection" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None)) clients))
+
+let test_off_precedes_client_guidance () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let module Lane = Browser_lane in
+      let module Tools = Masc.Tool_misc_browser_lane in
+      let current = ref Lane.Disabled in
+      Lane.install_activity_observer (Some (fun _ -> !current));
+      Eio.Switch.on_release sw (fun () ->
+        Lane.install_activity_observer (Some (fun _ -> Lane.Enabled)));
+      let backend_calls = ref 0 in
+      Lane.install_automation_executor (Some (fun _ ->
+        incr backend_calls; Lane.Refused "backend refused after admission"));
+      Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+      let run_session () = Tools.handle_session ~tool_name:"BrowserSession"
+        ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "automation";"action",`String "open"]) in
+      let run_goto () = Tools.handle_goto ~tool_name:"BrowserGoto"
+        ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "automation";"url",`String "https://example.org/"]) in
+      List.iter (fun run ->
+        match run () with
+        | Tool_result.Failed (failure : Tool_result.failure_payload) -> check bool "off effect is proven pre-effect" true
+            (failure.effect_disposition = Tool_result.Proven_pre_effect)
+        | _ -> fail "off effect was accepted") [run_session; run_goto];
+      check int "off effects never reach backend" 0 !backend_calls;
+      current := Lane.Enabled;
+      (match run_session () with
+       | Tool_result.Failed (failure : Tool_result.failure_payload) -> check bool "backend refusal remains effect-unknown" true
+           (failure.effect_disposition = Tool_result.Effect_outcome_unknown)
+       | _ -> fail "backend refusal was accepted");
+      check int "admitted request reaches backend" 1 !backend_calls;
+      current := Lane.Disabled;
+      let info n : Lane.client_info =
+        let raw = Printf.sprintf "50000000-0000-4000-8000-%012d" n in
+        let client_id = match Lane.client_id_of_string raw with
+          | Ok id -> id | Error detail -> fail detail in
+        {client_id;browser=Lane.Firefox;version="fixture";engine_version="fixture"} in
+      let connect client =
+        ignore (Lane.take_command ~client_info:client ~window_sec:0.001);
+        Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.Lane.client_id)) in
+      let tabs fields = Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
+        ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+      let check_off name result =
+        check bool (name ^ " is a workflow rejection") true
+          (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+        let data = Tool_result.data result in
+        check string (name ^ " reports off before client selection") "browser_lane_off"
+          Yojson.Safe.Util.(data |> member "error" |> to_string);
+        check bool (name ^ " names the activity remedy") true
+          (String_util.contains_substring (Tool_result.message result)
+            "browser.live is off; enable it before issuing new browser work");
+        List.iter (fun key -> check bool (name ^ " has no misleading " ^ key) true
+          (Yojson.Safe.Util.member key data = `Null)) ["host";"clients";"retry"] in
+      let check_requests name fields =
+        check_off (name ^ " tabs") (tabs fields);
+        check_off (name ^ " scene") (Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead"
+          ~start_time:(Tool_timing.start ()) (`Assoc (fields @ ["mode",`String "scene";"tabId",`Int 1])));
+        let result, phase = Tools.handle_interact_with_phase ~base_path:no_workspace ~tool_name:"BrowserInteract"
+          ~start_time:(Tool_timing.start ()) (`Assoc (fields @ ["tabId",`Int 1;"action",`String "click";
+            "selector",`String "a";"expectedUrl",`String "https://example.org/"])) in
+        check bool (name ^ " interaction has no effect") true (phase = Tool_result.Proven_pre_effect);
+        check_off (name ^ " interact") result in
+      let enabled_error fields expected =
+        current := Lane.Enabled;
+        check string "enabled lane retains selection diagnostics" expected
+          Yojson.Safe.Util.(Tool_result.data (tabs fields) |> member "error" |> to_string);
+        current := Lane.Disabled in
+      check_requests "no clients" [];
+      enabled_error [] "no_live_client";
+      let first = info 1 and second = info 2 and stale = info 3 in
+      List.iter connect [first;second;stale];
+      ignore (Lane.disconnect_client ~client_id:stale.client_id);
+      check_requests "multiple clients" [];
+      enabled_error [] "ambiguous_browser_clients";
+      let selected = ["clientId",`String (Lane.client_id_to_string stale.client_id)] in
+      check_requests "stale selected client" selected;
+      enabled_error selected "selected_client_disconnected";
+      List.iter (fun client -> check bool "off requests queued no browser command" true
+        (Lane.take_command ~client_info:client ~window_sec:0.001 = Ok None)) [first;second]))
 
 (* Measured 2026-09-15: a Keeper's BrowserTabs answered only
    {"error":"client_not_connected","clients":[]} for days while the installed
@@ -445,7 +533,42 @@ let test_scoped_scene_acknowledgement () =
       check bool "duplicate scope fields rejected" true (Result.is_error (Masc.Browser_scene.scope_of_json
         (`Assoc ["documentId",`String "fixture";"nodeId",`String "a";"nodeId",`String "b"])))))
 
+let test_compound_read_keeps_admission () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock env#clock;
+    Eio.Switch.run (fun sw ->
+      let current = ref Browser_lane.Enabled in
+      Browser_lane.install_activity_observer (Some (fun _ -> !current));
+      Eio.Switch.on_release sw (fun () ->
+        Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+        Browser_lane.install_automation_executor None;
+        Browser_lane.install_stagehand_executor None);
+      List.iter (fun (route, install) ->
+        current := Browser_lane.Enabled;
+        let calls = ref [] in
+        install (Some (fun verb ->
+          calls := verb :: !calls;
+          match verb with
+          | Browser_lane.Tabs_list ->
+              current := Browser_lane.Disabled;
+              Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`List [
+                `Assoc ["id",`Int 7;"title",`String "accepted";"url",`String "https://example.org/";"active",`Bool true]]])
+          | Browser_lane.Page_read _ -> Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+              "url",`String "https://example.org/";"title",`String "accepted";
+              "text",`String "accepted page";"chars",`Int 13;"truncated",`Bool false]])
+          | _ -> fail "compound read sent a different command"));
+        let request : Surface.request = {route;tab_id=None} in
+        let result = match Surface.read request with Ok value -> value | Error failure -> fail (Surface.failure_message failure) in
+        check string "accepted page survives activity publication between hops" "accepted page"
+          Yojson.Safe.Util.(member "page" result |> member "text" |> to_string);
+        check int "both read phases execute" 2 (List.length !calls);
+        check bool "new read is refused after off" true (Result.is_error (Surface.read request));
+        check int "refused new request sends no command" 2 (List.length !calls))
+        [Browser_lane.Automation_route,Browser_lane.install_automation_executor;
+         Browser_lane.Stagehand_route,Browser_lane.install_stagehand_executor]))
+
 let () = run "browser surface" ["behavior",[
+  test_case "compound read retains its original admission" `Quick test_compound_read_keeps_admission;
   test_case "input correction resumes on the same connected browser" `Quick test_tool_input_recovery;
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
@@ -457,5 +580,6 @@ let () = run "browser surface" ["behavior",[
   test_case "an absent lane names its own setup" `Quick test_absent_lane_names_its_setup;
   test_case "capture target and image identity" `Quick test_capture_identity;
   test_case "Keeper discovers ambiguous clients without dispatch" `Quick test_keeper_discovers_clients_without_dispatch;
+  test_case "off precedes live client guidance" `Quick test_off_precedes_client_guidance;
   test_case "Keeper hears why no browser is connected" `Quick test_keeper_hears_why_no_browser_is_connected;
   test_case "live read pins client across both hops" `Quick test_live_read_pins_client_between_hops]]

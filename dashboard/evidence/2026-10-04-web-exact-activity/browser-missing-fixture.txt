@@ -1,0 +1,26 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
++ [
++   '/api/v1/dashboard/keepers/deletions',
++   '/api/v1/dashboard/keepers/deletions'
++ ]
+- []
+
+    at file:///Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard/evidence/2026-10-04-web-exact-activity/browser-fixture.mjs:99:37 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: [
+    '/api/v1/dashboard/keepers/deletions',
+    '/api/v1/dashboard/keepers/deletions'
+  ],
+  expected: [],
+  operator: 'deepStrictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.3.0

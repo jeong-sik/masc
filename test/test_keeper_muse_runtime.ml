@@ -752,7 +752,6 @@ is-non-interactive = true
 [models.fixture]
 api-name = "muse-fixture-1"
 max-context = 200000
-max-prompt-bytes = 1048576
 
 [muse_fixture.fixture]
 
@@ -817,8 +816,7 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
     Keeper_muse_runtime.run
       ?composed_context
       ~prompt_capacity:
-        (Option.to_result ~none:Runtime_muse_prompt_capacity.No_window_declared
-           (Runtime_inference.resolve_max_prompt_bytes ~runtime_id))
+        (Runtime_muse_prompt_capacity.start_prompt_bytes ~max_context:(Some 200_000))
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
       ~turn_timeout_s:(Runtime_inference.resolve_turn_timeout_s ~runtime_id)
       ~quota_scope:(Runtime_quota_window.scope_of_muse_home selected_home)
@@ -1117,7 +1115,6 @@ is-non-interactive = true
 [models.fixture]
 api-name = "muse-fixture-1"
 max-context = 200000
-max-prompt-bytes = 1048576
 reasoning-effort = "high"
 turn-timeout-s = 0
 tools-support = true
@@ -1196,6 +1193,26 @@ default = "reloaded.reloaded"
   check int "routed second durable ordinal" 2 second_count
 ;;
 
+(* What the operator surface holds for [scope]: source, window kind, used
+   percent and reset (epoch seconds), sorted. *)
+let recorded_usage_windows scope =
+  let module Usage = Runtime_provider_usage_window in
+  match Usage.state ~scope with
+  | Usage.Not_reported_since_start | Usage.Reported_no_windows _ -> []
+  | Usage.Reported (first, rest) ->
+    List.map (fun (recorded : Usage.recorded) ->
+        let kind = match recorded.window.kind with
+          | Usage.Five_hour -> "5h" | Usage.Seven_day -> "7d"
+          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" minutes
+          | Usage.Provider_label label -> label in
+        let percent = match recorded.window.utilization with
+          | Usage.Percent percent -> percent
+          | Usage.Fraction _ | Usage.Usd _ -> -1 in
+        Printf.sprintf "%s %s %d%% resets=%d" (Usage.source_to_string recorded.source) kind
+          percent (Option.value recorded.window.resets_at ~default:0))
+      (first :: rest)
+    |> List.sort String.compare
+
 let test_subscription_exhaustion_is_account_scoped () =
   with_scripted_host (fun ~base_path ->
     Runtime_quota_window.reset_for_testing ();
@@ -1209,6 +1226,10 @@ let test_subscription_exhaustion_is_account_scoped () =
      | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
     check (option (float 0.)) "successful turn retains latest provider reset" (Some 900.)
       (Runtime_quota_window.active_until ~scope ~now:100.);
+    check (list string) "the turn's usage/changed reaches the operator surface"
+      [ "muse.usage_changed 5min 100% resets=500"; "muse.usage_changed 7d 101% resets=900" ]
+      (recorded_usage_windows scope);
+    check (list string) "another account records nothing" [] (recorded_usage_windows other);
     check bool "another selected account stays available" false
       (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
     let same_account = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
@@ -1267,6 +1288,9 @@ let test_muse_usage_read_rests_only_the_selected_account () =
        | Error detail -> fail detail);
       check (option (float 0.)) "weekly reset recorded from usage/read"
         (Some 900.) (Runtime_quota_window.active_until ~scope ~now:100.);
+      check (list string) "usage/read reaches the operator surface"
+        [ "muse.usage_read 5min 20% resets=500"; "muse.usage_read 7d 101% resets=900" ]
+        (recorded_usage_windows scope);
       check bool "different account remains dispatchable" false
         (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
       check bool "no model session was started" false

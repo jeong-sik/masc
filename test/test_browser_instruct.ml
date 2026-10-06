@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* BrowserInstruct through a fake Stagehand executor: which verb a call
    becomes, what reaches the lane, and whether a failure may have acted. *)
 open Alcotest

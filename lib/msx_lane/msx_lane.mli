@@ -78,6 +78,8 @@ val entry_json : entry -> Yojson.Safe.t
     refusal that took no effect. An exception is not an [error]: a ledger
     append that raises mid-press may already have run frames. *)
 type error =
+  | Activity_disabled
+  | Activity_unobserved
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
   | Unreadable of string
@@ -86,6 +88,14 @@ type error =
           the caller named it. *)
 
 val error_to_string : error -> string
+
+val install_activity_observer : (unit -> Machine_configuration.activity) option -> unit
+(** Install the published Runtime observer. [None] means unobserved, so new
+    execution is refused. Installation never changes the machine itself. *)
+val activity : unit -> Machine_configuration.activity
+(** Lock-free activity reading. New execution is admitted once at entry; already
+    admitted work finishes even if activity changes while it waits/runs.
+    Inspection, checkpoint saving, eject and controller release remain available. *)
 
 val frames_per_second : int
 (** The machine's frame rate, 60 (NTSC). The one number a caller multiplies

@@ -73,6 +73,40 @@ before another pointer action can execute.
 
 See [setup and Keeper usage](../design/browser-lane-examples.md).
 
+All Lanes displays each Browser backend's activity separately from its live
+connections or registered executor. Off rejects new reads and actions while
+preserving accepted work and sessions; server session status and close remain
+available. Activity follows validated Runtime configuration saves. Executable,
+extension and profile paths apply at server startup, including when a previously
+unconfigured backend is added. See [backend activity settings](../design/browser-lane-examples.md#backend별-활동-설정)
+for the current Runtime TOML editing workflow and restart requirements.
+
+From All Lanes, select a Browser row and press `Space` to edit its activity.
+`Space` changes the retained draft; `s` previews and saves against the file
+revision you read. `r` reads current settings, `u` reapplies only your activity
+choice after a conflict, `x` discards it, and `Esc` returns with the draft kept.
+These drafts belong to the workspace and backend. A changed configuration path
+requires discarding the old draft before editing the new file. Opening, toggling
+or leaving the screen never saves. A successful save rereads both the file and
+Lane inventory. Saving Automation activity moves existing flat `geckodriver` and
+`binary` paths under `[browser]` into `[browser.automation]`. Saving Live or
+Stagehand activity leaves those paths where they are. Inline/dotted forms that
+cannot be preserved by the line editor require the Runtime source editor.
+
+The Web All Lanes detail offers the same explicit activity draft/save flow via
+**활동 설정 열기** and **활동 설정 저장**. It keeps its draft across navigation,
+leaves the raw Runtime editor's draft intact, and rereads file and inventory after
+save. A file conflict requires explicit activity-only reapplication; a changed
+file path requires discarding the old draft. Enabling an unconfigured backend
+does not install its executor. See the linked backend settings guide for Web
+TOML editing and path migration limits.
+
+The Web activity editor reads decoded Browser TOML paths directly. Unrelated
+provider names are preserved as data, including names such as `__proto__`.
+Unknown Browser backend/field names and non-boolean activity values are shown
+as errors. Absolute-path and required-path-pair validation remains part of the
+server preview before saving; it does not check whether an executor is installed.
+
 ## Verification
 
 `test/test_browser_surface.ml` covers page selection, empty browsers and failures.

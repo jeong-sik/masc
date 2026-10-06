@@ -58,6 +58,7 @@ type SurfaceSectionId =
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
   | 'lane-addons'
+  | 'lane-inventory'
   | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
   | 'skills' // SKILL.md catalog keepers load at turn start, with usage (RFC skills-as-tools §2.6).
   // command
@@ -365,6 +366,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'skills' },
     },
     {
+      id: 'lane-inventory',
+      label: 'All Lanes',
+      description: 'Built-in Lanes, package declarations and manual workers.',
+      params: { section: 'lane-inventory' },
+    },
+    {
       id: 'lane-addons',
       label: 'Lane Add-ons',
       description: 'Optional cross-lane observations and relationships.',
@@ -574,6 +581,9 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
+  // Target identity only belongs to these receiver surfaces. Ordinary
+  // navigation must not carry an old Lane selection into an unrelated screen.
+  if (tabId !== 'monitoring' || !['runtime', 'lane-addons', 'internal-agents'].includes(next.section ?? '')) delete next.lane_target
   const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
 
   if (tabId === 'settings') {

@@ -1,0 +1,21 @@
+Testing `Browser activity'.
+This run has ID `VBNDPDAV'.
+
+  [OK]          configuration          0   paths retained and accepting locat...
+  [OK]          configuration          1   both automation locations.
+  [OK]          configuration          2   flat binary and nested driver.
+  [OK]          configuration          3   wrong flag type.
+  [OK]          configuration          4   unknown backend key.
+  [OK]          configuration          5   wrong table type.
+  [OK]          configuration          6   stray browser key.
+  [OK]          configuration          7   relative path even when off.
+  [OK]          configuration          8   partial stagehand even when off.
+  [OK]          configuration          9   stagehand empty table.
+  [OK]          admission              0   off precedes selection.
+  [OK]          admission              1   off precedes preselected stale cli...
+  [OK]          admission              2   off and unavailable keep status/cl...
+  [OK]          admission              3   accepted automation request finishes.
+  [OK]          admission              4   accepted live request survives off.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-parent-sync-20261005/_build/_tests/Browser activity'.
+Test Successful in 0.007s. 15 tests run.

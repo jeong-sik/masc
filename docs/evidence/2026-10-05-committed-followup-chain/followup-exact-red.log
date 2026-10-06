@@ -1,0 +1,39 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+
+ ❯ src/components/exact-lane-activity-panel.test.ts (39 tests | 1 failed) 744ms
+   ❯ Exact activity operator flow (30)
+     × keeps a verified durable receipt certain when authority changes during follow-up 55ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > keeps a verified durable receipt certain when authority changes during follow-up
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:117:43
+    115|     await waitFor(() => expect(session.state.value.receipt?.commit.dur…
+    116|     workspace('/fixture/B')
+    117|     expect(session.state.value.uncertain).toBe(false)
+       |                                           ^
+    118|     expect(session.state.value.current).toBeNull()
+    119|     expect(session.state.value.receipt?.commit.durability).toBe('durab…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 38 passed (39)
+   Start at  04:49:12
+   Duration  2.55s (tests 31%, import 28%, transform 25%, environment 8%, setup 8%)
+
+ ELIFECYCLE  Test failed. See above for more details.

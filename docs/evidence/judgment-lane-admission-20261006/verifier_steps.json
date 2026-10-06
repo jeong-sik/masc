@@ -1,0 +1,107 @@
+{
+  "window": {
+    "since": 1791176400.0,
+    "until": 1791262800.0
+  },
+  "outcomes": {
+    "rejected": 82,
+    "approved": 100,
+    "infrastructure_unavailable": 4,
+    "not_reviewed": 2
+  },
+  "by_runtime": {
+    "claude_code.claude-sonnet-5-5-medium": {
+      "elapsed_s": {
+        "n": 117,
+        "p50": 921.0,
+        "p90": 931.2
+      },
+      "tool_s": {
+        "n": 117,
+        "p50": 5.7,
+        "p90": 19.6
+      },
+      "first_tool_s": {
+        "n": 117,
+        "p50": 230.7,
+        "p90": 518.5
+      },
+      "model_steps": {
+        "n": 117,
+        "p50": 5,
+        "p90": 9
+      },
+      "step_gap_s": {
+        "n": 583,
+        "p50": 109.4,
+        "p90": 267.0
+      }
+    },
+    "glm-coding.glm-5.3-flash": {
+      "elapsed_s": {
+        "n": 65,
+        "p50": 650.8,
+        "p90": 839.8
+      },
+      "tool_s": {
+        "n": 65,
+        "p50": 3.6,
+        "p90": 18.6
+      },
+      "first_tool_s": {
+        "n": 65,
+        "p50": 182.7,
+        "p90": 381.7
+      },
+      "model_steps": {
+        "n": 65,
+        "p50": 3,
+        "p90": 7
+      },
+      "step_gap_s": {
+        "n": 200,
+        "p50": 110.5,
+        "p90": 243.4
+      }
+    },
+    "None": {
+      "elapsed_s": {
+        "n": 4,
+        "p50": 0.0,
+        "p90": 0.0
+      },
+      "tool_s": {
+        "n": 4,
+        "p50": 0.0,
+        "p90": 0.0
+      }
+    },
+    "ollama_cloud.ollama-cloud-deepseek-v4-1-flash": {
+      "elapsed_s": {
+        "n": 2,
+        "p50": 1479.3,
+        "p90": 1608.9
+      },
+      "tool_s": {
+        "n": 2,
+        "p50": 6.9,
+        "p90": 8.0
+      },
+      "first_tool_s": {
+        "n": 2,
+        "p50": 135.2,
+        "p90": 185.8
+      },
+      "model_steps": {
+        "n": 2,
+        "p50": 10.0,
+        "p90": 10
+      },
+      "step_gap_s": {
+        "n": 18,
+        "p50": 144.9,
+        "p90": 235.3
+      }
+    }
+  }
+}

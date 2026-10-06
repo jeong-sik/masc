@@ -45,6 +45,31 @@ let test_one_credit_per_goal () =
     (Candle_balance.balance before ~keeper:"keeper");
   check int "unmentioned Keeper has zero credit" 0
     (Candle_balance.balance before ~keeper:"other")
+(* The boundary is the whole balance: one milli-candle more is refused with
+   the exact amounts, the whole balance is spendable, and a stored overspend
+   does not replay. *)
+let test_a_purchase_beyond_the_balance_is_refused () =
+  let funded = row (payment "funded" 1000) in
+  let credited = state [funded] in
+  let item = match Keeper_portrait_item.of_id "crown" with
+    | Some item -> item | None -> fail "catalog fixture missing" in
+  (match Candle_balance.purchase credited ~at:now ~keeper:"keeper" ~item ~amount_milli:1001 with
+   | Error (Candle_balance.Insufficient_balance {keeper; available_milli; required_milli}) ->
+     check string "refused wallet" "keeper" keeper;
+     check int "available amount" 1000 available_milli;
+     check int "required amount" 1001 required_milli
+   | Ok _ | Error _ -> fail "an overspend was accepted");
+  (match Candle_balance.purchase credited ~at:now ~keeper:"other" ~item ~amount_milli:1 with
+   | Error (Candle_balance.Insufficient_balance {available_milli = 0; _}) -> ()
+   | Ok _ | Error _ -> fail "a wallet with no credit bought an item");
+  let spent = match Candle_balance.purchase credited ~at:now ~keeper:"keeper" ~item ~amount_milli:1000 with
+    | Ok state -> state | Error error -> fail (Candle_balance.error_to_string error) in
+  check int "the whole balance can be spent" 0 (Candle_balance.balance spent ~keeper:"keeper");
+  let overspend : Candle_event.t =
+    {at=now;body=Candle_event.Purchased {keeper="keeper";item;amount_milli=1001}} in
+  (match Candle_balance.of_events ~at:now [policy; funded; overspend] with
+   | Error (Candle_balance.Insufficient_balance {required_milli = 1001; _}) -> ()
+   | Ok _ | Error _ -> fail "a stored overspend was replayed")
 let test_supply_tracks_actual_currency () =
   let paid = payment ~deduction_rate:500 ~overdue_hours:1 "deducted" 1001 in
   let credited = state [row paid] in
@@ -167,6 +192,7 @@ let test_policy_clock_before_first_wallet () =
 let () = run "candle_balance"
   ["ledger credits", [test_case "serialized payments cannot overflow a balance" `Quick test_cumulative_credit_boundary;
     test_case "a Goal is credited once" `Quick test_one_credit_per_goal;
+    test_case "a purchase beyond the balance is refused" `Quick test_a_purchase_beyond_the_balance_is_refused;
     test_case "deduction and purchases conserve actual currency" `Quick test_supply_tracks_actual_currency;
     test_case "aggregate supply exceeds machine integer without wrapping" `Quick test_supply_above_machine_integer;
     test_case "recorded half-life changes preserve purchases and supply" `Quick test_historical_half_life_controls_purchase_and_supply;

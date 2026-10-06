@@ -1,0 +1,39 @@
+{
+  "scope": "Readback of existing Pyright reports; no typecheck rerun for this record.",
+  "reports": {
+    "baseline": {
+      "source_log": "/tmp/pr40996-baseline-pyright.json",
+      "source_log_sha256": "bfdf9090120359cf2b8658acf96e86952eec1c8dd029c4069b6e3b49e7cf7455",
+      "summary": {
+        "filesAnalyzed": 2,
+        "errorCount": 63,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.382
+      }
+    },
+    "final_health_barrier": {
+      "source_log": "/tmp/pr40996-health-barrier-pyright.json",
+      "source_log_sha256": "2a24803f1e95c9a5fa0318cb70c1edc96385cc0a2f91bfc4941bbc95475a0b8b",
+      "summary": {
+        "filesAnalyzed": 2,
+        "errorCount": 63,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.339
+      }
+    }
+  },
+  "diagnostic_identity_multiset_equal": true,
+  "comparison_fields": [
+    "file basename",
+    "severity",
+    "message",
+    "rule"
+  ],
+  "excluded_from_comparison": [
+    "absolute worktree path",
+    "source line and column positions"
+  ],
+  "type_clean": false
+}

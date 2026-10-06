@@ -931,6 +931,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          (server_routes_http_routes_frontend.ml wraps GET and POST /graphql in
          [with_read_auth]). /graphql is not in [is_public_read_path], so an
          unauthenticated caller must be rejected on either transport. *)
+      | `GET, (("/api/v1/lane-addons/package-catalog" | "/api/v1/lane-addons/package-preview") as package_path) ->
+          with_h2_read_auth h2_reqd (fun state ->
+            let module Packages = Server_routes_http_routes_lane_addons in
+            let fields = Packages.query_fields httpun_request in
+            let result = match package_path with
+              | "/api/v1/lane-addons/package-catalog" -> Packages.package_catalog_payload state fields
+              | _ -> Packages.package_preview_payload state fields in
+            match result with
+            | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+            | Error detail -> h2_respond_json_value h2_reqd
+                (`Assoc ["error",`String detail]) ~status:`Bad_request ~extra_headers:cors)
+
       | `GET, "/graphql" ->
           with_h2_read_auth h2_reqd (fun _state ->
             let nonce = fresh_graphql_csp_nonce () in

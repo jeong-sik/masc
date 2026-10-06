@@ -1,0 +1,19 @@
+{
+  "qualified_commit": "d2f4abc712164a92430d22e66ae583550e7af029",
+  "source_sha256": {
+    "lib/server/server_runtime_bootstrap.ml": "4c50bd59118b5f1054f5f5fee329f9f1478fea9f40bcc77c8ea3ec68d81607a5",
+    "lib/server/server_machine_configuration.ml": "4ea09808c6e5e1d7142670f352cab4fa250397fdb0bf2d61b7078bbe1b9fdad7",
+    "test/test_stdio_machine_activity.py": "5d6ae7cbe993f2a5313038314425fdfd2df4a7b059b749980e09919105d05f26",
+    "test/test_stdio_browser_activity.py": "bf8d1a96cfbb987f31a9f78b917e02d9bd3a6bced49349d376eac566038604a9",
+    "test/stanzas/test_browser_activity.inc": "bf65329ce7e287bd7fc1a6f7067cc3628e63deffdf730aa300a74c61c70c3a64"
+  },
+  "binary_sha256": "ff5bb94d207458aaf81d0eb2d0ee4e6e409c4f42748313a48d390ee9fbd3d87e",
+  "raw_sha256": {
+    "stdio-aliases.log": "685e863819866a8f01c6a70f36203b8efb0a45abdf2e2ea9a01c8e18df30ab5e"
+  },
+  "cases": {
+    "browser": 2,
+    "machine": 4
+  },
+  "exit": 0
+}

@@ -1,0 +1,28 @@
+{
+  "baseline": "690424d085919671eacc0ccfac0400d16695103c",
+  "comment": 4179320113,
+  "red": [
+    "inventory dispatched after document changed workspace",
+    "mixed-workspace document accepted"
+  ],
+  "focused_build_exit": 0,
+  "green_pty_scenarios": 5,
+  "pyright_errors": 0,
+  "ruff_exit": 0,
+  "source_sha256": {
+    "bin/masc_tui.ml": "781b4429049a3f7bb338cf9afad5c41fc0c55252c6e2a6de3e18824f7b1c6517",
+    "test/test_tui_machine_activity_pty.py": "2e6b153652782b0f87572f6d23a2b4959176f296e4c7da288337678651a30e67"
+  },
+  "raw_sha256": {
+    "pr41201-boundary-red-build.log": "08781d7867e09a5e8ba1be953d407cd2eba74f8690f1746a79f6395ac8e8c500",
+    "pr41201-boundary-red.log": "82f4659dfddf7280212f423893eae225c60d6d00438a9a63aa2516be11fd0b4c",
+    "pr41201-boundary-red2.log": "f9cd50ab6efdd4ee30082f0d84ff7097ffa6b4c00c240c508ecb6694d3f717d7",
+    "pr41201-boundary-inventory-red.log": "f926ed12fa192cbd0e95f77ac2baa42d8009027fbe8ed265e2fb97d7c6803758",
+    "pr41201-boundary-green-build.log": "75d52f5b0bf3f358c6d5a2b9c298a46a2bb222a0e9631688a6481962b267a6b6",
+    "pr41201-boundary-green-pty.log": "3ba846e90df674f6a66a3acd24ca93fa15f6913265e9db77ebd3894e677aea60",
+    "pr41201-boundary-green-final.log": "3ba846e90df674f6a66a3acd24ca93fa15f6913265e9db77ebd3894e677aea60",
+    "pr41201-boundary-ruff-final.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pr41201-boundary-pyright-clean.json": "19c21f5d5aa0dc707825f9bcd0b65744fcadd8163a1ee750dd9f69d1c031326d"
+  },
+  "binary_sha256": "acc38c595017a3e719936082db25c115f22b23c1bb44d3bcaaf62cd9c5a01065"
+}

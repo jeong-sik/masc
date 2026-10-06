@@ -1,0 +1,11 @@
+{
+  "lib/runtime/runtime_exact_output_registry.ml": "731c3eec18a0a32d08d517c3cb00775552d728eeb6a9945605e72fe646d03d76",
+  "lib/runtime/runtime_exact_output_registry.mli": "8ae8d803cfc0e7e0668639a6466badfd9d41f3f6c388c5f4720d91cd53b53a1e",
+  "lib/server/server_workspace_memory_curator.ml": "2718efc63340f9af476b92e7234522ae1dfebfcef4cf5b8a520e62ad53ab1a9c",
+  "lib/server/server_workspace_memory_curator.mli": "e8c42c4a75c2b6a44e49481d2e70e6545bccdc63719b0807f149a17c88ce8657",
+  "test/test_exact_output_catalog_precedence.ml": "eaf82b64d1ca097632e51d8fd028155d0156013cac2f4958c8e2142ccf3a00db",
+  "test/test_exact_output_catalog_precedence_fixture.ml": "7bc60a91d30f8084ebe174ef9e107a0bbac6c651dc116c64190fcd11eb1b33cd",
+  "test/test_workspace_memory_curator_lane.ml": "e5ebff45d9e8a6a20b23217f28489120f562588919ba6ec8fd43d6e3f3354997",
+  "docs/guides/exact-lane-activity.md": "af4482784c18763bc3b39fee2e8e6d8904175beab0d8d7ede64e4f46e1e1bd04",
+  "docs/evidence/2026-10-04-curator-activity-resume/check-source.py": "97a01034b754d9057724bbaea180d8b2ca6323ac969c8223319d18f939d4a0a1"
+}

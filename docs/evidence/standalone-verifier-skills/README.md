@@ -1,17 +1,19 @@
 # Standalone verifier Skills
 
-Task and Goal verifiers now receive the existing `keeper_skill` tool when the
-workspace has published readable instruction Skills. The tool advertises the
-workspace's instruction catalog so each verifier can choose a relevant procedure
-and load its body or bundled reference on demand. There is no role-name heuristic,
-new preset, new environment variable, or duplicate Skill parser. The bundled
-`skills/evidence-review/SKILL.md` provides a concrete verification procedure; the
-existing embedded-skill seeder installs it as a missing package while preserving
-operator edits.
+Task and Goal verifiers do NOT receive the `keeper_skill` tool. Both verifiers
+take their tools only from `Verification_authority_tools` (`tool_read_file`,
+`tool_search_files`, `masc_web_fetch`, `masc_board_post_get`,
+`masc_fusion_status`), which has no Skill entry. `Standalone_skill_tools`
+advertises a workspace instruction catalog as `keeper_skill` for standalone
+tool-using agents and is covered by `test_standalone_skill_tools`, but no
+production verifier calls it. The bundled `skills/evidence-review/SKILL.md`
+and the acceptance record below describe that standalone tooling, not
+verifier behavior.
 
-The new connection is:
+How the standalone Skill tooling connects (not wired into the verifiers):
 
-1. The shared Task/Goal reviewer hook reads the published workspace snapshot.
+1. The caller reads the published workspace snapshot (`for_workspace` /
+   `of_snapshot`; currently only tests call these).
 2. `Standalone_skill_tools` projects instruction entries using the same helper as
    Keeper's executable and advertised tool surfaces.
 3. `run_named_with_masc_tools` preserves these native Agent-Core tools alongside
@@ -84,10 +86,10 @@ return the exact complete fixture content and path, with no truncation. A correc
 Skill use does not pass this workflow probe. This tests Goal proof through the
 shared reviewer, not Task submission, every standalone role, or production quality.
 
-`python3 test/test_standalone_verifier_skill_acceptance.py` exercises receipt
-validation locally. These tests reject unrelated runs, failed reads of existing fixtures,
-missing Skill use, other files, other Skills and duplicate verdicts. They exercise
-the receipt checker, not a model. The first real-model receipt is [recorded here](20260909/README.md).
+Receipt validation for this workflow was exercised by
+`test/test_standalone_verifier_skill_acceptance.py`, which no longer exists in
+the tree; no current test covers the acceptance receipt checker. The first
+real-model receipt is still [recorded here](20260909/README.md).
 
 The first release build also found a stale `report_review_verdict` parameter
 golden from the preceding role-prompt change. The one changed line in

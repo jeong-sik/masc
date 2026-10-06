@@ -85,6 +85,8 @@ type t =
   ; previous_response_id : string option
   ; connect_timeout_s : float option
   ; max_concurrent_requests : int option
+  ; admission_priority_run_limit : int option
+  ; admission_class : Admission_class.t
   }
 
 let make
@@ -127,6 +129,8 @@ let make
       ?previous_response_id
       ?connect_timeout_s
       ?max_concurrent_requests
+      ?admission_priority_run_limit
+      ?(admission_class = Admission_class.Standard)
       ()
   =
   let request_path =
@@ -187,6 +191,8 @@ let make
   ; previous_response_id
   ; connect_timeout_s
   ; max_concurrent_requests
+  ; admission_priority_run_limit
+  ; admission_class
   }
 ;;
 

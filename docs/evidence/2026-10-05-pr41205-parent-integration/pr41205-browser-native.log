@@ -1,0 +1,10 @@
+Testing `Local package discovery and selection'.
+This run has ID `7K7UGIA3'.
+
+  [OK]          journeys          0   discover actual directory with explicit...
+  [OK]          journeys          1   never load manifests outside workspace.
+  [OK]          journeys          2   folder to package selection and existin...
+  [OK]          journeys          3   all entries reachable in a short terminal.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41205-parent-integration-20261005/_build/_tests/Local package discovery and selection'.
+Test Successful in 0.002s. 4 tests run.

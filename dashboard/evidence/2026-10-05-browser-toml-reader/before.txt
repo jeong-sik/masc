@@ -1,0 +1,110 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-browser-activity-toml-reader-20261005/dashboard
+
+ ❯ src/lib/browser-lane-activity.test.ts (39 tests | 15 failed) 1207ms
+   ❯ Browser activity TOML boundaries (28)
+     × refuses invalid Browser structure: [[browser.live]] 2ms
+     × refuses invalid Browser structure: [browser.stagehand]
+enabled=0 0ms
+     × refuses invalid Browser structure: [browser.live.enabled] 0ms
+     × refuses invalid Browser structure: [browser]
+geckodriver=42 0ms
+     × refuses invalid Browser structure: [browser.other] 0ms
+     × refuses invalid Browser structure: [browser.live]
+other=true 0ms
+   ❯ Browser prototype isolation (11)
+     × does not mutate or inherit keys: [__proto__.browser.automation]
+enabled=… 149ms
+     × does not mutate or inherit keys: __proto__.browser.live.enabled=false 103ms
+     × does not mutate or inherit keys: [providers.__proto__]
+base_url="https:/… 105ms
+     × does not mutate or inherit keys: [browser.__proto__]
+enabled=false 106ms
+     × does not mutate or inherit keys: [browser]
+__proto__=true 104ms
+     × does not mutate or inherit keys: [browser.automation]
+__proto__=true 102ms
+     × does not mutate or inherit keys: [browser.automation.__proto__]
+enabled=… 109ms
+     × does not mutate or inherit keys: [browser.constructor]
+enabled=false 104ms
+     × does not mutate or inherit keys: [browser.live]
+toString=false 106ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser activity TOML boundaries > refuses invalid Browser structure: [[browser.live]]
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser activity TOML boundaries > refuses invalid Browser structure: [browser.stagehand]
+enabled=0
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser activity TOML boundaries > refuses invalid Browser structure: [browser.live.enabled]
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser activity TOML boundaries > refuses invalid Browser structure: [browser]
+geckodriver=42
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser activity TOML boundaries > refuses invalid Browser structure: [browser.other]
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser activity TOML boundaries > refuses invalid Browser structure: [browser.live]
+other=true
+AssertionError: expected [Function] to throw an error
+ ❯ src/lib/browser-lane-activity.test.ts:53:61
+     51|     '[browser.other]', '[browser.live]\nother=true',
+     52|   ])('refuses invalid Browser structure: %s', source => {
+     53|     expect(() => readBrowserActivity(source, 'automation')).toThrow()
+       |                                                             ^
+     54|     expect(() => writeBrowserActivity(source, 'automation', false)).to…
+     55|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [__proto__.browser.automation]
+enabled=…
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: __proto__.browser.live.enabled=false
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [providers.__proto__]
+base_url="https:/…
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [browser.__proto__]
+enabled=false
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [browser.automation.__proto__]
+enabled=…
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/lib/browser-lane-activity.test.ts:93:30
+     91|     const result = JSON.parse(execFileSync(process.execPath,
+     92|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     93|     expect(result.unchanged).toBe(true)
+       |                              ^
+     94|     expect(result.empty).toEqual(Array.from({ length: 3 }, () => ({ va…
+     95|     if (rejects) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [browser]
+__proto__=true
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [browser.automation]
+__proto__=true
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [browser.constructor]
+enabled=false
+ FAIL  src/lib/browser-lane-activity.test.ts > Browser prototype isolation > does not mutate or inherit keys: [browser.live]
+toString=false
+AssertionError: expected undefined to be type of 'string'
+
+Expected: "string"
+Received: "undefined"
+
+ ❯ src/lib/browser-lane-activity.test.ts:96:33
+     94|     expect(result.empty).toEqual(Array.from({ length: 3 }, () => ({ va…
+     95|     if (rejects) {
+     96|       expect(result.read.error).toBeTypeOf('string'); expect(result.wr…
+       |                                 ^
+     97|     } else {
+     98|       expect(result.read).toEqual({ value: { enabled: true } })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  15 failed | 24 passed (39)
+   Start at  03:54:59
+   Duration  1.75s (tests 74%, environment 12%, setup 11%, transform 3%)

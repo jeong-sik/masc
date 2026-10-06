@@ -1,0 +1,12 @@
+Focused TUI build: PASS
+Ruff: PASS
+Pyright: 0 errors
+Before candidate: expected failure, unread row counts absent
+Usage studio PTY: PASS (6 journeys)
+Coverage narrow PTY: PASS (60/80/120 columns, short scrolling)
+BROWSER_PTY_FRAME_MATCH=PASS keeper-comparison-wide
+BROWSER_PTY_FRAME_MATCH=PASS keeper-comparison-compact
+BROWSER_PTY_FRAME_MATCH=PASS keeper-comparison-bottom
+BROWSER_PTY_FRAME_MATCH=PASS keeper-comparison-wide-before
+Live current Keeper snapshot candidate replay: PASS
+Broader surface audit: FAIL at narrow Work done=15 absent; tracked#40947, not a coverage regression. Workspace/System journeys not reached.

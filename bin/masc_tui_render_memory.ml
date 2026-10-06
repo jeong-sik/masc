@@ -10,6 +10,7 @@ module Terminal_text = Masc_tui_ansi.Terminal_text
 module Theme = Masc_tui_ansi.Theme
 module Rows = Masc_tui_rows
 module Memory_category = Masc.Keeper_memory_os_types
+module Memory_usage = Masc_tui_memory_usage
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -112,13 +113,23 @@ let memory_updated_text = function
   | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
-(* Stored JSON bytes are not model input and cannot establish a token count.
-   The Context inspector carries observed per-turn prompt block bytes. *)
+(* The health endpoint renders stored knowledge as text, excluding snapshot
+   bookkeeping. Its token size is an estimate, never a provider input count. *)
 let storage_size bytes =
   if bytes >= 1024 * 1024 then Printf.sprintf "%.1f MiB" (float bytes /. 1048576.)
   else if bytes >= 1024 then Printf.sprintf "%.1f KiB" (float bytes /. 1024.)
   else Printf.sprintf "%d B" bytes
 ;;
+let stored_size unit bytes =
+  match unit with
+  | Memory_usage.Tokens ->
+      Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
+  | Memory_usage.Bytes -> storage_size bytes
+
+let stored_amount unit bytes =
+  stored_size unit bytes
+  ^ (match unit with Memory_usage.Tokens -> " tok" | Memory_usage.Bytes -> "")
+
 (* One break, and no more. The block sits under the list and is paid for out
    of the same frame, so a reading never takes more than two rows. At a
    terminal wide enough to draw the roster, the Librarian row and an alert
@@ -162,6 +173,37 @@ let clause_rows ~cols clauses =
     [ indent ^ first; fold ^ last ]
   | rows -> List.map (fun row -> indent ^ row) rows
 
+let memory_input_lines ~cols ~unit reading =
+  let wrap clauses =
+    Message_layout.pack_clauses ~max_cells:(max 1 (framed_inner_width cols - 2)) clauses
+    |> List.map (fun row -> "  " ^ row)
+  in
+  let label, format = match unit with
+    | Memory_usage.Tokens -> "Input tok", (fun value -> Message_layout.compact_count (int_of_float (Float.round value)))
+    | Memory_usage.Bytes -> "Request KiB", (fun value -> Printf.sprintf "%.1f" (value /. 1024.))
+  in
+  let values (snapshot : Memory_usage.t) =
+    let measured = match unit with
+      | Memory_usage.Tokens -> snapshot.tokens
+      | Memory_usage.Bytes -> snapshot.bytes in
+    let avg, maximum, minimum, samples = match measured.distribution with
+      | None -> "unreported", "unreported", "unreported", 0
+      | Some d -> format d.mean, format (float d.maximum), format (float d.minimum), d.samples in
+    let last = match measured.last with None -> "unreported" | Some n -> format (float n) in
+    wrap [label; "avg " ^ avg; "max " ^ maximum; "min " ^ minimum; "last " ^ last]
+    @ wrap
+        [ Printf.sprintf "Recent %d recorded turns" snapshot.records
+        ; Printf.sprintf "%d/%d recorded" samples snapshot.records
+        ; (match unit with Memory_usage.Tokens -> "input may include runtime estimates" | Memory_usage.Bytes -> "serialized body")
+        ]
+  in
+  match reading with
+  | Masc_tui_fetched.Absent | Loading -> wrap [label ^ ": loading"]
+  | Failed detail -> wrap [label ^ ": " ^ Terminal_text.single_line detail]
+  | Ready snapshot -> values snapshot
+  | Stale (snapshot, detail) ->
+      wrap [label ^ ": stale · " ^ Terminal_text.single_line detail] @ values snapshot
+
 (* #39831: what the block under the selected keeper draws before the operator
    asks for detail. The operator's first question is whether this keeper's
    memory can be used now and whether there is something to do; the ledger
@@ -200,14 +242,24 @@ let shown_by_default kind =
 
 type memory_context_projection =
   { rows : string list
+  ; primary_rows : int
   ; stalled_row : (int * string) option
   }
 
-let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let input_rows = memory_input_lines ~cols ~unit input in
+  let stored_rows =
+    match k.mkh_read_error, k.mkh_source_read_error with
+    | None, None ->
+      clause_rows ~cols
+        [ "Stored " ^ stored_amount unit (k.mkh_snapshot_bytes + k.mkh_source_snapshot_bytes)
+        ; (match unit with Memory_usage.Tokens -> "estimated knowledge size" | Memory_usage.Bytes -> "rendered knowledge") ]
+    | Some _, _ | _, Some _ -> clause_rows ~cols ["Stored: unreadable"]
+  in
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · stored %s · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
-      (storage_size k.mkh_snapshot_bytes)
+      (stored_amount unit k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
   in
   let facts_line =
@@ -361,7 +413,7 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
     Printf.sprintf
       "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s · %s"
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
-      (storage_size k.mkh_source_snapshot_bytes)
+      (stored_amount unit k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
   in
   let vision_line =
@@ -416,8 +468,10 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
   let rows =
     if detail
     then
-      [ current_line; facts_line; source_line;
-        "  Turn recall bytes: open Keeper chat /context; Librarian status is memory processing, not Keeper execution." ]
+      [ current_line ]
+      @ input_rows
+      @ [ facts_line; source_line;
+          "  Recall block detail: open Keeper chat /context." ]
       @ clause_rows ~cols librarian_clauses
       @ librarian_stalled_lines
       @ librarian_cause_lines @ context_lines
@@ -444,6 +498,8 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
         | clauses -> clause_rows ~cols ("Librarian" :: clauses)
       in
       [ status_row ]
+      @ stored_rows
+      @ input_rows
       @ librarian_action_rows
       @ librarian_stalled_lines
       @ librarian_cause_lines
@@ -452,6 +508,7 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
     end
   in
   { rows
+  ; primary_rows = 1 + List.length input_rows + (if detail then 0 else List.length stored_rows)
   ; stalled_row =
       (match librarian_stalled_lines with
        | row :: _ ->
@@ -489,7 +546,7 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
         Some (Theme.warn ())
     | Memory_ordinary -> None
 
-let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+let memory_row_line ~unit columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let no_value = Masc_tui_theme.Glyph.no_value in
   let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
@@ -497,7 +554,7 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
     else if k.mkh_source_snapshot_present then
       Printf.sprintf "r%d i%d %s" k.mkh_source_revision
         k.mkh_source_invalidations
-        (storage_size k.mkh_source_snapshot_bytes)
+        (stored_size unit k.mkh_source_snapshot_bytes)
     else no_value
   in
   let delta =
@@ -518,7 +575,7 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
       ; mrow_updated = memory_updated_text k.mkh_updated_at
       ; mrow_facts = ordinary_reading (fun () -> string_of_int k.mkh_facts)
       ; mrow_size =
-          ordinary_reading (fun () -> storage_size k.mkh_snapshot_bytes)
+          ordinary_reading (fun () -> stored_size unit k.mkh_snapshot_bytes)
       ; mrow_source = source
       ; mrow_delta = delta
       }
@@ -911,10 +968,12 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          ; Printf.sprintf "%d ordinary + %d source"
              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
          ; Printf.sprintf "stored %s"
-             (storage_size
+             (stored_amount state.memory_unit
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          ; Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper"
-         ; "storage, not turn input"
+         ; (match state.memory_unit with
+            | Memory_usage.Tokens -> "stored estimate, not turn input"
+            | Memory_usage.Bytes -> "stored knowledge, not turn input")
          ]
   in
   let readings =
@@ -972,29 +1031,31 @@ let fold_memory_rows ~subject ~max_rows rows =
     @ [ note ]
     @ List.filteri (fun index _ -> index >= count - trailing) rows
 
-(* A stalled gap is the actionable reading in the selected Keeper's block.
-   Keep its typed row when the body budget folds the surrounding detail; the
-   generic first/last fold could otherwise hide it in the middle. *)
+(* Keep the requested storage/input prefix and the actionable stalled row
+   when detail exceeds the frame. Spend remaining room on the tail, with an
+   explicit omission count between the readings. *)
 let fold_memory_context_rows ~max_rows context =
   let rows = context.rows in
   let count = List.length rows in
-  match context.stalled_row with
-  | None -> fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
-  | Some _ when count <= max_rows -> rows
-  | Some _ when max_rows <= 1 ->
-    fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
-  | Some (stalled_index, stalled_row) ->
-    let extra = max_rows - 2 in
-    let before = min stalled_index (extra / 2) in
-    let after = min (count - stalled_index - 1) (extra - before) in
-    let before = min stalled_index (extra - after) in
-    let hidden = count - before - after - 1 in
-    let note =
-      Printf.sprintf "  … %d Keeper detail rows hidden; enlarge terminal" hidden
-    in
-    List.filteri (fun index _ -> index < before) rows
-    @ [ note; stalled_row ]
-    @ List.filteri (fun index _ -> index >= count - after) rows
+  if count <= max_rows then rows
+  else if max_rows <= 0 then []
+  else
+    let stalled = match context.stalled_row with
+      | Some (index, row) when index >= context.primary_rows && max_rows > 1 -> Some (index, row)
+      | Some _ | None -> None in
+    let stalled_count = if Option.is_some stalled then 1 else 0 in
+    let leading = min context.primary_rows (max_rows - 1 - stalled_count) in
+    let remaining = max_rows - 1 - leading - stalled_count in
+    let tail =
+      List.mapi (fun index row -> index, row) rows
+      |> List.filter (fun (index, _) ->
+          index >= leading && match stalled with Some (kept, _) -> index <> kept | None -> true)
+      |> List.rev |> List.take remaining |> List.rev |> List.map snd in
+    let hidden = count - leading - stalled_count - List.length tail in
+    List.take leading rows
+    @ [Printf.sprintf "  … %d Keeper detail rows hidden; enlarge terminal" hidden]
+    @ (match stalled with Some (_, row) -> [row] | None -> [])
+    @ tail
 
 let memory_refused_keeper_lines (state : state) =
   match state.memory_health with
@@ -1024,9 +1085,12 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
   let context =
     match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
-    | None -> { rows = []; stalled_row = None }
+    | None -> { rows = []; primary_rows = 0; stalled_row = None }
     | Some keeper ->
-      memory_context_lines ~cols ~detail:state.memory_overview_detail keeper
+      memory_context_lines ~cols ~detail:state.memory_overview_detail
+        ~unit:state.memory_unit
+        ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input ~key:keeper.mkh_keeper_id)
+        keeper
   in
   let all_refused = memory_refused_keeper_lines state in
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
@@ -1038,10 +1102,12 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
-  (* Preserve an omission count and the stalled-gap row, plus their divider,
-     before the fleet summary and rejected rows spend the remaining body. *)
+  (* Keep the selected Keeper's input reading and sample coverage before the
+     fleet summary spends the body; folding also needs an omission row and
+     divider, plus any actionable stalled-gap row. *)
   let context_reserve =
-    if Option.is_some context.stalled_row then 3 else 0
+    if context.rows = [] then 0
+    else context.primary_rows + 2 + (if Option.is_some context.stalled_row then 1 else 0)
   in
   let header =
     memory_fleet_header_rows ~cols state
@@ -1093,9 +1159,10 @@ let render_memory_body ~cols ~budget (state : state)
      also named [a / A] in bold, a key with no value beside it that the footer
      carries at every width, so it said the footer's word again louder. *)
   let info_bar =
-    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[/]:%s Filter"
+    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[u]:%s %s  %s[/]:%s Filter"
       (Theme.recede ()) Ansi.reset sort_label
       (Theme.recede ()) Ansi.reset
+      (Theme.recede ()) Ansi.reset (Memory_usage.unit_label state.memory_unit)
       (Theme.recede ()) Ansi.reset
   in
   let projection = memory_overview_rows ~cols ~budget state in
@@ -1179,8 +1246,8 @@ let render_memory_body ~cols ~budget (state : state)
       | None -> push_empty ()
       | Some k ->
           if idx = cursor then
-            push_selected (Masc_tui_theme.strip_sgr (memory_row_line columns k))
-          else push (memory_row_line columns k)
+            push_selected (Masc_tui_theme.strip_sgr (memory_row_line ~unit:state.memory_unit columns k))
+          else push (memory_row_line ~unit:state.memory_unit columns k)
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())

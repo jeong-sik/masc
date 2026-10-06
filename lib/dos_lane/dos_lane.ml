@@ -25,6 +25,8 @@ type observation = {
 type entry = { at_step : int; who : string; key_name : string }
 
 type error =
+  | Activity_disabled
+  | Activity_unobserved
   | No_machine
   | Invalid_request of string
   | Unreadable of string
@@ -35,6 +37,8 @@ type error =
   | Other_program of { expected : string; loaded : string }
 
 let error_to_string = function
+  | Activity_disabled -> "machines.dos is off; enable it before new machine work"
+  | Activity_unobserved -> "Machine activity configuration is unavailable"
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
   | Invalid_request message -> message
   | Unreadable message -> message
@@ -51,6 +55,17 @@ let error_to_string = function
   | Other_program { expected; loaded } ->
     Printf.sprintf "%s is loaded now, not %s, so nothing was pressed" loaded expected
 ;;
+
+let ( let* ) = Result.bind
+let activity_observer : (unit -> Machine_configuration.activity) option Atomic.t = Atomic.make None
+let install_activity_observer observer = Atomic.set activity_observer observer
+let activity () = match Atomic.get activity_observer with
+  | None -> Machine_configuration.Unobserved
+  | Some observe -> observe ()
+let require_activity () = match activity () with
+  | Machine_configuration.Enabled -> Ok ()
+  | Disabled -> Error Activity_disabled
+  | Unobserved -> Error Activity_unobserved
 
 (* The core runs about 24 million instructions a second on this hardware
    (measured booting ZZT: 6M steps in 0.25 s). 4M is roughly 170 ms, the same
@@ -201,14 +216,14 @@ let current_publication () = Atomic.get published
    watching the screen go blank wants -- and is never otherwise reset: a load
    or restore is one more line on the same feed, not a new one, so the
    Lane's timeline reads as continuous. *)
-let activity : Lane_activity.entry list Atomic.t = Atomic.make []
+let activity_feed : Lane_activity.entry list Atomic.t = Atomic.make []
 
 let note_activity ~who action =
-  Atomic.set activity
-    (Lane_activity.push { Lane_activity.at = Time_compat.now (); who; action } (Atomic.get activity))
+  Atomic.set activity_feed
+    (Lane_activity.push { Lane_activity.at = Time_compat.now (); who; action } (Atomic.get activity_feed))
 ;;
 
-let recent_activity () = Atomic.get activity
+let recent_activity () = Atomic.get activity_feed
 
 let with_machine f =
   locked (fun () ->
@@ -245,7 +260,7 @@ let running f =
   (match result with
    | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
    | Error
-       ( No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
+       ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
        | Other_program _ ) ->
      publish_stable ());
   result
@@ -258,6 +273,7 @@ let refuse_other st ~who =
 ;;
 
 let with_control ~who f =
+  let* () = require_activity () in
   with_machine (fun st ->
     match refuse_other st ~who with
     | Error e -> Error e
@@ -271,7 +287,7 @@ let with_control ~who f =
        | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
          (* the call ran: the machine may have moved *)
        | Error
-           ( No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
+           ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
            | Other_program _ ) ->
          st.controller <- before);
       result)
@@ -679,6 +695,7 @@ let is_mz image =
 ;;
 
 let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
+  let* () = require_activity () in
   locked (fun () ->
     match Option.map (refuse_other ~who) !state with
     | Some (Error e) -> Error e
@@ -751,6 +768,7 @@ let eject ~who ~announce () =
 ;;
 
 let pass ~who ~to_ ~announce =
+  let* () = match to_ with None -> Ok () | Some _ -> require_activity () in
   with_machine (fun st ->
     match refuse_other st ~who with
     | Error e -> Error e
@@ -1056,6 +1074,7 @@ let meta_of_json json =
 ;;
 
 let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+  let* () = require_activity () in
   locked (fun () ->
     match Option.map (refuse_other ~who) !state with
     | Some (Error e) -> Error e

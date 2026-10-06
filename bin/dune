@@ -212,6 +212,20 @@
   masc.agent_core
   unix))
 
+;; Operator Candle gifts outside any Goal: one cursor-checked Granted row
+;; per invocation, refused on duplicate (keeper, reason).
+(executable
+ (name masc_candle_grant)
+ (modules masc_candle_grant)
+ (public_name masc-candle-grant)
+ (package masc)
+ (libraries
+  masc
+  masc.keeper_registry
+  masc.config_dir_resolver
+  masc.masc_candle_runtime
+  unix))
+
 ;; Phase 1 SSH remote execution lane (spec §4.2): remote shim installed on
 ;; SSH endpoints as the fixed remote command.  Decodes one framed request
 ;; from stdin, supervises the payload (setsid + pdeathsig, process-group

@@ -47,10 +47,15 @@ val current : base_path:string -> Candle_config.t
     retains Enabled so Snapshot/Owed's own CAS refuses the transition instead
     of silently skipping its mandatory record. This is not a monetary view. *)
 val for_recording : base_path:string -> Candle_config.t
-(** Configuration and ledger recovery for durable Snapshot and PayoutOwed
-    facts. An unavailable appraiser postpones settlement without discarding
-    these facts. Configuration and recovery failures retain the same
-    Off/Disabled semantics as {!current}. Each append still acquires its lock. *)
+(** Configuration and ledger recovery for durable Snapshot, PayoutOwed and
+    Granted facts. An unavailable appraiser postpones settlement without
+    discarding these facts. Configuration and recovery failures retain the
+    same Off/Disabled semantics as {!current}. Each append still acquires
+    its lock. Grants deliberately bypass the appraiser gate: an operator
+    outside the server has no lane registry to consult, and a gift needs
+    no appraisal. While the appraiser is down the operator can therefore
+    mint while keepers cannot spend; that asymmetry is the explicit
+    policy, and the minted money stays durable and accounted. *)
 
 val report_at_start : base_path:string -> unit
 val install_appraiser_check : (unit -> (unit, string) result) -> unit

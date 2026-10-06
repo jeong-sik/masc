@@ -123,6 +123,8 @@ let error_info = function
           | Candle_balance.Wrong_equipment_slot _
           | Candle_balance.Negative_purchase _
           | Candle_balance.Duplicate_payment _
+          | Candle_balance.Invalid_grant _
+          | Candle_balance.Duplicate_grant _
           | Candle_balance.Balance_overflow _ ) ->
         "invalid_purchase", Tool_result.Runtime_failure
     in

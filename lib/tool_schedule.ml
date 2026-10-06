@@ -788,8 +788,8 @@ let handle_write ~action ~tool_name ~start_time ctx args =
     in
     let* () = refuse_other_actor ~actor:caller ~prefix:"requested_by" args in
     let* () = refuse_other_actor ~actor:caller ~prefix:"scheduled_by" args in
-    let caller_as_both () = Ok (caller, caller) in
-    let* requested_by, scheduled_by =
+    let caller_as_creator () = Ok (caller, caller, payload) in
+    let* requested_by, scheduled_by, payload =
       match action, schedule_id with
       | Update_schedule, Some schedule_id ->
         let* stored = authorize_row_change ctx ~schedule_id in
@@ -798,9 +798,19 @@ let handle_write ~action ~tool_name ~start_time ctx args =
            let* () =
              authorize_replacement ctx ~schedule_id ~stored ~keeper_wake_target
            in
-           Ok (stored.requested_by, stored.scheduled_by)
-         | None -> caller_as_both ())
-      | Update_schedule, None | Create_schedule, _ -> caller_as_both ()
+           (* The result of a wake goes back to the conversation that created
+              it, the same way requested_by and scheduled_by stay the
+              creator's. An edit from another surface (the TUI and dashboard
+              stamp no channel) must not drop or reroute it. *)
+           let* origin = plain (Schedule_payload_projection.result_delivery stored) in
+           let* payload =
+             plain
+               (Schedule_payload_projection.set_keeper_wake_result_delivery
+                  ~payload ~channel:origin)
+           in
+           Ok (stored.requested_by, stored.scheduled_by, payload)
+         | None -> caller_as_creator ())
+      | Update_schedule, None | Create_schedule, _ -> caller_as_creator ()
     in
     let* expires_at = strict_number args "expires_at_unix" in
     let write_request () =

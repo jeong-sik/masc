@@ -1968,7 +1968,20 @@ let test_call_usage_survives_missing_terminal_aggregate () =
               check int "two model calls" 14 usage.output_tokens;
               check int "cache reads" 80 usage.cache_read_input_tokens;
               check int "cache writes" 20 usage.cache_creation_input_tokens
-            | None -> fail "per-call usage lost when terminal aggregate was absent")
+            | None -> fail "per-call usage lost when terminal aggregate was absent");
+           (* The context gauge reads one request, not the turn's sum. *)
+           (match result.runtime_observation with
+            | Some { request_context = Some context; _ } ->
+              check int "the newest request's counted-once prompt" 150 context.input_tokens;
+              check (option (pair int int)) "that request's cache writes and reads"
+                (Some (10, 40))
+                (Option.map
+                   (fun (cache : Runtime_observation.request_cache) ->
+                      cache.cache_creation_input_tokens, cache.cache_read_input_tokens)
+                   context.cache);
+              check (option int) "that request's own output" (Some 7) context.output_tokens
+            | Some { request_context = None; _ } -> fail "request context not reported"
+            | None -> fail "runtime observation missing")
          | Error error -> fail (Agent_core.Error.to_string error));
         match run.reports with
         | [report] ->

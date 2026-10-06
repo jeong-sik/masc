@@ -223,6 +223,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
 
   const RESOLVED: RuntimeResolvedResponse = {
     config_path: '/tmp/runtime.toml',
+    default_route: null,
     default_runtime: null,
     runtimes: [],
     lanes: [

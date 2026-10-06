@@ -1,0 +1,4 @@
+empty_answer=accepted
+blank_answer=accepted
+insufficient=accepted
+supported_answer=accepted

@@ -1,5 +1,6 @@
 import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
 import { decodeGoalProof } from './api/goal-proof'
+import { decodeGoalResumePhase } from './api/goal-lifecycle'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'
 // MASC Dashboard — Centralized reactive state via @preact/signals
 // SSE events and API responses update these signals;
@@ -885,6 +886,7 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
       if (!id || !title || !phase || !createdAt || !updatedAt) return null
       return {
         verification: decodeGoalProof(row.verification),
+        resume_phase: decodeGoalResumePhase(phase, row.resume_phase),
         id,
         title,
         metric: asString(row.metric) ?? null,

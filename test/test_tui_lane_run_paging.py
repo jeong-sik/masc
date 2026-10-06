@@ -11,7 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
@@ -106,10 +106,20 @@ def turn_page(
     return visible_window(output, split=split)
 
 
-def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> None:
+def run(
+    executable: str,
+    *,
+    columns: int,
+    split: bool,
+    refresh_error: bool,
+    preflight: Literal["context", "continuity", "memory", "failed_memory", "memory_context_failure", "memory_continuity_failure"]
+    | None = None,
+) -> None:
     scenario = ("split" if split else "stacked") + (
         " cached refresh error" if refresh_error else ""
     )
+    if preflight is not None:
+        scenario = "preflight-" + preflight
     run_id = "paging-" + scenario.replace(" ", "-")
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
@@ -126,6 +136,68 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
             for row in PAYLOAD_ROWS
         ],
     )
+    if preflight is not None:
+        observed_output: dict[str, Any] = {
+            "exact_output": "retained-generation-answer",
+            "generation_path": "full_lane",
+            "full_llm_skipped": False,
+            "preflight_domain_rejection": None,
+            "jev_preflight": {
+                "status": "skipped" if preflight == "memory" else "ineligible",
+                "reason": "disabled" if preflight == "memory" else "context pass",
+                "elapsed_s": None,
+            },
+        }
+        if preflight == "failed_memory":
+            record.update(
+                status="failed",
+                code="provider_failure",
+                detail="fixture generation failure",
+            )
+            observed_output["jev_preflight"] = {
+                "status": "judged",
+                "decision": "needs_generation",
+                "confidence": 0.8,
+                "probabilities": {
+                    "keep_current": 0.1,
+                    "needs_generation": 0.8,
+                    "uncertain": 0.1,
+                },
+                "destination": {
+                    "destination_uri": "https://fixture.invalid/evaluate",
+                    "model": "requested-model",
+                },
+                "model": "received-model",
+                "request_body_sha256": "a" * 64,
+                "passed_over": [],
+                "elapsed_s": 0.05,
+            }
+        elif preflight in ("memory", "memory_context_failure", "memory_continuity_failure"):
+            observed_output["after"] = {
+                "commit": "unchanged",
+                "revision": 4,
+                "fact_count": 2,
+                "change": {"added_count": 0, "removed_count": 0},
+            }
+        else:
+            observed_output["memory_write"] = "skipped_context_only"
+            observed_output["context_write"] = {
+                "status": "committed",
+                "generation": "context-generation",
+                "revision": 3,
+            }
+            if preflight == "continuity":
+                observed_output["continuity_write"] = {
+                    "status": "committed",
+                    "end_atom": 42,
+                    "prefix_sha256": "a" * 64,
+                }
+        if preflight in ("memory_context_failure", "memory_continuity_failure"):
+            side = "context" if preflight == "memory_context_failure" else "continuity"
+            observed_output[side + "_write"] = {
+                "status": "failed", "detail": side + "-side-write-refused",
+            }
+        record["output"] = observed_output
     summary = {
         key: record[key]
         for key in (
@@ -137,6 +209,8 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
             "status",
             "elapsed_s",
             "selected_slot",
+            "code",
+            "detail",
         )
         if key in record
     }
@@ -174,7 +248,56 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
         )
         _keyboard_harness.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
         _keyboard_harness.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained")
-        _keyboard_harness.send_and_wait(process, master, output, b"\r", b"INPUT")
+        _keyboard_harness.send_and_wait(
+            process, master, output, b"\r", b"JEV" if preflight else b"INPUT"
+        )
+        if preflight is not None:
+            _keyboard_harness.resize_and_wait(
+                process,
+                master,
+                output,
+                rows=80,
+                columns=columns,
+                needle=b"JEV",
+                controls=(_keyboard_harness.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+
+            def completed_screen() -> bytes:
+                end = output.rfind(_keyboard_harness.FRAME_END)
+                if end < 0:
+                    raise AssertionError("preflight has no completed terminal frame")
+                return _keyboard_harness.screen_text(bytes(output[: end + len(_keyboard_harness.FRAME_END)]))
+
+            screen = completed_screen()
+            marker = b"retained-generation-answer"
+            if preflight in ("memory", "failed_memory", "memory_context_failure", "memory_continuity_failure"):
+                if marker in screen or b"received-model" in screen:
+                    raise AssertionError(
+                        "memory evidence must start compact even without a snapshot"
+                    )
+                if preflight in ("memory", "memory_context_failure", "memory_continuity_failure") and "변경 없음".encode() not in screen:
+                    raise AssertionError("compact memory snapshot result is missing")
+                if preflight in ("memory_context_failure", "memory_continuity_failure"):
+                    side = "context" if preflight == "memory_context_failure" else "continuity"
+                    label = (side.capitalize() + ": failed").encode()
+                    reason = (side + "-side-write-refused").encode()
+                    if label not in screen or reason not in screen:
+                        raise AssertionError("compact Memory success hid a side-write failure")
+                if preflight == "failed_memory" and b"needs_generation" not in screen:
+                    raise AssertionError("failed memory status summary is missing")
+            else:
+                for key in (b"memory_write", b"context_write", b"committed"):
+                    if key not in screen:
+                        raise AssertionError(f"default context result hid {key!r}")
+                if preflight == "continuity" and b"continuity_write" not in screen:
+                    raise AssertionError("default continuity result was hidden")
+            _keyboard_harness.send_and_wait(process, master, output, b"d", marker)
+            if marker not in completed_screen():
+                raise AssertionError("expanded evidence lost the recorded output")
+            print(f"Librarian {preflight} default and expanded readings: PASS")
+            os.write(master, b"q")
+            return
         _keyboard_harness.resize_and_wait(
             process,
             master,
@@ -294,4 +417,12 @@ if __name__ == "__main__":
     run(executable, columns=180, split=True, refresh_error=False)
     run(executable, columns=100, split=False, refresh_error=False)
     run(executable, columns=180, split=True, refresh_error=True)
+    for preflight in ("context", "continuity", "memory", "failed_memory", "memory_context_failure", "memory_continuity_failure"):
+        run(
+            executable,
+            columns=180,
+            split=False,
+            refresh_error=False,
+            preflight=preflight,
+        )
     print("TUI lane run paging: PASS")

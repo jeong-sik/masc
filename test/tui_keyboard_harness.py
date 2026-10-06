@@ -109,6 +109,13 @@ class MethodHttpResponse:
         self.resolve = resolve
 
 
+# What a fixture callable may hand the dispatcher: the same response shapes
+# the wrapper objects resolve to. The dispatcher's isinstance chain handles
+# every one of these, so the callable arm of [HttpFixture] accepts them all
+# instead of only the JSON tuple.
+FixtureResponse = (
+    HttpResponse | RawHttpResponse | StreamingHttpResponse | DroppedHttpResponse
+)
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
@@ -118,10 +125,26 @@ HttpFixture = (
     | MethodHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
-    | Callable[[], HttpResponse]
+    | Callable[[], FixtureResponse]
 )
 HttpFixtures = dict[str, HttpFixture]
 HttpRequests = list[tuple[str, bytes]]
+
+
+def json_payload_fixture(fixtures: HttpFixtures, path: str) -> dict[str, object]:
+    """The JSON object payload of a plain ``(status, payload)`` tuple fixture.
+
+    The fixture map's value union also carries wrapper objects and bare
+    callables that are not subscriptable, so a caller reading a tuple
+    fixture's payload goes through here and the narrowing lives in one
+    place. A non-tuple fixture at ``path``, or a payload that is not a JSON
+    object, is a test-composition error and fails the assert loudly.
+    """
+    fixture = fixtures[path]
+    assert isinstance(fixture, tuple), f"fixture at {path} is not a tuple response"
+    payload = fixture[1]
+    assert isinstance(payload, dict), f"fixture payload at {path} is not a JSON object"
+    return payload
 WorkspaceSetup = Callable[[str], None]
 WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
 WORKSPACE_RENDERED = b"workspace\\x1B]8;;https://attacker.invalid\\x07owned"
@@ -1455,6 +1478,7 @@ def empty_runtime_resolved_fixture() -> HttpResponse:
         "generated_at_iso": "2026-09-23T00:00:00Z",
         "source": RUNTIME_RESOLVED_PATH,
         "config_path": None,
+        "default_route": None,
         "default_runtime": None,
         "media_failover": [],
         "media_failover_declared": [],
@@ -1466,7 +1490,7 @@ def empty_runtime_resolved_fixture() -> HttpResponse:
     })
 
 
-def fleet_safety_fixture() -> HttpResponse:
+def fleet_safety_fixture() -> tuple[int, dict[str, object]]:
     """A fleet reading the TUI can decode.
 
     Without it the poll fails and the TUI records a "fleet safety data
@@ -1589,7 +1613,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                     "verifying_count": 0,
                     "awaiting_confirmation_count": 0,
                     "done_count": 0,
-                    "dropped_count": 0,
+                    "dropped_count": 0, "paused_count": 0, "blocked_count": 0,
                 },
                 "task_backlog": {
                     "todo": 0,
@@ -1721,7 +1745,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
                 "verifying_count": 0,
                 "awaiting_confirmation_count": 0,
                 "done_count": 0,
-                "dropped_count": 0,
+                "dropped_count": 0, "paused_count": 0, "blocked_count": 0,
             },
             "task_backlog": {
                 "todo": 0,

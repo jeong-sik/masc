@@ -1,0 +1,44 @@
+Testing `Machine activity draft and save'.
+This run has ID `TWGCTEA9'.
+
+  [OK]          operator flow          0   explicit save preserves other mach...
+  [OK]          operator flow          1   conflict reapplies activity only.
+  [OK]          operator flow          2   fresh read retains and discard res...
+  [OK]          operator flow          3   clean draft follows external activ...
+  [OK]          operator flow          4   clean draft preserves latest unrel...
+  [OK]          operator flow          5   durable draft follows next file wh...
+  [OK]          operator flow          6   uncertain drafts need explicit rea...
+  [OK]          operator flow          7   clean draft keeps changed-path bou...
+  [OK]          operator flow          8   independent machine flags and defa...
+> [FAIL]        operator flow          9   server reading is separate from fi...
+  [OK]          operator flow         10   unavailable and malformed input.
+  [OK]          operator flow         11   workspace roundtrip ignores old ca...
+  [OK]          operator flow         12   unconfirmed write and preview refu...
+  [OK]          operator flow         13   changed file path needs discard.
+  [OK]          operator flow         14   quoted and multiline table shapes.
+  [OK]          operator flow         15   stored setting does not hide appli...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        operator flow          9   server reading is separate from...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT Current file: On
+ASSERT Server activity: Off
+ASSERT Server activity read failed: inventory offline
+ASSERT Current file: unverified
+ASSERT Server activity: Off
+File "test/test_tui_machine_activity.ml", line 131, character 2:
+FAIL Server activity: Off
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_tui_machine_activity.observed_state_is_separate in file "test/test_tui_machine_activity.ml", line 131, characters 2-46
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/_build/_tests/Machine activity draft and save/operator flow.009.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/_build/_tests/Machine activity draft and save'.
+1 failure! in 0.004s. 16 tests run.

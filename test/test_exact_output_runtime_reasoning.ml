@@ -238,6 +238,7 @@ let publish_thinking_lane ~binding ~thinking =
   Registry.publish
     ~lanes:
       [ { Runtime_schema.id = "board_attention_exact"
+        ; enabled = true
         ; slot_ids = [ target.target_ref ]
         ; cli_slot_ids = []
         ; max_output_tokens = None

@@ -183,7 +183,11 @@ export function FleetRotationSection({ keeper }: { keeper: Keeper }) {
     void loadRuntimeResolved()
   }, [])
 
-  const data = getData(runtimeResolvedState.value)
+  const reading = runtimeResolvedState.value
+  if (reading.status === 'error') return html`<div class="fl-as-sec" data-testid="fleet-rotation-section">
+    <h4>런타임 후보</h4><p role="alert">런타임 후보를 읽지 못했습니다: ${reading.message}</p>
+  </div>`
+  const data = getData(reading)
   if (!data) return null
 
   const runtime = keeperDisplayRuntime(keeper)

@@ -106,7 +106,7 @@ let release_retired ~keeper_name ~by =
   match Tool_misc_dos_lane.release_retired_keeper ~holder:keeper_name ~by with
   | Ok (true | false) | Error Dos_lane.No_machine -> Ok ()
   | Error
-      (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+      (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
        | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
        | Dos_lane.Other_program _ ) as err) ->
     Error (Dos_lane.error_to_string err)

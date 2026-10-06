@@ -1,0 +1,416 @@
+{
+  "checked_at": "2026-10-04T17:41:05.370227+00:00",
+  "compiler": "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+  "version": "5.5.1",
+  "scope": "Changed OCaml files parsed only; no type/link/native/PTY validation",
+  "command": [
+    "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+    "-stop-after",
+    "parsing",
+    "-c",
+    "<scratch-copy>"
+  ],
+  "files": [
+    {
+      "path": "bin/masc_tui.ml",
+      "sha256": "aa4026a182ed6f660c2f414fabdbed9a37fc3943b152f4765de511f69e5ad5f6",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.ml",
+      "sha256": "80c2f9b46e9456f7c4ef48e8896902432f2a3b6e772a3f6702600d8f00935b03",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.mli",
+      "sha256": "80c2f9b46e9456f7c4ef48e8896902432f2a3b6e772a3f6702600d8f00935b03",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_http.ml",
+      "sha256": "dba64e9083fb1e8c718beb20df862178b6ac6c18a6ef9911743e1f851e734c48",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.ml",
+      "sha256": "bc04d034da178e5b9259c21f64d3f78a73e241a47d48bd1ba55c77a56c4354b9",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.mli",
+      "sha256": "82c57a3faf235930307dce1d6c659f014669de30b9a6dfbe9efe89e192b8e46d",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_msx_tick.ml",
+      "sha256": "16993c6019ab483616ee4ece8cfd9dcbe41f6ba251b42e47b5ae103229167fb2",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_msx_tick.mli",
+      "sha256": "ad81caaf49562dd874d5f9096c441960f1bff662dce2ca4091788f565968b9a1",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/dos_lane/dos_lane.ml",
+      "sha256": "83df3024ca70f78320decaf640679d41dddd8a0872a61f4bc8ba221bc628d88a",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/dos_lane/dos_lane.mli",
+      "sha256": "982adf8a1fd262bb3a67b1e4db830f92c8f59dc7819304f41bc70b5bd9d52056",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_dos_controller.ml",
+      "sha256": "05b779c9a5e0a9801bfc94135fddc237035e173363ed525d733985162a08b149",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/machine_configuration/machine_configuration.ml",
+      "sha256": "da03d9ae527fea8b2c05df3b2ca06c81c8b315af6ebe876fafaabf6ea4ce526c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/machine_configuration/machine_configuration.mli",
+      "sha256": "6e8d900c270f239d645ab0e19df47fd49380020b49e6bbf6fe23045e55b4e456",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/msx_lane/msx_lane.ml",
+      "sha256": "67fb44a27643e6ada09b34de9064ef9ca296b95de645f792afdb65c1f8f453fd",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/msx_lane/msx_lane.mli",
+      "sha256": "1cacca8ce8850d34a3d88ab204b642aa443199aaa4d5b711dd21950fda19b444",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/runtime/runtime.ml",
+      "sha256": "ffadea1d9cd0dd9ba5e85816ad2d39d13d8055b7242ff06f7c5495168a3076dd",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/runtime/runtime.mli",
+      "sha256": "ecf2b557c5e1fad4379fc003a54db7da275ea1c6fc97b6b44856d4902dd8277a",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/runtime/runtime_schema.ml",
+      "sha256": "84de867da3a7e9cdb1cf3ae68b6bc62cc0a21e0ee772854298a4de9bcd63c505",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/runtime/runtime_schema.mli",
+      "sha256": "408f42d8fa734b9d300da8250054b1e8f70fa85a716326d8543d887551a1f43e",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/runtime/runtime_toml.ml",
+      "sha256": "386fbe92f87a7d0279097e11e2c2cc662e1953d6bfe35b9dbac9fdd4f55e59e8",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/runtime_toml_namespace/runtime_toml_namespace.ml",
+      "sha256": "b857b8b3ac3b4d9d2f15c2eff4fd662f2ba0cbcf51f9d8012a74d8baa4361291",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/runtime_toml_namespace/runtime_toml_namespace.mli",
+      "sha256": "5e93626163b77fe372ae31942a0034d2df6196536bb27a87be81beb011dbc186",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_lane_inventory.ml",
+      "sha256": "b4d4e5b60e7ab60bdf0ba4895e653f645324cd09f89142945f3cfb7d090d2815",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_lane_inventory.mli",
+      "sha256": "048cde3368123899ddd3c9d3eb9600d286cbb2e88742faf1f24a8354ebed506e",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_machine_configuration.ml",
+      "sha256": "4ea09808c6e5e1d7142670f352cab4fa250397fdb0bf2d61b7078bbe1b9fdad7",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_machine_configuration.mli",
+      "sha256": "21560b90d500ebd2f9a88b218785a75606a4d9d177366867a4c4dc3d1e533aba",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_msx.ml",
+      "sha256": "ba8dedcd7ac90c367b3bb3dfc276fcba65c5b858dcc321921512143331d84767",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_msx.mli",
+      "sha256": "bb2c6707f120e831c4a850908de64d6a10e27e6438a08b4063b0a228c4ddbbbd",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_play.ml",
+      "sha256": "5875fec180bed5b2402f0c1f936d5488d9163d67e9e1bb764e8c113961710b47",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_play_pad.ml",
+      "sha256": "cdd4dea56a872b27a4c1931a6e5487fb9cf077bc707122e0dbedd35753d4feae",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_play_page.ml",
+      "sha256": "01ab07554caddd108ed6fd8e4e369bee213612c524753044fbf43c3c7b8500e5",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_play_screen.ml",
+      "sha256": "c200f62af25bdb9cf8d5f68d1e7c1e623b5dc28d7e0382fe715df30df70c5cc5",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_runtime_bootstrap.ml",
+      "sha256": "9ece86e37e09cd1451f2ff4589ee3cc6b4dc10d206dd228f2c5b73ac21a330e1",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/tool_misc_dos_lane.ml",
+      "sha256": "9a6895af3440e0bcdf17776331ad66c7db653096cc27a5adbbccf77ad4bea789",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/tool_misc_msx_lane.ml",
+      "sha256": "347efb73b28606ba423fbd6dc7f9b4b2b024a967f18581ff1419ebf5056c663b",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.ml",
+      "sha256": "acad740bbff9b190a24d7ac97d6bb22d6606ea55cd42b8e858b90b52c17c182a",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.mli",
+      "sha256": "3aefe4288017aa00abfc0be0d840d4837ad6165b47052a6cb6e730f2f2253c98",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_credential_expiry.ml",
+      "sha256": "865d7970952918dc8d7fb14bdc05ec43794f5d6109a95403fa55aa094e59fa54",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_dashboard_runtime_probe_nonblocking.ml",
+      "sha256": "5501a68c36a67bedc3f36edba4c3d9e51e95b4309528f1cfa53efe2d2913b815",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_dos_input_routes.ml",
+      "sha256": "0f2c701a328be3eedb204c7a4664c65d4d4cd4af91780f972e1ab8ffd26d156f",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_dos_lane_activity.ml",
+      "sha256": "92f87437bad2a78979957d186f2d0e16b52cfadf025ac3f774602223e415b0b7",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_dos_tools.ml",
+      "sha256": "d044de75a6ff560fa6b042a20c562c1ba5320d3583d4b4ef51e7422066d78a20",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_dos_vision.ml",
+      "sha256": "27d1a36ec9df493228e88609fa11943cfa0836ef02c0d518ba0b92a25817b186",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_tool_dispatch_runtime.ml",
+      "sha256": "5d2ec784fcd2a1623ffbf6647bdb19763429a1da441fb5bb08cdb98ccbc0dd58",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_lane_addon.ml",
+      "sha256": "86cac9dc655266cf87adc13a00501124e2f2cea244e9827779a8e387ac6e6c1d",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_lane_addon_composition.ml",
+      "sha256": "4ad4100d3ca8336410ab7b1078ac8807e0beb91455f53687a499722d153fea4c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_lane_addon_live_route.ml",
+      "sha256": "4792ef3e7920a315584c371929d7b7bcce4e050d64ee814c4d3071b4a532197f",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_lane_addon_sources.ml",
+      "sha256": "29a3f8e9c9d1ed29f1870bfddc693a14737b2ff89cba519f88ea132cff9bd359",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_mcp_dos_screen_image.ml",
+      "sha256": "c30c85e04af3383810d7032aaa7d92d3d12add05cb6309c6161aa67b85057068",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_mcp_seat_profile.ml",
+      "sha256": "c44c1db1c696f0c34424ce745c036801701073d18c595da10ad773fb7790998f",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_msx_lane_activity.ml",
+      "sha256": "915c9fe846ab58bd9e8ea4c8780f247384922c5522aeaafef50d63dde60f3718",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_msx_routes.ml",
+      "sha256": "a76a56bd4f126f36b7490e3ab34ce3b37c73f755c4340ee04ddc1c6c2516895c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_msx_tools.ml",
+      "sha256": "17f1f573ebaa54080db85e751514d74aa36196d5d792921b54930e17c4a98f79",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_msx_vision.ml",
+      "sha256": "7548d3acd1b45425b3a919a55956bd32dce184996a72e105eca16bccdead0487",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_play_credential_transaction.ml",
+      "sha256": "4d887dacb2ee1935f76d45b1239d1fcf9577cee264179a89aecdadb8464cd9ba",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_play_current_credential_authority.ml",
+      "sha256": "1d175823187fa84474850f8acde693534754bf3fe2a21828794b549ef874ed3c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_play_invite_routes.ml",
+      "sha256": "7ce898e45f58d94fbccfa7f2bbe66d1389919426d38f9d750e37e45583f69c61",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_play_pad_routes.ml",
+      "sha256": "acf0136ca0d0a9f043723152bed0d5212c5cc097671169ed17464010f19a94df",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_play_page.ml",
+      "sha256": "553a610f6bbf8a09524f86aff09100cd8fca620c6ae0abb929827ad4d5a689fa",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_play_screen.ml",
+      "sha256": "ef3cd0a796a2972dfa428e24a22a5cbb3b1d5f12573c414e77e8a74308fd9c94",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_runtime_config_validity.ml",
+      "sha256": "6667977c53e5bd2a90eb389f4bd914d45524d3c5f5202b99f28dae07e4960add",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_runtime_provider_auth_headers.ml",
+      "sha256": "3bb270aadf87471b76b8ae272d1515ba15865581ac6196497112f63e0ed61b9a",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_server_lane_inventory.ml",
+      "sha256": "e9ca29a6875e4dd97beff02550584bd6cd72c1599f96721eb1c7ee2d21491930",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_keys.ml",
+      "sha256": "9ba15d444863fd843bae8cc29d2bd9914bb833fb95e85fd69330aa35474eebcb",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_lane_inventory.ml",
+      "sha256": "54f03b304484313dc0f2e5728a0960aa42e101f69f88e130e30c6a92bb062d3b",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_msx_tick.ml",
+      "sha256": "e72133658b38eb7037878fa35e12faa39815fcc1ebe0470a625c02fcf849c198",
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "final_delta_reparsed": [
+    "bin/masc_tui.ml",
+    "bin/masc_tui_http.ml",
+    "test/test_msx_routes.ml"
+  ]
+}

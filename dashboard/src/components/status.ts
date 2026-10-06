@@ -14,7 +14,7 @@ export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime'
   | 'internal-agents'
   | 'fleet-health' | 'transport-health'
-  | 'lanes' | 'skills' | 'lane-addons'
+  | 'lanes' | 'skills' | 'lane-addons' | 'lane-inventory'
 
 function monitorSectionItem(section: string | undefined) {
   if (!section) return undefined
@@ -61,6 +61,9 @@ const LazyLaneAddonsPanel = lazy(async () => ({
 const LazyLaneQueuePanel = lazy(async () => ({
   default: (await import('./lanes/lane-queue-panel')).LaneQueuePanel,
 }))
+const LazyLaneInventoryPanel = lazy(async () => ({
+  default: (await import('./lane-inventory-panel')).LaneInventoryPanel,
+}))
 const LazySkillsPanel = lazy(async () => ({
   default: (await import('./skills-panel')).SkillsPanel,
 }))
@@ -81,6 +84,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyJourneyPanel} />`
     case 'lane-addons':
       return html`<${LazyLaneAddonsPanel} />`
+    case 'lane-inventory':
+      return html`<${LazyLaneInventoryPanel} />`
     case 'lanes':
       return html`<${LazyLaneQueuePanel} />`
     case 'skills':
@@ -131,7 +136,7 @@ export function Status() {
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-5">
       <${SectionNav} tab="monitoring" current=${section} />
-      <${SurfaceHeader} />
+      ${section === 'lane-inventory' ? null : html`<${SurfaceHeader} />`}
       <div class="transition-opacity duration-[var(--t-slow)]">
         <${Suspense} fallback=${sectionFallback(sectionLabel(section))}>
           ${renderSection(section)}

@@ -1,0 +1,22 @@
++ ocamlfind ocamlc -package unix,yojson,alcotest -w +32+69 -warn-error +a -c lane_addon_catalog.mli
++ ocamlfind ocamlc -package unix,yojson,alcotest -w +32+69 -warn-error +a -c lane_addon_catalog.ml
++ ocamlfind ocamlc -package unix,yojson,alcotest -w +32+69 -warn-error +a -c masc.ml
++ ocamlfind ocamlc -package unix,yojson,alcotest -w +32+69 -warn-error +a -c masc_tui_package_browser.mli
++ ocamlfind ocamlc -package unix,yojson,alcotest -w +32+69 -warn-error +a -c masc_tui_package_browser.ml
++ ocamlfind ocamlc -package unix,yojson,alcotest -w +32+69 -warn-error +a -c test_tui_package_browser.ml
++ ocamlfind ocamlc -package unix,yojson,alcotest -linkpkg lane_addon_catalog.cmo masc.cmo masc_tui_package_browser.cmo test_tui_package_browser.cmo -o check.exe
++ ./check.exe
+Testing `Local package discovery and selection'.
+This run has ID `K6Y4Y34I'.
+
+  [OK]          journeys          0   discover actual directory with explicit...
+  [OK]          journeys          1   never load manifests outside workspace.
+  [OK]          journeys          2   folder to package selection and existin...
+  [OK]          journeys          3   all entries reachable in a short terminal.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-package-discovery-nu1rxfoc/_build/_tests/Local package discovery and selection'.
+Test Successful in 0.004s. 4 tests run.
++ ocamlfind ocamlc -package yojson,otoml -w +32+69 -warn-error +a -c masc_tui_schema_form.mli
++ ocamlfind ocamlc -package yojson,otoml -w +32+69 -warn-error +a -c masc_tui_lane_declaration.mli
++ ocamlfind ocamlc -package yojson,otoml -w +32+69 -warn-error +a -c masc_tui_lane_installer.mli
++ ocamlfind ocamlc -package yojson,otoml -w +32+69 -warn-error +a -c masc_tui_lane_installer.ml

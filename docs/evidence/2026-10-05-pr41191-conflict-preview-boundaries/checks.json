@@ -1,0 +1,21 @@
+{
+  "head": "7c0214fbbaa39d75d39d0d5a735f96715db03f51",
+  "source_sha256": {
+    "dashboard/src/lib/browser-lane-activity-session.ts": "09e4aed6c635a151333906faaab8d1c4257b93dfa11c4c28ce07a3f8d069f864",
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "1566fe964fec8e5d4567c0a73b09b2d24ee87802312ec7f4534488091d9af842"
+  },
+  "raw_logs_sha256": {
+    "red.log": "11eea8268c0b9a0ec27571f70878b75e35038c542e9a6034bb6527201731dadd",
+    "green.log": "c6159a556596a226c62740fd0b1d0f5c0861cf936322f57186832e1db7aae6fa",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results": {
+    "red": "3 failed / 42 passed",
+    "green": 46,
+    "suites": 1,
+    "tsc_exit": 0,
+    "eslint_exit": 0
+  },
+  "scope": "Actual owner session regressions in component suite with mocked HTTP; no server/browser/native/provider/full-suite execution. No parent propagation."
+}

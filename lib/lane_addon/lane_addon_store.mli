@@ -41,7 +41,8 @@ val read_jsonl : t -> Lane_addon_types.evidence -> (string, string) result
     Explicit full-history reads allocate the requested result; capture does not. *)
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
 val remove_binding : t -> instance_id:string -> (unit, string) result
-(** Removes one binding record. A missing record is already removed. *)
+(** Removes one binding record and syncs the containing directory. A retry
+    syncs even when the record was already unlinked by an uncertain attempt. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 (** Requires the configured root parent to exist as the workspace anchor.
     Publishes the root and action directories, syncing each parent even on
@@ -70,6 +71,8 @@ val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Saf
 (** Retain the exact published evidence before sending its idempotent Broadcast.
     Repeated sends read that original artifact, not a changing live binding. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
+(** Confirms containing-directory durability after capturing records/absence,
+    including cold reads used to authorize reconciliation. *)
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads
     still require their own durability and payload verification. *)
@@ -79,10 +82,13 @@ type binding_inventory = {
   complete : bool;
 }
 val binding_inventory : root:string -> binding_inventory
-(** Read binding metadata without constructing a store, reconciling observation
-    sequences, syncing, writing or creating directories. Per-file failures leave
-    readable siblings available and make [complete] false. Offload filesystem I/O.
-    These bytes are observations, never mutation or durability authority. *)
+(** Read metadata without constructing a store, reconciling observation
+    sequences, rewriting records or creating directories. After capturing the
+    records/absence, sync the containing directory (or its first existing
+    ancestor) to reestablish publication durability after an uncertain rename
+    or unlink by a previous process. Read/sync failures preserve readable
+    siblings but make [complete] false. Offload filesystem I/O. These observed
+    bytes do not authorize mutations. *)
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;
@@ -129,6 +135,8 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val remove_binding : sync_parent:(string -> unit) -> t -> instance_id:string -> (unit, string) result
+  val binding_inventory : sync_parent:(string -> unit) -> root:string -> binding_inventory
   val iter_sampling_requests :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     t -> instance_id:string -> max_bytes:int ->

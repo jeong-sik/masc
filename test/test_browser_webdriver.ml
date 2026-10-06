@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 open Alcotest
 module Driver = Masc.Browser_webdriver
 module Lane = Browser_lane
@@ -194,18 +197,18 @@ let test_selected_binary () =
 
 let test_browser_configuration () =
   let parse text = match Otoml.Parser.from_string_result text with
-    | Error detail -> fail detail | Ok toml -> Masc.Browser_configuration.parse toml in
-  (match parse "" with Ok { Masc.Browser_configuration.automation = None; stagehand = None } -> () | _ -> fail "missing browser config");
+    | Error detail -> fail detail | Ok toml -> Browser_configuration.parse toml in
+  (match parse "" with Ok { Browser_configuration.automation = None; stagehand = None; _ } -> () | _ -> fail "missing browser config");
   (match parse {|[browser]
 geckodriver = "/test/geckodriver"
 binary = "/test/Zen.app"
 |} with
-   | Ok { Masc.Browser_configuration.automation = Some {driver="/test/geckodriver";binary=Some "/test/Zen.app"}; stagehand = None } -> ()
+   | Ok { Browser_configuration.automation = Some {driver="/test/geckodriver";binary=Some "/test/Zen.app"}; stagehand = None; _ } -> ()
    | _ -> fail "explicit browser configuration lost");
   (match parse {|[browser]
 geckodriver = "/test/geckodriver"
 |} with
-   | Ok { Masc.Browser_configuration.automation = Some {driver="/test/geckodriver";binary=None}; stagehand = None } -> ()
+   | Ok { Browser_configuration.automation = Some {driver="/test/geckodriver";binary=None}; stagehand = None; _ } -> ()
    | _ -> fail "a driver without a binary lets geckodriver discover the browser");
   List.iter (fun (why, text) -> check bool why true (Result.is_error (parse text)))
     [ "a binary needs the driver that launches it", {|[browser]
@@ -236,8 +239,8 @@ geckodriver = "/test/geckodriver"
 chrome = "/test/chrome"
 extension = "/test/extension"
 |} with
-   | Ok { Masc.Browser_configuration.automation = Some _;
-          stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None } } -> ()
+   | Ok { Browser_configuration.automation = Some _;
+          stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
    | _ -> fail "both backends can be configured together")
 
 (* The server owns the driver it starts. On 2026-09-15 a driver started by hand

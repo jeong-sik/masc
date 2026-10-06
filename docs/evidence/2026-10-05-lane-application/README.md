@@ -11,8 +11,12 @@ fields; TUI/Web consumers and continuous observation remain follow-up work.
   application module plus its feature scenarios in an owned temporary directory:
   **5 tests pass**. No mocked module or facade was substituted. Build and test
   output are retained. This is not the project's pinned 5.5.1 full build.
-- Syntax parsing of **11 changed OCaml files**, all exit 0. This does not typecheck
-  Runtime, Store, their direct consumers or the authored runtime tests.
+- Syntax parsing of the **11 changed OCaml files** as committed at
+  `4e672fa75d584e128f81f3966b1bc78cb5a5ce5a`, with OCaml **5.5.1**
+  `ocamlc -stop-after parsing`: all exit 0. `check-syntax.py <rev>` reads each
+  blob with `git show`, hashes it and parses it; `syntax.json` is its output.
+  This does not typecheck Runtime, Store, their direct consumers or the authored
+  runtime tests.
 - `git diff --check` is clean.
 
 ## Source-reviewed repair and authored checks

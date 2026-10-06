@@ -536,10 +536,12 @@ let guided_installation () =
     (match Install.handle ~key:"enter" path |> ok with Preview path -> path | _ -> fail "expected preview");
   let schema = Yojson.Safe.from_string
     {|{"type":"object","properties":{"topic":{"type":"string","minLength":1}},"required":["topic"],"additionalProperties":false}|} in
-  let preview image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
+  let preview ?(binding_schema=schema) image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
     "image",image;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
-      "image",`String "worker:revision-1";"binding_schema",schema]] in
-  let response = preview (`Assoc ["state",`String "unverified";"detail",`String "engine offline"]) in
+      "image",`String "worker:revision-1";"binding_schema",binding_schema]] in
+  let unverified = `Assoc ["state",`String "unverified";"detail",`String "engine offline"] in
+  let response = preview unverified in
+  let schemaless = preview ~binding_schema:`Null unverified in
   let pending = Install.begin_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" path |> ok in
   let reopened = Install.create () |> ok in
   check bool "canceled preview cannot replace a freshly opened wizard" true
@@ -556,6 +558,15 @@ let guided_installation () =
   let form,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
     (Ok response) pending |> Option.get in
   check (option string) "matching preview advances without error" None error;
+  let typed,detail = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Ok schemaless) pending |> Option.get in
+  check (option string) "typed path refusal names keys that work there"
+    (Some "Package has no binding schema; Esc back to the Add-ons list, then n for an advanced TOML declaration.") detail;
+  check bool "n does not open the editor from the typed path" true
+    (match Install.handle ~key:"n" typed |> ok with Updated _ -> true | _ -> false);
+  let rec closes presses state = presses>0 && (match Install.handle ~key:"esc" state |> ok with
+    | Install.Cancel -> true | Updated next -> closes (presses-1) next | _ -> false) in
+  check bool "Esc leads from the typed path back to the Add-ons list" true (closes 3 typed);
   check bool "failed image inspection remains explicit" true
     (List.mem "Image unverified: engine offline" (Install.lines form));
   let module Catalog = Masc.Lane_addon_catalog in
@@ -580,6 +591,18 @@ let guided_installation () =
   let restored,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Error "manifest changed") pending |> Option.get in
   check (option string) "preview failure preserves folder" (Some "/packages") (Install.directory restored);
   check (option string) "preview failure shown" (Some "manifest changed") detail;
+  let listed,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok schemaless) pending |> Option.get in
+  check (option string) "browser refusal names n"
+    (Some "Package has no binding schema; use n for an advanced TOML declaration.") detail;
+  check bool "n in the browser opens the raw TOML declaration editor" true
+    (Install.handle ~key:"n" listed = Ok Install.Declare);
+  let remembered=Install.browse ~directory:"/packages/removed" () in
+  let pending_remembered=Install.begin_catalog ~request_id:23 ~directory:(Some "/packages/removed") remembered |> ok in
+  let unread,detail=Install.receive_catalog ~request_id:23 ~directory:(Some "/packages/removed")
+    (Error "folder not found") pending_remembered |> Option.get in
+  check (option string) "remembered folder read failure shown" (Some "folder not found") detail;
+  check bool "Left leaves an unread remembered folder for the workspace root" true
+    (Install.handle ~key:"left" unread = Ok (Install.Browse None));
   let form,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending |> Option.get in
   check (option string) "selected package preview accepted" None detail;
   check bool "preview rereads title and revision" true

@@ -75,10 +75,18 @@ export class LanePackageInstallationSession {
     if (!this.admits(authority)) return Promise.resolve()
     const state = this.state.peek()
     const canonical = this.resolved.get(path) ?? path
-    const rechecks = (draft: PackageDraft | undefined) =>
+    const names = (draft: PackageDraft | undefined) =>
       draft !== undefined && (draft.preview.manifest_path === path || draft.preview.manifest_path === canonical)
+    // A path that names no draft may still be an alias of any of them until
+    // the server resolves it, so its recheck suspends every current preview.
+    // A successful reply gives authority back to the drafts it proves are
+    // another manifest; a failed or abandoned one leaves them suspended.
+    const known = [...state.drafts.values()].some(names)
+    const rechecks = (draft: PackageDraft) => !known || names(draft)
+    const suspended = new Set([...state.drafts]
+      .filter(([, draft]) => rechecks(draft) && draft.previewAuthority === authority).map(([key]) => key))
     this.state.value = { ...state,
-      selected: state.selected !== null && rechecks(state.drafts.get(state.selected)) ? state.selected : null,
+      selected: state.selected !== null && names(state.drafts.get(state.selected)) ? state.selected : null,
       drafts: new Map([...state.drafts].map(([key, draft]) => [key,
         rechecks(draft) ? { ...draft, previewAuthority: null } : draft])) }
     return this.read('preview', authority, signal => fetchLanePackagePreview(path, signal), (preview, state) => {
@@ -90,8 +98,10 @@ export class LanePackageInstallationSession {
       const prior = state.drafts.get(key)
       const draft: PackageDraft = prior ? { ...prior, preview, previewAuthority: authority }
         : { preview, schema, input: initialBindingInput(schema), id: '', runId: '', dirty: false, previewAuthority: authority }
-      const drafts = new Map([...state.drafts].map(([otherKey, other]) =>
-        [otherKey, otherKey !== key && other.preview.manifest_path === preview.manifest_path ? { ...other, previewAuthority: null } : other]))
+      const drafts = new Map([...state.drafts].map(([otherKey, other]) => [otherKey,
+        otherKey === key ? other
+          : other.preview.manifest_path === preview.manifest_path ? { ...other, previewAuthority: null }
+          : suspended.has(otherKey) ? { ...other, previewAuthority: authority } : other]))
       return { ...state, drafts: drafts.set(key, draft), selected: key }
     })
   }

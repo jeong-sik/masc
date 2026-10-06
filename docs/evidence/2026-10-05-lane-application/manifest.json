@@ -2,13 +2,18 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 2502,
-      "sha256": "340534d5187a7d28f41a2b3d85a276b51a6a8c42ddfcee0f473f32e45af5a7ea"
+      "bytes": 2735,
+      "sha256": "f5ddfdfdaa46af91abefbab9dd9ad71f781558cfc1321527e1e7e8f635955129"
+    },
+    {
+      "path": "check-syntax.py",
+      "bytes": 2666,
+      "sha256": "b4550d4adbf3adfeb651f571a7d474e78c62a7d9ff2146b98c4635ef276b17da"
     },
     {
       "path": "checks.json",
-      "bytes": 2709,
-      "sha256": "f907cb934672a35b0ed6aeaa57521800b5eb60be2223bacee6534b2e9029afbd"
+      "bytes": 2496,
+      "sha256": "b41f65de94f2026ef3194a1ab99bb053df3efc89723e8dac9cbdde45715156b2"
     },
     {
       "path": "pure-compile.txt",
@@ -27,8 +32,8 @@
     },
     {
       "path": "syntax.json",
-      "bytes": 1979,
-      "sha256": "a6c51daa0686b668d74dbbfb162f77aaafcdc996407b7dec352af0a17cbb7c05"
+      "bytes": 4004,
+      "sha256": "b97ce8514cb83f4ca622d20283f8d443430b1c78d377492e648b6fdbf49ea56c"
     }
   ]
 }

@@ -914,7 +914,25 @@ let test_the_turn_observation_names_its_keeper_turn () =
    repeated by a response with usage, so no row; a response without usage
    (a host stop) still records the missing usage, under no scope. An
    AGENT_CORE response is one request; without usage its row has no scope
-   either. *)
+   either. Only an AGENT_CORE response is a reading of the turn's spend, so
+   only its row records the observation. *)
+let spend_observation_of_row json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt Masc.Keeper_spend_observation.field fields with
+     | Some `Null -> "none"
+     | Some observation ->
+       (match Masc.Keeper_spend_observation.of_json observation with
+        | Ok (Masc.Keeper_spend_observation.Agent_core_response { usage = Some _; _ }) ->
+          "agent_core_response"
+        | Ok (Masc.Keeper_spend_observation.Agent_core_response { usage = None; _ }) ->
+          "agent_core_response_without_usage"
+        | Ok (Masc.Keeper_spend_observation.Client_report _) -> "client_report"
+        | Error error -> failf "spend observation: %s" error)
+     | None -> fail "the row has no spend observation field")
+  | _ -> fail "a cost row must be an object"
+;;
+
 let test_the_completion_hook_rows_by_attempt () =
   let rows_for ~attempt ~usage =
     with_temp_base_path @@ fun base_path ->
@@ -945,9 +963,10 @@ let test_the_completion_hook_rows_by_attempt () =
       match Cost_ledger.of_json json with
       | Ok { Cost_ledger.usage_projection = Cost_ledger.Raw_observation scope; usage; _ } ->
         ( Runtime_usage_scope.to_string scope
-        , match usage with
-          | Cost_ledger.Usage_missing -> "missing"
-          | Cost_ledger.Usage_reported _ -> "reported" )
+        , (match usage with
+           | Cost_ledger.Usage_missing -> "missing"
+           | Cost_ledger.Usage_reported _ -> "reported")
+        , spend_observation_of_row json )
       | Ok
           { Cost_ledger.usage_projection =
               Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _
@@ -960,20 +979,71 @@ let test_the_completion_hook_rows_by_attempt () =
     ; cache_read_input_tokens = 800; cost_usd = None } in
   let client ~reported =
     Some (Masc.Keeper_hooks_agent_core.Client_stream_attempt { reported }) in
-  check (list (pair string string)) "a reported client response is not written again" []
+  let rows = list (triple string string string) in
+  check rows "a reported client response is not written again" []
     (rows_for ~attempt:(client ~reported:true) ~usage:(Some usage));
-  check (list (pair string string)) "a client response without usage after reports"
-    [ "unavailable", "missing" ]
+  check rows "a client response without usage after reports"
+    [ "unavailable", "missing", "none" ]
     (rows_for ~attempt:(client ~reported:true) ~usage:None);
-  check (list (pair string string)) "a client response no report preceded"
-    [ "unavailable", "missing" ]
+  check rows "a client response no report preceded"
+    [ "unavailable", "missing", "none" ]
     (rows_for ~attempt:(client ~reported:false) ~usage:None);
-  check (list (pair string string)) "an AGENT_CORE response is one request"
-    [ "per_request", "reported" ]
+  check rows "an AGENT_CORE response is one request"
+    [ "per_request", "reported", "agent_core_response" ]
     (rows_for ~attempt:(Some Masc.Keeper_hooks_agent_core.Agent_core_attempt) ~usage:(Some usage));
-  check (list (pair string string)) "an AGENT_CORE response without usage has no scope"
-    [ "unavailable", "missing" ]
+  check rows "an AGENT_CORE response without usage has no scope"
+    [ "unavailable", "missing", "agent_core_response_without_usage" ]
     (rows_for ~attempt:(Some Masc.Keeper_hooks_agent_core.Agent_core_attempt) ~usage:None)
+;;
+
+(* An official client's report is the turn's reading of its stream, and its
+   row records the report as it was observed, a replaced count included. *)
+let test_a_client_report_row_records_the_report () =
+  let row_for (report : Masc.Keeper_client_usage_report.t) =
+    with_temp_base_path @@ fun base_path ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    let masc_root =
+      Masc.Workspace.masc_root_dir (Masc.Workspace.default_config base_path) in
+    Masc.Keeper_hooks_agent_core.emit_client_usage_report
+      ~trajectory_acc:
+        (Some
+           (Trajectory.create_accumulator
+              ~masc_root ~keeper_name:"client-keeper" ~trace_id:"client-trace" ()))
+      ~agent_name:"client-keeper" ~trace_id:"client-trace" ~keeper_turn_id:3
+      ~runtime_attempt:("run-1", "codex.fixture", 0)
+      report;
+    match Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 10 with
+    | [ `Assoc fields ] ->
+      (match List.assoc_opt Masc.Keeper_spend_observation.field fields with
+       | Some observation -> observation
+       | None -> fail "the row has no spend observation field")
+    | rows -> failf "expected one row, got %d" (List.length rows)
+  in
+  let report count : Masc.Keeper_client_usage_report.t =
+    { official_turn = 2
+    ; response_id = "turn-2"
+    ; model = "gpt-fixture"
+    ; conversation_id = "thread-1"
+    ; position = Masc.Keeper_usage_resolution.Resumed
+    ; usage_scope = Runtime_usage_scope.Turn_total
+    ; count
+    ; vendor_total_tokens = Some 1200
+    } in
+  let usage : Agent_core.Types.api_usage =
+    { input_tokens = 900; output_tokens = 7; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 800; cost_usd = Some 0.01 } in
+  List.iter
+    (fun (label, report) ->
+       check string label
+         (Yojson.Safe.to_string
+            (Masc.Keeper_spend_observation.to_json
+               (Masc.Keeper_spend_observation.Client_report report)))
+         (Yojson.Safe.to_string (row_for report)))
+    [ "a running count", report (Masc.Keeper_client_usage_report.Running_count usage)
+    ; "a replaced count", report Masc.Keeper_client_usage_report.Count_replaced
+    ]
 ;;
 
 let test_plain_tool_commits_before_hook_returns ~success () =
@@ -2052,7 +2122,9 @@ let () =
       , [ test_case "the turn observation names its keeper turn" `Quick
             test_the_turn_observation_names_its_keeper_turn
         ; test_case "the completion hook rows by attempt" `Quick
-            test_the_completion_hook_rows_by_attempt ] )
+            test_the_completion_hook_rows_by_attempt
+        ; test_case "a client report row records the report" `Quick
+            test_a_client_report_row_records_the_report ] )
     ; ( "rejected_tool_calls"
       , [ test_case "autonomous plain success commits before completion" `Quick
             (test_plain_tool_commits_before_hook_returns ~success:true)

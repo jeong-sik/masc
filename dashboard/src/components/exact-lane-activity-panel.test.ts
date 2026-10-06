@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseLaneInventory } from '../api/lane-inventory'
 import inventory from '../api/fixtures/lane-inventory.json'
 import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import { modelSetupResumeState, resumeSavedModelSetup } from '../lib/model-setup-resume'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
 import { RuntimeTomlRevisionConflict, RuntimeTomlSaveRejected, type RuntimeTomlConfig } from '../api/dashboard-runtime'
 import { readExactActivity, writeExactActivity } from '../lib/exact-lane-activity'
@@ -25,7 +26,19 @@ const inventoryApi = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
 vi.mock('../api/lane-inventory', async original => ({ ...await original<typeof import('../api/lane-inventory')>(), ...inventoryApi }))
 vi.mock('../api/dashboard-runtime', async original => ({ ...await original<typeof import('../api/dashboard-runtime')>(), ...api }))
 vi.mock('../api/dashboard-standalone-lanes', async original => ({ ...await original<typeof import('../api/dashboard-standalone-lanes')>(), ...projectionApi }))
-vi.mock('../lib/model-setup-resume', async original => ({ ...await original<typeof import('../lib/model-setup-resume')>(), resumeSavedModelSetup: followup.resumeSavedModelSetup }))
+vi.mock('../lib/model-setup-resume', async original => {
+  const actual = await original<typeof import('../lib/model-setup-resume')>()
+  // Keeps the real state contract: a request enters `resuming` as it starts,
+  // and only the latest request's result reaches the shared state.
+  let latest = 0
+  return { ...actual, resumeSavedModelSetup: async (...args: Parameters<typeof actual.resumeSavedModelSetup>) => {
+    const request = ++latest
+    actual.modelSetupResumeState.value = { kind: 'resuming' }
+    const result = await followup.resumeSavedModelSetup(...args)
+    if (request === latest) actual.modelSetupResumeState.value = result
+    return result
+  } }
+})
 vi.mock('../lib/runtime-config-refresh', () => ({ refreshRuntimeConfigConsumers: followup.refreshRuntimeConfigConsumers }))
 
 const lane = parseLaneInventory(inventory).exact_snapshot.lanes.find(row => row.laneId === 'librarian_exact')!
@@ -71,7 +84,7 @@ beforeEach(() => {
   onboardingApi.fetchSetupInventory.mockResolvedValue({ source_revision: 'fixture', runtimes: [] })
   inventoryApi.fetchLaneInventory.mockResolvedValue(parseLaneInventory(inventory))
 })
-afterEach(() => { cleanup(); resetExactLaneActivitySessionsForTesting(); resetRuntimeTomlSessionsForTesting() })
+afterEach(() => { cleanup(); resetExactLaneActivitySessionsForTesting(); resetRuntimeTomlSessionsForTesting(); modelSetupResumeState.value = { kind: 'idle' } })
 async function draft() {
   const authority = executionWorkspaceAuthority.peek()!, session = exactLaneActivitySessionFor(authority, lane)
   await session.read(authority); session.toggle(authority); return { authority, session }
@@ -538,6 +551,15 @@ describe('Exact activity operator flow', () => {
     expect(session.state.value.current?.source_text).toBe(off)
     expect(session.state.value.receipt?.application.exact_output_registry.status).toBe('kept')
     expect(session.state.value.setupResumeError).toMatch(/재개를 확인하지 못했습니다/)
+  })
+  it('does not report its own resume failure once a newer resume has succeeded', async () => {
+    const { session, authority } = await draft()
+    followup.resumeSavedModelSetup.mockImplementationOnce(async () => {
+      await resumeSavedModelSetup()
+      return { kind: 'failed', reason: 'activation_failed' }
+    }).mockResolvedValueOnce({ kind: 'active', exactOutputAvailable: true })
+    expect(await session.save(authority)).toBe(true)
+    expect(session.state.value.setupResumeError).toBeNull()
   })
   it('keeps uncertain durability separate from the freshly observed file', async () => {
     const { session, authority } = await draft()

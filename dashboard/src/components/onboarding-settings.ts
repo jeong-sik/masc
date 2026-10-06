@@ -5,7 +5,7 @@ import { fetchSetupStatus, fetchSetupInventory, saveSetupCredential, type Status
 import { RuntimeSetupPicker } from './runtime-setup-picker'
 import { ModelSetupResumeControl } from './model-setup-resume-control'
 import { executionWorkspaceAuthority } from '../store'
-import { completeExactLaneSetupResume } from '../lib/exact-lane-activity-session'
+import { completeLaneActivitySetupResume } from '../lib/lane-activity-session'
 import { modelSetupResumeState, resumeSavedModelSetup, type ModelSetupResumeState } from '../lib/model-setup-resume'
 
 const labels = { satisfied: '확인됨', needs_setup: '설정 필요', needs_verification: '검증 필요', invalid: '설정 확인 필요' }
@@ -13,7 +13,7 @@ const labels = { satisfied: '확인됨', needs_setup: '설정 필요', needs_ver
 export function OnboardingSettings() {
   const authority = executionWorkspaceAuthority.value
   function completeSetupResume(result: ModelSetupResumeState) {
-    if (authority) completeExactLaneSetupResume(authority, result)
+    if (authority) completeLaneActivitySetupResume(authority, result)
   }
   const [status, setStatus] = useState<Status | null>(null)
   const [inventory, setInventory] = useState<Inventory | null>(null)

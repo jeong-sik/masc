@@ -540,7 +540,10 @@ let start_flow ~first_slot ~other_slots ~messages ~requirement =
     Exact.snapshot_flow ~first ~rest ~messages requirement
     |> Result.map_error (fun error -> Snapshot_refused error)
   in
-  Exact.start_flow snapshot |> Result.map_error (fun error -> Start_refused error)
+  Exact.start_flow
+    ~admission_class:(Standalone_lane.admission_class Browser_stagehand)
+    snapshot
+  |> Result.map_error (fun error -> Start_refused error)
 ;;
 
 (* ---- CLI tail --------------------------------------------------------------- *)

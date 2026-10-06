@@ -114,6 +114,7 @@ type capabilities =
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
 let exact_body_timeout_s_key = "exact-body-timeout-s"
+let admission_priority_run_limit_key = "admission-priority-run-limit"
 
 type antigravity_effort =
   | Antigravity_low
@@ -204,6 +205,14 @@ type provider =
         a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)
+  ; admission_priority_run_limit : int option
+    (** [admission-priority-run-limit]: how many admission permits in a row
+        this provider account may hand to [Priority] requests (the judgment
+        lanes) while a [Standard] request waits for one. [None] keeps one
+        arrival-order queue. Declared on the provider because the permits are
+        counted per account. It reaches only the bindings that declare
+        [max-concurrent]; a provider where no binding can use it, or an
+        official-client provider, is refused at load. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)

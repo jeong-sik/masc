@@ -267,6 +267,7 @@ let fanout_provider ~id ~url =
   ; headers = None
   ; connect_timeout_s = None
   ; exact_body_timeout_s = None
+  ; admission_priority_run_limit = None
   ; antigravity_cli = None
   ; usage_read = None
   }

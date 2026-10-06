@@ -43,7 +43,9 @@ val anti_rationalization_reviewer_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 (** Provider config for the task anti-rationalization reviewer: clears the AGENT_CORE
-    structured-output response format. The verdict channel is the
+    structured-output response format, and its requests join the verifier
+    lane's admission queue ({!Standalone_lane.admission_class}). The verdict
+    channel is the
     [report_review_verdict] tool call (exactly-once, total parser in
     [Task.Anti_rationalization]); a wire response format constrained only the
     final assistant text this surface never parses, and its capability branch

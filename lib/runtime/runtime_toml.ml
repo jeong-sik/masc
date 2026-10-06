@@ -815,6 +815,7 @@ let provider_keys =
   ; "is-non-interactive"; "credentials"; "capabilities"; "healthcheck"; "headers"
   ; "kind"; "max-context"; "account-home"; "request-path"; "model-set"; usage_read_key
   ; Runtime_schema.connect_timeout_s_key; Runtime_schema.exact_body_timeout_s_key
+  ; Runtime_schema.admission_priority_run_limit_key
   ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
 ;;
 
@@ -984,6 +985,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
        in
        (let ( let* ) = Result.bind in
         let* max_context = positive_int_opt_field ~path ~key:"max-context" tbl in
+        let* admission_priority_run_limit =
+          positive_int_opt_field ~path ~key:Runtime_schema.admission_priority_run_limit_key tbl
+        in
         let* capabilities = capabilities_result in
         let* enabled_opt = enabled_result in
         let* healthcheck_path = healthcheck_result in
@@ -1013,6 +1017,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; headers
             ; connect_timeout_s
             ; exact_body_timeout_s
+            ; admission_priority_run_limit
             ; antigravity_cli
             ; usage_read
             }))
@@ -2278,9 +2283,10 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   in
   (* [max-concurrent] is an explicit operator override, not a required binding
      property. Absence means "no static client-side cap", and it also means no
-     endpoint admission at all: [Provider_admission] holds a FIFO permit only
-     for a binding that declares this key, so an undeclared binding dispatches
-     straight out. What remains for it is live health/backoff and whatever the
+     endpoint admission at all: [Provider_admission] holds a permit only for
+     a binding that declares this key, so an undeclared binding dispatches
+     straight out, and its provider's [admission-priority-run-limit] does not
+     reach it. What remains for it is live health/backoff and whatever the
      provider itself refuses with (e.g. HTTP 429): this side stops sending
      only once the other side says no.
 
@@ -3085,6 +3091,60 @@ let validate_ollama_only_binding_fields
     bindings
 ;;
 
+(* [admission-priority-run-limit] orders the queue for an account's permits.
+   Only an HTTP request admitted through [max-concurrent] waits in that
+   queue: official-client runtimes run outside it, and a binding without
+   [max-concurrent] is not admitted. A provider whose bindings cannot use
+   the limit would carry a declaration that orders nothing, so it is refused
+   here, naming the provider. *)
+let validate_priority_run_limit_providers
+      (providers : Runtime_schema.provider list)
+      (bindings : Runtime_schema.binding list)
+  : parse_error list
+  =
+  List.concat_map
+    (fun (provider : Runtime_schema.provider) ->
+       match provider.admission_priority_run_limit with
+       | None -> []
+       | Some limit ->
+         let refuse reason =
+           error
+             (Ns.(path Providers) provider.id
+              ^ "."
+              ^ Runtime_schema.admission_priority_run_limit_key)
+             (Printf.sprintf
+                "%s = %d orders the permit queue of provider %S, but %s. Remove it, \
+                 or declare it where requests wait for a permit."
+                Runtime_schema.admission_priority_run_limit_key
+                limit
+                provider.id
+                reason)
+         in
+         (match provider.api_format with
+          | Runtime_schema.Codex_app_server_runtime
+          | Runtime_schema.Antigravity_cli_runtime
+          | Runtime_schema.Claude_code_runtime
+          | Runtime_schema.Muse_serve_runtime ->
+            refuse
+              (Printf.sprintf
+                 "%s runs as an official client outside account admission"
+                 (Runtime_schema.show_api_format provider.api_format))
+          | Runtime_schema.Messages_api
+          | Runtime_schema.Chat_completions_api
+          | Runtime_schema.Gemini_api
+          | Runtime_schema.Vertex_gemini_api
+          | Runtime_schema.Ollama_api ->
+            if
+              List.exists
+                (fun (binding : Runtime_schema.binding) ->
+                   String.equal binding.provider_id provider.id
+                   && Option.is_some binding.max_concurrent)
+                bindings
+            then []
+            else refuse "none of its bindings declares max-concurrent"))
+    providers
+;;
+
 (* --- [typesafeai] --- *)
 
 let typesafeai_keys =
@@ -3396,10 +3456,13 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let browser = extract_after_all_errors_guard ~label:(Ns.key Ns.Browser) browser_result in
     let machines = extract_after_all_errors_guard ~label:(Ns.key Ns.Machines) machines_result in
     let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
-    (* Cross-table Gate: a binding field only reaches the wire through its
-       provider's request builder, so whether it is carriable is a fact about
-       the provider, not about the binding table it was written in. *)
-    match validate_ollama_only_binding_fields providers bindings with
+    (* Cross-table Gates: whether a declaration can take effect depends on
+       another table -- a binding field on its provider's request builder, a
+       provider's run limit on its bindings' permit queue. *)
+    match
+      validate_ollama_only_binding_fields providers bindings
+      @ validate_priority_run_limit_providers providers bindings
+    with
     | _ :: _ as errors -> Error errors
     | [] ->
       Ok

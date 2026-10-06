@@ -678,7 +678,7 @@ let test_bookkeeping_terminal_remains_retryable () =
       ~minimum_guarantee:Exact.Json_syntax in
     let attempt = Exact.snapshot_flow ~first ~rest:[]
       ~messages:[Agent_core.Types.user_msg "appraise"] requirement
-      |> Result.get_ok |> Exact.start_flow |> Result.get_ok in
+      |> Result.get_ok |> Exact.start_flow ~admission_class:Llm_provider.Admission_class.Standard |> Result.get_ok in
     let measurement = ref None in
     let result = Exact.execute_flow_once ~net ~clock
       ~before_measurement_dispatch:(fun receipt -> measurement := Some receipt; Ok ())

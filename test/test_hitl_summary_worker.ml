@@ -790,6 +790,104 @@ let test_schema_is_closed_nonhierarchical_contract () =
     (schema |> member "additionalProperties" |> to_bool)
 ;;
 
+(* On an account that declares a priority run limit, the HITL judge's flow
+   takes a freed permit ahead of an ordinary request that queued first. The
+   ordinary request, once it holds the permit, reads how many requests the
+   server has received: one means the judge's request went first. *)
+let test_hitl_flow_takes_a_freed_permit_ahead_of_a_standard_request () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-priority-admission" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       let api_key = "hitl-priority-admission" in
+       let binding =
+         Llm_provider.Provider_config.make
+           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~provider_id:"deepseek"
+           ~model_id:"deepseek-v4-pro"
+           ~base_url:server.base_url
+           ~api_key
+           ~request_path:"/chat/completions"
+           ~max_concurrent_requests:1
+           ~admission_priority_run_limit:3
+           ()
+       in
+       let snapshot =
+         match
+           EO.load_resolver_snapshot
+             ~io:{ getenv = (fun _ -> Ok None) }
+             ~catalog:
+               (EO.Embedded_with_targets
+                  [ { EO.target_ref = "hitl-priority"
+                    ; binding
+                    ; credential = EO.Credential_resolved (Llm_provider.Secret.of_string api_key)
+                    ; body_timeout_s = Some F.fixture_post_body_timeout_seconds
+                    }
+                  ])
+             ()
+         with
+         | Ok snapshot -> snapshot
+         | Error _ -> fail "the bound HITL target should load"
+       in
+       publish_lane [ "hitl-priority" ] snapshot;
+       let prepared = prepare_exn (pending_entry ~base_path ()) in
+       let occupied, occupied_resolver = Eio.Promise.create () in
+       let release, release_resolver = Eio.Promise.create () in
+       let seen_by_standard = ref None in
+       (* Steps on the permit queue itself, so the arrival order does not
+          depend on how fast the machine runs the fibers. *)
+       let await_queued count =
+         let deadline = Eio.Time.now clock +. F.fixture_wait_seconds in
+         let rec loop () =
+           match Llm_provider.Provider_admission.snapshot_for ~config:binding with
+           | Some snapshot when snapshot.queue_length >= count -> ()
+           | Some _ | None ->
+             if Eio.Time.now clock > deadline
+             then failf "%d requests never queued for the permit" count
+             else (
+               Eio.Time.sleep clock 0.001;
+               loop ())
+         in
+         loop ()
+       in
+       Eio.Fiber.all
+         [ (fun () ->
+             Llm_provider.Provider_admission.with_admission ~config:binding (fun () ->
+               Eio.Promise.resolve occupied_resolver ();
+               Eio.Promise.await release))
+         ; (fun () ->
+             Eio.Promise.await occupied;
+             Llm_provider.Provider_admission.with_admission ~config:binding (fun () ->
+               seen_by_standard := Some (List.length (F.request_bodies server))))
+         ; (fun () ->
+             Eio.Promise.await occupied;
+             await_queued 1;
+             Worker.For_testing.execute_prepared_flow
+               ~net
+               ~clock
+               ~on_summary:(fun _ -> ())
+               prepared
+             |> require_executed)
+         ; (fun () ->
+             Eio.Promise.await occupied;
+             await_queued 2;
+             Eio.Promise.resolve release_resolver ())
+         ];
+       check (option int) "the judge's request was sent before the queued request ran"
+         (Some 1) !seen_by_standard;
+       check int "the judge sent one request" 1 (List.length (F.request_bodies server)))
+;;
+
 let test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-json-syntax-contract" @@ fun base_path ->
@@ -3140,6 +3238,10 @@ let () =
             "JSON-syntax request is prompt-only and carries canonical schema"
             `Quick
             test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema
+        ; test_case
+            "HITL flow takes a freed permit ahead of a standard request"
+            `Quick
+            test_hitl_flow_takes_a_freed_permit_ahead_of_a_standard_request
         ; test_case
             "prompt is registry-owned"
             `Quick

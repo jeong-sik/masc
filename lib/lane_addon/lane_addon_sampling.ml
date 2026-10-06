@@ -309,13 +309,9 @@ let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
     | _ -> Ok None in
   let references = List.concat_map (fun (row : Types.row) -> row.evidence) output.rows
     |> List.sort_uniq Stdlib.compare in
-  let* receipts, _ = List.fold_left (fun result reference ->
-    let* receipts, remaining = result in
+  List.fold_left (fun result reference ->
+    let* receipts = result in
     let* captured = receipt reference in
     match captured with
-    | None -> Ok (receipts, remaining)
-    | Some value ->
-        let size = String.length (Yojson.Safe.to_string value) in
-        if size > remaining then Error "sampling receipts exceed the source envelope"
-        else Ok (value :: receipts, remaining - size)) (Ok ([],max_bytes)) references in
-  Ok receipts
+    | None -> Ok receipts
+    | Some value -> Ok (value :: receipts)) (Ok []) references

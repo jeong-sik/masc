@@ -5207,7 +5207,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  (Keeper_portrait_item.id item))
     in
     (* Equipped implies owned: the state word is exclusive so a worn row
-       never reads "owned". The row suffix below carries "equipped". *)
+       never reads "owned". The row suffix below carries "equipped", bold
+       so worn rows stand out from owned rows. The word stays the
+       distinguisher: Sgr.bold is colors-gated, so NO_COLOR drops the
+       weight and the words still tell the states apart. *)
+    let equipped_word = "  " ^ Ansi.bold ^ "equipped" ^ Ansi.reset in
     let item_account_facts item =
       match account with
       | Some (Item_account.Ready account) ->
@@ -5256,7 +5260,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (if index = cursor then ">" else " ") (index + 1)
         (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
         (Keeper_portrait_item.id item) account_facts
-        (if worn then "  equipped" else "")
+        (if worn then equipped_word else "")
     in
     let item_headline cursor count =
       [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
@@ -5291,7 +5295,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Some item ->
             (match item_account_facts item with
              | Some facts ->
-               [ "  Selected: " ^ facts ^ (if is_worn item then "  equipped" else "") ]
+               [ "  Selected: " ^ facts ^ (if is_worn item then equipped_word else "") ]
              | None -> []) in
       let footer = [ "  Preview changes this picture only." ] in
       let reserved = List.length headline + List.length selected_facts

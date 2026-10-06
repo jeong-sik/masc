@@ -1509,7 +1509,7 @@ let run_turn
       request_attribution_ref := Some attribution
     in
     (* 8. Run Agent *)
-    let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
+    let record_turn_progress, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
         ~preview
         ~observation_token
@@ -1745,12 +1745,11 @@ let run_turn
                       ~accept:
                         Keeper_tooling.Response.response_has_text_or_tool_progress
                       ?on_event
-                      ?on_yield
-                      ?on_resume
+                      ~on_yield
+                      ~on_resume
                       ~agent_ref
                       ?checkpoint_sidecar
                       ~cache_system_prompt:true
-                      ~yield_on_tool
                       ~context_injector
                       ~context:shared_context
                       ~terminal_effect_state:s.terminal_effect_state

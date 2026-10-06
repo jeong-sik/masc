@@ -175,9 +175,3 @@ let settle_one ~now ~appraise ~base_path (waiting : Candle_payout.waiting) =
   | Error (A.Transport_unavailable detail) -> Retry_later {goal_id=waiting.goal_id;detail}
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Retry_later {goal_id=waiting.goal_id;detail=Printexc.to_string exn}
-let drain_once ~now ~appraise ~base_path =
-  match Candle_status.current ~base_path with
-  | Candle_config.Off | Candle_config.Disabled _ -> Ok []
-  | Candle_config.Enabled _ ->
-    let* waiting = pending ~base_path in
-    Ok (List.map (settle_one ~now ~appraise ~base_path) waiting)

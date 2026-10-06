@@ -24,9 +24,9 @@ val resolve_turn_timeout_s_or : runtime_id:string -> default:float -> float opti
 (** [turn_timeout_s_of_declared] applied to the model's declaration. The one
     spelling every official-client boundary uses. *)
 
-val resolve_max_prompt_bytes : runtime_id:string -> int option
-(** Per-model ceiling, in bytes, on the history an official-client start turn
-    seeds its conversation with ({!Runtime_instance.prompt_capacity_bytes}). [None]
+val resolve_prompt_capacity_bytes : runtime_id:string -> int option
+(** Ceiling, in bytes, on the history an official-client start turn seeds its
+    conversation with ({!Runtime_instance.prompt_capacity_bytes}). [None]
     applies no ceiling. *)
 
 val resolve_temperature :

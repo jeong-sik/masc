@@ -57,15 +57,8 @@ val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
-(** Independently retain the terminal request/outcome link before replacing the
-    primary request index. Terminal records include exact [outcome_bytes] before
-    blob publication; recovery verifies the digest and restores a missing blob. *)
-val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
-  f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
-(** Stream recovery records with bounded per-record reads and constant directory
-    memory. Terminal recovery links are visited first, then unresolved requests.
-    The callback can stop immediately with [Error]; directory and decoding errors
-    are explicit. Call from a system thread. No ordering is guaranteed. *)
+(** Retain the terminal request/outcome link independently of the primary
+    request index. [load_sampling_request_bounded] reads this link first. *)
 val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Retain the exact published evidence before sending its idempotent Broadcast.
@@ -137,10 +130,6 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
 module For_testing : sig
   val remove_binding : sync_parent:(string -> unit) -> t -> instance_id:string -> (unit, string) result
   val binding_inventory : sync_parent:(string -> unit) -> root:string -> binding_inventory
-  val iter_sampling_requests :
-    sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
-    t -> instance_id:string -> max_bytes:int ->
-    f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
   val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
   val load_sampling_request_bounded :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

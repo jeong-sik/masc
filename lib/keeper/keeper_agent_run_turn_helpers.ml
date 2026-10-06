@@ -404,32 +404,20 @@ let turn_progress_callbacks ~preview ~observation_token ~config ~keeper_name ~do
       ~event_kind
   in
   (* Keeper tool execution and typed recovery judgment are separate provider
-     lease phases. This is a Keeper lifecycle invariant, not an operator
-     tuning knob: AGENT_CORE releases before tools/judgment and reacquires only for
-     the next main-model turn. *)
-  let yield_on_tool = true in
-  (* SSOT-DRIFT-REMEDIATION: Streaming⇄Awaiting_tool_result FSM transitions
-     are now emitted from the turn-scoped AGENT_CORE Event_bus observation in
-     [Keeper_unified_turn_event_bus], so they appear unconditionally even
-     independently of these lease callbacks. The callbacks below record the
-     mandatory Keeper provider-lease transition. *)
-  let on_yield =
-    if yield_on_tool then
-      Some
-        (fun () ->
-          record_turn_progress "slot_yield";
-          Log.Misc.debug "keeper %s: slot yielded (tool execution)" keeper_name)
-    else None
+     lease phases: AGENT_CORE releases before tools/judgment and reacquires
+     only for the next main-model turn. These callbacks record that lease
+     transition. Streaming⇄Awaiting_tool_result FSM transitions come from the
+     turn-scoped AGENT_CORE Event_bus observation in
+     [Keeper_unified_turn_event_bus], independently of these callbacks. *)
+  let on_yield () =
+    record_turn_progress "slot_yield";
+    Log.Misc.debug "keeper %s: slot yielded (tool execution)" keeper_name
   in
-  let on_resume =
-    if yield_on_tool then
-      Some
-        (fun () ->
-          record_turn_progress "slot_resume";
-          Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" keeper_name)
-    else None
+  let on_resume () =
+    record_turn_progress "slot_resume";
+    Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" keeper_name
   in
   let on_event = Some (fun event ->
     Keeper_turn_preview.note_stream ~writer:preview ~now:(Time_compat.now ()) event;
     registry_progress_on_event ~record_turn_progress downstream event) in
-  (record_turn_progress, yield_on_tool, on_yield, on_resume, on_event)
+  (record_turn_progress, on_yield, on_resume, on_event)

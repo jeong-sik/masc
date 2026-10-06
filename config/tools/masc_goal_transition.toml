@@ -6,7 +6,7 @@ Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
 request_complete moves executing -> verifying and persists a durable proof \
 request; repeated while verifying, it re-arms that request. drop and reopen \
 also leave verifying. Verifier verdicts are not accepted by this MCP tool. \
-pause/block suspend Goal progression and new verification work, preserving the prior live phase. resume/unblock restore it. Linked Tasks remain independent. Terminal Goals must be reopened first."""
+pause/block suspend Goal progression and new verification work, preserving the prior live phase. resume/unblock restore it. Linked Tasks remain independent of pause and block. drop cancels its unclaimed linked Tasks unless another Goal that is not dropped also links them; claimed Tasks keep running and the drop notice names their holders. Terminal Goals must be reopened first."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name. Not

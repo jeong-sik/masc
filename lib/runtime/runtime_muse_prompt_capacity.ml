@@ -10,8 +10,7 @@ type error =
 
 let error_to_string = function
   | No_window_declared ->
-    "the Muse model declares neither max-context (the window the host reports) nor \
-     max-prompt-bytes"
+    "the Muse model declares no max-context (the window the host reports)"
   | Window_below_host_overhead { max_context } ->
     Printf.sprintf
       "%d%% of the Muse model's max-context %d does not cover the host's own %d-token \
@@ -36,17 +35,12 @@ let bytes_of_tokens tokens =
   else tokens * host_bytes_per_estimated_token
 ;;
 
-let start_prompt_bytes ~declared ~max_context =
-  match declared, max_context with
-  | None, None -> Error No_window_declared
-  | Some declared, None -> Ok declared
-  | declared, Some max_context ->
+let start_prompt_bytes ~max_context =
+  match max_context with
+  | None -> Error No_window_declared
+  | Some max_context ->
     let room_tokens = compaction_line_tokens max_context - host_fixed_overhead_tokens in
     if room_tokens <= 0
     then Error (Window_below_host_overhead { max_context })
-    else (
-      let derived = bytes_of_tokens room_tokens in
-      match declared with
-      | None -> Ok derived
-      | Some declared -> Ok (Int.min declared derived))
+    else Ok (bytes_of_tokens room_tokens)
 ;;

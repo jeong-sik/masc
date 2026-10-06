@@ -247,9 +247,6 @@ let test_read_only_observation_keeps_policy_bytes () =
   (match Candle_observe.summary (Candle_observe.read ~now ~base_path) with
    | Candle_observation.Ready _ -> ()
    | _ -> fail "read-only roster observation should remain available");
-  let keeper = Result.get_ok (Keeper_id.Keeper_name.of_string "keeper") in
-  (match Candle_shop.observed_account ~now ~base_path ~keeper with
-   | Ok _ -> () | Error error -> fail (Candle_shop.error_to_string error));
   check string "read-only paths never publish desired policy" before (ledger_bytes base_path);
   ignore (view_exn ~now ~base_path : Candle_status.view);
   check bool "authorized policy writer still publishes" true (before <> ledger_bytes base_path)

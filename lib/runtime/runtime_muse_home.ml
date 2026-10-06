@@ -91,11 +91,38 @@ let write_private path body =
   Fun.protect ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel body; flush channel; Unix.fsync (Unix.descr_of_out_channel channel))
 
+(* Muse Code runs observer agents beside the main session, and "each enabled
+   observer makes its own model calls" on the same subscription
+   (dev.meta.ai/docs/muse-code/extending). A Keeper keeps its own goals,
+   verification and memory, so every observer the host bundles is turned off
+   through [runtime_capabilities]. The ids are the host's capability names for
+   its bundled reminder plugin (muse 1.4.3). *)
+type observer =
+  | Memory
+  | Skill_reminder
+  | Verify_reminder
+  | Goal_reminder
+  | Todo_reminder
+  | Scope_reminder
+[@@deriving enumerate]
+
+let observer_capability_id = function
+  | Memory -> "plugin:tbh-reminders:reminder:memory"
+  | Skill_reminder -> "plugin:tbh-reminders:reminder:skill-reminder"
+  | Verify_reminder -> "plugin:tbh-reminders:reminder:verify-reminder"
+  | Goal_reminder -> "plugin:tbh-reminders:reminder:goal-reminder"
+  | Todo_reminder -> "plugin:tbh-reminders:reminder:todo-reminder"
+  | Scope_reminder -> "plugin:tbh-reminders:reminder:scope-reminder"
+
 let settings =
   Yojson.Safe.to_string
     (`Assoc [ "schema_version", `Int 1
             ; "permissions", `Assoc [ "schema_version", `Int 1
-                                    ; "default_profile", `String ":ask-me" ] ])
+                                    ; "default_profile", `String ":ask-me" ]
+            ; "runtime_capabilities",
+              `Assoc (List.map (fun observer ->
+                  observer_capability_id observer, `Assoc [ "enabled", `Bool false ])
+                  all_of_observer) ])
 
 let parse_record body =
   try
@@ -145,6 +172,12 @@ let validate_auth body =
   | _ -> unavailable "selected account has an invalid auth document"
   with Yojson.Json_error _ -> unavailable "selected account has an unreadable auth document"
 
+(* What one preparation did, so [prepare] can say when it replaced a
+   generation: the file it no longer admits may have been edited. *)
+type preparation =
+  | Admitted
+  | Replaced_other_settings of { replaced_revision : string }
+
 let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source =
   let* source_bytes = read_optional ~ownership_root:account_home source in
   match source_bytes with
@@ -157,38 +190,51 @@ let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~sour
     let* previous = match previous with
       | None -> Ok None
       | Some body -> Result.map Option.some (parse_record body) in
+    let publish auth_bytes =
+      let revision = Random_id.uuid_v7 () in
+      let* directory = directories store [ revision, true; "muse", true ] in
+      write_private (Filename.concat directory "settings.json") settings;
+      write_private (Filename.concat directory "auth.json") auth_bytes;
+      sync_directory directory;
+      let generation = Filename.dirname directory in
+      let* _ = directories generation [ "tmp", true ] in
+      sync_directory generation;
+      let record = Yojson.Safe.to_string (`Assoc [ "source_sha256", `String source_sha256
+                                               ; "revision", `String revision ]) in
+      (* The strict atomic writer creates its tempfile with mode 0600 and
+         fsyncs both it and the parent directory; no post-publication chmod. *)
+      let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
+      Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home }
+    in
     (match previous with
      | Some (previous_sha256, revision) when String.equal source_sha256 previous_sha256 ->
        let generation = Filename.concat store revision in
        let* () = check_directory ~private_:true (Filename.concat generation "tmp") in
        let* auth = read_optional ~ownership_root:store (Filename.concat generation "muse/auth.json") in
        let* current_settings = read_optional ~ownership_root:store (Filename.concat generation "muse/settings.json") in
-       let* () = match current_settings with
-         | Some body when String.equal body settings -> Ok ()
-         | None | Some _ -> unavailable "managed permission settings changed or are missing" in
        (match auth with
         | None -> Error (Sign_in_required No_file_sign_in)
         | Some body ->
           let* () = validate_auth body in
-          (* A previous current.json rename may have become visible even when
-             its parent fsync failed. Reconfirm that pointer before admission. *)
-          sync_store store;
-          Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
+          (match current_settings with
+           | Some current when String.equal current settings ->
+             (* A previous current.json rename may have become visible even when
+                its parent fsync failed. Reconfirm that pointer before admission. *)
+             sync_store store;
+             Ok ({ config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home }, Admitted)
+           | None | Some _ ->
+             (* The generation runs settings other than the current managed
+                ones: an earlier masc wrote another policy, or the file was
+                edited. It is never admitted again. A new generation with the
+                current settings carries its credentials, vendor refreshes
+                included, and its new revision starts Keeper sessions afresh,
+                since the host commits a session's permission profile when the
+                session starts. *)
+             let* prepared = publish body in
+             Ok (prepared, Replaced_other_settings { replaced_revision = revision })))
      | None | Some _ ->
-       let revision = Random_id.uuid_v7 () in
-       let* directory = directories store [ revision, true; "muse", true ] in
-       write_private (Filename.concat directory "settings.json") settings;
-       write_private (Filename.concat directory "auth.json") source_bytes;
-       sync_directory directory;
-       let generation = Filename.dirname directory in
-       let* _ = directories generation [ "tmp", true ] in
-       sync_directory generation;
-       let record = Yojson.Safe.to_string (`Assoc [ "source_sha256", `String source_sha256
-                                                ; "revision", `String revision ]) in
-       (* The strict atomic writer creates its tempfile with mode 0600 and
-          fsyncs both it and the parent directory; no post-publication chmod. *)
-       let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
-       Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
+       let* prepared = publish source_bytes in
+       Ok (prepared, Admitted))
 
 (* The vendor launcher (v3) keeps its sign-in at [muse/auth.json] under
    XDG_CONFIG_HOME, and under [HOME/.config] when that is unset. *)
@@ -231,7 +277,14 @@ let prepare_with_store_sync ~sync_store ~account_home =
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"
             (fun () -> prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source)) with
-    | Ok result -> result
+    | Ok (Ok (prepared, Admitted)) -> Ok prepared
+    | Ok (Ok (prepared, Replaced_other_settings { replaced_revision })) ->
+      Log.Runtime_agent.info
+        "Muse managed configuration %s for %s held settings other than the current \
+         managed settings; generation %s now carries its sign-in"
+        replaced_revision selected_account_home prepared.account_revision;
+      Ok prepared
+    | Ok (Error error) -> Error error
     | Error _ -> unavailable "credential generation lock failed")
 
 let prepare ~account_home =

@@ -1,0 +1,19 @@
+{
+  "base": "7da701a398a9b9383dc37a1a5312b49b421c780e",
+  "binary_sha256": "196d9fce8ecced88ab44ac424d300d9744299ee1f707d323eac9c0803d7bae0e",
+  "red_fixture_sha256": "22ba57dfef8cc5a677ffec975f1a87b0d8a9e3ddf46b481f0ca83c21f583e45e",
+  "green_fixture_sha256": "fcd16c65c3b30fb825875b1384a36f756ba47fc90b89ebfd3645db2e8df5ae0e",
+  "pyright_baseline_errors": 141,
+  "pyright_current_errors": 141,
+  "pyright_diagnostic_signatures_equal": true,
+  "pyright_raw_hashes": {
+    "baseline-pyright": "739aee213fd40f9e795582bf9879617797ecd2a6dde5dc231fff988ecf4fe640",
+    "final-pyright": "a0652a61f6e254fa4b65993aedec4bffc0798d91042e275edc08a95e7f1f80d4"
+  },
+  "scenarios": {
+    "prior_parent_full_attempt_before_goal": 4,
+    "goal_current": 1,
+    "remaining_held_current": 3
+  },
+  "single_full8_pass_claim": false
+}

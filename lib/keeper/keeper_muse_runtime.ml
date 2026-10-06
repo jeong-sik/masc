@@ -493,7 +493,7 @@ let capacity_bounded_model_input_projection ~capacity_bytes ~system_prompt ~goal
   then
     Error
       (config_error
-         ~field:"max_prompt_bytes"
+         ~field:"prompt_ceiling_bytes"
          (Printf.sprintf
             "Muse Code fixed prompt sections measure %d bytes, at or above the prompt \
              ceiling %d"
@@ -1096,7 +1096,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       else
         Error
           (config_error
-             ~field:"max_prompt_bytes"
+             ~field:"prompt_ceiling_bytes"
              (Printf.sprintf
                 "Muse Code final prompt measures %d bytes, above the prompt ceiling %d"
                 (String.length prompt)

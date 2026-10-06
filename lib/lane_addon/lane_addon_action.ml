@@ -184,7 +184,7 @@ let validate_value ~schema ~name input =
 let validate ~schema ~name input =
   let* () = validate_schema schema in
   validate_input ~schema ~name input
-let decode_result ~store ~max_bytes json =
+let decode_result ~store json =
   let* fields = exact ["status"; "result"; "output"] json in
   let* status = match List.assoc "status" fields with
     | `String "confirmed" -> Ok Package_confirmed
@@ -194,5 +194,5 @@ let decode_result ~store ~max_bytes json =
   let* result = match List.assoc "result" fields with
     | `Assoc _ as value -> canonical value
     | _ -> Error "package action result must be an object" in
-  let* output = Lane_addon_packet.decode ~store ~max_bytes (List.assoc "output" fields) in
+  let* output = Lane_addon_packet.decode ~store (List.assoc "output" fields) in
   Ok {status; result; output}

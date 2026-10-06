@@ -1,0 +1,15 @@
+{
+  "files": {
+    "runner.log": "a033bf9b277aed60ba1c64f5239db3d541b61074c5fc8c257a2f1c1c449179eb",
+    "prebuild.log": "631fbb80a0d7444bb420a0672888a77486ffbda1b3cf5bb220ce09d9f95a9ebb",
+    "results.json": "dc13365a8c801147020cb5bf27e57e980d8cefe68bdc16697e7239ade397b5fb",
+    "README.md": "5e20af2d690f3423cd105212ae88df05dcfcf0747efa00e13e8211c945c9c10c"
+  },
+  "verification": {
+    "candidate_head_tree_and_clean": true,
+    "ordered_profile_byte_equal": true,
+    "unique_exact_completion_lines": 13,
+    "binary_hashes_match": true,
+    "credential_scan": "No credential values found; blank fixture environment variables and assertion labels only."
+  }
+}

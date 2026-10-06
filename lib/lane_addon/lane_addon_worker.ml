@@ -121,17 +121,10 @@ let mount_argument ({ source; destination } : mount) =
   else Ok (Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination)
 
 let validate_package (package : package) =
-  let resources = package.resources in
-  if not (Float.is_finite resources.cpus) || resources.cpus <= 0. then
-    Error (Invalid_package "cpus must be finite and positive")
-  else if resources.cpus *. 1_000_000_000. < 1. then
-    Error (Invalid_package "cpus must be representable as a positive Docker NanoCpus value")
-  else if resources.cpus *. 1_000_000_000. >= Int64.to_float Int64.max_int then
-    Error (Invalid_package "cpus exceed Docker NanoCpus representation")
-  else if resources.memory_bytes <= 0L || resources.pids <= 0
-          || resources.max_reply_bytes <= 0 then
-    Error (Invalid_package "memory_bytes, pids and max_reply_bytes must be positive")
-  else if String.trim package.image = "" || package.command = [] then
+  match Lane_addon_types.check_resources package.resources with
+  | Error detail -> Error (Invalid_package detail)
+  | Ok () ->
+  if String.trim package.image = "" || package.command = [] then
     Error (Invalid_package "image and command are required")
   else if Filename.is_relative package.directory then
     Error (Invalid_package "package directory must be absolute")
@@ -423,8 +416,7 @@ let observe t ~binding ~sources =
               | None -> Error (Invalid_observation "lane_observe must return structuredContent")
               | Some json ->
                   Eio_unix.run_in_systhread (fun () ->
-                    Lane_addon_packet.decode ?store:t.artifact_store
-                      ~max_bytes:t.package.resources.max_reply_bytes json)
+                    Lane_addon_packet.decode ?store:t.artifact_store json)
                   |> Result.map_error (fun detail -> Invalid_observation detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
@@ -459,7 +451,7 @@ let act t ~arguments =
           (match result.structured_content with
            | None -> Error (Protocol_failed "action tool must return structuredContent")
            | Some json -> Eio_unix.run_in_systhread (fun () ->
-               Lane_addon_action.decode_result ~store ~max_bytes:t.package.resources.max_reply_bytes json)
+               Lane_addon_action.decode_result ~store json)
                |> Result.map_error (fun detail -> Protocol_failed detail))
     with
     | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn

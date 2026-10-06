@@ -499,7 +499,7 @@ let test_antigravity_judge_receives_its_system_prompt () =
     (List.sort Int.compare order) order
 ;;
 
-let muse_fixture ~muse_cli ~account_home ~max_prompt_bytes =
+let muse_fixture ~muse_cli ~account_home ~max_context =
   Printf.sprintf
     {|
 [runtime]
@@ -513,15 +513,14 @@ is-non-interactive = true
 
 [models.muse-spark]
 api-name = "muse-spark-1.3"
-max-context = 1007997
-max-prompt-bytes = %d
+max-context = %d
 reasoning-effort = "high"
 
 [muse_code.muse-spark]
 |}
     muse_cli
     account_home
-    max_prompt_bytes
+    max_context
 ;;
 
 let muse_runtime_id = "muse_code.muse-spark"
@@ -624,7 +623,7 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 |}
 ;;
 
-let with_muse_runtime ?(max_prompt_bytes=1048576) ~muse_cli f =
+let with_muse_runtime ?(max_context=1007997) ~muse_cli f =
   let snapshot = Runtime.For_testing.snapshot () in
   let base_dir = Filename.temp_dir "fusion-muse" "" in
   Fun.protect
@@ -640,7 +639,7 @@ let with_muse_runtime ?(max_prompt_bytes=1048576) ~muse_cli f =
   write_file ~path:(Filename.concat account_config "auth.json") ~perm:0o600
     {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|};
   write_file ~path:config_path ~perm:0o600
-    (muse_fixture ~muse_cli:(muse_cli ~base_dir) ~account_home ~max_prompt_bytes);
+    (muse_fixture ~muse_cli:(muse_cli ~base_dir) ~account_home ~max_context);
   (match Runtime.init_default ~config_path with
    | Ok () -> ()
    | Error detail -> failf "muse-serve fixture must initialize: %s" detail);
@@ -922,7 +921,15 @@ let test_muse_framed_prompt_capacity_before_spawning () =
     let cli = Filename.concat base_dir "muse" in
     write_file ~path:cli ~perm:0o700 (stub_cli_script ~marker:!marker);
     cli in
-  with_muse_runtime ~max_prompt_bytes:(framed_bytes - 1) ~muse_cli (fun ~base_dir ->
+  (* The smallest window that leaves any room above the host's own overhead:
+     its ceiling is far below the framed prompt. *)
+  let small_window = 15_940 in
+  (match Runtime_muse_prompt_capacity.start_prompt_bytes ~max_context:(Some small_window) with
+   | Ok capacity ->
+     check bool "the small window holds less than the framed prompt" true
+       (capacity < framed_bytes)
+   | Error _ -> fail "the small window must leave room above the host overhead");
+  with_muse_runtime ~max_context:small_window ~muse_cli (fun ~base_dir ->
     let runtime = match Runtime.get_runtime_by_id muse_runtime_id with
       | Some runtime -> runtime | None -> fail "Muse fixture missing" in
     let refused runtime =
@@ -937,12 +944,12 @@ let test_muse_framed_prompt_capacity_before_spawning () =
     refused runtime;
     check bool "an over-budget input never spawns" false
       (Sys.file_exists !marker));
-  with_muse_runtime ~max_prompt_bytes:framed_bytes ~muse_cli:muse_panel_launcher
+  with_muse_runtime ~muse_cli:muse_panel_launcher
     (fun ~base_dir ->
       match in_eio_context (fun () ->
         Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
           ~system_prompt ~prompt ()) with
-      | Ok (text, _) -> check string "exact framed byte capacity admitted"
+      | Ok (text, _) -> check string "a framed prompt inside the ceiling is admitted"
           "MUSE_PANEL_ANSWER" text
       | Error (failure, _) -> fail (Fusion_types.show_panel_failure failure))
 ;;
@@ -1055,7 +1062,6 @@ let test_panel_paid_failures_survive_exhaustion_and_fallback () =
 [models.muse-fallback]
 api-name = "muse-fallback"
 max-context = 1007997
-max-prompt-bytes = 1048576
 reasoning-effort = "high"
 [muse_code.muse-fallback]
 [runtime.lanes.paid-seat]

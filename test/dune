@@ -2081,6 +2081,14 @@
  (modules test_keeper_body_timeout_override)
  (libraries alcotest masc_test_deps eio_main unix))
 
+; A one-shot walk (a completion review) is watched one model turn at a time
+; and outlives the provider-call deadline. Slow: the deadline's lower bound is
+; thirty seconds.
+(test
+ (name test_one_shot_walk_lease_deadline)
+ (modules test_one_shot_walk_lease_deadline)
+ (libraries alcotest masc_test_deps eio_main unix))
+
 (test
  (name test_keeper_required_tools)
  (modules test_keeper_required_tools)
@@ -2903,6 +2911,7 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
+(include stanzas/test_runtime_client_prompt_ceiling.inc)
 (include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
 (include stanzas/test_runtime_muse_model_discovery.inc)
@@ -9552,7 +9561,7 @@
 (test
  (name test_goal_suspension)
  (modules test_goal_suspension)
- (libraries masc masc_goal masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
+ (libraries masc masc_goal masc_types masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
 
 (test
  (name test_goal_suspension_projection)

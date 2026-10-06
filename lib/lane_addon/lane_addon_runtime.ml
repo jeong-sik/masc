@@ -227,12 +227,17 @@ let validate_released_binding ~package_shape fields =
   let* _ = Lane_addon_presentation.of_json (List.assoc "presentation" package) in
   let* resources = object_ (List.assoc "resources" package) in
   let* () = exact_fields ["cpus";"memory_bytes";"pids";"max_reply_bytes"] resources in
-  let* () = match List.assoc "cpus" resources with `Float f when Float.is_finite f && f > 0. -> Ok () | _ -> Error "invalid retained CPU bound" in
-  let* () = match List.assoc "memory_bytes" resources with
-    | `Intlit s -> (match Int64.of_string_opt s with Some n when n > 0L -> Ok () | _ -> Error "invalid retained memory bound")
-    | `Int n when n > 0 -> Ok () | _ -> Error "invalid retained memory bound" in
-  let* () = List.fold_left (fun result key -> let* () = result in match List.assoc key resources with
-    | `Int n when n > 0 -> Ok () | _ -> Error "invalid retained resource bound") (Ok ()) ["pids";"max_reply_bytes"] in
+  let* cpus = match List.assoc "cpus" resources with
+    | `Float f -> Ok f | _ -> Error "invalid retained CPU bound" in
+  let* memory_bytes = match List.assoc "memory_bytes" resources with
+    | `Intlit s -> Option.to_result ~none:"invalid retained memory bound" (Int64.of_string_opt s)
+    | `Int n -> Ok (Int64.of_int n) | _ -> Error "invalid retained memory bound" in
+  let* pids = match List.assoc "pids" resources with
+    | `Int n -> Ok n | _ -> Error "invalid retained resource bound" in
+  let* max_reply_bytes = match List.assoc "max_reply_bytes" resources with
+    | `Int n -> Ok n | _ -> Error "invalid retained resource bound" in
+  let* () = Lane_addon_types.check_resources { cpus; memory_bytes; pids; max_reply_bytes }
+    |> Result.map_error (fun detail -> "invalid retained resource bound: " ^ detail) in
   let binding = List.assoc "binding" fields in
   let* () = match List.assoc "binding_schema" package with
     | `Null -> Ok () | `Assoc _ as schema -> Lane_addon_action.validate_value ~schema ~name:"retained binding" binding |> Result.map (fun _ -> ())

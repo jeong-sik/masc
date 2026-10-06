@@ -1,0 +1,19 @@
+{
+  "baseline_errors": 2,
+  "current_errors": 2,
+  "diagnostic_signatures_unchanged": true,
+  "diagnostics": [
+    [
+      "reportPossiblyUnboundVariable",
+      "\"current\" is possibly unbound"
+    ],
+    [
+      "reportPossiblyUnboundVariable",
+      "\"current\" is possibly unbound"
+    ]
+  ],
+  "baseline_pyright_sha256": "fea7d79cbfe8435f51e2471a6fc5054fe6b676eff114722d40509f20d06e343f",
+  "current_pyright_sha256": "738a94c2cafadcaa8feb34aaec947d28d7a06657cb3f876909f0d4c2b4b7ee31",
+  "fixture_sha256": "39640512394043f04140e2cb8ed074ee3eb41543317c7b9944d28f2c822c03c4",
+  "binary_sha256": "196d9fce8ecced88ab44ac424d300d9744299ee1f707d323eac9c0803d7bae0e"
+}

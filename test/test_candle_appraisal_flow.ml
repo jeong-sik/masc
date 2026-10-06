@@ -135,7 +135,10 @@ let paid config goal_id =
 let one_payment config goal_id = match paid config goal_id with
   | [payment] -> payment | _ -> fail "expected exactly one Paid row"
 
-(* The worker's own two steps, run in order on this fiber. *)
+(* The worker's settle step for each waiting payout, on this fiber. It skips
+   the worker's availability gate and candidate preparation: every caller
+   below starts with Candle enabled and Candidates already written, and with
+   Candle off each payout comes back Superseded instead of being deferred. *)
 let drain config appraise =
   let base_path = config.Workspace.base_path in
   List.map (Candle_appraise.settle_one ~now ~appraise ~base_path)

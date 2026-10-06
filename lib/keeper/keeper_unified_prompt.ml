@@ -125,6 +125,18 @@ let format_fleet_messages
    makes the digest's worst case a number: about 2 KB. *)
 let rejected_digest_input_bytes = 240
 
+(* Hard bound for the assembled own-recent-actions section — digest, heading
+   and rows together. The removed briefing budget used to press exactly this
+   section under [context_budget_bytes], and #29676 is what its absence costs:
+   120,951 bytes of call arguments inside a 131,072-byte model input, every
+   turn refused for eight hours. The first request carries this section
+   verbatim ([dynamic_context] is the raw [world_state]) and a Wide keeper —
+   or a Small one without a reader tool — never externalizes, so the rows are
+   bounded here, at assembly, in every request shape. Whole rows are dropped
+   from the oldest end, never cut mid-string, and the omission is rendered —
+   see the assembly site. *)
+let own_recent_actions_max_bytes = 16384
+
 let rejected_digest_input input =
   match Tool_output.decode_from_agent_core input with
   | Tool_output.Decoded _ -> input
@@ -1514,12 +1526,12 @@ let build_prompt_internal
          ^ "\n\n")
     | Ok turns ->
       let failures = Keeper_own_recent_actions.digest_failures turns in
-      let rows = List.map format_own_recent_actions_turn turns in
+      let count = List.length turns in
       let ubuf = Buffer.create 1024 in
       Buffer.add_string ubuf
         (render_fragment
            Prompt_names.keeper_world_own_recent_actions_heading
-           [ "count", string_of_int (List.length rows) ]
+           [ "count", string_of_int count ]
          ^ "\n");
       Buffer.add_string ubuf
         (render_fragment Prompt_names.keeper_world_own_recent_actions_intro [] ^ "\n");
@@ -1581,7 +1593,50 @@ let build_prompt_internal
              in
              Buffer.add_string ubuf (row ^ "\n"))
            failures);
-      Buffer.add_string ubuf (String.concat "\n" rows);
+      (* Bound the whole assembled section: the heading, the intro and the
+         digest above are already in the buffer, so the rows take exactly
+         what is left of [own_recent_actions_max_bytes]. The removed
+         briefing budget used to press this section under the model input
+         cap, and the review P1 on this PR is that the first request
+         carries [world_state] verbatim while a Wide keeper — or a Small
+         one without a reader tool — never externalizes, so the bound must
+         hold at assembly, in every request shape. Rows are whole turns
+         read oldest first, so dropping from the front of the list sheds
+         the oldest turns and keeps the newest; nothing is ever cut
+         mid-string. The rendered omission marker is sized below, so the
+         bound reserves bytes for it: the count is at most one per turn
+         this layer read — [keeper.own_actions.turns.max], 200 by
+         default — so three digits and the reserve always fits. *)
+      let marker_reserve = 128 in
+      (* Walk the rows newest first and accumulate until the budget is
+         spent: the kept rows are the newest suffix, the dropped ones the
+         oldest prefix, and [acc] is rebuilt oldest-first for rendering. *)
+      let rec bound acc n = function
+        | [] -> (acc, n)
+        | row :: rest ->
+          let cost = String.length row + 1 in
+          if
+            Buffer.length ubuf + String.length acc + cost + marker_reserve
+            > own_recent_actions_max_bytes
+          then (acc, n + 1 + List.length rest)
+          else bound (if acc = "" then row else row ^ "\n" ^ acc) n rest
+      in
+      let rows, rows_omitted =
+        bound "" 0
+          (List.rev (List.map format_own_recent_actions_turn turns))
+      in
+      let rows_marker =
+        if rows_omitted > 0
+        then
+          render_fragment
+            Prompt_names.keeper_world_own_recent_actions_turns_omitted_marker
+            [ "count", string_of_int rows_omitted
+            ; "bytes", string_of_int own_recent_actions_max_bytes ]
+        else ""
+      in
+      (if rows_marker <> ""
+       then Buffer.add_string ubuf (rows_marker ^ "\n"));
+      Buffer.add_string ubuf rows;
       Buffer.add_string ubuf "\n\n";
       Some (Buffer.contents ubuf)
   in

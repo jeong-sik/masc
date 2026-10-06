@@ -338,6 +338,10 @@ let keeper_world_own_recent_actions_turn_rejected_detail_row =
   "keeper.world.own_recent_actions.turn_rejected_detail_row"
 ;;
 
+let keeper_world_own_recent_actions_turns_omitted_marker =
+  "keeper.world.own_recent_actions.turns_omitted_marker"
+;;
+
 let keeper_world_own_recent_actions_turn_deferred_row =
   "keeper.world.own_recent_actions.turn_deferred_row"
 ;;

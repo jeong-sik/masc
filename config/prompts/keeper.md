@@ -408,6 +408,9 @@ Your own tool-call history could not be read this turn ({{detail}}). Do not trea
 ### world.own_recent_actions.turn_unrecorded_row (vars: turn_id, tool)
 - [turn {{turn_id}}] {{tool}} -> outcome not recorded
 
+### world.own_recent_actions.turns_omitted_marker (vars: count, bytes)
+- [{{count}} older turns omitted to keep this section within {{bytes}} bytes] — the digest above still names every distinct refusal
+
 ### world.pending_messages.heading (vars: count)
 ### Pending Messages ({{count}})
 

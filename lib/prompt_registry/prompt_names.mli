@@ -250,6 +250,7 @@ val keeper_world_own_recent_actions_turn_rejected_row : string
 val keeper_world_own_recent_actions_turn_rejected_detail_row : string
 val keeper_world_own_recent_actions_turn_deferred_row : string
 val keeper_world_own_recent_actions_turn_unrecorded_row : string
+val keeper_world_own_recent_actions_turns_omitted_marker : string
 val keeper_world_own_recent_actions_unavailable : string
 val keeper_world_pending_messages_heading : string
 val keeper_world_pending_messages_intro : string

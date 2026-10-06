@@ -117,7 +117,6 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
 let record_next_shrink_capacity
     ~measure_message_bytes
     ~capacity_bytes
-    ~reserved_bytes
     ~observed_next_shrink_capacity_bytes
     windowed =
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -135,19 +134,14 @@ let record_next_shrink_capacity
           ~capacity:full_bytes
       else
         Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-          ~capacity:(capacity_bytes - reserved_bytes)
+          ~capacity:capacity_bytes
     in
-    (* The oracle sizes a history view; the next attempt charges the same
-       reservation against its capacity again, so it is added back here.
-       Without it every retry would narrow twice. *)
     observed_next_shrink_capacity_bytes :=
-      Option.map
-        (fun history_bytes -> history_bytes + reserved_bytes)
-        (Runtime_model_input_tail_window.next_shrink_capacity_bytes
-           ~allow_empty_history:true
-           ~measure_message_bytes
-           ~target_capacity_bytes
-           windowed))
+      Runtime_model_input_tail_window.next_shrink_capacity_bytes
+        ~allow_empty_history:true
+        ~measure_message_bytes
+        ~target_capacity_bytes
+        windowed)
 ;;
 
 (* The history a Start carries: the range the other official-client lanes
@@ -157,22 +151,20 @@ let record_next_shrink_capacity
    caller gives it no observers, and [thread_mode] keeps the range it did
    not send from narrowing the fresh thread that retries it. The
    provider-bound copy is cut; the durable conversation is not rewritten.
-   [reserved_bytes] is what the attempt sends besides history -- system
-   prompt, posture note and goal -- so a byte window and the fixed
-   sections share one ceiling.
+   Only history is measured: what the attempt sends besides it is not
+   charged against the capacity.
 
    The range starts where the last answered request's range did (the
    seed), at the Librarian's absorbed point when that is later, and
    otherwise at the end of the last completed turn, exactly as on the
-   Claude Code and Antigravity lanes. The vendor request limit still cuts
-   first and names a front of its own; the later front wins, so the shrink
-   ladder that answers a typed overflow keeps narrowing instead of being
-   widened back by the seed. *)
+   Claude Code and Antigravity lanes. After a typed overflow the shrink
+   ladder's capacity cuts inside the range and names a front of its own; the
+   later front wins, so the ladder keeps narrowing instead of being widened
+   back by the seed. *)
 let carried_model_input_projection
     ~thread_mode
     ~measure_message_bytes
     ~capacity_bytes
-    ~reserved_bytes
     ~observed_next_shrink_capacity_bytes
     ?on_model_input_window_observation
     ?carried_front_seed
@@ -189,7 +181,6 @@ let carried_model_input_projection
        record_next_shrink_capacity
          ~measure_message_bytes
          ~capacity_bytes
-         ~reserved_bytes
          ~observed_next_shrink_capacity_bytes
          sent
      | Runtime_codex_app_server.Resume _ ->
@@ -213,7 +204,7 @@ let carried_model_input_projection
       ~measure_message_bytes
       ~capacity_bytes
       ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
-      ~reserved_bytes
+      ~reserved_bytes:0
       ?on_model_input_window_observation
       ?carried_front_seed
       ?librarian_front
@@ -874,7 +865,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~tools
         ~initial_messages
         ~model_input_projection:
-          (Some (project_history ~thread_mode ~reserved_bytes:0))
+          (Some (project_history ~thread_mode))
         ~hooks:(Some hooks)
     in
     let* prompt, images =
@@ -1728,7 +1719,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
              and no carried front, though -- the range it measures is not
              what a Resume sends, and both records are only for a range the
              lane sent. As on the Claude Code lane. *)
-          ~project_history:(fun ~thread_mode ~reserved_bytes ->
+          ~project_history:(fun ~thread_mode ->
             let observed callback =
               match thread_mode with
               | Runtime_codex_app_server.Start -> callback
@@ -1738,7 +1729,6 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
               ~thread_mode
               ~measure_message_bytes
               ~capacity_bytes
-              ~reserved_bytes
               ~observed_next_shrink_capacity_bytes
               ?on_model_input_window_observation:
                 (observed on_model_input_window_observation)
@@ -1807,7 +1797,6 @@ module For_testing = struct
       ~thread_mode:Runtime_codex_app_server.Start
       ~measure_message_bytes:measure_model_input_message_bytes
       ~capacity_bytes
-      ~reserved_bytes:0
       ~observed_next_shrink_capacity_bytes:(ref None)
       ?on_model_input_window_observation
       ?carried_front_seed

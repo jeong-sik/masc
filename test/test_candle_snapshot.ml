@@ -480,16 +480,17 @@ let test_a_clock_that_gives_no_time_refuses_the_step () =
 ;;
 
 (* #40054: the appraiser lane settles money; it does not gate the pass record.
-   A pass records its Snapshot while the lane is unavailable. Only settlement
-   sees Disabled. *)
+   A pass records its Snapshot while the lane is unavailable. Recording sees
+   Enabled; only appraiser-gated readers (settlement,
+   [Candle_status.current]) see Disabled. *)
 let test_a_pass_records_its_snapshot_while_the_appraiser_is_unavailable () =
   with_workspace
   @@ fun config ->
   enable_candle config;
-  Candle_status.install_appraiser_check (fun () -> Error "lane publication unavailable");
   Fun.protect
     ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
     (fun () ->
+      Candle_status.install_appraiser_check (fun () -> Error "publication unavailable");
       check
         bool
         "settlement view is disabled"
@@ -498,7 +499,10 @@ let test_a_pass_records_its_snapshot_while_the_appraiser_is_unavailable () =
          | Candle_config.Disabled _ -> true
          | Candle_config.Off | Candle_config.Enabled _ -> false);
       is_ok "snapshot records" (record config);
-      check (list string) "written" [ "goal-1" ] (goal_ids (ledger_events config)))
+      (match ledger_events config with
+       | [ { Candle_event.body = Candle_event.Snapshot snapshot; _ } ] ->
+         check string "goal" "goal-1" snapshot.goal_id
+       | events -> failf "expected one Snapshot, got %d rows" (List.length events)))
 ;;
 
 let () =

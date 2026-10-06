@@ -303,16 +303,25 @@ let test_a_confirmation_time_is_not_read_when_nothing_is_owed () =
 
 (* #40054: confirmation owes while the lane is unavailable. The Snapshot is
    left first with the lane up only to keep the two steps separate; the owed
-   row must not wait for the lane. *)
+   row must not wait for the lane. Recording sees Enabled; only
+   appraiser-gated readers (settlement, [Candle_status.current]) see
+   Disabled. *)
 let test_a_confirmation_owes_while_the_appraiser_is_unavailable () =
   with_workspace
   @@ fun config ->
   enable_candle config;
   pass config;
-  Candle_status.install_appraiser_check (fun () -> Error "lane publication unavailable");
   Fun.protect
     ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
     (fun () ->
+      Candle_status.install_appraiser_check (fun () -> Error "publication unavailable");
+      check
+        bool
+        "settlement view is disabled"
+        true
+        (match Candle_status.current ~base_path:(base_path_of config) with
+         | Candle_config.Disabled _ -> true
+         | Candle_config.Off | Candle_config.Enabled _ -> false);
       is_ok "owed records" (confirm config);
       check
         (list string)

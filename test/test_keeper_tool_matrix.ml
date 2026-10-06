@@ -212,6 +212,12 @@ let isolated_child_env_unset =
   ; "OLLAMA_HOST"
   ]
 
+let with_runner_diagnostics ~stderr = function
+  | Ok () as outcome -> outcome
+  | Error message ->
+      if stderr = "" then Error message
+      else Error (message ^ "\nChild stderr:\n" ^ stderr)
+
 let run_tool_case_process tool_name =
   let tmp_root = Filename.temp_file "keeper-tool-matrix-base" "" in
   Sys.remove tmp_root;
@@ -259,15 +265,16 @@ let run_tool_case_process tool_name =
       cleanup_dir tmp_root)
     (fun () ->
       let status = run_capture_process ~env ~out_file ~err_file prog argv in
+      let stderr = read_file err_file in
       let output =
-        String.concat "\n" [ read_file out_file; read_file err_file ]
+        String.concat "\n" [ read_file out_file; stderr ]
       in
       let parsed = parse_case_result ~tool_name output in
       (match parsed.base_path with
       | Some path when path <> tmp_root -> cleanup_dir path
       | Some _ | None -> ());
       match status with
-      | 0 -> parsed.outcome
+      | 0 -> with_runner_diagnostics ~stderr parsed.outcome
       | 124 ->
           Error
             (Printf.sprintf "%s timed out after %ds\n%s" tool_name
@@ -279,7 +286,7 @@ let run_tool_case_process tool_name =
                 (Printf.sprintf
                    "%s exited nonzero without failure payload\n%s"
                    tool_name output)
-          | Error message -> Error message))
+          | Error message -> with_runner_diagnostics ~stderr (Error message)))
 
 let test_keeper_inventory_is_unique () =
   let names = Cases.all_keeper_tool_names in

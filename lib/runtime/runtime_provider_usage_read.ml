@@ -100,14 +100,7 @@ let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
   in
   match Runtime_muse_serve.read_usage ~mgr ~clock ~cwd config with
   | Ok usage ->
-    Option.iter
-      (fun usage ->
-        Option.iter
-          (fun reset_ms ->
-            Runtime_quota_window.note_exhausted
-              ~scope ~resets_at:(float_of_int reset_ms /. 1000.))
-          (Runtime_muse_msp.exhausted_subscription_reset_ms usage))
-      usage;
+    Option.iter (Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_read) usage;
     Ok ()
   | Error error -> Error (Runtime_muse_serve.error_to_string error)
 ;;

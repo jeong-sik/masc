@@ -20,6 +20,8 @@ type source =
   | Kimi_coding_usages_read
   | Ollama_usage_read
   | Antigravity_usage_read
+  | Muse_usage_changed
+  | Muse_usage_read
 
 type window_role =
   | Gates_model_calls
@@ -100,6 +102,8 @@ let source_to_string = function
   | Kimi_coding_usages_read -> "kimi_coding.usages"
   | Ollama_usage_read -> "ollama.usage"
   | Antigravity_usage_read -> "antigravity.usage"
+  | Muse_usage_changed -> "muse.usage_changed"
+  | Muse_usage_read -> "muse.usage_read"
 ;;
 
 let ( let* ) = Result.bind
@@ -200,6 +204,8 @@ let kind_of_minutes minutes =
   then Seven_day
   else Duration_minutes minutes
 ;;
+
+let window_kind_of_minutes = kind_of_minutes
 
 let codex_window_kind ~slot = function
   | Some minutes -> kind_of_minutes minutes
@@ -856,7 +862,8 @@ type report_shape = Complete_snapshot | Sparse_update
 
 let report_shape = function
   | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
-  | Ollama_usage_read | Antigravity_usage_read -> Complete_snapshot
+  | Ollama_usage_read | Antigravity_usage_read
+  | Muse_usage_changed | Muse_usage_read -> Complete_snapshot
   | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read -> Sparse_update
 

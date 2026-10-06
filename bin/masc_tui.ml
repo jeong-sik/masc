@@ -20139,6 +20139,7 @@ and is loaded on demand through keeper_skill.
                        | Error detail -> update {view with error=lane_addons_input_failure detail}
                        | Ok (Updated installer) -> update {view with installer=Some installer;error=None;scroll=0}
                        | Ok Cancel -> invalidate {view with installer=None;error=None;scroll=0}
+                       | Ok Declare -> invalidate {view with installer=None;draft=Some "";naming=true;document_key=None;error=None;scroll=0}
                        | Ok (Browse directory) -> launch_lane_package_catalog state ~mailbox:async_messages directory
                        | Ok (Preview path) -> launch_lane_package_preview state ~mailbox:async_messages path
                        | Ok (Draft session) ->

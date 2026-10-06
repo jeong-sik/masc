@@ -355,6 +355,14 @@ type kauto_column =
   | Kauto_requested
   | Kauto_what
 
+val kauto_minimum_recurrence_width : int
+val kauto_maximum_recurrence_width : int
+
+val kauto_recurrence_width : string list -> int
+(** Cells the RECURRENCE column needs for the recurrences on the page: the
+    widest of them, never under {!kauto_minimum_recurrence_width} and never
+    over {!kauto_maximum_recurrence_width}. *)
+
 val kauto_minimum_by_width : int
 val kauto_maximum_by_width : int
 
@@ -371,6 +379,7 @@ type kauto_layout = private {
   k_status_width : int;
   k_clock_width : int;
   k_outcome_width : int;
+  k_recurrence_width : int;
   k_by_width : int;
 }
 
@@ -379,11 +388,13 @@ val kauto_layout :
   status_width:int ->
   clock_width:int ->
   outcome_width:int ->
+  recurrence_width:int ->
   by_width:int ->
   kauto_layout
 (** The columns the tab draws in [inner_width], given the status width
     (measured from the contract's own word list), the clock width (from the
-    stamp format) and the outcome and actor widths measured from the page. *)
+    stamp format) and the outcome, recurrence and actor widths measured from
+    the page. *)
 
 val kauto_plain_styles : kauto_row_styles
 

@@ -3060,7 +3060,7 @@ status: reference
   [dashboard 투영](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
 **Librarian Pass (Librarian 회차)**
-: Librarian이 한 번 도는 일. 코드의 이름은 pass 다(`Keeper_librarian_durable_consumer`·
+: Librarian이 한 번 도는 일. 코드의 이름은 pass 다 — 식별자(`invalid_arg "librarian pass: …"` 등)에는 pass 를 쓰고 `round` 는 주석과 사용자 노출 메시지 일부에만 남는다(`Keeper_librarian_durable_consumer`·
   `Keeper_librarian_continuity`). Keeper마다 따로 돌고, 같은 신호(서버 기동·턴 끝·받은 일
   변경)에 깨어난다. 두 가지가 있다.
   - durable pass(`Keeper_librarian_durable_consumer`): 끝난 턴을 읽어 Memory OS에 적고
@@ -3110,8 +3110,8 @@ status: reference
   좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 pass 다음에는 같은 자리가
   아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
   그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli`의 `not_committed` 필드)가 들고, 원인별 판정
-  규칙은 RFC-librarian-lifecycle §4.3이 정하고, 마지막 후보 하나가 아니라 후보를 차례로
-  시도한 전체 결과로 판정한다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
+  규칙은 RFC-librarian-lifecycle §4.3이 정한다. 마지막 후보 하나가 아니라 후보를 차례로
+  시도한 전체 결과로 판정한다. 폭은 backlog 를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
   거절했던 범위가 이제 들어간다는 증거가 아니다. 루프
   메모리에만 있으므로 서버가 재시작하면 폭은 사라지고 다시 전부 읽기부터 시작한다(RFC
   librarian-lifecycle §4.3).

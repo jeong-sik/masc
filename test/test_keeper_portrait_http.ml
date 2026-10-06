@@ -704,9 +704,22 @@ beanie = %d
       ~args:(`Assoc ["slot", `String slot;"item",`String item]) in
     let accepted = function Tool_result.Completed _ as result -> Tool_result.data result
       | other -> fail (Tool_result.message other) in
+    let refused code = function
+      | Tool_result.Failed _ as result ->
+        check string "typed equip refusal code" code
+          Yojson.Safe.Util.(Tool_result.data result |> member "error_code" |> to_string)
+      | other -> fail ("expected refusal " ^ code ^ ": " ^ Tool_result.message other) in
+    (* The tool reports every refusal as [equipment_refused]; the library call
+       the tool makes names which rule refused it. *)
+    let equip_directly slot = Candle_equipment.equip ~now:Time_compat.now ~base_path
+      ~keeper:owner ~slot ~choice:(Candle_event.Item item) in
     let ledger_bytes () = Fs_compat.load_file (Candle_ledger.path ~base_path) in
     let initial = ledger_bytes () in
-    (match call id with Tool_result.Completed _ -> fail "equipped without purchase" | _ -> ());
+    refused "equipment_refused" (call id);
+    (match equip_directly (Keeper_portrait_item.slot item) with
+     | Error (Candle_equipment.Refused (Candle_balance.Unowned_equipment _)) -> ()
+     | Error error -> fail ("unowned item refused for another reason: " ^ Candle_equipment.error_to_string error)
+     | Ok _ -> fail "equipped without purchase");
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
     let read_roster () =
       Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
@@ -807,7 +820,11 @@ beanie = %d
        fail "purchased Item account unavailable");
     check string "purchase alone does not equip" before96.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
-    (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
+    refused "equipment_refused" (call ~slot:"face" id);
+    (match equip_directly Keeper_portrait_item.Face with
+     | Error (Candle_equipment.Refused (Candle_balance.Wrong_equipment_slot _)) -> ()
+     | Error error -> fail ("wrong slot refused for another reason: " ^ Candle_equipment.error_to_string error)
+     | Ok _ -> fail "head item equipped into face slot");
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
     let equipped = accepted (call id) in
     check bool "first choice changed" true Yojson.Safe.Util.(equipped |> member "changed" |> to_bool);

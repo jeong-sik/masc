@@ -14,7 +14,7 @@ type preview = {path:string;title:string;revision:string;image:string;image_stat
 type t = Path of Form.t | Pending of int * string * t | Binding of preview * Form.t
   | Catalog of Browser.t | Catalog_pending of int * string option * Browser.t * Form.t option
   | Directory of Form.t * Browser.t
-type event = Updated of t | Browse of string option | Preview of string | Draft of Document.session | Cancel
+type event = Updated of t | Browse of string option | Preview of string | Draft of Document.session | Declare | Cancel
 let browse ?directory () = Catalog (Browser.create ?directory ())
 let rec directory = function
   | Catalog browser | Directory (_,browser) -> Browser.directory browser
@@ -36,10 +36,17 @@ let accept_preview json =
     | "unverified" -> let* detail = text "detail" image_result in Ok ("Image unverified: " ^ detail)
     | _ -> Error "unknown image inspection state" in
   let* binding_schema = field "binding_schema" package in
-  let* () = if binding_schema=`Null then Error "Package has no binding schema; use n for an advanced TOML declaration." else Ok () in
+  if binding_schema=`Null then Ok None else
   let* form = Form.create ~schema:(object_schema ["installation_id",string_schema;"run_id",string_schema;"binding",binding_schema])
       ~initial:(`Assoc []) in
-  Ok (Binding ({path;title;revision;image;image_state},form))
+  Ok (Some (Binding ({path;title;revision;image;image_state},form)))
+(* The refusal names the key that works where the preview returns. Only the
+   package browser answers n; a text input takes it as a letter, and Esc leads
+   from each input back to the Add-ons list, where n also opens the editor. *)
+let missing_binding_schema = function
+  | Catalog _ -> "Package has no binding schema; use n for an advanced TOML declaration."
+  | Path _ | Pending _ | Binding _ | Catalog_pending _ | Directory _ ->
+      "Package has no binding schema; Esc back to the Add-ons list, then n for an advanced TOML declaration."
 let begin_preview ~request_id ~path = function
   | Path form as previous ->
       let* json = Form.value form in let* selected = text "manifest_path" json in
@@ -52,7 +59,9 @@ let begin_preview ~request_id ~path = function
 let receive_preview ~request_id ~path response = function
   | Pending (expected_id,expected_path,previous) when expected_id=request_id && expected_path=path ->
       Some (match Result.bind response accept_preview with
-        | Ok next -> next,None | Error detail -> previous,Some detail)
+        | Ok (Some next) -> next,None
+        | Ok None -> previous,Some (missing_binding_schema previous)
+        | Error detail -> previous,Some detail)
   | Path _ | Pending _ | Binding _ | Catalog _ | Catalog_pending _ | Directory _ -> None
 let begin_catalog ~request_id ~directory = function
   | Catalog browser -> Ok (Catalog_pending (request_id,directory,browser,None))
@@ -94,6 +103,7 @@ let handle ~key state = match state with
        | Browse path -> Ok (Browse path)
        | Preview path -> Ok (Preview path)
        | Cancel -> Ok Cancel
+       | Declare -> Ok Declare
        | Manual -> Result.map (fun state -> Updated state) (create ())
        | Jump ->
            let initial = match Browser.directory browser with None -> `Assoc []
@@ -122,7 +132,7 @@ let paste ~text = function
   | Path form -> Path (Form.insert_text ~text form)
   | Binding (preview,form) -> Binding (preview,Form.insert_text ~text form)
 let hints = function
-  | Catalog _ -> "j/k:select  Enter:open  Left:parent  Right:folder  g:directory  p:manifest  PgUp/PgDn:details  Esc:cancel"
+  | Catalog browser -> Browser.hints browser
   | Pending _ | Catalog_pending _ -> "Esc:cancel request"
   | Path _ | Binding _ | Directory _ -> "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
 let lines ?(height=24) ?(render=fun line -> [line]) state =

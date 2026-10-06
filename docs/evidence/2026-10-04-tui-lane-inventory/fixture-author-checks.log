@@ -1,0 +1,8 @@
+Python AST: PASS (234 files)
+Common Lane authored fixture wire checks: PASS; no native TUI/PTY executed
+Authored fixture default: 12 rows; shared exact configuration consistent
+Authored fixture packages_partial: 31 rows; shared exact configuration consistent
+Authored fixture owner_absent: 31 rows; shared exact configuration consistent
+Authored fixture unapplied: 14 rows; shared exact configuration consistent
+Authored fixture routing: 12 rows; shared exact configuration consistent
+Native TUI, PTY, Dune, CI: NOT RUN

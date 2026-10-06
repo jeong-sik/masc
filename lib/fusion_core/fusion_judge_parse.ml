@@ -56,6 +56,41 @@ let string_codec =
         | _ -> Error (path ^ ": expected string"))
   }
 
+(* Unicode White_Space is the single classification authority. Derive the
+   schema character class from the same property used by the decoder, once at
+   module initialization. Preserve any supported answer bytes unchanged. *)
+let nonblank_pattern =
+  let pattern = Buffer.create 64 in
+  Buffer.add_string pattern "[^";
+  for code = Uchar.to_int Uchar.min to Uchar.to_int Uchar.max do
+    if Uchar.is_valid code then begin
+      let uchar = Uchar.of_int code in
+      if Uucp.White.is_white_space uchar then Buffer.add_utf_8_uchar pattern uchar
+    end
+  done;
+  Buffer.add_char pattern ']';
+  Buffer.contents pattern
+
+let nonblank_string_codec =
+  { schema =
+      `Assoc
+        [ "type", `String "string"
+        ; "pattern", `String nonblank_pattern
+        ]
+  ; decode =
+      (fun path json ->
+        let* value = string_codec.decode path json in
+        let* has_content = Uutf.String.fold_utf_8
+            (fun result _ char ->
+              let* found = result in
+              match char with
+              | `Uchar uchar -> Ok (found || not (Uucp.White.is_white_space uchar))
+              | `Malformed _ -> Error (path ^ ": expected UTF-8 string"))
+            (Ok false) value in
+        if has_content then Ok value
+        else Error (path ^ ": expected nonblank string"))
+  }
+
 let enum_codec values =
   { schema =
       `Assoc
@@ -199,9 +234,9 @@ let decision_case kind fields construct =
     let* _ = get path kvs tag in
     construct path kvs)
 
-let decision_answer = required wire_field_answer string_codec
-let decision_action = required wire_field_recommend_action string_codec
-let decision_rationale = required wire_field_recommend_rationale string_codec
+let decision_answer = required wire_field_answer nonblank_string_codec
+let decision_action = required wire_field_recommend_action nonblank_string_codec
+let decision_rationale = required wire_field_recommend_rationale nonblank_string_codec
 let decision_missing =
   optional ~default:[] wire_field_missing string_array_codec
 
@@ -224,31 +259,6 @@ let decision_insufficient_codec =
       let* missing_for_decision = get path kvs decision_missing in
       Ok (Fusion_types.Insufficient { missing_for_decision }))
 
-let decision_codec =
-  let cases =
-    [ wire_decision_answer, decision_answer_codec
-    ; wire_decision_recommend, decision_recommend_codec
-    ; wire_decision_insufficient, decision_insufficient_codec
-    ]
-  in
-  { schema =
-      `Assoc
-        [ "oneOf", `List (List.map (fun (_, codec) -> codec.schema) cases) ]
-  ; decode =
-      (fun path -> function
-        | `Assoc kvs as json ->
-          let kind_path = path ^ "." ^ wire_field_decision_kind in
-          let* kind =
-            match List.assoc_opt wire_field_decision_kind kvs with
-            | Some value -> string_codec.decode kind_path value
-            | None -> Error (kind_path ^ ": missing")
-          in
-          (match List.assoc_opt kind cases with
-           | Some codec -> codec.decode path json
-           | None -> Error (kind_path ^ ": unknown value " ^ kind))
-        | _ -> Error (path ^ ": expected object"))
-  }
-
 let consensus = optional ~default:[] wire_field_consensus (list_codec claim_codec)
 let contradictions =
   optional ~default:[] wire_field_contradictions (list_codec contradiction_codec)
@@ -257,10 +267,9 @@ let partial_coverage =
 let unique_insights =
   optional ~default:[] wire_field_unique_insights (list_codec insight_codec)
 let blind_spots = optional ~default:[] wire_field_blind_spots string_array_codec
-let resolved_answer = required wire_field_resolved_answer string_codec
-let decision = required wire_field_decision decision_codec
-
-let synthesis_codec =
+let synthesis_case ~resolved_value ~decision_value =
+  let resolved_answer = required wire_field_resolved_answer resolved_value in
+  let decision = required wire_field_decision decision_value in
   object_codec
     [ Field consensus
     ; Field contradictions
@@ -287,6 +296,43 @@ let synthesis_codec =
         ; resolved_answer
         ; decision
         })
+
+let synthesis_codec =
+  let cases =
+    [ wire_decision_answer,
+      synthesis_case ~resolved_value:nonblank_string_codec
+        ~decision_value:decision_answer_codec
+    ; wire_decision_recommend,
+      synthesis_case ~resolved_value:nonblank_string_codec
+        ~decision_value:decision_recommend_codec
+    ; wire_decision_insufficient,
+      synthesis_case ~resolved_value:string_codec
+        ~decision_value:decision_insufficient_codec
+    ]
+  in
+  { schema =
+      `Assoc [ "oneOf", `List (List.map (fun (_, codec) -> codec.schema) cases) ]
+  ; decode =
+      (fun path -> function
+        | `Assoc kvs as json ->
+          let decision_path = path ^ "." ^ wire_field_decision in
+          let* fields =
+            match List.assoc_opt wire_field_decision kvs with
+            | Some (`Assoc fields) -> Ok fields
+            | Some _ -> Error (decision_path ^ ": expected object")
+            | None -> Error (decision_path ^ ": missing")
+          in
+          let kind_path = decision_path ^ "." ^ wire_field_decision_kind in
+          let* kind =
+            match List.assoc_opt wire_field_decision_kind fields with
+            | Some value -> string_codec.decode kind_path value
+            | None -> Error (kind_path ^ ": missing")
+          in
+          (match List.assoc_opt kind cases with
+           | Some codec -> codec.decode path json
+           | None -> Error (kind_path ^ ": unknown value " ^ kind))
+        | _ -> Error (path ^ ": expected object"))
+  }
 
 let output_schema = synthesis_codec.schema
 

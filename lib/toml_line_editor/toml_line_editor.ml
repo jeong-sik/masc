@@ -564,6 +564,35 @@ let edit_table_bool content ~path ~key ~value =
   edit_table_value content ~path ~key ~value:(Some (Bool value))
 ;;
 
+let edit_root_bool content ~key ~value =
+  let lines, trailing_newline = split_lines content in
+  let root, rest = match find_structural_index is_table_header lines with
+    | None -> lines, [] | Some index -> split_at index lines in
+  let boolean_line line = match Otoml.Parser.from_string_result (String.trim line) with
+    | Ok (Otoml.TomlTable [(name, Otoml.TomlBoolean _)]) -> String.equal name key
+    | Ok _ | Error _ -> false in
+  let line = value_line ~key ~value:(Bool value) in
+  let root = match find_structural_index boolean_line root with
+    | None -> line :: root
+    | Some index ->
+        let before, found = split_at index root in
+        match found with
+        | [] -> line :: root
+        | opening :: after ->
+            (* A # in a quoted key is data. Only a prefix that the grammar
+               reads as the complete boolean assignment can end the value. *)
+            let rec comment from = match String.index_from_opt opening from '#' with
+              | None -> if String.ends_with ~suffix:"\r" opening then "\r" else ""
+              | Some at when boolean_line (String.sub opening 0 at) ->
+                  let rec start index =
+                    if index > 0 && (opening.[index-1]=' ' || opening.[index-1]='\t')
+                    then start (index-1) else index in
+                  let index = start at in String.sub opening index (String.length opening-index)
+              | Some at -> comment (at+1) in
+            before @ ((line ^ comment 0) :: after) in
+  join_lines (root @ rest) ~trailing_newline
+;;
+
 type nested_edit_error = Invalid_document | Unreachable_table
 
 module Exact_number = struct

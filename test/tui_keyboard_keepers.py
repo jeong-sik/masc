@@ -1077,7 +1077,7 @@ def keeper_selection_identity_interaction(
 
 
 KEEPER_LANES_PATH = "/api/v1/keepers/composite"
-STANDALONE_LANES_PATH = "/api/v1/dashboard/standalone-lanes"
+LANE_INVENTORY_PATH = "/api/v1/lanes"
 
 
 def standalone_lane_fixture(
@@ -1118,6 +1118,7 @@ def standalone_lane_fixture(
         ),
     }
     purpose, required = lane_contracts[lane_id]
+    running_count = 1 if status == "running" else 0
     row = {
         "lane_id": lane_id,
         "label": label,
@@ -1138,8 +1139,8 @@ def standalone_lane_fixture(
         "admission_error": None,
         "status": status,
         "retained_run_count": retained,
-        "running_count": 0,
-        "succeeded_count": retained,
+        "running_count": running_count,
+        "succeeded_count": retained - running_count,
         "failed_count": 0,
         "cancelled_count": 0,
         "last_started_at": 1787557600.0 if retained else None,
@@ -1190,6 +1191,69 @@ def standalone_lanes_response() -> HttpResponse:
             ],
         },
     )
+
+
+def lane_inventory_response(
+    *, exact_snapshot: dict[str, object] | None = None,
+    package_rows: list[dict[str, object]] | None = None,
+    package_read: dict[str, object] | None = None,
+) -> HttpResponse:
+    """Explicit /api/v1/lanes fixture; the embedded exact API is unchanged.
+
+    Each caller chooses this endpoint. Mutable routing fixtures pass the exact
+    snapshot captured when their request arrived, including a held old read;
+    no harness-level endpoint rewrite or post-write state substitution occurs.
+    Builtin row order keeps the existing exact navigation scenarios stable.
+    """
+    if exact_snapshot is None:
+        _, exact_snapshot = standalone_lanes_response()
+    rows = []
+    for lane in exact_snapshot["lanes"]:
+        state = lane["configuration_state"]
+        if state in ("ready", "degraded"):
+            configuration = {"kind": "configured", **{
+                key: lane[key] for key in (
+                    "admitted_slots", "cli_slots", "declared_slots",
+                    "declared_cli_slots", "dropped_slots", "admission_error",
+                )
+            }}
+        elif state in ("unconfigured", "unavailable"):
+            configuration = {"kind": state, "detail": lane["admission_error"]}
+        else:
+            raise ValueError(f"Unknown exact configuration state: {state!r}")
+        rows.append({
+            "id": "exact/" + lane["lane_id"], "label": lane["label"],
+            "purpose": lane["purpose"],
+            "selection": {"kind": "exact", "lane_id": lane["lane_id"]},
+            "state": {"kind": "exact", "configuration": configuration},
+        })
+    for lane, label in (("live", "Live browser"),
+                        ("automation", "Browser automation"),
+                        ("stagehand", "Browser Stagehand")):
+        rows.append({
+            "id": "browser/" + lane, "label": label,
+            "purpose": "Browser backend observation.",
+            "selection": {"kind": "browser", "lane": lane},
+            "state": ({"kind": "browser_clients", "connected_clients": 0}
+                      if lane == "live" else
+                      {"kind": "browser_executor", "registered": False}),
+        })
+    for machine in ("msx", "dos"):
+        rows.append({
+            "id": "machine/" + machine, "label": machine.upper(),
+            "purpose": "Published machine state.",
+            "selection": {"kind": "machine", "machine": machine},
+            "state": {"kind": "machine", "publication": "no_screen"},
+        })
+    return 200, {
+        "schema": "masc.lane-inventory/v1",
+        "observed_at": exact_snapshot["observed_at_unix"],
+        "rows": rows + (package_rows or []), "exact_snapshot": exact_snapshot,
+        "package_read": package_read if package_read is not None else {
+            "directory": "/fixture/lane-addons", "complete": True,
+            "owner_present": True, "issues": [],
+        },
+    }
 
 
 def lane_runs_path(lane_id: str) -> str:
@@ -1440,7 +1504,7 @@ def keeper_lane_row(
 def keeper_lanes_ia_interaction(
     gate: GatedHttpResponse, fixtures: HttpFixtures
 ) -> Interaction:
-    """Keeper composite facts live on Keepers; Lanes is Standalone-only."""
+    """Keeper composite facts stay on Keepers; Lanes includes all families."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -1484,7 +1548,7 @@ def keeper_lanes_ia_interaction(
             output,
             rows=30,
             columns=220,
-            needle="Lanes · observed ".encode(),
+            needle="All lanes · observed ".encode(),
             controls=(FULL_REDRAW,),
         )
         # The resize clears the screen and repaints the lane list -- ten rows
@@ -1496,7 +1560,7 @@ def keeper_lanes_ia_interaction(
         lanes_plain = screen_text(bytes(output)).decode("utf-8")
         if "MASC Lanes" not in lanes_plain:
             raise AssertionError(
-                f"Lanes did not name the standalone scope: {lanes_plain!r}"
+                f"Lanes did not name its scope: {lanes_plain!r}"
             )
         for duplicate in ("TURN STEP", "LAST OUTCOME", "DIAGNOSIS"):
             if duplicate in lanes_plain:
@@ -1504,6 +1568,42 @@ def keeper_lanes_ia_interaction(
                     f"Lanes still repeated Keeper column {duplicate!r}: "
                     f"{lanes_plain!r}"
                 )
+        # The overview now shares one identity/state table across families.
+        # Exact-output run counts and detailed meaning remain in the full
+        # reading, rather than pretending to apply to Browser/Machines rows.
+        lane_rows = screen_rows(bytes(output))
+        header_row = screen_row_of(lane_rows, b"STATE")
+        if header_row < 0 or b"LANE" not in lane_rows[header_row]:
+            raise AssertionError(f"Lanes drew no common header: {lanes_plain!r}")
+        state_column = lane_rows[header_row].decode("utf-8").index("STATE")
+        for label, expected_state in (
+            (b"Board Attention", "1 running · 1 admitted slots"),
+            (b"Workspace Curator", "idle · 1 admitted slots"),
+        ):
+            line = lane_rows[screen_row_of(lane_rows, label)].decode("utf-8")
+            if line.find(expected_state) != state_column:
+                raise AssertionError(f"common state column drifted: {line!r}")
+        if "Exact-output" not in lanes_plain:
+            raise AssertionError(f"common list omitted Exact-output: {lanes_plain!r}")
+        # The list has a bounded viewport even at 30 rows. Search brings
+        # each other family into view; its last rows need not fit initially.
+        for identity, label, family in (
+            (b"browser/live", b"Live browser", b"Browser"),
+            (b"machine/dos", b"DOS", b"Machines"),
+        ):
+            send_and_wait(process, master_fd, output, b"/" + identity,
+                          re.compile(rb"\x1b\[7m[^\x1b\n]*" + re.escape(label)))
+            send_and_wait(process, master_fd, output, b"\x1b", b"j/k:move")
+            drain_until_quiet(process, master_fd, output)
+            visible = screen_rows(bytes(output))
+            row_index = screen_row_of(visible, label)
+            if row_index < 0 or family not in visible[row_index]:
+                raise AssertionError(f"common list omitted {family!r}: {visible!r}")
+        send_and_wait(process, master_fd, output, b"\x1b[H",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention"))
+        send_and_wait(process, master_fd, output, b"d", b"MASC Lane reading")
+        drain_until_quiet(process, master_fd, output)
+        detail_plain = screen_text(bytes(output)).decode("utf-8")
         for detail in (
             "Judges one durable Board candidate for Keeper attention.",
             "Config: [runtime.exact_output_lanes.board_attention_exact]",
@@ -1513,66 +1613,9 @@ def keeper_lanes_ia_interaction(
             "Output meaning: the accepted candidate judgment JSON.",
             "Evidence: structured-output generation, not a MASC tool loop;",
         ):
-            if detail not in lanes_plain:
-                raise AssertionError(
-                    f"Lanes omitted selected-lane detail {detail!r}: "
-                    f"{lanes_plain!r}"
-                )
-
-        # The list is a table under one header, not five rows each carrying
-        # its own labels: the labels cost some forty cells a row, so beside
-        # the roster pane every row was cut at "runs 12", and the name column
-        # was a literal fifteen that "Workspace Curator" overran, pushing its
-        # whole row two cells right of the others. The header's words and the
-        # column each begins at are read in cells (one code point each here),
-        # and the lane whose name overran must start its status, its counts
-        # and its slots where the running lane and the header do.
-        lane_rows = {
-            row: text.decode("utf-8")
-            for row, text in screen_rows(bytes(output)).items()
-        }
-        header_row = screen_row_of(
-            screen_rows(bytes(output)), b"OK/FAIL/CANCEL"
-        )
-        if header_row < 0:
-            raise AssertionError(f"Lanes drew no column header: {lanes_plain!r}")
-        header = lane_rows[header_row]
-        column_words = (
-            "LANE", "STATUS", "ACTIVE", "RUNS", "OK/FAIL/CANCEL", "P50",
-            "SLOTS", "OBSERVED",
-        )
-        word_columns = [header.find(word) for word in column_words]
-        if word_columns != sorted(word_columns) or -1 in word_columns:
-            raise AssertionError(
-                f"Lanes header does not carry {column_words} in order: "
-                f"{header!r}"
-            )
-        status_column = header.index("STATUS")
-        counts_column = header.index("OK/FAIL/CANCEL")
-        slots_column = header.index("SLOTS")
-        for lane_name, status_word in (
-            ("Board Attention", "running "),
-            ("Workspace Curator", "idle "),
-        ):
-            row = lane_rows[
-                screen_row_of(screen_rows(bytes(output)), lane_name.encode())
-            ]
-            for column, cell in (
-                (status_column, status_word),
-                (counts_column, "12/0/0 "),
-                (slots_column, "glm-coding.glm-5-turbo "),
-            ):
-                if row.find(cell) != column:
-                    raise AssertionError(
-                        f"{lane_name} row puts {cell!r} at {row.find(cell)}, "
-                        f"header column is {column}: {row!r}"
-                    )
-        for own_label in ("slots glm", "runs 12", "ok/fail/cancel"):
-            if own_label in lanes_plain:
-                raise AssertionError(
-                    f"a lane row still carries its own label {own_label!r}: "
-                    f"{lanes_plain!r}"
-                )
+            if detail not in detail_plain:
+                raise AssertionError(f"Full Lane reading omitted {detail!r}: {detail_plain!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"All lanes")
 
         banded_hitl = re.compile(rb"\x1b\[7m[^\x1b\n]*HITL Auto Judge")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
@@ -2450,7 +2493,7 @@ def lanes_press_selects_the_lane_under_the_pointer(
         output,
         rows=30,
         columns=220,
-        needle="Lanes · observed ".encode(),
+        needle="All lanes · observed ".encode(),
         controls=(FULL_REDRAW,),
     )
     drain_until_quiet(process, master_fd, output)
@@ -2683,7 +2726,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
         )
     )
     fixtures[KEEPER_LANES_PATH] = gate
-    fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    fixtures[LANE_INVENTORY_PATH] = lane_inventory_response()
     fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
     fixtures[
         "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
@@ -2701,7 +2744,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Keepers operations and Standalone-only Lanes",
+        description="Keepers operations and common Lane inventory",
         interact=keeper_lanes_ia_interaction(gate, fixtures),
         http_fixtures=fixtures,
     )

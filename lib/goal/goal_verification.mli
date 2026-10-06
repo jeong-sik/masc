@@ -128,11 +128,16 @@ val mark_proof_pending :
     replacement; a historical proof for another criterion may be superseded. *)
 
 val record_proof_verdict :
+  ?before_commit:(unit -> (unit, string) result) ->
   Workspace_utils.config ->
   goal_id:string ->
   verdict ->
   (record, string) result
-(** Requires the exact pending request identity and criterion. A replay of the
+(** Requires the exact pending request identity and criterion. [before_commit]
+    runs under the proof lock after identity validation and before a new verdict
+    write. It must not re-enter Goal/proof mutations. Refusal and exact replay
+    never invoke it. This preserves Candle-before-proof ordering without
+    snapshotting a refused stale answer. A replay of the
     identical proof/provenance payload returns the stored record without rewriting
     its original timestamp, even if delivered with a later observation time. Same-outcome verdicts from another request, run, criterion, or
     with changed evidence are conflicts. *)
@@ -142,3 +147,9 @@ val validate_state_json : Yojson.Safe.t -> (unit, string) result
 
 val record_human_confirmation : Workspace_utils.config -> goal_id:string -> verdict -> operator_id:string -> (record, string) result
 (** Caller holds the Goal transaction and supplies token-bound operator identity. *)
+
+val bind_review : Workspace_utils.config -> goal_id:string ->
+  (Goal_store.goal * (string * Goal_store.criterion * Workspace_verification_store.submitted_evidence_item list), string) result
+(** Admit a verifier against the complete current lifecycle and exact pending
+    proof under the Goal lock. Suspended Goals admit no new work. A binding
+    acquired before suspension may still commit its exact ledger result. *)

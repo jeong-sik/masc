@@ -120,7 +120,16 @@ let test_the_window_follows_the_cursor () =
   check int "a cursor below the window pulls it down" 6
     (Masc_tui_scroll.ensure_visible ~cursor:10 ~height:5 0);
   check int "a visible cursor moves nothing" 3
-    (Masc_tui_scroll.ensure_visible ~cursor:5 ~height:5 3)
+    (Masc_tui_scroll.ensure_visible ~cursor:5 ~height:5 3);
+  (* A multi-line item: the window the reader scrolled into it stays. It used
+     to be dragged back to the item's first line, so the body below was
+     unreachable on a one-row window (#41026 review). *)
+  let span = Masc_tui_scroll.ensure_span_visible ~start:0 ~stop:3 ~height:1 in
+  Alcotest.(check int) "window at the head stays" 0 (span 0);
+  Alcotest.(check int) "window inside the body stays" 2 (span 2);
+  Alcotest.(check int) "window past the item returns to its head" 0 (span 4);
+  Alcotest.(check int) "item below the window comes into view" 9
+    (Masc_tui_scroll.ensure_span_visible ~start:10 ~stop:13 ~height:2 0)
 
 
 (* Changes draws a preview under its list. The list keeps five rows and the

@@ -261,11 +261,16 @@ let start_with ~sw ~base_path ~enabled ~prepare =
     if Hashtbl.mem owners base_path then false
     else (Hashtbl.add owners base_path owner; true)) in
   if admitted then (
+    let unsubscribe_configuration =
+      Runtime_exact_output_registry.subscribe_lane_changes ~lane_id (fun () ->
+        (* fire-and-forget: publication signals the owner; it never runs a model here. *)
+        ignore (wake owner)) in
     let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
       (* fire-and-forget: wake reports admission only; notifications have no response consumer. *)
       if String.equal event.keepers_dir keepers_dir then ignore (wake owner)) in
     Eio.Switch.on_release sw (fun () ->
       Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
+      unsubscribe_configuration ();
       unsubscribe ();
       Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.remove owners base_path));
     (* A daemon, because the switch is this owner's whole life and the loop
@@ -296,22 +301,29 @@ let start_with ~sw ~base_path ~enabled ~prepare =
       drain ();
       `Stop_daemon))
 
-let start ~sw ~base_path =
-  let enabled () = match Runtime_exact_output_registry.current () with
+let configured () = match Runtime_exact_output_registry.current () with
     | Error _ -> false
     | Ok registry ->
       (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
        | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
-       | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true) in
-  start_with ~sw ~base_path ~enabled ~prepare:(fun () -> prepare_execution ~base_path)
+       | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true)
+
+let start ~sw ~base_path =
+  start_with ~sw ~base_path ~enabled:configured ~prepare:(fun () -> prepare_execution ~base_path)
 
 module For_testing = struct
   let execute = execute
 
-  let start ~sw ~base_path ~max_input_bytes ~execute =
-    start_with ~sw ~base_path ~enabled:(fun () -> true)
+  let start_with_enabled ~sw ~base_path ~enabled ~max_input_bytes ~execute =
+    start_with ~sw ~base_path ~enabled
       ~prepare:(fun () -> Ok { configuration = `Assoc ["injected_runner", `Bool true];
                               max_input_bytes; execute })
+
+  let start ~sw ~base_path ~max_input_bytes ~execute =
+    start_with_enabled ~sw ~base_path ~enabled:(fun () -> true) ~max_input_bytes ~execute
+
+  let start_configured ~sw ~base_path ~max_input_bytes ~execute =
+    start_with_enabled ~sw ~base_path ~enabled:configured ~max_input_bytes ~execute
 
   let find ~base_path =
     let base_path = Unix.realpath base_path in

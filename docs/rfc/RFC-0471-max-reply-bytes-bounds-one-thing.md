@@ -25,7 +25,7 @@ README(`addons/README.md`)는 그중 3가지만 적어 두었다. 아래는 코�
 | 3 | `lane_addon_runtime.ml` 의 action 입력 검사 | host 가 worker 에게 주는 action 입력 | 아니다. 보내는 쪽에 받는 쪽 한도를 쓴다 |
 | 4 | `lane_addon_sources.ml` 의 소스 수집 예산 | host 가 worker 에게 주는 입력 | 아니다 |
 | 5 | `lane_addon_sampling.ml` 의 요청·결과 blob | host 가 직접 저장하는 모델 요청과 결과 | 아니다. worker 에게 보내는 응답이 아니다 |
-| 6 | `lane_addon_sampling.ml` `with_observation` 의 읽기 예산 | 한 관측에 붙은 증거 blob 전체를 다시 읽는 합계 | 아니다. 소스 스냅샷과 모델 요청이 합쳐서 한도를 넘으면, 문제가 없는데도 관측 전체가 실패한다 |
+| 6 | `lane_addon_sampling.ml` `with_observation` 의 읽기 예산 | 한 관측에 붙은 증거 blob 전체를 다시 읽는 합계 | 아니다. 소스 스냅샷과 모델 요청이 합쳐서 한도를 넘으면, 문제가 없는데도 관측 전체가 실패할 수 있다. 코드를 읽고 추정한 것이고 재현하지는 못했다 |
 | 7 | `lane_addon_worker.ml` 의 Docker `inspect`·`create` 출력 | host 가 실행한 docker CLI 출력 | 아니다. 값이 작으면 `create` 가 실패한다 |
 
 7번은 실제 버그다. 코드 주석(`lane_addon_worker.ml` 약 293행)이 "create 가 효과를 내고 나서 stdout 을 못 받을 수 있다"고

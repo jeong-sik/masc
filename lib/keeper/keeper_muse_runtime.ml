@@ -740,10 +740,8 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             (shown string_of_int compaction.Msp.tokens_after)
         | Serve.Subscription_usage_observed usage ->
           Option.iter (fun scope ->
-            Option.iter (fun reset_ms ->
-              Runtime_quota_window.note_exhausted ~scope
-                ~resets_at:(float_of_int reset_ms /. 1000.))
-              (Msp.exhausted_subscription_reset_ms usage)) quota_scope
+            Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed usage)
+            quota_scope
         | Serve.Turn_terminal_received _ -> ()
         (* The usage this turn reports belongs to the model its calls ran
            on, when the host names it, rather than the session's selection. *)

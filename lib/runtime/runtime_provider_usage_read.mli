@@ -40,9 +40,10 @@ val read_muse :
   scope:Runtime_quota_window.scope ->
   Runtime_muse_serve.config ->
   (unit, string) result
-(** Read [usage/read] without a model turn. Only a provider-stated exhausted
+(** Read [usage/read] without a model turn and record its windows under
+    [scope] ({!Runtime_muse_usage.observe}). Only a provider-stated exhausted
     window with a future reset rests [scope]; an absent or unspent report
-    changes no routing state. *)
+    changes no routing state, and an absent report records nothing. *)
 
 type http_error
 (** Why one HTTP read recorded nothing. *)

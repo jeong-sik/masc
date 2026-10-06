@@ -1575,6 +1575,7 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
+  Server_browser_configuration.install_activity_observer ~sw;
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own
@@ -1734,6 +1735,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
         initialized_owner
       in
       let state = activated_owner.state in
+      (* Both Browser lanes start from this one snapshot, taken before any
+         config save can be accepted; a save applies at the next restart. *)
+      let browser_configuration = Runtime.browser_configuration () in
       (* Authentication wrappers treat [server_state = Some _] as the mutation
          capability boundary. Publish only after transport-neutral activation
          has restored Gate state and started the owner persistence lanes. *)
@@ -1839,10 +1843,12 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       (* The browser lanes keep their owner records and profiles under the
          server's own base path, not one resolved again from env or cwd. *)
       boot_stage "browser_webdriver.begin";
-      Server_browser_webdriver.start ~sw ~env ~base_path;
+      Server_browser_webdriver.start ~sw ~env ~base_path
+        ~configuration:browser_configuration;
       boot_stage "browser_webdriver.end";
       boot_stage "browser_stagehand.begin";
-      Server_browser_stagehand.start ~sw ~env ~base_path;
+      Server_browser_stagehand.start ~sw ~env ~base_path
+        ~configuration:browser_configuration;
       boot_stage "browser_stagehand.end";
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's

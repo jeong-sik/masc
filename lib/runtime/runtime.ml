@@ -845,14 +845,15 @@ let degrade_loaded_for_missing_catalog
       , media_failover
       , lanes
       , lsp_servers
-      , typesafeai ) :
+      , typesafeai
+      , browser ) :
       t list
       * t
       * string
       * (string * string) list
       * string list
       * Runtime_lane.t list
-      * (string * (string * string list)) list  * Runtime_schema.typesafeai )
+      * (string * (string * string list)) list  * Runtime_schema.typesafeai * Browser_configuration.t )
     (report : missing_catalog_report)
   : ( ( t list
         * t
@@ -860,7 +861,7 @@ let degrade_loaded_for_missing_catalog
         * (string * string) list
         * string list
         * Runtime_lane.t list
-        * (string * (string * string list)) list  * Runtime_schema.typesafeai )
+        * (string * (string * string list)) list  * Runtime_schema.typesafeai * Browser_configuration.t )
       * startup_degradation
     , string )
     result
@@ -974,7 +975,8 @@ let degrade_loaded_for_missing_catalog
         , kept_media_failover
         , kept_lanes
         , lsp_servers
-        , typesafeai )
+        , typesafeai
+      , browser )
       , degradation )
 ;;
 
@@ -987,7 +989,7 @@ let materialize_config
        * (string * string) list
        * string list
        * Runtime_lane.t list
-       * (string * (string * string list)) list * Runtime_schema.typesafeai)
+       * (string * (string * string list)) list * Runtime_schema.typesafeai * Browser_configuration.t)
       * Runtime_schema.exact_output_lane_decl list
     , load_failure )
     result
@@ -1088,7 +1090,8 @@ let materialize_config
     , cfg.media_failover
     , lanes
     , cfg.lsp_servers
-    , cfg.typesafeai )
+    , cfg.typesafeai
+    , cfg.browser )
   in
   Ok (loaded, cfg.exact_output_lane_decls)
 ;;
@@ -1100,7 +1103,7 @@ let load_list_internal ~(config_path : string) ~validate_max_context
        * (string * string) list
        * string list
        * Runtime_lane.t list
-       * (string * (string * string list)) list * Runtime_schema.typesafeai)
+       * (string * (string * string list)) list * Runtime_schema.typesafeai * Browser_configuration.t)
       * Runtime_schema.exact_output_lane_decl list
     , load_failure )
     result
@@ -1136,7 +1139,8 @@ let load_list ~config_path =
            , media_failover
            , lanes
            , _lsp_servers
-           , _typesafeai )
+           , _typesafeai
+           , _browser )
          , _ ) ->
          (runtimes, rt, assignments, media_failover, lanes))
 ;;
@@ -1158,6 +1162,7 @@ type loaded_state =
   ; media_failover : string list
   ; declared_media_failover : string list
   ; lanes : Runtime_lane.t list
+  ; browser : Browser_configuration.t option
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
   ; startup_degradation : startup_degradation option
@@ -1176,6 +1181,7 @@ let empty_loaded_state =
   ; media_failover = []
   ; declared_media_failover = []
   ; lanes = []
+  ; browser = None
   ; lsp_servers = []
   ; config_path = None
   ; startup_degradation = None
@@ -1229,7 +1235,8 @@ let set_loaded
     , media_failover
     , lanes
     , lsp_servers
-    , typesafeai ) =
+    , typesafeai
+      , browser ) =
   (* Reuse observations only when the actual resolved binding is unchanged.
      Compare the identities frozen at materialization, never re-resolve old
      credentials/catalog facts after a reload. Removed/rebound rows retain no
@@ -1251,6 +1258,7 @@ let set_loaded
     ; media_failover
     ; declared_media_failover
     ; lanes
+    ; browser = Some browser
     ; lsp_servers
     ; config_path = Some config_path
     ; startup_degradation
@@ -1441,7 +1449,7 @@ let unpublish_exact_output_registry () =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1455,12 +1463,12 @@ let init_default_strict ~config_path =
 (* Prepare one immutable runtime publication. Boot and config edits share the
    same catalog exclusion so a save cannot reactivate an unavailable route. *)
 let prepare_degraded_loaded ~config_path
-    (((runtimes, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+    (((runtimes, _, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
   (* [\[runtime\].media_failover] as the file declares it, read before the
      catalog exclusion below drops what it could not resolve. The surface
      needs both: the admitted list it draws, and what was dropped, which is
      what stops the route being written back from a list missing them. *)
-  let _, _, _, _, declared_media_failover, _, _, _ = loaded in
+  let _, _, _, _, declared_media_failover, _, _, _, _ = loaded in
   let* loaded, startup_degradation =
     match missing_runtime_model_capabilities ~config_path runtimes with
     | None -> Ok (loaded, None)
@@ -1468,7 +1476,7 @@ let prepare_degraded_loaded ~config_path
         let* loaded, degradation = degrade_loaded_for_missing_catalog loaded report in
         Ok (loaded, Some degradation)
   in
-  let active_runtimes, _, _, _, _, _, _, _ = loaded in
+  let active_runtimes, _, _, _, _, _, _, _, _ = loaded in
   let* () =
     validate_runtime_max_context active_runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)
@@ -1515,6 +1523,7 @@ let init_default_degraded_observation (observation : config_observation) =
 ;;
 
 let runtime_state () = Atomic.get loaded_state_ref
+let browser_configuration () = (runtime_state ()).browser
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
@@ -2415,7 +2424,7 @@ let validate_fusion_change ~config_path content =
    [Route_unavailable] rather than [Unknown_route]. The payloads are the ones
    a run records. *)
 let fusion_seat_failure
-    ((runtimes, _, _, _, _, lanes, _, _), _, startup_degradation, _)
+    ((runtimes, _, _, _, _, lanes, _, _, _), _, startup_degradation, _)
     route
   : Fusion_types.judge_failure option
   =
@@ -2535,7 +2544,7 @@ let validate_fusion_seats ~config_path ~validated content =
    [load_list_internal], and a broken [fusion] must not stop every Keeper turn
    with it; Fusion reports its own section per call. *)
 let exact_slot_body_deadline_gaps_of_validated
-    ((runtimes, _, _, _, _, _, _, _), exact_output_lane_decls, _, _)
+    ((runtimes, _, _, _, _, _, _, _, _), exact_output_lane_decls, _, _)
   =
   exact_slot_body_deadline_gaps_of
     ~target_source:(exact_output_target_source ())
@@ -2817,7 +2826,7 @@ let on_disk_text_rebuilds_exact_output_registry ~config_path =
     (match parse_and_validate_config_text ~config_path text with
      | Error (_ : string) -> false
      | Ok (loaded, lanes, _, _) ->
-       let runtimes, _, _, _, _, _, _, _ = loaded in
+       let runtimes, _, _, _, _, _, _, _, _ = loaded in
        Result.is_ok (prepare_exact_output_replacement ~runtimes ~lanes))
 ;;
 
@@ -3020,7 +3029,7 @@ let commit_config_text_locked
       ~exact_output_lane_decls:exact_output_lanes
       loaded
   in
-  let runtimes, _, _, _, _, _, _, _ = loaded in
+  let runtimes, _, _, _, _, _, _, _, _ = loaded in
   let* plan =
     plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
     |> Result.map_error (fun detail -> Config_commit_refused detail)
@@ -3173,7 +3182,7 @@ let validate_config_text ?runtime_config_path content =
   let* loaded, exact_output_lanes, _degradation, _declared_media_failover =
     validate_save_text ~config_path:path content
   in
-  let runtimes, _, _, _, _, _, _, _ = loaded in
+  let runtimes, _, _, _, _, _, _, _, _ = loaded in
   (* The commit's registry decision, without the write, so a preview cannot
      promise a save the commit then refuses. *)
   let* (_ : exact_output_commit_plan) =

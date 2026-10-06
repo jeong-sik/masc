@@ -19,6 +19,10 @@ let declaration_summary = function
   | Invalid _ -> "declaration invalid"
   | Absent -> "declaration absent"
   | Unobserved -> "declaration not observed"
+let browser_activity_label = function
+  | Browser_enabled -> "on"
+  | Browser_disabled -> "off; configuration retained"
+  | Browser_unobserved -> "activity unavailable"
 let row_summary (row : row) = match row.state with
   | Exact_state (Disabled _) -> "off; candidates retained"
   | Exact_state (Unconfigured _) -> "unconfigured"
@@ -27,10 +31,9 @@ let row_summary (row : row) = match row.state with
       if c.admitted_slots=[] && c.cli_slots=[] then "no admitted slots"
       else if Option.is_some c.admission_error then "admission issue"
       else Printf.sprintf "%d admitted slots" (List.length c.admitted_slots + List.length c.cli_slots)
-  | Browser_clients 0 -> "no connected clients"
-  | Browser_clients n -> Printf.sprintf "%d connected clients" n
-  | Browser_executor true -> "executor registered"
-  | Browser_executor false -> "executor not registered"
+  | Browser_clients (activity,n) -> browser_activity_label activity ^ "; " ^ Printf.sprintf "%d connected clients" n
+  | Browser_executor (activity,registered) -> browser_activity_label activity ^ "; "
+      ^ (if registered then "executor registered" else "executor not registered")
   | Machine_state No_screen -> "no screen published"
   | Machine_state Stable -> "screen stable"
   | Machine_state Running -> "machine running"
@@ -67,8 +70,10 @@ let detail_lines (row : row) =
          @ (match c.dropped_slots with [] -> [] | values -> ["Dropped HTTP slots: " ^ String.concat ", " values])
          @ (match c.admission_error with None -> [] | Some detail -> ["Admission: " ^ detail])
      | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [detail]
-     | Browser_clients _ -> []
-     | Browser_executor _ -> ["Registration does not prove browser process health or an open session."]
+     | Browser_clients _ -> ["Off refuses new requests while accepted requests finish."]
+     | Browser_executor _ -> ["Off retains configuration and sessions; status and close remain available.";
+         "Registration does not prove browser process health or an open session.";
+         "Activity follows saved settings; executable and profile paths are installed at server startup."]
      | Machine_state _ -> []
      | Package_state {declaration;instances} ->
          (match declaration with

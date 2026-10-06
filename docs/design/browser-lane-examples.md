@@ -25,7 +25,8 @@ Automation은 resolved configuration directory의 `runtime.toml`에 geckodriver
 포트로 직접 띄우고, 서버가 끝날 때 같이 내린다.
 
 ```toml
-[browser]
+[browser.automation]
+enabled = true
 geckodriver = "/absolute/path/to/geckodriver"
 # Optional: an absolute path to the installed Zen executable/app bundle.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
@@ -33,6 +34,45 @@ geckodriver = "/absolute/path/to/geckodriver"
 
 자세한 연결 계약은 [native Firefox](native-firefox-lane.md)에 있다.
 TUI에서는 `:` → `go Browser Lane`, `l` / `a`로 source를 선택한다.
+
+## Backend별 활동 설정
+
+`runtime.toml`의 세 표에서 새 Browser 요청을 독립적으로 켜고 끈다.
+경로를 지우거나 세션을 종료할 필요는 없다.
+
+```toml
+[browser.live]
+enabled = true
+
+[browser.automation]
+enabled = false
+geckodriver = "/absolute/path/to/geckodriver"
+
+[browser.stagehand]
+enabled = false
+chrome = "/absolute/path/to/chromium"
+extension = "/absolute/path/to/stagehand-extension"
+# profile = "/absolute/path/to/profile"
+```
+
+Off는 탭 목록·페이지 읽기·스크린샷을 포함한 **새 요청**을 거절한다.
+이미 접수한 요청은 완료할 수 있고 기존 연결·세션·경로는 유지된다.
+서버 backend의 `status`와 `close`, 정리 동작은 계속 가능하다.
+다시 켜면 설치된 backend로 새 요청을 보낼 수 있다.
+
+Runtime 원문 편집기나 admin raw endpoint로 검증·저장한 활동 값은 다음
+요청부터 적용된다. 실행 파일·확장·프로필 경로는 서버 시작 때 설치하므로
+경로 변경 후에는 재시작해야 한다. 설정 미완료 상태에서 시작하여 executor가
+설치되지 않았다면 설정을 저장하고 재개하는 것만으로 설치되지 않는다.
+그 경우에도 재시작해야 한다. All Lanes의 활동 값과 executor 등록 여부를
+각각 확인한다. 등록됐다는 표시는 세션이나 브라우저 프로세스의 정상 동작을
+보장하지 않는다. 전용 Browser 활동 편집 화면은 아직 제공하지 않는다.
+
+승인된 accepting 배포 단계에서는 `enabled` 생략을 켜짐으로 읽는다.
+Automation 경로는 `[browser.automation]`이 정본이다. 이 단계에서는 기존
+`[browser] geckodriver/binary`도 받지만 두 자리를 함께 쓰면 저장을 거절한다.
+기존 파일에 `[browser.automation] enabled`를 추가할 때는 경로도 같은 표로
+옮겨야 한다. 운영 파일 변경과 후속 strict 전환은 별도 배포 단계다.
 
 ## 열린 업무 화면에서 근거 찾기
 

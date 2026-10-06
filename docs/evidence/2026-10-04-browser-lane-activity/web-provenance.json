@@ -1,0 +1,39 @@
+{
+  "scope": "Actual source/API decoder tests and typecheck/lint; synthetic HTTP browser rendering. No real backend or config save.",
+  "sources": {
+    "dashboard/src/api/lane-inventory.ts": "10ce95ec62565aef2f9c721edb85f5d5b0b76c98bf4a0425c726119c681720fe",
+    "dashboard/src/api/lane-inventory.test.ts": "4749171718fb6124ffbba54e8054bf564d4bc964704c7c0d802d2503e34bf352",
+    "dashboard/src/api/fixtures/lane-inventory.json": "95f55ee31fb6a889f5893760c10922f704754cdc5767e5846b78672cdfe9795b",
+    "dashboard/src/components/lane-inventory-panel.ts": "038de609eb34e128868f71820870e258f3b476f42cc6f39ce509f082d4af9fab",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "392071886b624ba34e2723f3f0dad046aa2e24ed9c4d8a6c349857a672e10efb",
+    "dashboard/package.json": "2c820c3d81db9d2c81263f91b15232d532dbad22302d84ec660fb0cba4d0f101",
+    "dashboard/pnpm-lock.yaml": "1a85e066a8baf940cf65df3cf18e76224684fcff6b47254b9c37d6647fd607a0",
+    "dashboard/evidence/2026-10-04-browser-lane-activity/browser-fixture.mjs": "ed19e8a84a8df83c04798ca1131cd2096614fbf6f4d1ba820c99783cee6a2dab",
+    "dashboard/evidence/2026-10-04-browser-lane-activity/fixture.ts": "8e7abf885d3bc6fc180781f2fab9ff4ba0c8b62205455f321db00de8852666c1",
+    "dashboard/evidence/2026-10-04-browser-lane-activity/fixture.html": "7fc6354ee8011e01bedb9d7964252e3a7c5595aea06806f36ce0871576ad706f"
+  },
+  "commands": [
+    {
+      "cwd": "dashboard",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 --reporter=verbose src/api/lane-inventory.test.ts src/components/lane-inventory-panel.test.ts",
+      "exit_code": 0,
+      "result": "11 tests passed"
+    },
+    {
+      "cwd": "dashboard",
+      "command": "node node_modules/typescript/bin/tsc --noEmit",
+      "exit_code": 0
+    },
+    {
+      "cwd": "dashboard",
+      "command": "node node_modules/eslint/bin/eslint.js src/api/lane-inventory.ts src/api/lane-inventory.test.ts src/components/lane-inventory-panel.ts src/components/lane-inventory-panel.test.ts",
+      "exit_code": 0
+    },
+    {
+      "cwd": "repository root",
+      "command": "MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:9 node dashboard/evidence/2026-10-04-browser-lane-activity/browser-fixture.mjs",
+      "exit_code": 0,
+      "result": "6 checks; 3 inventory GETs; 0 writes, errors, unexpected routes"
+    }
+  ]
+}

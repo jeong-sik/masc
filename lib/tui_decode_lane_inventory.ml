@@ -31,11 +31,12 @@ type instance = {
   package_id : string; title : string; package_revision : string;
   presence : presence; phase : phase; applied_revision : string option;
 }
+type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
 type machine_publication = No_screen | Stable | Running
 type state =
   | Exact_state of configuration
-  | Browser_clients of int
-  | Browser_executor of bool
+  | Browser_clients of browser_activity * int
+  | Browser_executor of browser_activity * bool
   | Machine_state of machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
@@ -150,12 +151,22 @@ let instance json =
   let* applied_revision = get (nullable nonblank) "applied_revision" f in
   Ok {instance_id;incarnation;run_id;package_id;title;package_revision;presence;phase;applied_revision}
 
+let browser_activity = function
+  | `String "on" -> Ok Browser_enabled
+  | `String "off" -> Ok Browser_disabled
+  | `String "unobserved" -> Ok Browser_unobserved
+  | _ -> error "unknown Browser activity"
+
 let state json =
   let* tag = kind json in
   match tag with
   | "exact" -> let* f = fields ["kind";"configuration"] json in Result.map (fun c -> Exact_state c) (get configuration "configuration" f)
-  | "browser_clients" -> let* f = fields ["kind";"connected_clients"] json in Result.map (fun n -> Browser_clients n) (get count "connected_clients" f)
-  | "browser_executor" -> let* f = fields ["kind";"registered"] json in Result.map (fun value -> Browser_executor value) (get bool "registered" f)
+  | "browser_clients" -> let* f = fields ["kind";"activity";"connected_clients"] json in
+      let* activity = get browser_activity "activity" f in
+      Result.map (fun n -> Browser_clients (activity,n)) (get count "connected_clients" f)
+  | "browser_executor" -> let* f = fields ["kind";"activity";"registered"] json in
+      let* activity = get browser_activity "activity" f in
+      Result.map (fun value -> Browser_executor (activity,value)) (get bool "registered" f)
   | "machine" -> let* f = fields ["kind";"publication"] json in
       let* value = get (function `String "no_screen" -> Ok No_screen | `String "stable" -> Ok Stable | `String "running" -> Ok Running | _ -> error "unknown machine publication") "publication" f in
       Ok (Machine_state value)

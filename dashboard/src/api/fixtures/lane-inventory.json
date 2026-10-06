@@ -187,6 +187,7 @@
       },
       "state": {
         "kind": "browser_clients",
+        "activity": "on",
         "connected_clients": 0
       }
     },
@@ -200,6 +201,7 @@
       },
       "state": {
         "kind": "browser_executor",
+        "activity": "on",
         "registered": false
       }
     },
@@ -213,6 +215,7 @@
       },
       "state": {
         "kind": "browser_executor",
+        "activity": "on",
         "registered": false
       }
     },

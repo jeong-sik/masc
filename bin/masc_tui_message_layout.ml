@@ -1317,6 +1317,18 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
+(* The rows a box body spends on [content] at inner width [inner]: one row per
+   server line, plus the rows a line longer than the body wraps to. The box
+   draws each row with a two-cell indent, so a line wraps at [inner - 2]. Both
+   the drawing ([Masc_tui_ansi.box_lines_styled]) and every row budget that
+   reserves space for it count with this one function, so the frame and the
+   footer cannot disagree about how many rows the body took. *)
+let boxed_rows ~inner content =
+  let max_cells = Int.max 1 (inner - 2) in
+  List.concat_map
+    (fun line -> wrap_words ~max_cells line)
+    (String.split_on_char '\n' content)
+
 let wrap_styled_words ~max_cells text =
   let _, rows =
     List.fold_left (fun (style, rows) row ->

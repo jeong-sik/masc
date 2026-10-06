@@ -20,8 +20,7 @@ type source =
   | Kimi_coding_usages_read
   | Ollama_usage_read
   | Antigravity_usage_read
-  | Muse_usage_changed
-  | Muse_usage_read
+  | Muse_subscription_usage
 
 type window_role =
   | Gates_model_calls
@@ -102,8 +101,7 @@ let source_to_string = function
   | Kimi_coding_usages_read -> "kimi_coding.usages"
   | Ollama_usage_read -> "ollama.usage"
   | Antigravity_usage_read -> "antigravity.usage"
-  | Muse_usage_changed -> "muse.usage_changed"
-  | Muse_usage_read -> "muse.usage_read"
+  | Muse_subscription_usage -> "muse.subscription_usage"
 ;;
 
 let ( let* ) = Result.bind
@@ -863,7 +861,7 @@ type report_shape = Complete_snapshot | Sparse_update
 let report_shape = function
   | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
   | Ollama_usage_read | Antigravity_usage_read
-  | Muse_usage_changed | Muse_usage_read -> Complete_snapshot
+  | Muse_subscription_usage -> Complete_snapshot
   | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read -> Sparse_update
 

@@ -1227,7 +1227,7 @@ let test_subscription_exhaustion_is_account_scoped () =
     check (option (float 0.)) "successful turn retains latest provider reset" (Some 900.)
       (Runtime_quota_window.active_until ~scope ~now:100.);
     check (list string) "the turn's usage/changed reaches the operator surface"
-      [ "muse.usage_changed 5min 100% resets=500"; "muse.usage_changed 7d 101% resets=900" ]
+      [ "muse.subscription_usage 5min 100% resets=500"; "muse.subscription_usage 7d 101% resets=900" ]
       (recorded_usage_windows scope);
     check (list string) "another account records nothing" [] (recorded_usage_windows other);
     check bool "another selected account stays available" false
@@ -1289,7 +1289,7 @@ let test_muse_usage_read_rests_only_the_selected_account () =
       check (option (float 0.)) "weekly reset recorded from usage/read"
         (Some 900.) (Runtime_quota_window.active_until ~scope ~now:100.);
       check (list string) "usage/read reaches the operator surface"
-        [ "muse.usage_read 5min 20% resets=500"; "muse.usage_read 7d 101% resets=900" ]
+        [ "muse.subscription_usage 5min 20% resets=500"; "muse.subscription_usage 7d 101% resets=900" ]
         (recorded_usage_windows scope);
       check bool "different account remains dispatchable" false
         (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);

@@ -7,11 +7,6 @@ type origin =
   | Usage_changed
   | Usage_read
 
-let source = function
-  | Usage_changed -> Usage_window.Muse_usage_changed
-  | Usage_read -> Usage_window.Muse_usage_read
-;;
-
 let method_name = function
   | Usage_changed -> "usage/changed"
   | Usage_read -> "usage/read"
@@ -40,7 +35,7 @@ let report origin (usage : Runtime_muse_msp.subscription_usage) =
   | (Usage_window.Five_hour | Usage_window.Duration_minutes _ | Usage_window.Provider_label _)
     as rolling_kind ->
     Ok
-      { Usage_window.source = source origin
+      { Usage_window.source = Usage_window.Muse_subscription_usage
       ; windows =
           [ window
               ~kind:rolling_kind
@@ -54,17 +49,20 @@ let report origin (usage : Runtime_muse_msp.subscription_usage) =
       }
 ;;
 
+(* The rest comes first: recording ends in the durable history sink, which
+   writes a file and can be cancelled with the turn, and a spent account must
+   rest even then. *)
 let observe ~scope origin usage =
-  (match report origin usage with
-   | Ok report -> Usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
-   | Error error ->
-     Log.Runtime_agent.warn
-       "Muse Code %s usage windows not recorded for %s: %s"
-       (method_name origin)
-       (Runtime_quota_window.scope_to_string scope)
-       (Usage_window.decode_error_to_string error));
   Option.iter
     (fun reset_ms ->
        Runtime_quota_window.note_exhausted ~scope ~resets_at:(float_of_int reset_ms /. 1000.))
-    (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
+    (Runtime_muse_msp.exhausted_subscription_reset_ms usage);
+  match report origin usage with
+  | Ok report -> Usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
+  | Error error ->
+    Log.Runtime_agent.warn
+      "Muse Code %s usage windows not recorded for %s: %s"
+      (method_name origin)
+      (Runtime_quota_window.scope_to_string scope)
+      (Usage_window.decode_error_to_string error)
 ;;

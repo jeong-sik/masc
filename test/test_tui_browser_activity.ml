@@ -97,6 +97,16 @@ let uncertain_drafts_require_explicit_reapply () =
      A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending;
      A.suspend pending]
 
+(* An operator note on an enabled flag stays on that line when the flag is
+   toggled in an ordinary Browser table. *)
+let enabled_comment_survives_toggle () =
+  List.iter (fun lane ->
+    let label=Browser_lane.Lane_name.to_wire lane in
+    let source=Printf.sprintf "[browser.%s]\nenabled = true # temporary during rollout\n" label in
+    let _,_,write=A.start_save ~generation:2 (A.toggle (loaded ~lane (doc source))) |> ok in
+    same (Printf.sprintf "[browser.%s]\nenabled = false # temporary during rollout\n" label) write.source_text)
+    Browser_lane.Lane_name.all
+
 let clean_draft_does_not_adopt_different_path () =
   let session=loaded (doc source) |> read ~generation:2 (doc ~path:"/new/runtime.toml" ~revision:"fresh" off) in
   shows "Activity draft: On" session; shows "Based on revision: original" session;
@@ -274,6 +284,7 @@ let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.ma
    "clean draft preserves latest unrelated edits",clean_read_follows_unrelated_edit;
    "durable draft follows next file while receipt stays",durable_save_follows_next_file_without_losing_receipt;
    "uncertain drafts need explicit reapply",uncertain_drafts_require_explicit_reapply;
+   "enabled flag keeps its inline comment",enabled_comment_survives_toggle;
    "clean draft keeps changed-path boundary",clean_draft_does_not_adopt_different_path;
    "backend flags and flat automation migration",backend_flags_and_flat_paths;
    "flat paths retain operator comments",flat_paths_preserve_operator_comments;

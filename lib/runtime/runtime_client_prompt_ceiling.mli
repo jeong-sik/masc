@@ -12,8 +12,10 @@
 
 val bytes_per_window_token : int
 (** The bytes of start prompt allowed per token of window. MASC has no
-    tokenizer, so this is a lower bound on how many bytes one token carries:
-    a prompt at the ceiling stays under the window for any text. *)
+    tokenizer, so this is an estimate, not a bound: a token can carry a single
+    byte, and text dense in such tokens goes over the window at this ratio.
+    Antigravity rewrites an oversized input without reporting it, so such an
+    excess is cut silently rather than refused. *)
 
 val antigravity_proven_start_prompt_bytes : int
 (** The largest start prompt the Antigravity CLI is known to take: 2,078,915

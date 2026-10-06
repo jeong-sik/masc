@@ -30,6 +30,11 @@ type resolution_failure =
   }
 (* One exact-output lane slot whose HTTP provider declares no
    [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
+type admitted_allowance_change =
+  { runtime_id : string
+  ; change : Llm_provider.Provider_admission_state.conflict
+  }
+
 type exact_slot_body_deadline_gap =
   { lane_id : string
   ; slot_id : string
@@ -89,6 +94,7 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Admitted_allowances_changed of admitted_allowance_change list
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
   | Context_marks_exceed_max_context of
       { runtime_id : string
@@ -242,6 +248,24 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       (Runtime_muse_prompt_capacity.error_to_string
          (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
+  | Admitted_allowances_changed changes ->
+    Printf.sprintf
+      "%s: this change gives %d runtime(s) an admission allowance their account \
+       is not running under. The server keeps an account's first %s and %s \
+       until it restarts and refuses every request that declares other \
+       values, so the change is not applied. Stop the server, edit the file, \
+       and start it again:\n%s"
+      config_path
+      (List.length changes)
+      "max-concurrent"
+      Runtime_schema.admission_priority_run_limit_key
+      (changes
+       |> List.map (fun { runtime_id; change } ->
+         Printf.sprintf
+           "  %s: %s"
+           runtime_id
+           (Llm_provider.Provider_admission.admitted_allowance_change_to_string change))
+       |> String.concat "\n")
   | Exact_slot_body_deadlines_absent gaps ->
     Printf.sprintf
       "%s: this change adds %d exact-output slot(s) on a provider that declares \
@@ -304,6 +328,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Max_context_absent _
   | Context_marks_exceed_max_context _
   | Muse_window_below_host_overhead _
+  | Admitted_allowances_changed _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
 ;;

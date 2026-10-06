@@ -45,6 +45,22 @@
     declare. *)
 val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
 
+(** The allowance this process already admits for [config]'s endpoint
+    identity, when [config] declares a different one: [authoritative] is the
+    admitted allowance and [declared] is [config]'s. The registry keeps an
+    identity's first allowance while the process runs, so {!with_admission}
+    raises for such a config until the process restarts. [None] when
+    [config] declares no [max_concurrent_requests], when nothing has been
+    admitted for the identity yet, or when the two agree. It installs
+    nothing. *)
+val admitted_allowance_change
+  :  config:Provider_config.t
+  -> Provider_admission_state.conflict option
+
+(** One line: the endpoint identity (URL sanitized for logs), the admitted
+    allowance and the declared one. *)
+val admitted_allowance_change_to_string : Provider_admission_state.conflict -> string
+
 (** {!Slot_scheduler.permit_wait}: the caller's cell the bounded waits
     below write as a wait begins and ends. An unbounded [with_admission]
     writes nothing, so a caller that stands its own watchdog down while

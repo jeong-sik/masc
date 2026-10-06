@@ -42,6 +42,15 @@ let allowance_to_string (allowance : State.allowance) =
       limit
 ;;
 
+let admitted_allowance_change_to_string (conflict : State.conflict) =
+  Printf.sprintf
+    "%s %s admits %s; this config declares %s"
+    conflict.kind
+    (Complete_common.sanitize_url_for_log conflict.base_url)
+    (allowance_to_string conflict.authoritative)
+    (allowance_to_string conflict.declared)
+;;
+
 (* Two configs naming the same endpoint identity with different allowances
    have no precedence between them, so neither may run under the other's.
    The disagreement is a configuration error, raised here: before the permit
@@ -83,6 +92,19 @@ let entry_for ~key ~(allowance : State.allowance) =
    than admitting silently. *)
 let allowance_of_config (config : Provider_config.t) ~max : State.allowance =
   { max; priority_run_limit = config.admission_priority_run_limit }
+;;
+
+(* Reads the registry under its mutex and keeps the state it read: the
+   lookup installs nothing, so asking about an identity never admits it. *)
+let admitted_allowance_change ~(config : Provider_config.t) =
+  match config.max_concurrent_requests with
+  | None -> None
+  | Some max ->
+    let declared = allowance_of_config config ~max in
+    Stdlib.Mutex.protect state_mutex (fun () ->
+      match State.resolve_existing (key_of_config config) ~declared !state with
+      | None -> None
+      | Some ((_ : Slot_scheduler.t State.t), resolution) -> resolution.conflict)
 ;;
 
 let with_admission ~(config : Provider_config.t) f =

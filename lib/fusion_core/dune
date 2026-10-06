@@ -11,6 +11,6 @@
  (public_name masc.fusion_core)
  (wrapped false)
  (libraries unix fs_compat masc_log masc.run_registry_core masc.string_util
-  masc.toml_line_editor masc.runtime_toml_namespace yojson otoml)
+  masc.toml_line_editor masc.runtime_toml_namespace yojson otoml uutf uucp)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

@@ -36,6 +36,24 @@ let build ?constitution () =
   KP.build_keeper_system_prompt ~instructions ~keeper_name ~workspace_root
     ?constitution ()
 
+(* The structure is what this suite pins, not the distribution's worldview
+   text: the operator may leave config/prompts' [<world>] body empty or rewrite
+   it at any time. Every assembly check therefore supplies its own worldview
+   through the same override an operator uses. *)
+let fixture_world_line = "Block fixture worldview line."
+
+let with_worldview line f =
+  (match
+     Prompt_registry.set_override Prompt_names.keeper_worldview
+       ("<world>\n" ^ line ^ "\n</world>")
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("worldview override refused: " ^ detail));
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.clear_prompt_override Prompt_names.keeper_worldview)
+    f
+
 let find ?(from = 0) needle haystack =
   let n = String.length needle in
   let rec scan i =
@@ -68,7 +86,9 @@ let block prompt name =
 let order = [ "system"; "world"; "norms"; "identity"; "workspace"; "role" ]
 
 let test_blocks_arrive_once_in_order_and_filled () =
-  let prompt = build ~constitution:articles () in
+  let prompt =
+    with_worldview fixture_world_line (fun () -> build ~constitution:articles ())
+  in
   let positions =
     List.map
       (fun name ->
@@ -105,8 +125,10 @@ let test_a_world_without_articles_has_no_norms_block () =
    The override replaces the distribution default in the same place. *)
 let test_operator_worldview_replaces_the_default () =
   let default_world =
-    let _, body = block (build ()) "world" in
-    body
+    let p = build () in
+    match find "<world>" p with
+    | None -> ""
+    | Some _ -> snd (block p "world")
   in
   let operator_line = "Block world values finished work others can reuse." in
   (match
@@ -124,7 +146,7 @@ let test_operator_worldview_replaces_the_default () =
   let world_at, world = block prompt "world" in
   check string "the world block is the operator's text" operator_line world;
   check bool "the default is gone" true
-    (Option.is_none (find default_world prompt));
+    (default_world = "" || Option.is_none (find default_world prompt));
   let system_at, _ = block prompt "system" in
   let identity_at, _ = block prompt "identity" in
   check bool "the world stays between the shared body and the identity" true

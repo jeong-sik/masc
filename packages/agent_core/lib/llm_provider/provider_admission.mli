@@ -89,10 +89,6 @@ val admitted_allowance_change
   :  config:Provider_config.t
   -> Provider_admission_state.conflict option
 
-(** One line: the endpoint identity (URL sanitized for logs), the admitted
-    allowance and the declared one. *)
-val admitted_allowance_change_to_string : Provider_admission_state.conflict -> string
-
 (** {!Slot_scheduler.permit_wait}: the caller's cell the bounded waits
     below write as a wait begins and ends. An unbounded [with_admission]
     writes nothing, so a caller that stands its own watchdog down while

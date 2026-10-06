@@ -42,15 +42,6 @@ let allowance_to_string (allowance : State.allowance) =
       limit
 ;;
 
-let admitted_allowance_change_to_string (conflict : State.conflict) =
-  Printf.sprintf
-    "%s %s admits %s; this config declares %s"
-    conflict.kind
-    (Complete_common.sanitize_url_for_log conflict.base_url)
-    (allowance_to_string conflict.authoritative)
-    (allowance_to_string conflict.declared)
-;;
-
 (* Two configs naming the same endpoint identity with different allowances
    have no precedence between them, so neither may run under the other's.
    The disagreement is a configuration error, raised here: before the permit

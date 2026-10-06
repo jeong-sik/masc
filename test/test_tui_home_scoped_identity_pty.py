@@ -206,6 +206,13 @@ def superseded_scoped_match_journey(executable):
     newer_asks_read = threading.Event()
     released_asks_read = threading.Event()
     briefing = fixtures[BRIEFING]
+    assert isinstance(briefing, tuple)
+    initial_briefing = copy.deepcopy(briefing)
+    initial_body = initial_briefing[1]
+    assert isinstance(initial_body, dict)
+    initial_summary = initial_body["summary"]
+    assert isinstance(initial_summary, dict)
+    initial_summary["workspace_health"] = "initializing"
 
     def record(path):
         with lock:
@@ -214,8 +221,11 @@ def superseded_scoped_match_journey(executable):
             return phase
 
     def read_briefing():
-        record(BRIEFING)
-        return briefing
+        with lock:
+            phase = state["phase"]
+            calls.append((BRIEFING, phase))
+            first_initial_read = phase == "initial" and calls.count((BRIEFING, "initial")) == 1
+        return initial_briefing if first_initial_read else briefing
 
     def read_operator():
         with lock:
@@ -274,7 +284,7 @@ def superseded_scoped_match_journey(executable):
 
         def health(path):
             phase = record(path)
-            root = foreign if phase in ("new-full", "released") else local
+            root = foreign if phase in ("new-full", "released", "gate-released") else local
             return h.RawHttpResponse(200, json.dumps({
                 "status": "ok", "paths": {
                     "cwd": str(root), "effective_base_path": str(root),
@@ -289,11 +299,22 @@ def superseded_scoped_match_journey(executable):
     def interact(process, fd, _slave, output, _base):
         try:
             h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
+            h.resize_and_wait(process, fd, output, rows=40, columns=159, needle=b"Esc:list")
+            # The first bundle says initializing. Refresh the matching Home
+            # reading explicitly: chat startup and scoped navigation need not
+            # reload briefing. Only the fresh full bundle can draw Health: ok.
+            keepers.press_label_on_screen(process, fd, output, b"Dashboard",
+                                         row=1, needle=b"Enter:open")
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"Health: ok" in h.screen_text(bytes(output)), timeout=10), (
+                "initial matching refresh briefing was not applied")
+            h.palette_go(process, fd, output, b"keeper alpha", b"Esc:list")
             h.drain_until_quiet(process, fd, output)
             with lock:
                 assert ("/health", "initial") in calls, calls
                 baseline = calls.count((BRIEFING, "initial"))
-                assert baseline >= 1, calls
+                assert baseline >= 2, calls
                 state["phase"] = "old-scoped"
             # Home's static footer is available before its scoped GET settles.
             keepers.press_label_on_screen(process, fd, output, b"Dashboard",
@@ -301,8 +322,13 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=10), (
                 "old scoped decision GET never reached the response gate"
             )
+            # An explicit Approvals refresh owns this independent Gate read.
+            # A fresh cached startup reading may suppress a later Poll.
+            h.send_and_wait(process, fd, output, b"p", b"Questions waiting on you")
             assert h.wait_for_fixture_event(process, fd, output, held_gate.requested, timeout=10), (
                 "independent Gate read never reached its response gate")
+            keepers.press_label_on_screen(process, fd, output, b"Dashboard",
+                                         row=1, needle=b"Enter:open")
             with lock:
                 assert ("/health", "old-scoped") in calls, calls
                 assert calls.index(("/health", "old-scoped")) < calls.index(
@@ -322,7 +348,7 @@ def superseded_scoped_match_journey(executable):
             h.wait_for_output(process, fd, output, b"[workspace mismatch]",
                               start=start, timeout=10)
             replacement = h.resize_and_wait(
-                process, fd, output, rows=40, columns=120,
+                process, fd, output, rows=40, columns=160,
                 needle=b"Enter:open", controls=(h.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -351,14 +377,26 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, released_asks_read, timeout=10
             ), "old scoped reader never consumed its released operator response"
+            def scoped_probe_finished():
+                with lock:
+                    return calls.count(("/health", "released")) == 1
+            assert h.wait_for_fixture_state(process, fd, output,
+                scoped_probe_finished, timeout=10), "released scoped read did not recheck identity"
+            with lock:
+                state["phase"] = "gate-released"
             held_gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output, held_gate.completed, timeout=10), (
                 "old Gate read never completed after workspace invalidation")
+            def gate_probe_finished():
+                with lock:
+                    return calls.count(("/health", "gate-released")) == 1
+            assert h.wait_for_fixture_state(process, fd, output,
+                gate_probe_finished, timeout=10), "released Gate read did not recheck identity"
             # Consume the returned response and mailbox, then force a fresh
             # frame: accumulated pre-release mismatch bytes are not evidence.
             h.drain_until_quiet(process, fd, output, cap=1)
             drawn = h.resize_and_wait(
-                process, fd, output, rows=40, columns=121,
+                process, fd, output, rows=40, columns=161,
                 needle=b"Enter:open", controls=(h.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -373,6 +411,8 @@ def superseded_scoped_match_journey(executable):
                 # no extra full refresh can repair a wrongly admitted bundle.
                 assert sum(path == BRIEFING for path, _ in calls) == baseline + 1, calls
                 assert calls.count(("/health", "released")) == 1, calls
+                assert calls.count(("/health", "gate-released")) == 1, calls
+                assert held_gate.calls == 1, "more than one independent Gate GET was gated"
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:

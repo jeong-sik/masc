@@ -313,8 +313,16 @@ let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
               | _ -> Ok None)
          | _ -> Ok None)
     | _ -> Ok None in
-  let references = List.concat_map (fun (row : Types.row) -> row.evidence) output.rows
-    |> List.sort_uniq Stdlib.compare in
+  (* Visit references in the order the rows list them, once each. Digest order
+     is random per run, and an outcome read from disk before its request has
+     seeded the journaled copy is charged a second time when that request
+     loads its record. A broker lists a request before its outcome (#41261). *)
+  let references =
+    let seen = Hashtbl.create 16 in
+    List.concat_map (fun (row : Types.row) -> row.evidence) output.rows
+    |> List.filter (fun reference ->
+         if Hashtbl.mem seen reference then false
+         else (Hashtbl.add seen reference (); true)) in
   let* receipts, _ = List.fold_left (fun result reference ->
     let* receipts, remaining = result in
     let* captured = receipt reference in

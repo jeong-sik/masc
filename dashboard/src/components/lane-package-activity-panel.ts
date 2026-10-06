@@ -36,12 +36,12 @@ export function LanePackageActivityPanel({ documents, authority, snapshot, onRef
       Draft: ${state.draft.enabled ? 'On' : 'Off'} · ${state.draft.enabled ? 'Turn off' : 'Turn on'}
     </button>`}
     ${conflict && html`<p role="alert">The file changed. Reapply only the activity value to retain its newer binding, manifest and comments.</p>`}
-    ${state.uncertain && html`<p role="alert">The previous save outcome is uncertain. Read the current file before another save.</p>`}
+    ${state.uncertain && html`<p role="alert">The previous save outcome is uncertain. A read shows the file now, but that save may still land later. Read the current file, then reapply only the activity value or discard the draft.</p>`}
     <div class="flex flex-wrap gap-2">
       <${ActionButton} variant="primary" disabled=${!ready || !owner.modified() || !!conflict || state.uncertain}
         onClick=${() => owner.save(authority)}>${state.phase === 'saving' ? 'Saving activity…' : 'Save activity'}</${ActionButton}>
       <${ActionButton} disabled=${busy} onClick=${async () => { await owner.read(authority); onRefresh() }}>Read current activity</${ActionButton}>
-      ${conflict && html`<${ActionButton} disabled=${!ready} onClick=${() => owner.reapply(authority)}>Reapply activity only</${ActionButton}>`}
+      ${(conflict || state.uncertain) && html`<${ActionButton} disabled=${!ready} onClick=${() => owner.reapply(authority)}>Reapply activity only</${ActionButton}>`}
       <${ActionButton} disabled=${busy || !state.draft} onClick=${() => owner.discard(authority)}>Discard activity draft</${ActionButton}>
       <${ActionButton} onClick=${() => documents.open(target.sourcePath, authority)}>Edit original TOML</${ActionButton}>
     </div>

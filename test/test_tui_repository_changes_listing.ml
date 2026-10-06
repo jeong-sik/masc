@@ -35,7 +35,7 @@ let test_the_overlay_over_a_keeper_view_is_a_listing () =
       let state = state () in
       with_overlay state ~changes:[change "a.ml"; change "b.ml"; change "c.ml"];
       state.view <- view;
-      match scrolled_surface_rows ~cols:100 state view with
+      match scrolled_surface_rows state ~cols:80 view with
       | None ->
           Alcotest.fail (label ^ " with the overlay open has no scroll geometry")
       | Some listing ->
@@ -54,7 +54,7 @@ let test_the_geometry_is_the_overlays_not_the_hosts () =
     with_overlay state ~changes:[change "a.ml"; change "b.ml"];
     state.repository_changes_error <- error;
     state.view <- view;
-    scrolled_surface_rows ~cols:100 state view
+    scrolled_surface_rows state ~cols:80 view
   in
   List.iter
     (fun error ->
@@ -71,7 +71,7 @@ let test_a_keeper_view_without_the_overlay_stays_unlisted () =
       let state = state () in
       state.view <- view;
       Alcotest.(check bool) (label ^ " moves a cursor, not a list") true
-        (scrolled_surface_rows ~cols:100 state view = None))
+        (scrolled_surface_rows state ~cols:80 view = None))
     overlay_hosts
 
 (* The rows the "/" search walks, over every surface the overlay draws on.

@@ -4386,7 +4386,7 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await saveRuntimeTomlConfig(sourceText, 'a'.repeat(64))
+    const result = await saveRuntimeTomlConfig(sourceText, 'a'.repeat(64), { expectedSourcePath: '/synthetic/runtime.toml' })
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
@@ -4396,7 +4396,7 @@ describe('runtime.toml raw config API', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/raw')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText, expected_source_revision: 'a'.repeat(64) })
+    expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText, expected_source_revision: 'a'.repeat(64), expected_source_path: '/synthetic/runtime.toml' })
     expect(result.application?.routing.status).toBe('applied')
     expect(result.application?.keeper_overlay.status).toBe('pending_restart')
     expect(result.state).toBe('committed')
@@ -4444,7 +4444,7 @@ describe('runtime.toml raw config API', () => {
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
 
-    await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64))).rejects.toThrow(/적용 영수증/)
+    await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64), { expectedSourcePath: '/synthetic/runtime.toml' })).rejects.toThrow(/적용 영수증/)
   })
 
   it.each([
@@ -4475,9 +4475,9 @@ describe('runtime.toml raw config API', () => {
       })))
 
       if (expected === undefined) {
-        await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64))).rejects.toThrow(/적용 영수증/)
+        await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64), { expectedSourcePath: '/synthetic/runtime.toml' })).rejects.toThrow(/적용 영수증/)
       } else {
-        const result = await saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64))
+        const result = await saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64), { expectedSourcePath: '/synthetic/runtime.toml' })
         expect(result.application.exact_output_registry.status).toBe(expected)
       }
     },
@@ -4501,7 +4501,7 @@ describe('runtime.toml raw config API', () => {
         headers: { 'Content-Type': 'application/json' },
       })))
 
-      await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64))).rejects.toThrow(/적용 영수증/)
+      await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64), { expectedSourcePath: '/synthetic/runtime.toml' })).rejects.toThrow(/적용 영수증/)
     },
   )
 
@@ -4550,7 +4550,7 @@ describe('runtime.toml raw config API', () => {
       headers: { 'Content-Type': 'application/json' },
     })))
 
-    await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64))).rejects.toThrow(/적용 영수증/)
+    await expect(saveRuntimeTomlConfig('[runtime]\n', 'a'.repeat(64), { expectedSourcePath: '/synthetic/runtime.toml' })).rejects.toThrow(/적용 영수증/)
   })
 
   it('previews Keeper setting validation before raw save', async () => {
@@ -4587,7 +4587,7 @@ describe('runtime.toml raw config API', () => {
   })
 
   it('posts runtime routing patches without client-side TOML text', async () => {
-    const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
+    const sourceText = '[runtime]\ndefault = "deepseek-first"\n'
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(committedPayload({
         ok: true,
@@ -4604,7 +4604,7 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchRuntimeRouting('default', 'openai.gpt')
+    const result = await patchRuntimeRouting('default', 'deepseek-first')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -4612,7 +4612,7 @@ describe('runtime.toml raw config API', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
       lane: 'default',
-      runtime_id: 'openai.gpt',
+      runtime_id: 'deepseek-first',
     })
     expect(result.source_text).toBe(sourceText)
   })

@@ -139,12 +139,13 @@ let resolution_suffix (resolution : resolution_failure) : string =
    and the startup degradation report. *)
 let exact_slot_body_deadline_gap_to_string (gap : exact_slot_body_deadline_gap) =
   Printf.sprintf
-    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s to \
+    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s = %s to \
      [providers.%s]"
     gap.lane_id
     gap.slot_id
     gap.provider_id
     Runtime_schema.exact_body_timeout_s_key
+    (Printf.sprintf "%.1f" Runtime_setup_spec.setup_exact_body_timeout_s)
     gap.provider_id
 ;;
 

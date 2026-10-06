@@ -179,9 +179,6 @@ let exec db ~operation sql =
 
 let close_db db =
   let closed = Sqlite3.db_close db in
-  (* [caml_sqlite3_close] has the same runtime-release/null-after-return
-     lifetime window as statement finalization. *)
-  ignore (Sys.opaque_identity db);
   closed
 ;;
 
@@ -201,13 +198,6 @@ let finalize db stmt result =
     | Sqlite3.Error detail ->
       Error (Store_unavailable ("finalize statement: " ^ detail))
   in
-  (* sqlite3-ocaml 5.4.1 releases the OCaml runtime while
-     [sqlite3_finalize] runs, then clears the statement pointer only after it
-     reacquires the runtime.  Without a use after [Sqlite3.finalize], another
-     domain can collect the wrapper in that window and its GC finalizer calls
-     [sqlite3_finalize] on the same pointer.  Keep the wrapper reachable until
-     the explicit finalize has fully returned. *)
-  ignore (Sys.opaque_identity stmt);
   match result, cleanup with
   | Ok value, Ok () -> Ok value
   | Error _ as error, Ok () -> error

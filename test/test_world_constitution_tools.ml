@@ -192,6 +192,47 @@ let test_the_byte_ceiling_blocks_the_write_that_would_cross_it () =
       Alcotest.(check int) "the blocked write added nothing" written
         (List.length (held ~base_path)))
 
+let test_the_byte_ceiling_is_the_agreed_8192 () =
+  Alcotest.(check int) "the world's article ceiling is 8192 bytes" 8192
+    Tools.render_byte_ceiling
+
+let test_the_byte_ceiling_admits_a_render_of_exactly_the_ceiling () =
+  with_world (fun base_path ->
+      let ceiling = Tools.render_byte_ceiling in
+      (* The runtime refuses a single article over 512 bytes; fill with
+         200-byte lines until one more such article could not fit, so the next
+         write can land exactly on the ceiling. *)
+      let article_cap = 512 in
+      let line = String.make 200 'x' in
+      let rec fill () =
+        let rendered = String.length (Render.articles (held ~base_path)) in
+        if rendered >= ceiling - 40 - article_cap then ()
+        else (
+          let execution = write ~base_path (`Assoc [ "text", `String line ]) in
+          Alcotest.(check bool) "filling stays under the ceiling" false
+            (failed execution);
+          fill ())
+      in
+      fill ();
+      let rendered = String.length (Render.articles (held ~base_path)) in
+      (* A new article costs one LF, "- [", the 34-char id, "] " and its text. *)
+      let text_len = ceiling - rendered - 40 in
+      Alcotest.(check bool)
+        (Printf.sprintf "room for one single-sentence article (%d bytes)" text_len)
+        true (text_len >= 1 && text_len <= article_cap);
+      let at_ceiling =
+        write ~base_path (`Assoc [ "text", `String (String.make text_len 'y') ])
+      in
+      Alcotest.(check bool) "a render of exactly the ceiling is admitted" false
+        (failed at_ceiling);
+      Alcotest.(check int) "the render lands exactly on the ceiling" ceiling
+        (String.length (Render.articles (held ~base_path)));
+      let over = write ~base_path (`Assoc [ "text", `String "z" ]) in
+      Alcotest.(check bool) "one byte over the ceiling is refused" true
+        (failed over);
+      Alcotest.(check (option string)) "a full world is a state to change first"
+        (Some "workflow_rejection") (failure_class over))
+
 let test_a_norm_longer_than_one_sentence_is_refused () =
   with_world (fun base_path ->
       let execution =
@@ -374,6 +415,10 @@ let () =
             test_an_empty_norm_is_refused;
           Alcotest.test_case "the byte ceiling blocks the crossing write" `Quick
             test_the_byte_ceiling_blocks_the_write_that_would_cross_it;
+          Alcotest.test_case "the byte ceiling is the agreed 8192" `Quick
+            test_the_byte_ceiling_is_the_agreed_8192;
+          Alcotest.test_case "a render of exactly the ceiling is admitted"
+            `Quick test_the_byte_ceiling_admits_a_render_of_exactly_the_ceiling;
           Alcotest.test_case "a norm longer than one sentence is refused"
             `Quick test_a_norm_longer_than_one_sentence_is_refused;
           Alcotest.test_case "evidence_uri reaches the ledger" `Quick

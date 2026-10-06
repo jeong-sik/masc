@@ -71,23 +71,8 @@ let config_bindings =
        80 cells, the only other thing the pane does. A reader left with
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
-  ; b Act "S" "save draft"
-      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
-      Some [ Config_runtime ]
-  ; b Act "C" "compare file"
-      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
-      Some [ Config_runtime ]
-  ; b Act "u" "adopt revision"
-      ~help:"runtime.toml: keep the draft and adopt the displayed current file revision; S saves",
-      Some [ Config_runtime ]
-  ; b Act "U" "use current text"
-      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
-      Some [ Config_runtime ]
-  ; b Act "X" "discard draft"
-      ~help:"runtime.toml: discard only the local draft and read the current file",
-      Some [ Config_runtime ]
   ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
-  ; b Act "o" "model source", Some [Config_models]
+  ; b Act "m" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]
@@ -112,9 +97,6 @@ let config_bindings =
   ; b Act "n" "new"
       ~help:"on presets, name a preset holding the configuration as it stands",
       Some [ Config_presets ]
-  ; b Act "u" "restore"
-      ~help:"on presets, put the selected one back; press twice to confirm",
-      Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
   ; b Act "a" "fragments / voice / account"
@@ -124,6 +106,26 @@ let config_bindings =
              declare one more Claude Code, Codex or Antigravity account by \
              copying a provider the file declares",
       Some [ Config_runtime; Config_prompts; Config_voice ]
+    (* [u] and the retained-draft keys come after [a]: a cut row drops them
+       first, and while a draft is retained the runtime.toml pane names them
+       in its own heading. *)
+  ; b Act "u" "restore / adopt revision"
+      ~help:"on presets, put the selected one back; press twice to confirm; \
+             on runtime.toml, keep the draft and adopt the displayed current \
+             file revision; S saves",
+      Some [ Config_presets; Config_runtime ]
+  ; b Act "S" "save draft"
+      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
+      Some [ Config_runtime ]
+  ; b Act "C" "compare file"
+      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
+      Some [ Config_runtime ]
+  ; b Act "U" "use current text"
+      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
+      Some [ Config_runtime ]
+  ; b Act "X" "discard draft"
+      ~help:"runtime.toml: discard only the local draft and read the current file",
+      Some [ Config_runtime ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -540,8 +542,8 @@ let for_surface = function
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
-      ; b Act "Ctrl-Q" "leave"
-          ~help:"leave with a turn running, without interrupting it"
+      ; b Act "Q / Ctrl-Q" "leave"
+          ~help:"Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting"
       ; (* One key, two focuses, listed once for the reason [Up / Down] above
            is: the dispatcher reads Esc from the roster as the way back to the
            composer and from the chat as the way off the screen. Spelled as two
@@ -1389,6 +1391,11 @@ let footer_hints_resources ~detail_focus =
 let opens_keepers ~message_mode key =
   (not message_mode) && String.equal key keepers_jump.key
 
+let chat_quiet_leave ~input_supported ~turn_active ~draft_empty key =
+  (String.equal key "Q"
+   && (not input_supported || (turn_active && draft_empty)))
+  || (String.length key = 1 && Char.code key.[0] = 17)
+
 (* An armed two-press action expires on the next unrelated input: otherwise
    it waits indefinitely and a later press of the same key -- after the
    cursor has moved, after a refresh -- submits work the operator armed
@@ -1513,6 +1520,13 @@ let footer_hints_lanes_run_detail =
      ]
      @ listing_meta)
 
+let preflight_detail_binding =
+  b Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
+
+let footer_hints_lanes_run_detail_for ~preflight =
+  if preflight then hints_of_bindings [preflight_detail_binding] ^ "  " ^ footer_hints_lanes_run_detail
+  else footer_hints_lanes_run_detail
+
 let footer_hints_git_changes =
   hints_of_bindings
     ([ b Navigate "j/k" "move"
@@ -1549,6 +1563,7 @@ let bindings_memory_facts =
   ; b Act "Enter" "detail"
       ~help:"read the whole fact in a wide overlay that owns the terminal"
   ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
+  ; b Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
   ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
   ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
   ; b Search "/" "filter" ~help:"live text filter / search"
@@ -1787,6 +1802,7 @@ let help_sections ?current () =
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
+           | Lanes -> entries [preflight_detail_binding]
            | _ -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))

@@ -5195,9 +5195,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           "  Account unavailable: " ^ Terminal_text.single_line detail
       | None, None -> "  Loading Item account…"
     in
+    let is_worn item =
+      match portrait_reading with
+      | Tui_decode.Unavailable _ -> false
+      | Tui_decode.Ready equipment ->
+          (match Keeper_portrait_item.in_slot equipment
+                   (Keeper_portrait_item.slot item) with
+           | None -> false
+           | Some equipped ->
+               String.equal (Keeper_portrait_item.id equipped)
+                 (Keeper_portrait_item.id item))
+    in
+    (* Equipped implies owned: the state word is exclusive so a worn row
+       never reads "owned". The row suffix below carries "equipped". *)
     let item_account_facts item =
       match account with
       | Some (Item_account.Ready account) ->
+          let worn = is_worn item in
           let owned =
             List.exists (fun owned ->
               String.equal (Keeper_portrait_item.id owned)
@@ -5212,7 +5226,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                | Item_account.Priced amount -> milli amount)
             | None -> "catalog unavailable"
           in
-          Some (price ^ (if owned then " owned" else ""))
+          Some (price ^ (if worn then "" else if owned then " owned" else ""))
       | Some (Item_account.Off | Item_account.Disabled _) | None -> None
     in
     let portrait =
@@ -5231,17 +5245,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
 
     let item_row cursor index item =
-      let worn =
-        match portrait_reading with
-        | Tui_decode.Unavailable _ -> false
-        | Tui_decode.Ready equipment ->
-            (match Keeper_portrait_item.in_slot equipment
-                     (Keeper_portrait_item.slot item) with
-             | None -> false
-             | Some equipped ->
-                 String.equal (Keeper_portrait_item.id equipped)
-                   (Keeper_portrait_item.id item))
-      in
+      let worn = is_worn item in
       let account_facts =
         if inner < 90 then ""
         else match item_account_facts item with
@@ -5286,7 +5290,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | None -> []
         | Some item ->
             (match item_account_facts item with
-             | Some facts -> [ "  Selected: " ^ facts ]
+             | Some facts ->
+               [ "  Selected: " ^ facts ^ (if is_worn item then "  equipped" else "") ]
              | None -> []) in
       let footer = [ "  Preview changes this picture only." ] in
       let reserved = List.length headline + List.length selected_facts

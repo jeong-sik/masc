@@ -1049,14 +1049,15 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 다섯
-  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
-  닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
-  이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
-  `Exact_lane_run_registry.lane`은 `Verifier`를 뺀 넷이고, `standalone_lane`·
-  `lane_of_standalone`으로 이 타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에
-  남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
-  Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
+: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 일곱
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`·
+  `Browser_stagehand`·`Candle_appraiser`)은 닫힌 타입 `Standalone_lane.t` 하나다.
+  `Standalone_lane.all`이 열거하고 `to_id`가 이름을 적는다. `Runtime.exact_lane`은
+  이 타입을 그대로 쓴다. 실행 기록의 `Exact_lane_run_registry.lane`은 `Verifier`와
+  `Browser_stagehand`를 뺀 다섯이고, `standalone_lane`·`lane_of_standalone`으로 이
+  타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에 남는다. 그 경로를 선언하는 설정은
+  `Exact-output route`이고, Keeper turn이 runtime 후보를 시도하는 순서
+  (`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
   공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
@@ -1068,6 +1069,18 @@ status: reference
   fallback하지 않고 typed 시작 오류 `Server_root_switch_unavailable`로 거절된다(#38426).
   Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Standalone_lane](../../lib/runtime/standalone_lane.mli) · [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+
+**Lane family (레인 가족)**
+: 운영자가 한 목록에서 함께 읽는 Lane 종류의 묶음. 닫힌 타입 `Lane_id.family` 하나이고
+  `Exact_family`·`Browser_family`·`Machine_family`·`Package_family` 넷이다(wire 문자열
+  `exact`·`browser`·`machine`·`package`). `Lane_id.t`는 `Builtin`(exact-output lane·
+  Browser Lane backend·machine)과 `Package`(Lane Add-on 선언 파일)로 나뉘고,
+  `Lane_id.family`가 그 id를 가족으로 접는다. wire id는 `family/name` 꼴이다
+  (`Lane_id.to_wire`, 구분자 `/`). TUI의 `Lanes` 개요는 모든 Lane family를 한 목록으로
+  읽고, 각 가족은 따로 읽히므로 이 목록은 가족을 가로지르는 원자적 트랜잭션이 아니다
+  (`docs/guides/lane-inventory.md`). 위의 **Lane**(고정 실행 경로)이나 **Standalone Lane**
+  (그 경로의 관찰)과 다른 층이다 — 이쪽은 운영자 목록의 행 분류다.
+  → [Lane_id](../../lib/lane_registry/lane_id.ml) · [lane-inventory guide](../guides/lane-inventory.md)
 
 **Chat Lane (채팅 레인)**
 : Keeper에게 대화 메시지가 들어오고 결과가 배달되는 표면. dashboard·커넥터
@@ -1160,9 +1173,9 @@ status: reference
   [keeper_turn_driver](../../lib/keeper/keeper_turn_driver.mli)
 
 **Standalone Lane**
-: TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
+: TUI의 `MASC Lanes` 인벤토리(`Lanes` 탭)가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (고정 실행 경로) 다섯을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
+  (고정 실행 경로) 일곱을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
   경로이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
   실행했는지의 관찰이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·

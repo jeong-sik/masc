@@ -1086,6 +1086,7 @@ let test_an_attempt_reading_beside_the_turn_is_not_a_conflict () =
       | `Assoc fields ->
         `Assoc
           (("usage_projection", `String "resolved_attempt_delta")
+           :: ("routing_run_id", `String "run-of-the-failed-attempt")
            :: ("lane_attempt_index", `Int 0)
            :: ("reading_index", `Int 0)
            :: List.remove_assoc "usage_projection" fields)

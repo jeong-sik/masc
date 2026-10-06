@@ -1,0 +1,17 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-runtime-cache-workspace-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/lib/runtime-workspace-resource.test.ts src/lib/runtime-catalog-resource.test.ts src/lib/runtime-config-refresh.test.ts src/components/keeper-runtime-model-editor.test.ts src/components/keeper-config-panel.test.ts src/components/keeper-detail-runtime.test.ts src/components/keeper-workspace/keeper-workspace-rail.test.ts src/components/tools/config-resolution-panel.test.ts src/components/fleet-aside-extras.test.ts src/components/overview/runtime-stats.test.ts src/components/runtime-environment-editor.test.ts src/components/agent-monitor/runtime-strip.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-runtime-cache-workspace-20261004/dashboard
+
+
+ Test Files  12 passed (12)
+      Tests  299 passed (299)
+   Start at  19:44:01
+   Duration  10.54s (import 27%, tests 27%, environment 18%, setup 14%, transform 13%)
+
+     Import  248 modules were evaluated 1142 times · 2.54s total, 27% of tracked time
+             ~1.99s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

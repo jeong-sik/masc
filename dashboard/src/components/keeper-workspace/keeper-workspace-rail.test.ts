@@ -1,3 +1,4 @@
+import { confirmRuntimeTestWorkspace } from '../../lib/runtime-workspace.test-fixture'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -118,6 +119,7 @@ function openRuntimeDetail(container: Element): void {
 }
 
 beforeEach(() => {
+  confirmRuntimeTestWorkspace()
   selectedTask.value = null
   tasks.value = [
     mkTask({ id: 'T-4412', title: '세그먼트 리텐션 대시보드', status: 'in_progress', assignee: 'masc-improver' }),

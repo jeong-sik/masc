@@ -1,0 +1,5 @@
+Excerpt: duplicate-interface discovery warnings omitted. This was a failed cached-dependency typecheck, not a PASS.
+File "runtime_exact_output_registry.mli", line 1:
+Error: The files /Users/dancer/me/workspace/yousleepwhen/masc/_build/default/lib/runtime/.masc_runtime.objs/byte/runtime_quota_window.cmi
+       and runtime_schema.cmi make inconsistent assumptions
+       over interface Runtime_schema

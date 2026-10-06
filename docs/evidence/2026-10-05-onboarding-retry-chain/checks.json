@@ -1,0 +1,132 @@
+{
+  "prepared": [
+    {
+      "number": 41172,
+      "old": "8a28d51ab930cff9f173f8b691c40b8307c5230c",
+      "head": "93778f8bd4a238d1db79ed9982bd0687864248fb",
+      "branch": "feat/web-exact-activity-20261004"
+    },
+    {
+      "number": 41178,
+      "old": "cddae2d5b8872b38fd43cbebe2856348daba7dd5",
+      "head": "a9b45f667dd3d9d1a92802d496495aa3f7678c9c",
+      "branch": "fix/curator-activity-resume-20261004"
+    },
+    {
+      "number": 41180,
+      "old": "3b09d8b0a67d47273e40986ad874baf434744e44",
+      "head": "96cccabdcfdfd876503c0f4dda517f294d577bdb",
+      "branch": "fix/tui-activity-current-file-20261004"
+    },
+    {
+      "number": 41182,
+      "old": "b582ca1be387f034908d082240e49b56bcef3e83",
+      "head": "583c36b30cd52b9845c10b1d4d2167f3f499f51e",
+      "branch": "fix/runtime-observation-workspace-20261004"
+    },
+    {
+      "number": 41185,
+      "old": "54c471dc73ef2c8670cb7020dc8271afc87566cd",
+      "head": "798b1950f5f98cb716af972ce285b3f85f1b0348",
+      "branch": "feat/browser-lane-activity-20261004"
+    },
+    {
+      "number": 41187,
+      "old": "a26d328d866dea729d21e06474d2100ace5464cd",
+      "head": "6e22126d8325d61cc627461a8e05402b70fc9fc4",
+      "branch": "feat/tui-browser-activity-20261004"
+    },
+    {
+      "number": 41191,
+      "old": "552dbcf15cf84bb5e2c4ad3790bd822a301a3215",
+      "head": "8356bfff3c12ac49dfc4dabfe4035919922fdde2",
+      "branch": "feat/web-browser-activity-20261005"
+    },
+    {
+      "number": 41194,
+      "old": "77634a95aa5b7d1f5a0c20bfcbff93a4757275bc",
+      "head": "c7d951d46fdc8c5749080871a12056a26896ce77",
+      "branch": "fix/settings-runtime-workspace-20261005"
+    },
+    {
+      "number": 41199,
+      "old": "d601400064be9b839dbce589ed34d13659ec47ba",
+      "head": "7ae580bf8766d1cab1ed704f6dba5f54b1370fc0",
+      "branch": "feat/machine-lane-activity-20261005"
+    },
+    {
+      "number": 41201,
+      "old": "bab0e235b0b998b334658e0b8fca90ae7b83271f",
+      "head": "7a9ca7238534700a9ecdca942c0296ef33156970",
+      "branch": "feat/tui-machine-activity-20261005"
+    },
+    {
+      "number": 41203,
+      "old": "65502501279e90e8d401c61be1225d5ebdb85431",
+      "head": "c645e376f0779b2c8f37a856c79d2d8241bdf695",
+      "branch": "feat/web-machine-activity-20261005"
+    },
+    {
+      "number": 41204,
+      "old": "5f81dc700d04f694d04cd15b4949d35a9ece241e",
+      "head": "cf5c943eeea9ec966befb47074dbc6c95b1a0002",
+      "branch": "fix/browser-activity-toml-reader-20261005"
+    },
+    {
+      "number": 41205,
+      "old": "6ece7beead1fb1207278d1763d5b87ee22c866bf",
+      "head": "c1048a823563383cfbbf2c975f7643a9819906ab",
+      "branch": "feat/tui-package-discovery-20261005"
+    },
+    {
+      "number": 41206,
+      "old": "cab1c2d74d6845b929b1a38e8c411b2e38ae46ad",
+      "head": "962fc6bff24adcdc79bd116ff861b24b6f0a3138",
+      "branch": "feat/web-package-installation-20261005"
+    },
+    {
+      "number": 41208,
+      "old": "27dcdcbbf7a67d719875d707cf65e1e13f11eb1c",
+      "head": "b2ed9d7483f0b83bc5b620310cc5f76ac9e3002f",
+      "branch": "feat/web-package-activity-20261005"
+    },
+    {
+      "number": 41209,
+      "old": "8c68daa7f7c2f98c3c1e0da1b4df0a3c227ddac5",
+      "head": "3bd876278dda63aac1a3a27d76e557bf88fe2c4e",
+      "branch": "feat/web-lane-target-navigation-20261005"
+    },
+    {
+      "number": 41210,
+      "old": "24ddb0d7d315299246a9dabfe6d2b9025ab2ecb2",
+      "head": "63cb8f4e5a16c303bc00656c16b8c85e1cbecf8d",
+      "branch": "fix/web-lane-read-ownership-20261005"
+    }
+  ],
+  "qualified_leaf": "63cb8f4e5a16c303bc00656c16b8c85e1cbecf8d",
+  "source_sha256": {
+    "dashboard/src/components/onboarding-settings.ts": "833def55db1dc01198cf94a04d56b474d864efacec0ffc6477d1b28482689b63",
+    "dashboard/src/components/onboarding-settings.test.ts": "3193206032a034b6ca8bf2c46c32ea69f7b97c622833dff554ccad4c5859f0fb",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "d087dbaadec53c50ae41f15ba59603b2d06ca0d56aff8fcb59e74e796268e6dc"
+  },
+  "raw_sha256": {
+    "onboarding-chain-web.log": "7bfc09a9a062d1a9e0b6c61c45984ffb268e20fca65158aa90c5a92ebdb1aab9",
+    "onboarding-chain-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "onboarding-chain-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results": {
+    "web": {
+      "handle": 88088,
+      "exit": 0,
+      "suites": 4,
+      "tests": 146
+    },
+    "tsc_lint": {
+      "handle": 41965,
+      "exit": 0
+    }
+  },
+  "native_source_identical_to_each_original": true,
+  "native_executed": false,
+  "published": false
+}

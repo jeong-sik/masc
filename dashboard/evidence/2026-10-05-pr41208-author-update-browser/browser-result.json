@@ -1,0 +1,115 @@
+{
+  "passed": true,
+  "scope": "Actual styled Add-ons panel/activity owner/declaration API with synthetic HTTP; not real backend/worker or full SPA.",
+  "browser": "149.0.7827.55",
+  "checks": [
+    "activity opens from declaration row with keyboard focus and actual file API read",
+    "unsaved activity and independent raw draft survive actual component remount without writes",
+    "CAS conflict retains intent; explicit reapply preserves newer binding; save stays distinct from worker cleanup",
+    "workspace return rereads the current file and keeps Off state isolated",
+    "Off can be saved back On with the same declaration and binding, without detach or remove requests",
+    "a retained pending save refreshes the new inventory mount when its receipt arrives",
+    "lost save response forces reread; matching observed Off is resolved without a duplicate save",
+    "actual styled mobile activity controls render without page horizontal overflow",
+    "invalid current declaration disables activity mutation and exposes original TOML repair"
+  ],
+  "reads": [
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "source_path": "/workspace/.masc/config/lane-addons/pkg.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "source_path": "/workspace/.masc/config/lane-addons/pkg.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "source_path": "/workspace/.masc/config/lane-addons/pkg.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "source_path": "/workspace/.masc/config/lane-addons/pkg.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "source_path": "/workspace/.masc/config/lane-addons/pkg.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "source_path": "/workspace/.masc/config/lane-addons/pkg.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons"
+    }
+  ],
+  "mutations": [
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = false\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\n",
+      "expected_source_revision": "r1"
+    },
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = false\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
+      "expected_source_revision": "external"
+    },
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = true\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
+      "expected_source_revision": "saved-2"
+    },
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = false\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
+      "expected_source_revision": "saved-3"
+    },
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = true\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
+      "expected_source_revision": "saved-4"
+    },
+    {
+      "mode": "save",
+      "file_name": "pkg.toml",
+      "source_text": "enabled = false\n# retained package comment\nid = \"pkg\"\nrun_id = \"run\"\nmanifest_path = \"../pkg/lane.toml\"\n[binding]\nsources = []\nnewer = \"preserved external binding\"\n",
+      "expected_source_revision": "saved-5"
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

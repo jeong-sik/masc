@@ -23,8 +23,8 @@ let () =
   let (_dashboard_ws_sessions : int) = Server_mcp_transport_ws.session_count () in
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test.local");
   Atomic.set
-    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
-    (fun () -> Ok [ "test.local" ])
+    Workspace_hooks.get_verifier_exact_lane_slots_fn
+    (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test.local" ]))
 
 let () =
   (* These process-global registries are installed by module initializers in the

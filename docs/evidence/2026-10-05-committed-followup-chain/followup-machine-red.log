@@ -1,0 +1,39 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/machine-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+
+ ❯ src/components/machine-lane-activity-panel.test.ts (51 tests | 1 failed) 637ms
+   ❯ Machine activity operator flow (18)
+     × keeps a verified durable receipt certain when authority changes during follow-up 61ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine activity operator flow > keeps a verified durable receipt certain when authority changes during follow-up
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/machine-lane-activity-panel.test.ts:86:43
+     84|     await waitFor(() => expect(session.state.value.receipt?.commit.dur…
+     85|     workspace('/fixture/B')
+     86|     expect(session.state.value.uncertain).toBe(false)
+       |                                           ^
+     87|     expect(session.state.value.current).toBeNull()
+     88|     expect(session.state.value.receipt?.commit.durability).toBe('durab…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 50 passed (51)
+   Start at  04:49:15
+   Duration  2.20s (tests 30%, import 28%, transform 24%, environment 10%, setup 8%)
+
+ ELIFECYCLE  Test failed. See above for more details.

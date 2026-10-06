@@ -1,0 +1,3 @@
+(node:11624) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+PASS: 10 Runtime draft browser assertions; 2 explicit raw saves; zero page errors

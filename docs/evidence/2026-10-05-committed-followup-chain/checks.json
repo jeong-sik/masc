@@ -1,0 +1,39 @@
+{
+  "tested_web_head": "da795d6af999197202cc97eefa0043f910a31001",
+  "web_tests": 379,
+  "web_suites": 7,
+  "web_exit": 0,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "native_tests": 16,
+  "native_build_exit": 0,
+  "native_suite_exit": 0,
+  "native_binary": "fix-pr41201-machine-help-integration-20261005/_build/default/test/test_tui_machine_activity.exe",
+  "native_binary_sha256": "688a39e4652d243e3165843330e7d2859133f0a9ccdb197dfd195fe49ca124d7",
+  "source_sha256": {
+    "bin/masc_tui_machine_activity.ml": "dbc32de6f067628c5050eb01d56eb41505e36086902725a5c8da7b50ec33d2ea",
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "566e738a1761c0a08d8d44762f1af0b9aeef789e4973c7b904380a82fb15fe74",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "a0e81e350eb83b56bb263f9d0de759486bbc39a62573ad0f14c8ed8a024cdda6",
+    "dashboard/src/components/machine-lane-activity-panel.test.ts": "6ea519c20e0556aab5b7f20a328c5d8b6679a49aa757d262ff77d03498358277",
+    "dashboard/src/components/settings-surface.test.ts": "1fa2d21fc28646f2a740670478c36bf9bf5db15d10161778fca5944f971c39e5",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "48b279cfee37f19bb80b41843ad7f10cbcf827caa9183f93ecc6cbb39fb11678",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "afaec42056a10b2c5b406f8c8b80020d417a85ed522d15a52d6424e46693b5cb",
+    "dashboard/src/lib/machine-lane-activity-session.ts": "ad5773616f5a8913684199ae996ea0802a73dcb33caeaa70ecbfbea098ac62ef",
+    "dashboard/src/lib/runtime-toml-session.ts": "ec18284ea7a43a811a335fe1dd3f208316b1eba26741c60c07f6bb3a5221b8ac",
+    "test/test_tui_machine_activity.ml": "2c06f8aea010fd68dd387430935b4667b589268d6cc233c551c2903b6d6f1ee1"
+  },
+  "raw_logs_sha256": {
+    "followup-exact-red.log": "fb14ec362c35a4c54f3eb63bdfc00d1a454d27ede96172ecb927ebe5a8bb0b5f",
+    "followup-browser-red.log": "84d9ce67a6d2c82382579c6b2da27d0e15fd1faf510841454f56fc6985f95116",
+    "followup-machine-red.log": "17e1862846232214d88495c6c7ca94da3245bec411ba3fe3e87a1088e19c0bb1",
+    "machine-parse-observation-red-build.log": "7a0af25ab1888fc9946a1ebbd73e90c8867245cda6ac26f3b62639ad48a0f542",
+    "machine-parse-observation-red.log": "3ac11bd5d1651a4c09a75ba574f38fbef4fb9de2d48cced4d779edbdcbf3778d",
+    "machine-parse-observation-green-build.log": "7a0af25ab1888fc9946a1ebbd73e90c8867245cda6ac26f3b62639ad48a0f542",
+    "machine-parse-observation-green.log": "e009371f9176b4cb35270d06b7c492c8290ecfbac8f92dda8a08c25d2a99c3b8",
+    "committed-followup-leaf-web.log": "3efc6a0021dbb9ae43c37e64cbf48c18e3fa172de08fa6d683077ac7a796f1f1",
+    "committed-followup-leaf-web-green.log": "cd02f56d9b5daa9755c5a5e1dff3f2a979f1e9e9db7ba9a0d3a5df283d93b468",
+    "committed-followup-leaf-web-final.log": "e5b971727f1b37180d4467ea899096f3ac97424d379bf03de840f9fb88ccf7fd",
+    "committed-followup-leaf-tsc-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "committed-followup-leaf-eslint-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

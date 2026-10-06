@@ -5,6 +5,7 @@ module Decision = Masc.Workspace_memory_decision
 module Current = Masc.Keeper_memory_os_current
 module Types = Masc.Keeper_memory_os_types
 module Runs = Masc.Exact_lane_run_registry
+module Registry = Runtime_exact_output_registry
 
 let require = function Ok value -> value | Error detail -> Alcotest.fail detail
 let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
@@ -148,12 +149,164 @@ let test_initial_inventory_drains_across_bounded_runs () = with_base (fun base_p
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     Worker.For_testing.stop ~base_path))
 
-module Registry = Runtime_exact_output_registry
+let accept_registry result =
+  result |> Result.map_error Registry.publication_error_to_string |> require
+
+let with_curator_lane_registry f =
+  let snapshot = Exact_output_fixture.resolver_snapshot ~source:"curator-activity"
+    [{ Exact_output_fixture.id = "curator-fixture"; base_url = "http://127.0.0.1:1" }] in
+  let lane : Runtime_schema.exact_output_lane_decl =
+    { id = Standalone_lane.to_id Standalone_lane.Workspace_curator; enabled = true;
+      slot_ids = ["curator-fixture"]; cli_slot_ids = [];
+      max_output_tokens = Some 4096; thinking = None } in
+  let publish enabled = ignore (accept_registry (Registry.publish ~lanes:[{lane with enabled}] snapshot)) in
+  let prepare enabled = accept_registry (Registry.prepare_replacement ~runtime_observations:[]
+    ~lanes:[{lane with enabled}] ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
+  Fun.protect ~finally:(fun () -> ignore (accept_registry (Registry.unpublish ())))
+    (fun () -> f publish prepare)
+
+let await_calls ~clock calls expected =
+  Eio.Time.with_timeout_exn clock 5. (fun () ->
+    while !calls < expected do Eio.Fiber.yield () done)
+
+let test_reenable_wakes_retained_facts () = with_base (fun base_path clock ->
+  with_curator_lane_registry (fun publish prepare ->
+    commit base_path "Pending while off";
+    publish false;
+    let calls = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls; Ok (answer selected, "curator-fixture") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "off owner parked without a model" 0 !calls;
+      Alcotest.(check int) "off preserves unassigned fact" 0
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      ignore (accept_registry (Registry.transact_replacement (prepare true)
+        ~apply_write:(fun () -> Registry.Committed ())));
+      (* No memory commit and no explicit Worker.request after re-enable. *)
+      await_calls ~clock calls 1; await_idle ~clock ~base_path;
+      Alcotest.(check int) "retained fact assigned by publication wake" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      Alcotest.(check int) "one model pass" 1 !calls;
+      Worker.For_testing.stop ~base_path)))
+
+exception Injected_config_write_failure
+type config_write_outcome = Not_written | Raised | Retained
+
+let test_fence_exit_retries_deferred_work outcome = with_base (fun base_path clock ->
+  with_curator_lane_registry (fun publish prepare ->
+    commit base_path "Initial fact";
+    publish true;
+    let calls = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls; Ok (answer selected, "curator-fixture") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "initial pass finished" 1 !calls;
+      let before = accept_registry (Registry.current ()) in
+      let prepared = match outcome with
+        | Not_written | Raised -> prepare false
+        | Retained ->
+          (match Registry.prepare_retention () with
+           | Some prepared -> prepared | None -> Alcotest.fail "retention lost registry") in
+      let apply_write () =
+        commit base_path "Fact committed during config write";
+        await_idle ~clock ~base_path;
+        Alcotest.(check int) "busy registry deferred new model work" 1 !calls;
+        match outcome with
+        | Raised -> raise Injected_config_write_failure
+        | Not_written -> Registry.Not_committed ()
+        | Retained -> Registry.Committed () in
+      (match Registry.transact_replacement prepared ~apply_write with
+       | Ok (Registry.Not_committed ()) ->
+         Alcotest.(check bool) "expected returned failure" true (outcome = Not_written)
+       | Ok (Registry.Committed ()) ->
+         Alcotest.(check bool) "expected retained commit" true (outcome = Retained)
+       | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+       | exception Injected_config_write_failure ->
+         Alcotest.(check bool) "original exception preserved" true (outcome = Raised));
+      Alcotest.(check bool) "fence exit keeps exact registry identity" true
+        (before == accept_registry (Registry.current ()));
+      await_calls ~clock calls 2; await_idle ~clock ~base_path;
+      Alcotest.(check int) "fact deferred during fence is now assigned" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      Worker.For_testing.stop ~base_path)))
+
+let test_initial_publication_wakes_parked_owner () = with_base (fun base_path clock ->
+  with_curator_lane_registry (fun publish _prepare ->
+    ignore (accept_registry (Registry.unpublish ()));
+    commit base_path "Pending before first registry";
+    let calls = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls; Ok (answer selected, "curator-fixture") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "unpublished registry does not run model" 0 !calls;
+      publish true;
+      await_calls ~clock calls 1; await_idle ~clock ~base_path;
+      Alcotest.(check int) "first publication wakes pending fact" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      Worker.For_testing.stop ~base_path)))
+
+let test_off_preserves_in_flight_and_reenable_resumes_next_fact () = with_base (fun base_path clock ->
+  with_curator_lane_registry (fun publish _prepare ->
+    commit base_path "Already accepted"; publish true;
+    let calls = ref 0 in
+    let entered, mark_entered = Eio.Promise.create () in
+    let release, release_first = Eio.Promise.create () in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls;
+      if !calls = 1 then (Eio.Promise.resolve mark_entered (); Eio.Promise.await release);
+      Ok (answer selected, "curator-fixture") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
+      publish false;
+      commit base_path "Pending after off";
+      Eio.Promise.resolve release_first ();
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "off did not cancel or start another pass" 1 !calls;
+      Alcotest.(check int) "accepted decision finished" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      publish true;
+      await_calls ~clock calls 2; await_idle ~clock ~base_path;
+      Alcotest.(check int) "re-enable processed the deferred change" 2 !calls;
+      Worker.For_testing.stop ~base_path)))
+
+let test_cancelled_owner_does_not_consume_another_owners_wake () = with_base (fun base_path clock ->
+  let other = Filename.temp_dir "curator-survivor" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree other) (fun () ->
+    with_curator_lane_registry (fun publish _prepare ->
+      commit base_path "Stopped owner fact"; commit other "Surviving owner fact";
+      publish false;
+      let stopped_calls, surviving_calls = ref 0, ref 0 in
+      let execute calls ~rendered_prompt:_ ~selected ~ledger:_ =
+        incr calls; Ok (answer selected, "curator-fixture") in
+      Eio.Switch.run (fun survivor ->
+        Worker.For_testing.start_configured ~sw:survivor ~base_path:other ~max_input_bytes:8192
+          ~execute:(execute surviving_calls);
+        Eio.Switch.run (fun stopped ->
+          Worker.For_testing.start_configured ~sw:stopped ~base_path ~max_input_bytes:8192
+            ~execute:(execute stopped_calls);
+          await_idle ~clock ~base_path; await_idle ~clock ~base_path:other);
+        (match Worker.request ~base_path with
+         | Worker.No_owner -> ()
+         | Worker.Queued | Worker.Unavailable _ -> Alcotest.fail "stopped owner retained");
+        publish true;
+        await_calls ~clock surviving_calls 1; await_idle ~clock ~base_path:other;
+        Alcotest.(check int) "cancelled waiter ran no work" 0 !stopped_calls;
+        Alcotest.(check int) "surviving owner processed pending fact" 1
+          (List.length (Ledger.dispositions (Ledger.load ~base_path:other |> require)));
+        Worker.For_testing.stop ~base_path:other))))
+
 
 let registry_ok result = result |> Result.map_error Registry.publication_error_to_string |> require
 
 let curator_lane : Runtime_schema.exact_output_lane_decl =
-  { id = "workspace_curator_exact"; slot_ids = ["curator-test"];
+  { id = "workspace_curator_exact"; enabled = true; slot_ids = ["curator-test"];
     cli_slot_ids = []; max_output_tokens = None; thinking = None }
 
 let curator_snapshot base_url =
@@ -400,4 +553,17 @@ let () = Alcotest.run "workspace curator lane"
     ; Alcotest.test_case "missing credential publication notifies" `Quick
         test_missing_credential_publication_notifies
     ; Alcotest.test_case "publication survives an in-flight failure" `Quick
-        test_publication_during_failed_call_keeps_wake ] ]
+        test_publication_during_failed_call_keeps_wake
+    ; Alcotest.test_case "re-enable wakes retained facts" `Quick test_reenable_wakes_retained_facts
+    ; Alcotest.test_case "failed write reopens deferred work" `Quick
+        (fun () -> test_fence_exit_retries_deferred_work Not_written)
+    ; Alcotest.test_case "exception reopens deferred work" `Quick
+        (fun () -> test_fence_exit_retries_deferred_work Raised)
+    ; Alcotest.test_case "retained commit reopens deferred work" `Quick
+        (fun () -> test_fence_exit_retries_deferred_work Retained)
+    ; Alcotest.test_case "first publication wakes parked owner" `Quick
+        test_initial_publication_wakes_parked_owner
+    ; Alcotest.test_case "off preserves accepted work and on resumes deferred facts" `Quick
+        test_off_preserves_in_flight_and_reenable_resumes_next_fact
+    ; Alcotest.test_case "cancelled owner does not consume another owner's wake" `Quick
+        test_cancelled_owner_does_not_consume_another_owners_wake ] ]

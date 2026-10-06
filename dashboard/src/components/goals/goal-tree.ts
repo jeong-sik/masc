@@ -1,3 +1,4 @@
+import { GOAL_TRANSITION_LABELS, goalLifecycleActions, type GoalTransitionAction } from '../../api/goal-lifecycle'
 import { GoalProofDetail } from './goal-proof'
 // Goal Manager — goal-first planning surface with explicit phase, detail, and evidence.
 
@@ -61,7 +62,6 @@ import { GoalStoreUnavailableAlert } from './goal-store-unavailable'
 import { errorToString } from '../../lib/format-string'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
-type GoalTransitionAction = 'request_complete'
 
 const CARD_BOX = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
 const GOAL_PANEL = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
@@ -415,34 +415,14 @@ function GoalTaskRelationStrip({
   `
 }
 
-function goalTransitionLabel(action: GoalTransitionAction): string {
-  switch (action) {
-    case 'request_complete': return 'Request completion'
-  }
-}
-
-function goalTransitionStatusLabel(action: GoalTransitionAction): string {
-  switch (action) {
-    case 'request_complete': return 'requested completion'
-  }
-}
-
 function lifecycleActionsForGoal(node: GoalTreeNode): Array<{
   action: GoalTransitionAction
   variant: 'primary' | 'ok' | 'danger'
 }> {
-  const actions: Array<{
-    action: GoalTransitionAction
-    variant: 'primary' | 'ok' | 'danger'
-  }> = []
-
-  // `request_complete` is admissible from `executing` and nowhere else
-  // (Goal_phase.decide_transition). The removed `ready_to_request_completion`
-  // field said exactly this and nothing more.
-  if (node.phase === 'executing') {
-    actions.push({ action: 'request_complete', variant: 'primary' })
-  }
-  return actions
+  return goalLifecycleActions(node.goal_fsm.next_actions).map(action => ({
+    action,
+    variant: action === 'drop' ? 'danger' : 'primary',
+  }))
 }
 
 function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
@@ -489,6 +469,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
 
   return html`
     <div class=${CARD_BOX} data-goal-lifecycle-actions>
+      ${node.resume_phase ? html`<p class="mb-3 text-xs text-text-muted" data-goal-resume-phase>재개 시 ${goalPhaseLabel(node.resume_phase)} · 연결된 Task는 별도로 진행됩니다.</p>` : null}
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">Goal lifecycle</div>
@@ -497,7 +478,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
       </div>
       <div class="flex flex-wrap gap-2">
         ${actions.map(({ action, variant }) => {
-          const label = goalTransitionLabel(action)
+          const label = GOAL_TRANSITION_LABELS[action]
           const isPending = pendingAction === action
           return html`
             <${ActionButton}
@@ -517,7 +498,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
       </div>
       ${lastAction ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-[var(--ok-25)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]" data-testid="goal-lifecycle-action-status">
-          ${goalTransitionStatusLabel(lastAction)}
+          ${GOAL_TRANSITION_LABELS[lastAction]} applied
         </div>
       ` : null}
       ${error ? html`
@@ -1188,6 +1169,8 @@ export function GoalTree() {
       awaiting_confirmation: 0,
       completed: 0,
       dropped: 0,
+      paused: 0,
+      blocked: 0,
     }
     for (const node of allNodes) {
       if (node.phase in counts) {
@@ -1246,6 +1229,8 @@ export function GoalTree() {
                 'awaiting_confirmation',
                 'completed',
                 'dropped',
+                'paused',
+                'blocked',
               ] as GoalPhaseFilter[]).map(filter => ({
                 key: filter,
                 label: phaseFilterLabel(filter),

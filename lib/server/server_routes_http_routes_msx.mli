@@ -16,12 +16,15 @@ val press_default_step_frames : int
 
 val press_response :
   config:Workspace.config -> who:string -> body:string ->
-  [ `OK | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
+  [ `OK | `Conflict | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
 (** Authenticated press body handling under [who], the actor the route's
     [with_tool_actor_auth] resolved. [keys] must be an array of strings naming
     at least one key; [hold_frames] and [frames] must be positive integers and
     [sequence] a boolean when present, each defaulting when absent. A field of
     the wrong type is a [`Bad_request] naming the field, and nothing is pressed.
+    A press while the machine's activity is off or unobserved is a [`Conflict]
+    carrying the same [code] the tick route sends ([activity_disabled] or
+    [activity_unobserved]), so a client reads one protocol on both routes.
     An accepted press wakes the [config] workspace's Lane instances bound to the
     machine once, with [Machine_changed Msx]; a refused one wakes nothing. The wake is
     cancellation-protected, so the call must run in an Eio fiber. *)

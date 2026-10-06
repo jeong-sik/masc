@@ -79,8 +79,14 @@ type t
 (** Optional host-owned model access. The subprocess sends standard MCP
     sampling requests; the host chooses credentials and model policy.
     Ordinary callback exceptions become protocol errors so the connection can
-    serve subsequent requests. Eio cancellation propagates to the caller. *)
-type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
+    serve subsequent requests. Eio cancellation propagates to the caller.
+
+    [error_bytes] is the largest JSON string, quotes included, that an [Error]
+    message may encode for this request: the connection's byte limit minus the
+    rest of the JSON-RPC error envelope (version, request id, code). It is
+    absent when the connection has no byte limit. A message within it is
+    delivered as returned; a larger one is replaced by the transport. *)
+type sampling_handler = ?error_bytes:int -> Mcp_protocol.Sampling.create_message_params ->
   (Mcp_protocol.Sampling.create_message_result, string) result
 
 (** {1 Connection lifecycle} *)

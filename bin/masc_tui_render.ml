@@ -6123,6 +6123,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                       Terminal_text.single_line row.sch_requested_by)
                    rows
                in
+               let recurrence_words =
+                 List.map
+                   (fun (row : schedule_row) ->
+                      Terminal_text.single_line row.sch_recurrence_summary)
+                   rows
+               in
                (* Every line carries a two-cell lead before the table, so the
                   table is fitted to what the lead leaves -- the same reserve
                   the Schedules list makes, without which the frame cuts the
@@ -6134,6 +6140,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ~clock_width:schedule_requested_clock_cells
                    ~outcome_width:
                      (Render_schedule.schedule_delivery_width outcome_words)
+                   ~recurrence_width:
+                     (Render_schedule.kauto_recurrence_width recurrence_words)
                    ~by_width:(Render_schedule.kauto_by_width by_words)
                in
                let header = Render_schedule.kauto_header_row ~layout in

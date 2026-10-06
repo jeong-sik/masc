@@ -1313,6 +1313,65 @@ let test_receipt_projection_reads_shared_outcome_once () = with_fixture (fun _en
   check bool "inline verification preserves the intact outcome inode" true
     (before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino))
 
+(* A row lists the request before the outcome it owns, and reading the request
+   seeds the outcome bytes from the journaled copy. An address-ordered walk can
+   visit the outcome first instead, charging the 3 MiB blob and then the 3 MiB
+   journal again. Pin each address order in turn so the projection is exercised
+   both ways rather than on the coin flip that made the sibling test fail 8 of
+   20 runs. *)
+let receipt_projection_with_address_order ~outcome_first () =
+  with_fixture (fun _env _sw dir _docker ->
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module Store = Masc.Lane_addon_store in
+  let module S = Mcp_protocol.Sampling in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "ordered-model-evidence") in
+  let instance_id = "ordered-worker" in
+  let max_bytes = 4 * 1024 * 1024 in
+  let answer : S.create_message_result = {role=Assistant;
+    content=Text {type_="text";text=String.make (3 * 1024 * 1024) 'x'};
+    model="large-model";stop_reason=None;_meta=None} in
+  let rec choose n =
+    let request_id = Printf.sprintf "ordered-%d" n in
+    let request_bytes = Yojson.Safe.to_string (`Assoc [
+      "kind",`String "model_request";"instance_id",`String instance_id;
+      "request_id",`String request_id]) in
+    let request = Store.blob_reference request_bytes in
+    let outcome_bytes = Yojson.Safe.to_string (`Assoc [
+      "kind",`String "model_outcome";"instance_id",`String instance_id;
+      "request",Types.evidence_to_json request;
+      "response",S.create_message_result_to_yojson answer]) in
+    let outcome = Store.blob_reference outcome_bytes in
+    if (outcome.uri < request.uri) = outcome_first then
+      (request_id, request_bytes, request, outcome_bytes, outcome)
+    else choose (n + 1) in
+  let request_id, request_bytes, request, outcome_bytes, outcome = choose 0 in
+  check bool (Printf.sprintf "fixture forces the %s address order"
+    (if outcome_first then "outcome-first" else "request-first")) true
+    ((outcome.uri < request.uri) = outcome_first);
+  let _request_blob = require (Store.write_blob store request_bytes) in
+  let _outcome_blob = require (Store.write_blob store outcome_bytes) in
+  let record = `Assoc ["instance_id",`String instance_id;"request_id",`String request_id;
+    "request",Types.evidence_to_json request;"state",`String "finished";
+    "outcome",Types.evidence_to_json outcome;"outcome_bytes",`String outcome_bytes] in
+  require (Store.save_sampling_request store ~instance_id ~request_id record);
+  require (Store.save_sampling_outcome store ~instance_id ~request_id record);
+  let output : Types.output = {rows=[{id="answer";lane_id="fusion/computation";
+    kind=Types.Value;title="large";observed_at=1.;subject_id="analysis";clock=None;
+    actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
+  let receipts = require (Sampling.retained_receipts ~store ~instance_id ~max_bytes output) in
+  check int "the pinned address order still projects one receipt" 1
+    (List.length receipts);
+  check bool "the projected terminal keeps the complete 3 MiB answer" true
+    (Yojson.Safe.Util.(member "terminal" (List.hd receipts) |> member "response")
+     = S.create_message_result_to_yojson answer))
+
+let test_receipt_projection_survives_outcome_first_address_order () =
+  receipt_projection_with_address_order ~outcome_first:true ()
+
+let test_receipt_projection_survives_request_first_address_order () =
+  receipt_projection_with_address_order ~outcome_first:false ()
+
 let test_sampling_receipt_requires_durable_journal () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let require = function Ok value -> value | Error detail -> fail detail in
@@ -2331,6 +2390,10 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling recovery reports unreadable terminal journal" `Quick test_sampling_recovery_reports_unreadable_terminal_journal;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
+  test_case "receipt projection survives outcome-first address order" `Quick
+    test_receipt_projection_survives_outcome_first_address_order;
+  test_case "receipt projection survives request-first address order" `Quick
+    test_receipt_projection_survives_request_first_address_order;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling bounds actual wire frames" `Quick test_sampling_wire_frame_envelope;

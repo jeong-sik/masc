@@ -22,7 +22,11 @@ val read_budget : max_bytes:int -> read_budget
 val read_blob_bounded : budget:read_budget -> t -> Lane_addon_types.evidence ->
   (string, bounded_read_error) result
 (** One shared byte allowance, charged before reads including corrupt blobs.
-    Use one budget for an entire projection, not one per reference. *)
+    Use one budget for an entire projection, not one per reference. A journal
+    record may carry an inline copy of a blob this budget already charged; that
+    read may exceed the remaining allowance by the largest body charged so far
+    and credits the duplicate once it parses the same digest, so one logical
+    body is charged once whichever address the caller visits first. *)
 val load_sampling_request_bounded : budget:read_budget -> t -> instance_id:string ->
   request_id:string -> (Yojson.Safe.t option, bounded_read_error) result
 (** Prefer the independently retained terminal link; otherwise read the pending

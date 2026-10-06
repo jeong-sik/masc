@@ -9,6 +9,15 @@ let read path =
   Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
 ;;
 
+(* Once a case has run Eio_main.run, Eio's SIGCHLD handler stays installed,
+   so a blocking call here returns EINTR when any child of this process ends
+   while it waits. *)
+let rec restart_on_eintr f =
+  match f () with
+  | result -> result
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> restart_on_eintr f
+;;
+
 let stopped pid =
   match Unix.kill pid 0 with
   | () -> false
@@ -187,12 +196,8 @@ let test_dead_leader_with_live_group_blocks_profile_reset () =
        | Unix.Unix_error (Unix.ESRCH, _, _) -> ()))
   @@ fun () ->
   let ready = Bytes.create 1 in
-  let count = Unix.read ready_read ready 0 1 in
-  let rec reap_leader () =
-    match Unix.waitpid [] leader with
-    | result -> result
-    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap_leader () in
-  ignore (reap_leader ());
+  let count = restart_on_eintr (fun () -> Unix.read ready_read ready 0 1) in
+  ignore (restart_on_eintr (fun () -> Unix.waitpid [] leader));
   check int "the orphan group was created" 1 count;
   (match Unix.kill leader 0 with
    | () -> fail "the group leader should have exited"

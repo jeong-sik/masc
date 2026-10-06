@@ -63,6 +63,7 @@ let assemble_cost_event_payload
     ?response_id
     ?runtime_attempt
     ?conversation
+    ?spend_observation
     ?vendor_total_tokens
     ?resolution_status
     ?(cache_creation_input_tokens : int = 0)
@@ -197,6 +198,16 @@ let assemble_cost_event_payload
       [ "resolution_status", `String (Keeper_usage_resolution.status_to_string status) ]
     | None -> []
   in
+  (* What the turn's spend observed when it read this count. Only a raw row
+     records one: a resolved row is already the spend. *)
+  let spend_observation_fields =
+    match usage_projection, spend_observation with
+    | Cost_ledger.Raw_observation _, Some observation ->
+      [ Keeper_spend_observation.field, Keeper_spend_observation.to_json observation ]
+    | Cost_ledger.Raw_observation _, None
+    | (Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _), _ ->
+      [ Keeper_spend_observation.field, `Null ]
+  in
   let vendor_total_fields =
     match usage_projection, vendor_total_tokens with
     | Cost_ledger.Raw_observation _, Some total -> [ "vendor_total_tokens", `Int total ]
@@ -264,6 +275,7 @@ let assemble_cost_event_payload
          ]
          @ attempt_fields
          @ conversation_fields
+         @ spend_observation_fields
          @ vendor_total_fields
          @ resolution_status_fields
          @ Keeper_usage_trust.json_fields usage_trust
@@ -294,6 +306,7 @@ let cost_event_payload
     ?response_id
     ?runtime_attempt
     ?conversation
+    ?spend_observation
     ?vendor_total_tokens
     ?resolution_status
     ?(cache_creation_input_tokens : int = 0)
@@ -316,6 +329,7 @@ let cost_event_payload
      ?response_id
      ?runtime_attempt
      ?conversation
+     ?spend_observation
      ?vendor_total_tokens
      ?resolution_status
      ~cache_creation_input_tokens
@@ -340,6 +354,7 @@ let emit_cost_event
     ?response_id
     ?runtime_attempt
     ?conversation
+    ?spend_observation
     ?vendor_total_tokens
     ?resolution_status
     ?(cache_creation_input_tokens : int = 0)
@@ -364,6 +379,7 @@ let emit_cost_event
       ?response_id
       ?runtime_attempt
       ?conversation
+      ?spend_observation
       ?vendor_total_tokens
       ?resolution_status
       ~cache_creation_input_tokens

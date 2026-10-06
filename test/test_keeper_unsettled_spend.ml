@@ -19,11 +19,26 @@ let with_ledger f =
     (fun () -> f dir)
 ;;
 
+let sample ?cost_usd input : Keeper_usage_resolution.sample =
+  { input_tokens = input
+  ; output_tokens = 10
+  ; cache_creation_input_tokens = 0
+  ; cache_read_input_tokens = input / 2
+  ; cost_usd
+  }
+;;
+
+(* A raw row as an execution writes it: its counts, and the observation its
+   spend read. [~recorded:false] is a row written before rows carried one. *)
 let raw
       ~masc_root
       ?(agent = keeper)
       ?(scope = Runtime_usage_scope.Per_request)
       ?client
+      ?(replaced = false)
+      ?cost_usd
+      ?(recorded = true)
+      ?(usage_reported = true)
       ?(lane = 0)
       ~turn
       ~ordinal
@@ -31,12 +46,38 @@ let raw
       ~input
       ()
   =
-  let response_id, conversation =
+  let usage = sample ?cost_usd input in
+  let response_id, conversation, observation =
     match client with
-    | None -> None, None
+    | None ->
+      ( None
+      , None
+      , Keeper_spend_observation.Agent_core_response
+          { response_id = ""
+          ; ordinal
+          ; model = "glm-fixture"
+          ; usage = (if usage_reported then Some usage else None)
+          } )
     | Some (response_id, conversation_id) ->
-      Some response_id, Some (conversation_id, Keeper_usage_resolution.Fresh)
+      ( Some response_id
+      , Some (conversation_id, Keeper_usage_resolution.Fresh)
+      , Keeper_spend_observation.Client_report
+          { official_turn = ordinal
+          ; response_id
+          ; model = "glm-fixture"
+          ; conversation_id
+          ; position = Keeper_usage_resolution.Fresh
+          ; usage_scope = scope
+          ; count =
+              (if replaced
+               then Keeper_client_usage_report.Count_replaced
+               else
+                 Keeper_client_usage_report.Running_count
+                   (Keeper_usage_resolution.api_usage_of_sample usage))
+          ; vendor_total_tokens = None
+          } )
   in
+  let spend_observation = if recorded then Some observation else None in
   Keeper_hooks_agent_core.emit_cost_event
     ~masc_root
     ~agent_name:agent
@@ -51,9 +92,45 @@ let raw
     ~usage_projection:(Cost_ledger.Raw_observation scope)
     ?response_id
     ?conversation
+    ?spend_observation
     ~runtime_attempt:(run, "glm-coding.fixture", lane)
     ~cache_read_input_tokens:(input / 2)
     ()
+;;
+
+(* A raw row whose observation this build cannot decode, as a kind a later
+   build adds would be. *)
+let undecodable_observation ~masc_root ~turn ~ordinal ~run () =
+  let payload =
+    Keeper_hooks_agent_core.cost_event_payload
+      ~agent_name:keeper
+      ~task_id:(Some "task-lost")
+      ~trace_id:trace
+      ~keeper_turn_id:turn
+      ~agent_core_turn_ordinal:ordinal
+      ~model:"glm-fixture"
+      ~input_tokens:100
+      ~output_tokens:10
+      ~cost_usd:0.0
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~spend_observation:
+        (Keeper_spend_observation.Agent_core_response
+           { response_id = ""; ordinal; model = "glm-fixture"; usage = Some (sample 100) })
+      ~runtime_attempt:(run, "glm-coding.fixture", 0)
+      ()
+  in
+  match payload with
+  | `Assoc fields ->
+    Dated_jsonl.append
+      (Cost_ledger.store_of_masc_root masc_root)
+      (`Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key Keeper_spend_observation.field
+                then key, `Assoc [ "kind", `String "from_a_later_build" ]
+                else key, value)
+             fields))
+  | _ -> fail "a cost payload is an object"
 ;;
 
 (* What a commit writes for its turn: the resolved spend of its last reading. *)
@@ -81,8 +158,17 @@ let rows masc_root =
     | Error error -> failf "ledger row: %s" (Cost_ledger.decode_error_to_string error))
 ;;
 
+(* The rows that decode, for a ledger a case seeded with one that does not. *)
+let decodable_rows masc_root =
+  Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 1000
+  |> List.filter_map (fun json ->
+    match Cost_ledger.of_json json with
+    | Ok row -> Some (row, json)
+    | Error _ -> None)
+;;
+
 (* (turn, run, lane, reading, input, cache read) of every settled reading. *)
-let settled masc_root =
+let settled ?(rows = rows) masc_root =
   List.filter_map
     (fun ((row : Cost_ledger.t), json) ->
        match row.source, row.usage_projection, row.usage with
@@ -217,6 +303,133 @@ let test_two_cancelled_runs_of_one_turn_keep_distinct_keys () =
     check int "two keys" 2 (List.length (List.sort_uniq Cost_ledger.compare_inference_key keys)))
 ;;
 
+(* Rows written before rows carried their observation are not settled: their
+   counts alone do not say what the spend read. *)
+let test_a_row_without_its_observation_is_not_settled () =
+  with_ledger (fun masc_root ->
+    committed ~masc_root ~turn:10 ~ordinal:4 ~input:90 ();
+    raw ~masc_root ~recorded:false ~turn:11 ~ordinal:5 ~run:"run-b" ~input:100 ();
+    raw ~masc_root ~turn:11 ~ordinal:6 ~run:"run-b" ~input:200 ();
+    let outcome = settle masc_root in
+    check int "the recorded request only" 1 outcome.settled_readings;
+    check int "the unrecorded row is not placed" 1 outcome.unplaced_rows;
+    check settled_entry "the recorded request"
+      (flatten [ 11, "run-b", 0, 0, 200, 100 ]) (flatten (settled masc_root)))
+;;
+
+(* A row that does not decode -- as its observation or as a cost row -- is
+   not settled and is named with why, apart from rows that carry nothing to
+   settle. The rows around it still settle. *)
+let test_a_row_that_does_not_decode_is_named () =
+  with_ledger (fun masc_root ->
+    committed ~masc_root ~turn:10 ~ordinal:4 ~input:90 ();
+    undecodable_observation ~masc_root ~turn:11 ~ordinal:5 ~run:"run-b" ();
+    raw ~masc_root ~recorded:false ~turn:11 ~ordinal:6 ~run:"run-b" ~input:150 ();
+    raw ~masc_root ~turn:11 ~ordinal:7 ~run:"run-b" ~input:200 ();
+    Dated_jsonl.append
+      (Cost_ledger.store_of_masc_root masc_root)
+      (`Assoc [ "agent", `String keeper; "usage_projection", `String "raw_observation" ]);
+    let outcome = settle masc_root in
+    check int "the decodable reading" 1 outcome.settled_readings;
+    check int "the row without an observation" 1 outcome.unplaced_rows;
+    check int "both rows that do not decode" 2 (List.length outcome.undecodable);
+    check string "the oldest, and why"
+      "spend_observation: unknown observation kind \"from_a_later_build\""
+      (List.hd outcome.undecodable);
+    check settled_entry "the decodable reading"
+      (flatten [ 11, "run-b", 0, 0, 200, 100 ])
+      (flatten (settled ~rows:decodable_rows masc_root)))
+;;
+
+let resolution_statuses masc_root =
+  List.filter_map
+    (fun ((row : Cost_ledger.t), json) ->
+       match row.usage_projection with
+       | Cost_ledger.Resolved_attempt_delta attempt ->
+         Some
+           ( attempt.reading_index
+           , Yojson.Safe.Util.(json |> member "resolution_status" |> to_string) )
+       | Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_delta -> None)
+    (rows masc_root)
+  |> List.sort compare
+;;
+
+(* Whether the provider reported a cost survives: a reported 0.25 resolves
+   exact and an unreported cost resolves without one, as they did live. *)
+let test_a_reported_cost_is_kept_apart_from_no_report () =
+  with_ledger (fun masc_root ->
+    committed ~masc_root ~turn:10 ~ordinal:4 ~input:90 ();
+    raw ~masc_root ~cost_usd:0.25 ~turn:11 ~ordinal:5 ~run:"run-b" ~input:100 ();
+    raw ~masc_root ~turn:11 ~ordinal:6 ~run:"run-b" ~input:200 ();
+    ignore (settle masc_root);
+    check (list (pair int string)) "statuses as resolved live"
+      [ 0, "exact"; 1, "exact_cost_unavailable" ]
+      (resolution_statuses masc_root))
+;;
+
+(* A client count replaced by compaction counts nothing; it is observed as
+   replaced, not as a count of zero. *)
+let test_a_replaced_client_count_is_observed_as_replaced () =
+  with_ledger (fun masc_root ->
+    committed ~masc_root ~turn:10 ~ordinal:4 ~input:90 ();
+    raw ~masc_root ~scope:Runtime_usage_scope.Turn_total ~client:("resp-1", "thread-1")
+      ~replaced:true ~turn:11 ~ordinal:1 ~run:"run-b" ~input:0 ();
+    let outcome = settle masc_root in
+    check int "one reading" 1 outcome.settled_readings;
+    let missing =
+      List.filter
+        (fun ((row : Cost_ledger.t), _) ->
+           match row.usage_projection, row.usage with
+           | Cost_ledger.Resolved_attempt_delta _, Cost_ledger.Usage_missing -> true
+           | _ -> false)
+        (rows masc_root)
+    in
+    check int "a reading with no count, not a count of zero" 1 (List.length missing))
+;;
+
+(* An Agent Core response that carried no usage is a reading with no count,
+   as the execution observed it. *)
+let test_a_response_without_usage_is_a_reading_with_no_count () =
+  with_ledger (fun masc_root ->
+    committed ~masc_root ~turn:10 ~ordinal:4 ~input:90 ();
+    raw ~masc_root ~usage_reported:false ~turn:11 ~ordinal:5 ~run:"run-b" ~input:0 ();
+    raw ~masc_root ~turn:11 ~ordinal:6 ~run:"run-b" ~input:200 ();
+    let outcome = settle masc_root in
+    check int "both readings" 2 outcome.settled_readings;
+    check (list (pair int string)) "the first resolves as missing"
+      [ 0, "usage_missing"; 1, "exact_cost_unavailable" ]
+      (resolution_statuses masc_root))
+;;
+
+let observation_round_trips observation =
+  match Keeper_spend_observation.of_json (Keeper_spend_observation.to_json observation) with
+  | Ok decoded ->
+    check string "round trip"
+      (Yojson.Safe.to_string (Keeper_spend_observation.to_json observation))
+      (Yojson.Safe.to_string (Keeper_spend_observation.to_json decoded))
+  | Error error -> failf "decode: %s" error
+;;
+
+let test_observations_round_trip () =
+  observation_round_trips
+    (Keeper_spend_observation.Agent_core_response
+       { response_id = "resp"; ordinal = 3; model = "m"; usage = None });
+  observation_round_trips
+    (Keeper_spend_observation.Agent_core_response
+       { response_id = ""; ordinal = 4; model = "m"; usage = Some (sample ~cost_usd:0.5 120) });
+  observation_round_trips
+    (Keeper_spend_observation.Client_report
+       { official_turn = 2
+       ; response_id = "turn-2"
+       ; model = "m"
+       ; conversation_id = "thread"
+       ; position = Keeper_usage_resolution.Resumed
+       ; usage_scope = Runtime_usage_scope.Turn_total
+       ; count = Keeper_client_usage_report.Count_replaced
+       ; vendor_total_tokens = Some 900
+       })
+;;
+
 let test_rows_above_the_newest_resolved_row () =
   let row ~agent ~projection =
     `Assoc
@@ -265,6 +478,17 @@ let () =
             test_another_keepers_rows_are_not_settled
         ; test_case "two cancelled runs of one turn keep distinct keys" `Quick
             test_two_cancelled_runs_of_one_turn_keep_distinct_keys
+        ; test_case "a row without its observation is not settled" `Quick
+            test_a_row_without_its_observation_is_not_settled
+        ; test_case "a row that does not decode is named" `Quick
+            test_a_row_that_does_not_decode_is_named
+        ; test_case "a reported cost is kept apart from no report" `Quick
+            test_a_reported_cost_is_kept_apart_from_no_report
+        ; test_case "a replaced client count is observed as replaced" `Quick
+            test_a_replaced_client_count_is_observed_as_replaced
+        ; test_case "a response without usage is a reading with no count" `Quick
+            test_a_response_without_usage_is_a_reading_with_no_count
+        ; test_case "observations round trip" `Quick test_observations_round_trip
         ; test_case "rows above the newest resolved row" `Quick
             test_rows_above_the_newest_resolved_row
         ] )

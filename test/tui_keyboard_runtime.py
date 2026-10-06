@@ -74,6 +74,11 @@ def config_navigation_source() -> str:
             "# model comment",
             "[ollama_cloud.alpha]",
             "max-tokens = 16384",
+            # A binding table only counts once its provider is declared.
+            "[providers.ollama_cloud]",
+            'protocol = "openai-compatible-http"',
+            'kind = "openai_compat"',
+            'endpoint = "http://localhost:9000/v1"',
         ]
     )
     return "\n".join(lines)

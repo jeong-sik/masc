@@ -88,9 +88,10 @@ choice after a conflict, `x` discards it, and `Esc` returns with the draft kept.
 These drafts belong to the workspace and backend. A changed configuration path
 requires discarding the old draft before editing the new file. Opening, toggling
 or leaving the screen never saves. A successful save rereads both the file and
-Lane inventory. Existing flat automation paths move into `[browser.automation]`
-with the activity edit. Inline/dotted forms that cannot be preserved by the line
-editor require the Runtime source editor.
+Lane inventory. Saving Automation activity moves existing flat `geckodriver` and
+`binary` paths under `[browser]` into `[browser.automation]`. Saving Live or
+Stagehand activity leaves those paths where they are. Inline/dotted forms that
+cannot be preserved by the line editor require the Runtime source editor.
 
 ## Verification
 

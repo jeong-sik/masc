@@ -1,0 +1,21 @@
+{
+  "helper_sha256": "320b564b28778fa13fccb61d38c38c48293718d78c31fae636ae6610eb00a829",
+  "script": "import {readMachineActivity} from './src/lib/machine-lane-activity.ts';\nconst source=process.argv[1]; const before=Object.getOwnPropertyNames(Object.prototype);\nconst read=()=>{try{return readMachineActivity(source,'msx')}catch(error){return {error:String(error)}}};\nconst result=read(); const empty=readMachineActivity('','msx');\nconsole.log(JSON.stringify({source,result,empty,prototypeAdded:Object.getOwnPropertyNames(Object.prototype).filter(k=>!before.includes(k))}));",
+  "results": [
+    {
+      "exit_code": 0,
+      "stdout": "{\"source\":\"[__proto__.machines.msx]\\nenabled = false\",\"result\":{\"enabled\":true},\"empty\":{\"enabled\":true},\"prototypeAdded\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "exit_code": 0,
+      "stdout": "{\"source\":\"[machines.__proto__]\\nenabled = false\",\"result\":{\"error\":\"Error: machines.__proto__\ub294 \uc9c0\uc6d0\ud558\uc9c0 \uc54a\ub294 \uc124\uc815\uc785\ub2c8\ub2e4.\"},\"empty\":{\"enabled\":true},\"prototypeAdded\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "exit_code": 0,
+      "stdout": "{\"source\":\"[machines]\\n__proto__ = true\",\"result\":{\"error\":\"Error: machines.__proto__\ub294 \uc9c0\uc6d0\ud558\uc9c0 \uc54a\ub294 \uc124\uc815\uc785\ub2c8\ub2e4.\"},\"empty\":{\"enabled\":true},\"prototypeAdded\":[]}\n",
+      "stderr": ""
+    }
+  ]
+}

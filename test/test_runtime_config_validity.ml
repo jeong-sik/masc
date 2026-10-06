@@ -1151,6 +1151,28 @@ let test_model_without_turn_timeout_leaves_it_unset () =
          (model.Runtime_schema.turn_timeout_s = None)
      | _ -> fail "exactly one model must parse")
 
+let test_exact_lane_activity_preserves_configuration () =
+  let parse lane body = Runtime_toml.parse_string
+    ("[runtime.exact_output_lanes." ^ lane ^ "]\n" ^ body) in
+  let one body = match parse "librarian_exact" body with
+    | Ok config -> (match config.Runtime_schema.exact_output_lane_decls with
+      | [lane] -> lane | _ -> fail "expected one lane")
+    | Error _ -> fail "lane activity did not parse" in
+  let original = one "slots=[\"slot-b\",\"slot-a\"]\ncli_slots=[\"cli\"]\nthinking=false\nmax_output_tokens=123\n" in
+  check bool "omission accepts existing configuration" true original.enabled;
+  let off = one "enabled=false\nslots=[\"slot-b\",\"slot-a\"]\ncli_slots=[\"cli\"]\nthinking=false\nmax_output_tokens=123\n" in
+  check bool "disable changes only activity" true
+    (Runtime_schema.equal_exact_output_lane_decl {original with enabled=false} off);
+  check bool "off can be configured before selecting candidates" false (one "enabled=false\n").enabled;
+  List.iter (fun (lane,body) -> match parse lane body with
+    | Error _ -> () | Ok _ -> fail "invalid activity accepted")
+    ["librarian_exact", "enabled=\"false\"\nslots=[\"slot\"]\n";
+     "librarian_exact", "enabled=true\n";
+     "librarian_exact", "enabled=false\nslots=[\"duplicate\",\"duplicate\"]\n";
+     "board_attention_exact", "enabled=false\nslots=[\"slot\"]\n";
+     "hitl_auto_judge", "enabled=false\nslots=[\"slot\"]\n"]
+;;
+
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
     "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
@@ -2045,7 +2067,7 @@ let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
     |> List.map mandatory_lane_violation_pair
   in
   let lane_decl ?(slot_ids = []) ?(cli_slot_ids = []) id =
-    { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
+    { Runtime_schema.id; enabled = true; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
   in
   match lane_ids with
   | [] | [ _ ] -> fail "this case needs at least two mandatory lanes"
@@ -2731,6 +2753,57 @@ let test_runtime_toml_rejects_non_positive_repeat_penalty () =
            String.equal err.path "local.sample.repeat-penalty")
          errs)
 
+(* The RFC's table, read from the one function the lanes' call sites use. *)
+let test_judgment_lanes_join_the_priority_queue () =
+  check
+    (list (pair string string))
+    "admission class per lane"
+    [ "librarian_exact", "standard"
+    ; "hitl_auto_judge", "priority"
+    ; "board_attention_exact", "priority"
+    ; "workspace_curator_exact", "standard"
+    ; "verifier_exact", "priority"
+    ; "browser_stagehand_exact", "standard"
+    ; "candle_appraiser", "standard"
+    ]
+    (List.map
+       (fun lane ->
+          ( Standalone_lane.to_id lane
+          , Llm_provider.Admission_class.to_string (Standalone_lane.admission_class lane) ))
+       Standalone_lane.all)
+
+(* The seed declares the run limit on glm-coding; every runtime built from a
+   glm-coding binding carries it with that binding's permit count, and its
+   ordinary requests stay [Standard]. Only the judgment lanes ask for
+   [Priority]. *)
+let test_repo_glm_coding_runtimes_carry_the_priority_run_limit () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match load_list_text ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    let glm_configs =
+      List.filter_map
+        (fun (runtime : Runtime_instance.t) ->
+           match runtime.execution with
+           | Runtime_execution.Agent_core config
+             when config.Llm_provider.Provider_config.provider_id = Some "glm-coding" ->
+             Some (runtime.id, config)
+           | Runtime_execution.Agent_core _
+           | Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _ -> None)
+        runtimes
+    in
+    check bool "the seed has glm-coding runtimes" true (glm_configs <> []);
+    List.iter
+      (fun (id, (config : Llm_provider.Provider_config.t)) ->
+         check (option int) (id ^ " run limit") (Some 3) config.admission_priority_run_limit;
+         check (option int) (id ^ " permit count") (Some 4) config.max_concurrent_requests;
+         check string (id ^ " class") "standard"
+           (Llm_provider.Admission_class.to_string config.admission_class))
+      glm_configs
+
 (* -1 is Ollama's "the whole context"; anything below it has no meaning. *)
 let test_runtime_toml_rejects_repeat_last_n_below_minus_one () =
   let content = "[providers.local]\n\
@@ -2982,13 +3055,11 @@ let with_config_save_model_catalog f =
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
 
-(* max-prompt-bytes is optional for an official-client runtime. An explicit
-   declaration remains supported. *)
-let test_runtime_config_validation_admits_undeclared_official_client_seed () =
+(* An official-client runtime loads with only its window declared. *)
+let test_runtime_config_validation_admits_official_client_runtime () =
   with_config_save_model_catalog @@ fun () ->
-  let content ~bound =
-    Printf.sprintf
-      "[providers.local]\n\
+  let content =
+    "[providers.local]\n\
        protocol = \"openai-compatible-http\"\n\
        endpoint = \"http://127.0.0.1:1/v1\"\n\
        \n\
@@ -3003,7 +3074,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
        \n\
        [models.seeded]\n\
        api-name = \"seeded\"\n\
-       max-context = 1024\n%s\
+       max-context = 1024\n\
        \n\
        [local.sample]\n\
        \n\
@@ -3014,7 +3085,6 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
        \n\
        [runtime.assignments]\n\
        \"probe\" = \"subscription.seeded\"\n"
-      bound
   in
   let attempt text =
     let snapshot = Runtime.For_testing.snapshot () in
@@ -3029,17 +3099,193 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
         | Sys_error _ -> ())
       (fun () -> Runtime.save_config_text ~runtime_config_path:path text)
   in
-  (match attempt (content ~bound:"") with
-   | Ok _receipt -> ()
-   | Error detail ->
-     failf
-       "an official-client Keeper runtime with no max-prompt-bytes must load: %s"
-       detail);
-  (* Declaring it stays legal — the key still exists for operators who want the
-     seed bounded; it is simply no longer an admission condition. *)
-  match attempt (content ~bound:"max-prompt-bytes = 131072\n") with
+  match attempt content with
   | Ok _receipt -> ()
-  | Error detail -> failf "a declared seed bound must still load: %s" detail
+  | Error detail ->
+    failf "an official-client Keeper runtime with only a window must load: %s" detail
+;;
+
+(* The running server keeps an account's first admission allowance until it
+   restarts, so a save that would give an admitted account other values is
+   refused, and one that keeps them is applied. *)
+let test_a_save_that_changes_an_admitted_allowance_is_refused () =
+  with_config_save_model_catalog @@ fun () ->
+  let content ~binding ~provider =
+    Printf.sprintf
+      "[providers.local]\n\
+       protocol = \"openai-compatible-http\"\n\
+       endpoint = \"http://127.0.0.1:1/admitted-allowance/v1\"\n%s\
+       \n\
+       [models.sample]\n\
+       api-name = \"sample\"\n\
+       max-context = 1024\n\
+       \n\
+       [local.sample]\n%s\
+       \n\
+       [runtime]\n\
+       default = \"local.sample\"\n"
+      provider
+      binding
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "admitted_allowance_" ".toml" in
+  let save text = Runtime.save_config_text ~runtime_config_path:path text in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       let admitted = content ~binding:"max-concurrent = 2\n" ~provider:"" in
+       (match save admitted with
+        | Ok _receipt -> ()
+        | Error detail -> failf "the first save should apply: %s" detail);
+       (match
+          List.find_opt
+            (fun (runtime : Runtime_instance.t) -> String.equal runtime.id "local.sample")
+            (Runtime.get_runtimes ())
+        with
+        | None -> fail "local.sample should be published"
+        | Some runtime ->
+          Eio_main.run (fun _env ->
+            Llm_provider.Provider_admission.with_admission
+              ~config:(agent_core_provider_config runtime)
+              (fun () -> ())));
+       let refused label text =
+         match save text with
+         | Ok _receipt -> failf "%s should be refused while the account is admitted" label
+         | Error detail ->
+           List.iter
+             (fun needle ->
+                check bool (label ^ " names " ^ needle) true
+                  (String_util.contains_substring detail needle))
+             [ "local.sample"; "Stop the server" ]
+       in
+       refused "more permits" (content ~binding:"max-concurrent = 3\n" ~provider:"");
+       refused
+         "a run limit"
+         (content
+            ~binding:"max-concurrent = 2\n"
+            ~provider:"admission-priority-run-limit = 3\n");
+       match save (admitted ^ "# the same allowance\n") with
+       | Ok _receipt -> ()
+       | Error detail -> failf "a save that keeps the allowance should apply: %s" detail)
+;;
+
+(* Two bindings of one account, so both share one admission identity. *)
+let two_binding_allowance_content ~endpoint ~sample ~lane =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = %S\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.lane]\n\
+     api-name = \"lane\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-concurrent = %d\n\
+     \n\
+     [local.lane]\n\
+     max-concurrent = %d\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+    endpoint
+    sample
+    lane
+;;
+
+(* Saves [first], then admits one request for [admitted_id], so the running
+   process holds that runtime's allowance for the account. *)
+let with_admitted_save ~first ~admitted_id f =
+  with_config_save_model_catalog @@ fun () ->
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "admitted_allowance_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       (match Runtime.save_config_text ~runtime_config_path:path first with
+        | Ok _receipt -> ()
+        | Error detail -> failf "the first save should apply: %s" detail);
+       (match
+          List.find_opt
+            (fun (runtime : Runtime_instance.t) -> String.equal runtime.id admitted_id)
+            (Runtime.get_runtimes ())
+        with
+        | None -> failf "%s should be published" admitted_id
+        | Some runtime ->
+          Eio_main.run (fun _env ->
+            Llm_provider.Provider_admission.with_admission
+              ~config:(agent_core_provider_config runtime)
+              (fun () -> ())));
+       f ~path)
+;;
+
+let published_max_concurrent id =
+  match
+    List.find_opt
+      (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id)
+      (Runtime.get_runtimes ())
+  with
+  | None -> failf "%s should stay published" id
+  | Some runtime ->
+    (agent_core_provider_config runtime).Llm_provider.Provider_config.max_concurrent_requests
+;;
+
+(* A disagreement the running config already had is not this save's doing,
+   so it does not block an unrelated save; a save that changes it is
+   refused. *)
+let test_a_save_is_refused_only_for_the_disagreement_it_introduces () =
+  let content =
+    two_binding_allowance_content ~endpoint:"http://127.0.0.1:1/introduced-allowance/v1"
+  in
+  with_admitted_save ~first:(content ~sample:2 ~lane:3) ~admitted_id:"local.sample"
+  @@ fun ~path ->
+  let save text = Runtime.save_config_text ~runtime_config_path:path text in
+  (match save (content ~sample:2 ~lane:3 ^ "# an unrelated edit\n") with
+   | Ok _receipt -> ()
+   | Error detail -> failf "an unrelated save should apply: %s" detail);
+  (match save (content ~sample:2 ~lane:4) with
+   | Ok _receipt -> fail "a save that changes the disagreement should be refused"
+   | Error detail ->
+     check bool "names the runtime it changes" true
+       (String_util.contains_substring detail "local.lane");
+     check bool "spells the setting as the file does" true
+       (String_util.contains_substring detail "max-concurrent = 2"));
+  match save (content ~sample:2 ~lane:2) with
+  | Ok _receipt -> ()
+  | Error detail -> failf "a save that ends the disagreement should apply: %s" detail
+;;
+
+(* [masc runtime-resume] republishes the file on disk through the degraded
+   initializer; a hand edit that changes an admitted allowance is refused
+   there too, and the running runtimes stay as they were. *)
+let test_a_resume_that_changes_an_admitted_allowance_is_refused () =
+  let content =
+    two_binding_allowance_content ~endpoint:"http://127.0.0.1:1/resumed-allowance/v1"
+  in
+  with_admitted_save ~first:(content ~sample:2 ~lane:2) ~admitted_id:"local.sample"
+  @@ fun ~path ->
+  let oc = open_out path in
+  output_string oc (content ~sample:3 ~lane:2);
+  close_out oc;
+  (match Runtime.init_default_degraded_report ~config_path:path with
+   | Ok _ -> fail "a resume that changes an admitted allowance should be refused"
+   | Error error ->
+     check bool "names the runtime" true
+       (String_util.contains_substring
+          (Runtime.strict_init_error_to_string error)
+          "local.sample"));
+  check (option int) "the running runtime keeps its allowance" (Some 2)
+    (published_max_concurrent "local.sample")
 ;;
 
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
@@ -3122,6 +3368,135 @@ let render_parse_errors errs =
   |> List.map (fun (err : Runtime_toml.parse_error) ->
     Printf.sprintf "%s: %s" err.path err.message)
   |> String.concat "\n"
+;;
+
+(* [admission-priority-run-limit] is declared once on the provider and orders
+   the permit queue of the bindings that declare [max-concurrent]. *)
+let run_limit_config ~run_limit ~sample_binding ~lane_binding =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     admission-priority-run-limit = %s\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.lane]\n\
+     api-name = \"lane\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     %s\n\
+     \n\
+     [local.lane]\n\
+     %s\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+    run_limit
+    sample_binding
+    lane_binding
+;;
+
+let run_limit_error_paths content =
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "the run limit declaration should be refused"
+  | Error errs -> List.map (fun (err : Runtime_toml.parse_error) -> err.path) errs
+;;
+
+let test_runtime_toml_parses_the_provider_priority_run_limit () =
+  match
+    Runtime_toml.parse_string
+      (run_limit_config
+         ~run_limit:"3"
+         ~sample_binding:"max-concurrent = 2"
+         ~lane_binding:"max-concurrent = 2")
+  with
+  | Error errs ->
+    failf "a run limit over bindings with max-concurrent should parse:\n%s"
+      (render_parse_errors errs)
+  | Ok cfg ->
+    (match cfg.Runtime_schema.providers with
+     | [ provider ] ->
+       check (option int) "the provider carries the run limit" (Some 3)
+         provider.Runtime_schema.admission_priority_run_limit
+     | providers -> failf "expected one provider, got %d" (List.length providers))
+;;
+
+let test_runtime_toml_rejects_a_priority_run_limit_below_one () =
+  check bool "names the offending key" true
+    (List.exists
+       (String.ends_with ~suffix:".admission-priority-run-limit")
+       (run_limit_error_paths
+          (run_limit_config
+             ~run_limit:"0"
+             ~sample_binding:"max-concurrent = 2"
+             ~lane_binding:"max-concurrent = 2")))
+;;
+
+(* A binding without [max-concurrent] runs outside admission, so the run
+   limit stays on the binding that has a permit queue. *)
+let test_a_priority_run_limit_reaches_only_bindings_with_max_concurrent () =
+  with_config_save_model_catalog @@ fun () ->
+  let path = Filename.temp_file "priority_run_limit_" ".toml" in
+  let oc = open_out path in
+  output_string
+    oc
+    (run_limit_config ~run_limit:"3" ~sample_binding:"max-concurrent = 2" ~lane_binding:"");
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match load_list_text ~config_path:path with
+       | Error msg -> failf "a run limit with one admitted binding should load: %s" msg
+       | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+         let allowance id =
+           match
+             List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id)
+               runtimes
+           with
+           | None -> failf "runtime %s should load" id
+           | Some runtime ->
+             let config = agent_core_provider_config runtime in
+             ( config.Llm_provider.Provider_config.max_concurrent_requests
+             , config.admission_priority_run_limit )
+         in
+         check (pair (option int) (option int)) "the admitted binding carries the limit"
+           (Some 2, Some 3) (allowance "local.sample");
+         check (pair (option int) (option int)) "the unadmitted binding carries none"
+           (None, None) (allowance "local.lane"))
+;;
+
+let test_runtime_toml_rejects_a_priority_run_limit_no_binding_can_use () =
+  check (list string) "names the provider's key"
+    [ "providers.local.admission-priority-run-limit" ]
+    (run_limit_error_paths
+       (run_limit_config ~run_limit:"3" ~sample_binding:"" ~lane_binding:""))
+;;
+
+let test_runtime_toml_rejects_a_priority_run_limit_on_an_official_client () =
+  check (list string) "names the provider's key"
+    [ "providers.subscription.admission-priority-run-limit" ]
+    (run_limit_error_paths
+       "[providers.subscription]\n\
+        protocol = \"claude-code\"\n\
+        command = \"/usr/bin/true\"\n\
+        is-non-interactive = true\n\
+        admission-priority-run-limit = 3\n\
+        \n\
+        [models.seeded]\n\
+        api-name = \"seeded\"\n\
+        max-context = 1024\n\
+        \n\
+        [subscription.seeded]\n\
+        max-concurrent = 2\n\
+        \n\
+        [runtime]\n\
+        default = \"subscription.seeded\"\n")
 ;;
 
 let sample_binding (cfg : Runtime_schema.config) =
@@ -3730,6 +4105,38 @@ let exact_lane_runtime_toml ~lane ~slot =
     slot
 ;;
 
+let test_off_exact_lanes_retain_unavailable_candidates () =
+  let resolver = match Exact_output.load_resolver_snapshot
+    ~io:{getenv=(fun _ -> Ok None)} ~catalog:(Exact_output.Embedded_with_targets []) () with
+    | Ok value -> value | Error _ -> fail "empty resolver snapshot did not load" in
+  let admission text =
+    let config = match Runtime_toml.parse_string text with
+      | Ok value -> value | Error _ -> fail "dormant lane TOML did not parse" in
+    Runtime_exact_output_registry.check_publication ~required_lane_ids:[]
+      ~lanes:config.exact_output_lane_decls resolver in
+  List.iter (fun lane ->
+    let active = exact_lane_runtime_toml ~lane ~slot:"local.absent"
+      ^ "cli_slots = [\"local.missing-client\"]\n" in
+    let off = Toml_line_editor.edit_table_bool active
+      ~path:("runtime.exact_output_lanes." ^ lane) ~key:"enabled" ~value:false in
+    with_temp_runtime_toml off (fun path ->
+      match load_list_text ~config_path:path with
+      | Ok _ -> ()
+      | Error error -> failf "off %s rejected dormant candidates: %s" lane error);
+    check bool "unavailable well-formed dormant targets remain admissible" true (Result.is_ok (admission off));
+    let malformed = exact_lane_runtime_toml ~lane ~slot:"../target"
+      |> fun text -> Toml_line_editor.edit_table_bool text
+        ~path:("runtime.exact_output_lanes." ^ lane) ~key:"enabled" ~value:false in
+    (match admission malformed with
+     | Error (Runtime_exact_output_registry.Invalid_lane_slot {cause=Exact_output.Invalid_target_ref;_}) -> ()
+     | _ -> failf "off %s did not reject malformed target reference through publication admission" lane);
+    with_temp_runtime_toml active (fun path ->
+      match load_list_text ~config_path:path with
+      | Error _ -> ()
+      | Ok _ -> failf "enabled %s admitted an unresolved CLI candidate" lane))
+    ["librarian_exact"; "verifier_exact"]
+;;
+
 let test_verifier_exact_slot_must_name_a_configured_route () =
   with_temp_runtime_toml
     (exact_lane_runtime_toml ~lane:"verifier_exact" ~slot:"local.absent")
@@ -3944,6 +4351,22 @@ let test_saving_an_exact_slot_without_body_deadline_is_refused () =
          (String_util.contains_substring detail Runtime_schema.exact_body_timeout_s_key));
     check string "the refused save leaves the file as it was" baseline
       (Fs_compat.load_file path))
+;;
+
+let test_saving_off_lane_without_body_deadline_preserves_candidates () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let baseline = exact_deadline_runtime_toml
+    ~body_timeout:(Some exact_deadline_body_timeout_s) ~lane:"" in
+  let dormant = exact_deadline_runtime_toml ~body_timeout:None
+    ~lane:"[runtime.exact_output_lanes.librarian_exact]\nenabled = false\nslots = [\"local.sample\"]\n" in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml baseline (fun path ->
+    (match Runtime.save_config_text ~runtime_config_path:path dormant with
+     | Ok _ -> ()
+     | Error error -> failf "off HTTP lane deadline blocked save: %s" error);
+    check string "save retains the exact off declaration" dormant (Fs_compat.load_file path))
 ;;
 
 (* Owner rule: never a hard gate on keeper actions. A file that already
@@ -4161,7 +4584,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
-    ; typesafeai = Runtime_schema.default_typesafeai
+    ; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -5091,6 +5514,37 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check bool "degraded save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_degraded);
     let replacement = content ~default:"local.chat" "slot-b" in
+    let original_revision =
+      Runtime.config_source_revision_to_string
+        (Runtime.config_observation ~path baseline).source_revision
+    in
+    let current_observation = Runtime.config_observation ~path degraded in
+    let stale_state = Runtime.exact_output_registry_stale () in
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+             ~expected_source_revision:original_revision replacement with
+     | Error (Runtime.Config_source_conflict current) ->
+       check string "conflict carries current path" path current.path;
+       check string "conflict carries intervening source" degraded current.source_text;
+       check string "conflict revision identifies intervening source"
+         (Runtime.config_source_revision_to_string current_observation.source_revision)
+         (Runtime.config_source_revision_to_string current.source_revision)
+     | Error (Runtime.Config_edit_failed detail) -> failf "expected source conflict: %s" detail
+     | Ok _ -> fail "a stale editor must not overwrite the intervening commit");
+    check string "source conflict preserves file" degraded (Fs_compat.load_file path);
+    check string "source conflict preserves runtime cache" "local.libr"
+      (Runtime.get_default_runtime_id ());
+    check bool "source conflict preserves registry identity" true
+      (registry_exn () == after_degraded);
+    check bool "source conflict preserves registry staleness" true
+      (Runtime.exact_output_registry_stale () = stale_state);
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+             ~expected_source_revision:"invalid" replacement with
+     | Error (Runtime.Config_edit_failed _) -> ()
+     | Error (Runtime.Config_source_conflict _) | Ok _ ->
+       fail "a malformed revision must fail admission");
+    check string "malformed revision preserves file" degraded (Fs_compat.load_file path);
+    check bool "malformed revision preserves registry" true
+      (registry_exn () == after_degraded);
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
     Fun.protect
@@ -5114,8 +5568,12 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (lane_is_unconfigured
               ~lane_id:"hitl_auto_judge"
               after_write_failure));
-    (match Runtime.save_config_text ~runtime_config_path:path replacement with
-     | Error detail -> failf "valid exact replacement failed: %s" detail
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+             ~expected_source_revision:
+               (Runtime.config_source_revision_to_string current_observation.source_revision)
+             replacement with
+     | Error (Runtime.Config_edit_failed detail) -> failf "valid exact replacement failed: %s" detail
+     | Error (Runtime.Config_source_conflict _) -> fail "fresh revision must commit"
      | Ok _receipt -> ());
     check string "valid save commits file" replacement (Fs_compat.load_file path);
     check string "valid save commits runtime cache" "local.chat"
@@ -6260,10 +6718,95 @@ let test_context_scope_survives_config_edit () =
       check int "saved resolution remains scoped" 1000000 (Runtime_instance.max_context_of_runtime runtime)))
 ;;
 
+let test_browser_config_publication_follows_visible_file () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let saved_state = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved_state) @@ fun () ->
+  let content enabled = Printf.sprintf {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+[browser.live]
+enabled = %b
+[browser.automation]
+enabled = %b
+geckodriver = "/fixture/geckodriver"
+[browser.stagehand]
+enabled = %b
+chrome = "/fixture/chrome"
+extension = "/fixture/extension"
+[machines.msx]
+enabled = %b
+[machines.dos]
+enabled = %b
+|} enabled enabled enabled enabled enabled in
+  let on = content true and off = content false in
+  let expected text = match Runtime_toml.parse_string text with
+    | Ok config -> config
+    | Error errors -> failf "browser fixture: %s" (render_parse_errors errors) in
+  let check_published label text =
+    check bool label true (match Runtime.browser_configuration (), Runtime.machine_configuration () with
+      | Some browser, Some machines ->
+        let expected = expected text in
+        Browser_configuration.equal expected.Runtime_schema.browser browser
+        && Machine_configuration.equal expected.machines machines
+      | None, _ | _, None -> false) in
+  with_temp_runtime_toml on (fun path ->
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> () | Error detail -> failf "browser boot: %s" detail);
+    check_published "boot publishes browser settings from the same parsed file" on;
+    let on_state = Runtime.For_testing.snapshot () in
+    let revision = Runtime.config_source_revision_to_string
+      (Runtime.config_observation ~path on).source_revision in
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+        ~expected_source_revision:revision off with
+     | Ok _ -> () | Error _ -> fail "fresh Browser save refused");
+    check_published "visible save publishes off with retained paths" off;
+    check string "same off bytes on disk" off (Fs_compat.load_file path);
+    (match Runtime.save_config_text_if_current ~runtime_config_path:path ~expected_source_path:path
+        ~expected_source_revision:revision on with
+     | Error (Runtime.Config_source_conflict _) -> ()
+     | Ok _ | Error (Runtime.Config_edit_failed _) -> fail "stale Browser save must conflict");
+    check_published "conflict preserves published activity" off;
+    let malformed = off ^ "\n[browser]\ngeckodriver = '/fixture/other'\n" in
+    check bool "both automation locations rejected before saving" true
+      (Result.is_error (Runtime.save_config_text ~runtime_config_path:path malformed));
+    check string "invalid browser configuration leaves file intact" off (Fs_compat.load_file path);
+    check_published "invalid save leaves published activity intact" off;
+    let directory = path ^ ".directory" in
+    Unix.mkdir directory 0o700;
+    Fun.protect ~finally:(fun () -> Unix.rmdir directory) (fun () ->
+      check bool "write failure is reported" true
+        (Result.is_error (Runtime.save_config_text ~runtime_config_path:directory on)));
+    check_published "pre-rename failure leaves activity intact" off;
+    (match Runtime.For_testing.save_config_text_with_sync_parent ~runtime_config_path:path
+        ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "browser fixture"))) on with
+     | Ok { durability = Runtime.Durability_unconfirmed _; _ } -> ()
+     | Ok _ -> fail "injected directory sync failure must be unconfirmed"
+     | Error detail -> failf "visible rename must publish despite sync failure: %s" detail);
+    check_published "after-rename uncertainty follows visible new activity" on;
+    check string "uncertain durability still has the new visible file" on (Fs_compat.load_file path);
+    (match Runtime.save_config_text ~runtime_config_path:path off with
+     | Ok _ -> () | Error detail -> failf "second Browser save: %s" detail);
+    Runtime.For_testing.restore on_state;
+    check_published "snapshot restore includes Browser state" on;
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> () | Error detail -> failf "Browser reload: %s" detail);
+    check_published "restart loads saved off instead of restored old state" off)
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
-        [ test_case "same model serves three context windows concurrently" `Quick
+        [ test_case "Browser and machine activity follow the visible config across save failure and reload" `Quick
+            test_browser_config_publication_follows_visible_file;
+          test_case "same model serves three context windows concurrently" `Quick
             test_same_model_context_windows_coexist;
           test_case "context declarations resolve by deployment scope" `Quick
             test_context_declaration_precedence_and_http_agreement;
@@ -6327,7 +6870,9 @@ let () =
             "deployment AGENT_CORE catalog modality priority strings resolve"
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
           test_case "exact-output lane config is ordered and rejects duplicates" `Quick
-            test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
+            test_exact_output_lane_config_is_ordered_and_rejects_duplicates
+        ; test_case "off exact lanes retain unavailable candidates" `Quick test_off_exact_lanes_retain_unavailable_candidates
+        ; test_case "exact lane activity preserves settings and required lanes" `Quick test_exact_lane_activity_preserves_configuration;
           test_case "exact-output lane cli_slots parse in order" `Quick
             test_exact_output_lane_cli_slots_parse_in_order;
           test_case "exact-output lane rejects unknown keys" `Quick
@@ -6360,7 +6905,7 @@ let () =
             "removed [runtime].structured_judge key is unknown"
             `Quick test_structured_judge_runtime_key_is_rejected;
           test_case
-            "save_config_text commits exact registry with runtime state"
+            "raw saves commit exact state and refuse stale editor revisions"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
@@ -6417,6 +6962,8 @@ let () =
             test_exact_cli_slots_carry_no_body_deadline_rule;
           test_case "replacement catalog targets skip the body deadline rule" `Quick
             test_replacement_catalog_targets_skip_the_body_deadline_rule;
+          test_case "saving an off lane without a body deadline retains candidates" `Quick
+            test_saving_off_lane_without_body_deadline_preserves_candidates;
           test_case "saving an exact slot without a body deadline is refused" `Quick
             test_saving_an_exact_slot_without_body_deadline_is_refused;
           test_case "an existing gap does not block an unrelated save" `Quick
@@ -6484,6 +7031,26 @@ let () =
             test_runtime_toml_rejects_non_positive_repeat_penalty;
           test_case "repeat-last-n below -1 is rejected" `Quick
             test_runtime_toml_rejects_repeat_last_n_below_minus_one;
+          test_case "the provider priority run limit parses" `Quick
+            test_runtime_toml_parses_the_provider_priority_run_limit;
+          test_case "a priority run limit below one is rejected" `Quick
+            test_runtime_toml_rejects_a_priority_run_limit_below_one;
+          test_case "a priority run limit reaches only bindings with max-concurrent" `Quick
+            test_a_priority_run_limit_reaches_only_bindings_with_max_concurrent;
+          test_case "a priority run limit no binding can use is rejected" `Quick
+            test_runtime_toml_rejects_a_priority_run_limit_no_binding_can_use;
+          test_case "a priority run limit on an official client is rejected" `Quick
+            test_runtime_toml_rejects_a_priority_run_limit_on_an_official_client;
+          test_case "repo glm-coding runtimes carry the priority run limit" `Quick
+            test_repo_glm_coding_runtimes_carry_the_priority_run_limit;
+          test_case "a save that changes an admitted allowance is refused" `Quick
+            test_a_save_that_changes_an_admitted_allowance_is_refused;
+          test_case "a save is refused only for the disagreement it introduces" `Quick
+            test_a_save_is_refused_only_for_the_disagreement_it_introduces;
+          test_case "a resume that changes an admitted allowance is refused" `Quick
+            test_a_resume_that_changes_an_admitted_allowance_is_refused;
+          test_case "judgment lanes join the priority queue" `Quick
+            test_judgment_lanes_join_the_priority_queue;
           test_case "repetition samplers off the ollama wire are rejected" `Quick
             test_runtime_toml_rejects_repetition_samplers_off_the_ollama_wire;
           test_case "repetition samplers on the ollama wire still parse" `Quick
@@ -6495,9 +7062,9 @@ let () =
           test_case "non-positive max-tokens is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_tokens;
           test_case
-            "runtime config admits an undeclared official-client seed"
+            "runtime config admits an official-client runtime"
             `Quick
-            test_runtime_config_validation_admits_undeclared_official_client_seed;
+            test_runtime_config_validation_admits_official_client_runtime;
           test_case
             "unknown capabilities key is rejected at load"
             `Quick test_unknown_capability_key_rejected_at_load;

@@ -1,0 +1,16 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  MASC Account Login                                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ codex-account-model-04-long-runtime-identifier (quota_exhausted)             │
+│ codex-account-model-05-long-runtime-identifier (quota_exhausted)             │
+│ codex-account-model-06-long-runtime-identifier (quota_exhausted)             │
+│ codex-account-model-07-long-runtime-identifier (quota_exhausted)             │
+│ codex-account-model-08-long-runtime-identifier (quota_exhausted)             │
+│ codex-account-model-09-long-runtime-identifier (quota_exhausted)             │
+│ codex-account-model-10-long-runtime-identifier (quota_exhausted)             │
+│ codex-account-model-11-long-runtime-identifier (quota_exhausted)             │
+│ [결과 6-13/13 · j/k:스크롤]                                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+  ↑↓/j/k:결과 스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기
+ › to alpha   (i to write)                                                      

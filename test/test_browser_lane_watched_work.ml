@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* The browser lane's waits keep what arrived as their window passed.
 
    Each wait raced work against a timer with [Fiber.first], which keeps
@@ -43,7 +46,7 @@ let connect ~sw ~clock browser =
 ;;
 
 let live client =
-  match Lane.resolve_target (Lane.Live_route (Some client.Lane.client_id)) with
+  match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some client.Lane.client_id)) with
   | Ok target -> target
   | Error error -> fail (Lane.selection_error_code error)
 ;;

@@ -37,7 +37,10 @@ let ok what = function
 let with_machine f =
   with_dir "msx-live-" (fun dir ->
     let ledger_dir = Filename.concat dir "ledger" in
-    Fun.protect ~finally:eject_if_loaded (fun () ->
+    Fun.protect ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
+      eject_if_loaded ()) (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       ok "load" (Lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None);
       f ~dir ~ledger_dir))
 
@@ -249,7 +252,11 @@ let dos_load ~dir program_bytes =
 
 let with_dos f =
   with_dir "dos-live-" (fun dir ->
-    Fun.protect ~finally:dos_eject_if_loaded (fun () -> f ~dir))
+    Fun.protect ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
+      dos_eject_if_loaded ()) (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      f ~dir))
 
 let dos_mark () =
   match Dos_lane.live ~since:None with

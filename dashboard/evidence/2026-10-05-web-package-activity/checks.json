@@ -1,0 +1,69 @@
+[
+  {
+    "name": "tests",
+    "command": [
+      "node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "src/lib/lane-package-activity.test.ts",
+      "src/components/lane-package-activity-panel.test.ts",
+      "src/components/lane-declaration-editor.test.ts",
+      "src/components/lane-addons-workspace.test.ts",
+      "src/components/lane-addons-panel.test.ts",
+      "src/components/lane-package-installer.test.ts",
+      "--config",
+      "vitest.config.ts",
+      "--no-file-parallelism",
+      "--maxWorkers=1"
+    ],
+    "exit_code": 0,
+    "log": "tests.txt",
+    "raw_log": "tests.txt.gz",
+    "raw_sha256": "96678f15173e6409cfd68a7e5530597a5cd3f5fd75518b76543845c28f7d1c14",
+    "normalization": "Trailing EOF whitespace only; raw output preserved as gzip."
+  },
+  {
+    "name": "typecheck",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "log": "typecheck.txt",
+    "raw_log": "typecheck.txt.gz",
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "normalization": "Trailing EOF whitespace only; raw output preserved as gzip."
+  },
+  {
+    "name": "lint",
+    "command": [
+      "node",
+      "node_modules/eslint/bin/eslint.js",
+      "src/lib/lane-package-activity.ts",
+      "src/lib/lane-package-activity-session.ts",
+      "src/lib/lane-package-activity.test.ts",
+      "src/lib/lane-declaration-sessions.ts",
+      "src/components/lane-package-activity-panel.ts",
+      "src/components/lane-package-activity-panel.test.ts",
+      "src/components/lane-addons-panel.ts"
+    ],
+    "exit_code": 0,
+    "log": "lint.txt",
+    "raw_log": "lint.txt.gz",
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "normalization": "Trailing EOF whitespace only; raw output preserved as gzip."
+  },
+  {
+    "name": "browser",
+    "command": [
+      "node",
+      "evidence/2026-10-05-web-package-activity/browser.mjs"
+    ],
+    "exit_code": 0,
+    "log": "browser.txt",
+    "raw_log": "browser.txt.gz",
+    "raw_sha256": "8f1b8099f1b130c08767d769bd67124c5b06fda988b54b8b5d02ed2b923171cf",
+    "normalization": "Trailing EOF whitespace only; raw output preserved as gzip."
+  }
+]

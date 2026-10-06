@@ -1,0 +1,91 @@
+{
+  "checked_at": "2026-10-04T18:12:27.359469+00:00",
+  "compiler": "5.5.1",
+  "scope": "Parsing only, not type/link or PTY validation",
+  "files": [
+    {
+      "path": "bin/masc_tui.ml",
+      "sha256": "4602872ee8aea3eacb3b484061c87f7ef3a4907cb4a311e16ff1ef9e9551d4ed",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.ml",
+      "sha256": "71b2136060e627a74e37a9a44862fbce12905e1df8c41f09b0664a571ce683b1",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.mli",
+      "sha256": "71b2136060e627a74e37a9a44862fbce12905e1df8c41f09b0664a571ce683b1",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "sha256": "4bd2be5e49e8f5732dd401cb6c9e59616b194ab41f16fb7794e1817e29b8a125",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.ml",
+      "sha256": "e9cf35550e41896fd8ea620a8e7ae8af69bc5995637d39572800103f1343b1ac",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_machine_activity.ml",
+      "sha256": "ecf4080ed9c3e393171a79fccd7dcb758c0be91ee0151fb016dbd36a7bc600ec",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_machine_activity.mli",
+      "sha256": "c0aeaf3b5e6ad54a5066d774e21ca7443cbb786d24926c67b03cf9fc3ea3cfd5",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_render.ml",
+      "sha256": "1a09237d94d5f3a6e045c27aecde94a1e3f994000a0e2f18f7ddeaff685924b9",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "sha256": "653eac5a8f3a282e105b4cf18380e91d8bf214329c16576ece33599759f6b466",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/toml_line_editor/toml_line_editor.ml",
+      "sha256": "379798dbce2df44e01139e52217325d00587dc24068ddf667f862afea3abf610",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/toml_line_editor/toml_line_editor.mli",
+      "sha256": "c04068627dd76c76a5db57b3a05bbf9103ef7691cdd81c019dae90fd1cac68d5",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_machine_activity.ml",
+      "sha256": "c1b59a1248525d915b21c18390a09f85286f10bc62fd431b07361d205d5a21c4",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/toml_line_editor/test_toml_line_editor.ml",
+      "sha256": "de65dde1467f61077ede281ed9f2c470363c39ff784f7f4a5bbfc96a14ace65f",
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "python_ast": [
+    "docs/evidence/2026-10-05-tui-machine-activity/check-bool-comments.py",
+    "docs/evidence/2026-10-05-tui-machine-activity/check-draft.py",
+    "test/test_tui_machine_activity_pty.py"
+  ],
+  "pty_import_and_signature": "checked without starting a TUI"
+}

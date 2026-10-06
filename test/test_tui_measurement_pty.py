@@ -236,7 +236,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         )
         if scenario == "oversized-lane":
             fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
-            fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+            fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
             fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (
                 200,
                 {

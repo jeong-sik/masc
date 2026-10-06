@@ -1,0 +1,39 @@
+{
+  "checked_at": "2026-10-04T17:32:54.245444+00:00",
+  "head": "5f8c3c6b5cd0cdfa4d1896b073d9e377f009c0ad",
+  "parent": "db39b4637939cfe1172590db485426b788e2417a",
+  "tested_source_tree": "52176ed3631ace5da733e4d27f2d40d5b4705abe",
+  "scope": "focused component/API mocked transport, no native/browser/fullsuite/CI/deployment",
+  "results": {
+    "red_cases_failed": 3,
+    "green_tests": 224,
+    "green_files": 6,
+    "test_exit": 0,
+    "tsc_exit": 0,
+    "eslint_exit": 0
+  },
+  "commands": [
+    "pnpm test src/components/browser-lane-activity-panel.test.ts src/components/lane-inventory-panel.test.ts src/components/settings-surface.test.ts src/components/runtime-toml-editor.test.ts src/components/exact-lane-activity-panel.test.ts src/components/model-setup-resume-control.test.ts",
+    "pnpm exec tsc --noEmit",
+    "pnpm exec eslint src/lib/browser-lane-activity-session.ts src/lib/browser-lane-activity.ts src/lib/browser-lane-observation.ts src/components/browser-lane-activity-panel.ts src/components/browser-lane-activity-panel.test.ts src/components/lane-inventory-panel.ts src/components/settings-surface.test.ts"
+  ],
+  "source_sha256": {
+    "changelog.d/41191.md": "55830177260b0f4ce5f626319e9330e83e224d6fd46e43be8813cd7d60b2b9a3",
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "5c77c5c531a2762ad621bbb40d2332ab540da768427711d1f4933fdff498b735",
+    "dashboard/src/components/browser-lane-activity-panel.ts": "cf931eff69013c5ce9e9070be2d8e6af76a5011140d02693afd6671844e23e94",
+    "dashboard/src/components/lane-inventory-panel.ts": "ddb98acbca0f460d9e52fab30eb7fc001308dd75863aafd7a0070bb812b8642c",
+    "dashboard/src/components/settings-surface.test.ts": "0f2c86c94a1a7cf4a840d9022bd33bbd6fde2f231685ed84c44a400ad4457187",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "a7ec909b3f5b0d1da75f7b4d3fe79bc0c11d331a1d27bc2629c030f23bd3c5f9",
+    "dashboard/src/lib/browser-lane-activity.ts": "9b740d939379f9da7aa91e586786bbf85665f5ffdce5f2225f9c9377f5b2ceb8",
+    "dashboard/src/lib/browser-lane-observation.ts": "2f7ae6c1a73dc359dc817784f07500c129dd5bb0d1504bfb611982ac8869af62",
+    "docs/design/browser-lane-examples.md": "27beaf2707d203d387478a442ea29155eb8fe1f8525387f13951c97284047634",
+    "docs/guides/tui-browser-lanes.md": "74d5d95a7060d177ab4577cdad42d31fbf4831de48ff6e653a25a8b129cc6733"
+  },
+  "artifact_sha256": {
+    "docs/evidence/2026-10-05-web-browser-commit-integration/README.md": "bf58839dbe106c10c5cc5ecb9c0ae38da260be445f744431c37e15a3040e6994",
+    "docs/evidence/2026-10-05-web-browser-commit-integration/red-tests.log": "53551576e207b925fcc12145da8cd24dca6af1f317e22516f07083aa3197bbb5",
+    "docs/evidence/2026-10-05-web-browser-commit-integration/tests.log": "519906fa1c5410615fc7af4e26d970d202c4942b0ab4753fb0c9a67b83b84c13",
+    "docs/evidence/2026-10-05-web-browser-commit-integration/typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-web-browser-commit-integration/eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

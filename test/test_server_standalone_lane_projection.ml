@@ -1010,6 +1010,23 @@ let test_every_lane_has_one_row_with_its_own_spec () =
     (List.sort (fun left right -> Bool.compare right left) flags)
     flags
 
+let test_off_lane_keeps_declarations_and_running_observation () =
+  let json = Projection.For_testing.snapshot_json_with ~now:100.
+    ~resolve_lane:(fun _ -> Projection.Disabled
+      {declared_slots=["first";"second"];declared_cli_slots=["cli"]})
+    ~jev_readiness:Typesafeai.Off ~exact_runs_total:1
+    ~exact_runs:[exact_run ~run_id:"accepted-before-off" ~lane:Exact.Librarian
+      ~started_at:50. ~status:Exact.Running]
+    ~verification_runs:[] ~goal_verification_runs:[] in
+  let lane = lane_by_id json "librarian_exact" in
+  let open Yojson.Safe.Util in
+  check string "off is configuration, not missing data" "off" (lane |> member "configuration_state" |> to_string);
+  check string "off is visible while accepted work finishes" "off" (lane |> member "status" |> to_string);
+  check int "running work remains observed" 1 (lane |> member "running_count" |> to_int);
+  check (list string) "candidate order retained" ["first";"second"]
+    (lane |> member "declared_slots" |> to_list |> List.map to_string)
+;;
+
 let () =
   run
     "server standalone lane projection"
@@ -1022,6 +1039,8 @@ let () =
             "all lanes and observation states"
             `Quick
             test_snapshot_names_every_lane_and_keeps_observed_truth
+        ; test_case "off retains declarations and accepted running work" `Quick
+            test_off_lane_keeps_declarations_and_running_observation
         ; test_case
             "runs without a slot are split by why"
             `Quick

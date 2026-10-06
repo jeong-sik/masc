@@ -802,6 +802,14 @@ let kauto_mark_width = 1
    row is a schedule the reader cannot tell from a one-shot. *)
 let kauto_minimum_recurrence_width = schedule_minimum_recurrence_width
 
+(* ...and the width is measured from the page, the way the BY column is: a
+   fixed twelve cells cut "every 30 minutes" to "eve… minutes" on a frame
+   with hundreds of cells to spare, losing the number that tells a five-minute
+   patrol from a thirty-minute one. The cap keeps one long cron from taking
+   the clocks' room; a narrower pane still gives the column up whole through
+   {!kauto_drop_order} before it cuts its text. *)
+let kauto_maximum_recurrence_width = 40
+
 (* The BY column carries the projection's own actor reading -- a display
    name and its kind, "won-chik (human_operator)". A floor of 16 holds the
    shortest names whole; the cap keeps one long identifier from taking the
@@ -898,6 +906,13 @@ let kauto_by_width words =
     kauto_minimum_by_width words
   |> min kauto_maximum_by_width
 
+(* The RECURRENCE column, measured from the recurrences on the page. *)
+let kauto_recurrence_width words =
+  List.fold_left
+    (fun widest word -> max widest (Masc_tui_message_layout.display_width word))
+    kauto_minimum_recurrence_width words
+  |> min kauto_maximum_recurrence_width
+
 (* The status, clock and outcome widths are the caller's: this module does
    not link the schedule contract, so the status comes measured from the
    contract's own word list, the clock from the stamp format, and the
@@ -908,17 +923,18 @@ type kauto_layout = {
   k_status_width : int;
   k_clock_width : int;
   k_outcome_width : int;
+  k_recurrence_width : int;
   k_by_width : int;
 }
 
 let kauto_layout ~inner_width ~status_width ~clock_width ~outcome_width
-    ~by_width =
+    ~recurrence_width ~by_width =
   let width = function
     | Kauto_mark -> kauto_mark_width
     | Kauto_status -> status_width
     | Kauto_triggered | Kauto_received | Kauto_requested -> clock_width
     | Kauto_outcome -> outcome_width
-    | Kauto_recurrence -> kauto_minimum_recurrence_width
+    | Kauto_recurrence -> recurrence_width
     | Kauto_by -> by_width
     | Kauto_what -> kauto_minimum_what_width
   in
@@ -928,6 +944,7 @@ let kauto_layout ~inner_width ~status_width ~clock_width ~outcome_width
   ; k_status_width = status_width
   ; k_clock_width = clock_width
   ; k_outcome_width = outcome_width
+  ; k_recurrence_width = recurrence_width
   ; k_by_width = by_width
   }
 
@@ -951,7 +968,7 @@ let kauto_cell ~styles ~(layout : kauto_layout) values = function
         values.krow_received
   | Kauto_recurrence ->
       Table.cell ~style:styles.kstyle_recurrence ~header:"RECURRENCE"
-        ~width:kauto_minimum_recurrence_width values.krow_recurrence
+        ~width:layout.k_recurrence_width values.krow_recurrence
   | Kauto_by ->
       Table.cell ~style:styles.kstyle_by ~header:"BY"
         ~width:layout.k_by_width values.krow_by

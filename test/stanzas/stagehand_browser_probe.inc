@@ -3,4 +3,4 @@
 (executable
  (name stagehand_browser_probe)
  (modules stagehand_browser_probe)
- (libraries masc masc.server masc.browser_lane masc.time_compat masc.tool_types eio eio_main yojson base64 unix))
+ (libraries masc.browser_configuration masc masc.server masc.browser_lane masc.time_compat masc.tool_types eio eio_main yojson base64 unix))

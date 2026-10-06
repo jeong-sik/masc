@@ -31,7 +31,8 @@ let target =
       | Some Tui_types.Text_browser_url -> "browser-url"
       | Some Tui_types.Text_ask_answer -> "ask-answer"
       | Some Tui_types.Text_board_draft -> "board-draft"
-      | Some Tui_types.Text_fusion_launch -> "fusion-launch"))
+      | Some Tui_types.Text_fusion_launch -> "fusion-launch"
+      | Some Tui_types.Text_goal_drop_reason -> "goal-drop-reason"))
     ( = )
 ;;
 
@@ -54,7 +55,7 @@ let test_model_form_requires_current_workspace_reading () =
       routing=Routing_active; routing_requires_restart=false; keeper=Not_configured;
       keeper_requires_restart=false; configured_count=0; pending_keys=[];
       applied_keys=[]; preempted_keys=[] } in
-  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_rows=[];rcv_metadata=metadata};
+  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata};
   check bool "current successful reading permits the selected model" true
     (Tui_types.selected_config_model state=Ok row);
   state.runtime_config_view_error <- Some "read failed";
@@ -233,6 +234,35 @@ let test_a_board_post_being_written_claims_its_draft () =
   state.Tui_types.board_mode <- Tui_types.Board_compose;
   check target "writing a post" (Some Tui_types.Text_board_draft)
     (resolved state)
+;;
+
+(* A drop reason claims typing only on the detail of the Goal it was opened
+   for: the Server refuses a drop without one, so the letters that are action
+   keys elsewhere on the detail must reach the reason. An armed action is a
+   key, not a field, and a compact frame does not draw the field. *)
+let test_a_drop_reason_claims_typing_on_its_goal_detail () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Planning;
+  state.Tui_types.planning_mode <- Tui_types.Planning_detail "goal-a";
+  check target "reading the detail" None (resolved state);
+  state.Tui_types.goal_action_pending <-
+    Some (Tui_types.Goal_action_armed { goal_id = "goal-a"; action = Goal_phase.Public_action.Pause });
+  check target "an armed action is a key" None (resolved state);
+  state.Tui_types.goal_action_pending <-
+    Some (Tui_types.Goal_drop_reason { goal_id = "goal-a"; reason = "" });
+  check target "typing the reason" (Some Tui_types.Text_goal_drop_reason) (resolved state);
+  check (option string) "the reason is the detail's" (Some "")
+    (Tui_types.goal_drop_reason_for state "goal-a");
+  check target "compact" None (resolved ~compact_viewport:true state);
+  state.Tui_types.planning_mode <- Tui_types.Planning_detail "goal-b";
+  check target "another Goal's detail" None (resolved state);
+  check (option string) "no reason for another Goal" None
+    (Tui_types.goal_drop_reason_for state "goal-b");
+  state.Tui_types.planning_mode <- Tui_types.Planning_list;
+  check target "the list" None (resolved state);
+  state.Tui_types.planning_mode <- Tui_types.Planning_detail "goal-a";
+  check bool "q types into the reason" false
+    (Tui_types.quit_key_allowed_for (resolved state))
 ;;
 
 (* The Fusion launch form takes typing only once it is open: while the
@@ -626,6 +656,8 @@ let () =
             test_the_runtime_picker_filter_claims_once_opened;
           test_case "the keeper runtime picker filter claims once opened" `Quick
             test_the_keeper_runtime_picker_filter_claims_once_opened;
+          test_case "a drop reason claims typing on its Goal detail" `Quick
+            test_a_drop_reason_claims_typing_on_its_goal_detail;
           test_case "the Fusion launch form claims while open" `Quick
             test_the_fusion_launch_form_claims_while_open;
           test_case "the loop drops a launch form left on another surface" `Quick

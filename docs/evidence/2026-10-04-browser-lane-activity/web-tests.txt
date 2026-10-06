@@ -1,0 +1,19 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-browser-lane-activity-20261004/dashboard
+
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows browser off and unavailable without losing executor or live observations 33ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > searches all families and offers existing owner destinations without inventing controls 16ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows off with retained candidates and work finishing independently 13ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > labels the retained reading after refresh fails and retries on demand 13ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > does not accept late rows from another workspace or retain its visible rows 62ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > does not read or keep rows while workspace authority is unknown 12ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > preserves browser activity independently of registration and requires an explicit observation 9ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > reads the actual TUI fixture contract with every built-in and exact observation 1ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > keeps disabled candidates and running observations, rejecting contradictory activity 1ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > rejects mismatched families, duplicate identities, missing builtins and conflicting exact readings 2ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > keeps off intent and unfinished retained cleanup, rejecting nonboolean flags 1ms
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  23:48:28
+   Duration  1.81s (import 35%, transform 28%, environment 16%, setup 11%, tests 10%)

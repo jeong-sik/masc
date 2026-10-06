@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/integrate-activity-review-responses-20261005/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  221 passed (221)
+   Start at  06:45:20
+   Duration  7.19s (tests 50%, import 19%, transform 16%, environment 8%, setup 7%)
+
+    Isolate  4 workers spawned · ~235ms startup each (spawn + environment, per file)
+             at least ~704ms faster with isolate: false — reuses workers across files instead of one per file
+

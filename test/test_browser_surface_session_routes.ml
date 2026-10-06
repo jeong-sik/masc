@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* The dashboard's session and navigation routes: the request names a lane
    the server owns, and the verb reaches that lane's executor only. *)
 open Alcotest

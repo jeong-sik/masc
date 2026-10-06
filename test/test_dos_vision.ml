@@ -36,11 +36,13 @@ let test_keeper_screen_carries_the_frame () =
   Config_dir_resolver.reset ();
   Fun.protect
     ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
       eject_held ();
       Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
       Config_dir_resolver.reset ();
       Fs_compat.remove_tree base)
     (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       let config = Workspace.default_config base in
       let meta =
         match Masc_test_deps.meta_of_json_fixture (`Assoc [ ("name", `String "dos-player") ]) with

@@ -99,7 +99,7 @@ let with_fixture f =
                       stop=(fun () -> Ok ());container_id=instance_id} in on_created connection;Ok connection);
                   image_ready=(fun ~package:_ -> Ok ());
                   acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-                  recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
+                  recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())} in
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend backend (fun () ->
                   f clock config directory root started;
@@ -214,6 +214,16 @@ sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
       (Result.is_error (read_as "editor-keeper"));
     check bool "new verified owner can read the reassigned document" true
       (Result.is_ok (read_as "next-keeper"));
+    let current = read config directory "transfer.toml" in
+    ignore (save config (request ~revision:(text "source_revision" current) ~mode:"save"
+      ~file_name:"transfer.toml" ("enabled = false\n" ^ bytes "editor-owner-b")));
+    ignore (reconcile config directory);
+    await _clock (fun () -> live config = []);
+    ignore (reconcile config directory);
+    check bool "disabled preserved document remains readable to its Keeper" true
+      (Result.is_ok (read_as "next-keeper"));
+    check bool "disabled document remains private after worker cleanup" true
+      (Result.is_error (read_as "editor-keeper"));
     let upstream_denial installation_id = Runtime.dispatch ~caller:"foreign-keeper" ~config
         ~operation:Runtime.Attach (`Assoc [
           "manifest_path", `String (Filename.concat _root ".masc/package.toml");

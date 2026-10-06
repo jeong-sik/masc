@@ -171,6 +171,14 @@ val admitted_target_with_enable_thinking : admitted_target -> bool -> admitted_t
     in the request body and therefore in the plan fingerprint. The flag reaches
     the wire only where the model's thinking control can carry it. *)
 
+val selected_target_with_admission_class
+  :  selected_target
+  -> Admission_class.t
+  -> selected_target
+(** Rebuild a selected target whose requests join the given admission queue.
+    The class orders permit waits only; it is not part of the target's
+    identity, request body or evidence. *)
+
 val selected_target_identity : selected_target -> target_identity
 val selected_target_catalog_generation : selected_target -> catalog_generation
 val selected_target_catalog_evidence : selected_target -> catalog_evidence

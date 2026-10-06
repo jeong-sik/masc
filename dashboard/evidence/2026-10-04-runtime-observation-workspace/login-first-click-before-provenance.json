@@ -1,0 +1,19 @@
+{
+  "command": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "vitest.config.ts",
+    "--no-file-parallelism",
+    "--maxWorkers=1",
+    "--reporter=verbose",
+    "src/components/runtime-observation-workspace.test.ts",
+    "-t",
+    "immediately after the account mounts"
+  ],
+  "exit_code": 1,
+  "source_sha256": "aa350579c47b89d3302ede65c9f23c91b8602e76493f061e4f892771d2859ac6",
+  "test_sha256": "e590d4ef29bcac8d379f76cc6d1b142c1bce9c7d9a7b1d89338581f9464c5161",
+  "scope": "WIP before layout-effect repair; regression from independent source review"
+}

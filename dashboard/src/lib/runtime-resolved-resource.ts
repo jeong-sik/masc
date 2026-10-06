@@ -7,15 +7,14 @@
 // it renders; a module-level resource avoids a per-card fetch of the same
 // fleet-wide document.
 
-import { createAsyncResource } from './async-state'
+import { createRuntimeWorkspaceResource } from './runtime-workspace-resource'
 import { fetchRuntimeResolved, type RuntimeResolvedResponse } from '../api/dashboard'
 
-const runtimeResolvedResource = createAsyncResource<RuntimeResolvedResponse>()
+const runtimeResolvedResource = createRuntimeWorkspaceResource<RuntimeResolvedResponse>(signal => fetchRuntimeResolved({ signal }))
 export const runtimeResolvedState = runtimeResolvedResource.state
 
 export function loadRuntimeResolved(): Promise<void> {
-  if (runtimeResolvedState.value.status !== 'idle') return Promise.resolve()
-  return runtimeResolvedResource.load(fetchRuntimeResolved)
+  return runtimeResolvedResource.load()
 }
 
 export function resetRuntimeResolved(): void {
@@ -23,15 +22,5 @@ export function resetRuntimeResolved(): void {
 }
 
 export async function reloadRuntimeResolved(): Promise<void> {
-  runtimeResolvedResource.reset()
-  let loadError: unknown = null
-  await runtimeResolvedResource.load(async () => {
-    try {
-      return await fetchRuntimeResolved()
-    } catch (error) {
-      loadError = error
-      throw error
-    }
-  })
-  if (loadError) throw loadError
+  await runtimeResolvedResource.reload()
 }

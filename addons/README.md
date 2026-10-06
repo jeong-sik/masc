@@ -66,11 +66,17 @@ docker build -f addons/web-project/Dockerfile -t masc-lane-web-project:0.1.0 add
 docker build -f addons/msx-observer/Dockerfile -t masc-lane-msx-observer:0.2.0 addons
 ```
 
-`max_reply_bytes` bounds each worker reply, acquired input, and namespaced host
-observation. Packages must leave room for the host's instance/sequence identity
-prefixes. A reply that fits the worker wire limit can therefore be explicitly
-refused before storage if namespacing exceeds that observation envelope; relation
-counts do not grant extra host storage capacity.
+`max_reply_bytes` is declared once and several host limits read it today:
+the size of a message the host accepts from the worker, the combined input the
+host acquires for the package, the namespaced observation the host retains,
+the model request and result it stores for host sampling, the aggregate of
+retained evidence it re-reads, and the record it reads back. Packages must
+leave room for the host's instance/sequence identity prefixes. A reply that
+fits the worker wire limit can therefore be explicitly refused before storage
+if namespacing exceeds that observation envelope; relation counts do not
+grant extra host storage capacity. Raising it raises every one of those
+limits together. [RFC-0471](../docs/rfc/RFC-0471-max-reply-bytes-bounds-one-thing.md)
+proposes narrowing it to the worker message.
 
 Each manifest specifies its worker's resource envelope. The Web, MSX, statistics,
 frame-progress and value-difference examples use half a CPU, 128 MiB memory,

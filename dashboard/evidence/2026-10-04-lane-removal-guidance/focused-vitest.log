@@ -1,0 +1,38 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-lane-removal-and-key-guidance-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts --reporter verbose
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-lane-removal-and-key-guidance-20261004/dashboard
+
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > renders the owning package display contract in order while retaining raw fields and binding schema 21ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > shows unavailable for absent or incorrectly typed readings without inventing successful values 5ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects malformed package display contracts instead of discarding them 4ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > opens original evidence from horizontal lanes without filtering and includes empty workers 28ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows keyboard selection of simultaneous observations and exposes missing relationship targets 18ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > projects an unknown package and its common evidence without a domain-specific renderer 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > shows installed and pending TOML declarations independently of observation health 9ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps the previous instance visible while a changed declaration and parse errors remain unresolved 26ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps detached history without offering edits to absent or differently owned files 22ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows detaching while observation is in progress without waiting for observe 13ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > distinguishes semantic lanes from the same package and keeps their full identities accessible 6ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > distinguishes matching local lanes from UUIDv7 instances sharing a timestamp prefix 9ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > queries the selected time and lane, showing partial coverage and explicit evidence action 20ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps a failed optional read local and allows leaving while a read remains pending 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > attaches a user package with the supplied binding through the common contract 9ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > selects a cross-lane time range by dragging and submits that exact query window 19ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > does not restore a cleared slice when its older request finishes 14ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects unknown control states and malformed common rows instead of inventing defaults 2ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > submits an advertised package action with an exact binding while slice and other controls remain usable 32ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > retains uncertain requests without replay and cancels a held status read independently of slice 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > reports outcome_unknown honestly without turning the receipt into successful completion 18ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > reports failed_before_effect honestly without turning the receipt into successful completion 17ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > requires selection after incarnation replacement while preserving old receipts and giving new requests unique IDs 27ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps last recorded status visible when a later receipt read fails 21ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects non-object action input and hides new actions for detached instances 19ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > uses real action transport with exact request identity and rejects mismatched or malformed receipts 2ms
+
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+   Start at  14:57:43
+   Duration  1.14s (tests 38%, import 22%, environment 15%, transform 12%, setup 12%)

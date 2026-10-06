@@ -1,0 +1,40 @@
+{
+  "base_head": "7936cd1d15bdd6e6a72197a904046b9e22a3b7a8",
+  "compiler": "OCaml 5.5.1",
+  "baseline_tui_sha256": "82ab2209fc1a58a873726e84fd66d7047daa96469d6c8f44152427f5ef26f7c1",
+  "source_sha256": {
+    "bin/masc_tui_memory_usage.ml": "7d5c76f93531f9ec483485546b3c992e2f959c5252c371c8fd51ffcb287a3be9",
+    "bin/masc_tui_memory_usage.mli": "903708f6a15bb9c21a30dbcb0ac847d7a5043ce6fd97b2bf0551e11f7bbd0fd6",
+    "lib/server/server_keeper_turn_records.ml": "a3d4ffb28addd141b6dcae6eb19ebf155b39d84e28bc8daefebee9e7ced3102e",
+    "lib/server/server_keeper_turn_records.mli": "ad56a71eda038868526cef27852af92c929331fbdf1ebb9ed05eae310c556218",
+    "lib/server/server_dashboard_http_keeper_api.ml": "506206d780aa642e14816acfdf48d366c733bad21deb4ef4e89be9986d258a07",
+    "bin/masc_tui_types.ml": "9e5720ee79bf9e60ad309130fa5019b1c6b342794b779491f7ab014613835693",
+    "bin/masc_tui_render_memory.ml": "a471e0ebba053a2f9628403112015f540c1084e9754d7fc2e5b8cf413265934d",
+    "test/test_memory_input_store.ml": "910872b48b5b066cf000a1e81ca2ae4041be9364efc01ede8891e2675842d898",
+    "test/test_tui_memory_usage.ml": "21cd643251c56c3d4009237c031d774c6f8bc325902497071ae5eacce1e7e3c0",
+    "test/test_tui_memory_selection_refresh_pty.py": "9280ddd41ce9a3b9d0275b8debe0eda3a3ac8c435da8039d7bd15e54d9197eee",
+    "test/test_tui_memory_input_stats_pty.py": "dbd7f1eb5a7dd26ab24f8fbf0de4c9c91c151d0c1a92284cc837e19b7c719af5",
+    "lib/dated_jsonl/dated_jsonl.ml": "c74ec71ebb473a2ef7addd6227605bd655069d0ea27aa8a40ab941f17fcec237",
+    "lib/types/turn_record.ml": "4b672d472822da76d81942d51873b9168ef380bdc4689f90f7e9506f70ee9c04"
+  },
+  "checks": {
+    "aggregation_native_tests": "3/3 PASS",
+    "storage_to_memory_native_tests": "3/3 PASS",
+    "live_turn_record_decode": "50 records,18 token samples,0 byte samples",
+    "existing_binary_selection_drift": "reproduced",
+    "candidate_full_tui_pty": "not_run"
+  },
+  "native_test_binary_sha256": {
+    "aggregation": "56f2e36ef646fceab27ab5fb0f7d859d7d965b25a0d0812823b2c7dd10b9f601",
+    "storage_boundary": "01e151311c93b00b915896e586fcfae8a7c9684f95a2802e55a3845ee7006e64"
+  },
+  "compiled_storage_probe_sources_sha256": {
+    "masc_tui_memory_usage.ml": "7d5c76f93531f9ec483485546b3c992e2f959c5252c371c8fd51ffcb287a3be9",
+    "server_keeper_turn_records.ml": "a3d4ffb28addd141b6dcae6eb19ebf155b39d84e28bc8daefebee9e7ced3102e",
+    "test_memory_input_store.ml": "910872b48b5b066cf000a1e81ca2ae4041be9364efc01ede8891e2675842d898"
+  },
+  "cached_dependency_source_matches": {
+    "lib/dated_jsonl/dated_jsonl.ml": true,
+    "lib/types/turn_record.ml": true
+  }
+}

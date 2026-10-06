@@ -45,3 +45,13 @@ val live_from_published_mark : Machine_lane.t -> since:since option -> live_answ
 (** The first step of [GET /api/v1/lane-addons/live]. It reads the machine's
     published state without taking the machine lock and never suspends.
     [Running] goes to the locked read to observe the completed run. *)
+
+val query_fields : Httpun.Request.t -> (string * string) list
+(** Preserve repeated query values so both transports reject duplicates. *)
+
+val package_catalog_payload : Mcp_server.server_state -> (string * string) list ->
+  (Yojson.Safe.t, string) result
+val package_preview_payload : Mcp_server.server_state -> (string * string) list ->
+  (Yojson.Safe.t, string) result
+(** Shared H1/H2 payloads. The transport applies its read-auth gate before
+    calling these filesystem readers. *)

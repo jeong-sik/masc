@@ -358,12 +358,15 @@ export function parseExactLaneRunResponse(raw: unknown): ExactLaneRunRecord {
 export type ExactLaneRunCursor = { startedAt: number; runId: string }
 
 export async function fetchExactLaneRuns(
-  opts?: AbortableRequestOptions & { limit?: number; before?: ExactLaneRunCursor },
+  opts?: AbortableRequestOptions & { limit?: number; before?: ExactLaneRunCursor; lane?: ExactLane },
 ): Promise<DashboardExactLaneRunsResponse> {
   const params = new URLSearchParams()
   // This consumer decodes native exact-output rows; Task verification has
   // its own monitor source. Keep the filter on every cursor request.
   params.set('run_kind', 'exact_output')
+  // The server applies the lane filter before it pages, so another busy lane
+  // cannot fill this page and hide the requested lane's runs.
+  if (opts?.lane != null) params.set('lane', opts.lane)
   if (opts?.limit != null) params.set('limit', String(opts.limit))
   if (opts?.before != null) {
     params.set('before_started_at', String(opts.before.startedAt))

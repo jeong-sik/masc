@@ -1,0 +1,594 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+ ❯ src/lib/machine-lane-activity.test.ts (41 tests | 9 failed) 859ms
+   ❯ machine activity prototype isolation (9)
+     × does not hide or inherit keys: [__proto__.machines.msx]
+enabled = false 101ms
+     × does not hide or inherit keys: __proto__.machines.msx.enabled = false 96ms
+     × does not hide or inherit keys: [machines.__proto__]
+enabled = false 94ms
+     × does not hide or inherit keys: [machines]
+__proto__ = true 94ms
+     × does not hide or inherit keys: machines = {__proto__ = {enabled = fals… 92ms
+     × does not hide or inherit keys: [machines.msx]
+__proto__ = true 93ms
+     × does not hide or inherit keys: [machines.msx.__proto__]
+enabled = false 98ms
+     × does not hide or inherit keys: [machines.constructor]
+enabled = false 93ms
+     × does not hide or inherit keys: [machines.msx]
+toString = false 90ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [__proto__.machines.msx]
+enabled = false
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "[__proto__.machines.msx]\nenabled = false";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: __proto__.machines.msx.enabled = false
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "__proto__.machines.msx.enabled = false";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.__proto__]
+enabled = false
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "[machines.__proto__]\nenabled = false";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines]
+__proto__ = true
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "[machines]\n__proto__ = true";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: machines = {__proto__ = {enabled = fals…
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "machines = {__proto__ = {enabled = false}}";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.msx]
+__proto__ = true
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "[machines.msx]\n__proto__ = true";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.msx.__proto__]
+enabled = false
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "[machines.msx.__proto__]\nenabled = false";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.constructor]
+enabled = false
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "[machines.constructor]\nenabled = false";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.msx]
+toString = false
+Error: Command failed: /opt/homebrew/Cellar/node/26.3.0/bin/node --import tsx --input-type=module --eval
+      import { readMachineActivity, writeMachineActivity } from "http://localhost:3000/src/lib/machine-lane-activity.ts";
+      const before = Object.getOwnPropertyNames(Object.prototype).sort();
+      const capture = fn => { try { return { value: fn() }; } catch (error) { return { error: String(error) }; } };
+      const source = "[machines.msx]\ntoString = false";
+      const read = capture(() => readMachineActivity(source, 'msx'));
+      const write = capture(() => readMachineActivity(writeMachineActivity(source, 'msx', false), 'msx'));
+      const empty = capture(() => readMachineActivity('', 'msx'));
+      const after = Object.getOwnPropertyNames(Object.prototype).sort();
+      console.log(JSON.stringify({ before, after, read, write, empty }));
+
+node:internal/modules/esm/load:50
+    throw new ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supportedSchemes);
+          ^
+
+Error [ERR_UNSUPPORTED_ESM_URL_SCHEME]: Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'http:'
+    at getSourceSync (node:internal/modules/esm/load:50:11)
+    at defaultLoadSync (node:internal/modules/esm/load:156:34)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:805:12)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at load (file:///private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:828:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:786:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:497:31) {
+  code: 'ERR_UNSUPPORTED_ESM_URL_SCHEME'
+}
+
+Node.js v26.3.0
+
+ ❯ load ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/tsx@4.23.12/node_modules/tsx/dist/register-C4vWVmug.mjs:2:5714
+ ❯ src/lib/machine-lane-activity.test.ts:82:31
+     80|       console.log(JSON.stringify({ before, after, read, write, empty }…
+     81|     `
+     82|     const result = JSON.parse(execFileSync(process.execPath,
+       |                               ^
+     83|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     84|     expect(result.after).toEqual(result.before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 32 passed (41)
+   Start at  03:39:42
+   Duration  1.36s (tests 69%, environment 14%, setup 12%, transform 4%, import 1%)

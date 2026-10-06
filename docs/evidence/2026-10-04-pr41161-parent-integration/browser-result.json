@@ -1,0 +1,69 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual shared runtime resources and two direct components with synthetic HTTP; no backend/Keeper/deployment proof.",
+  "assertions": [
+    "one catalog/resolved read shared by initial consumers",
+    "pending A data hidden",
+    "B failures show errors without A capabilities or candidates",
+    "late A replies cannot restore A",
+    "explicit B retry restores capabilities and candidates",
+    "unknown authority hides readings and sends no GET",
+    "restored A automatically loads new readings in still-mounted consumers",
+    "all observed requests are GET"
+  ],
+  "requests": [
+    {
+      "workspace": "A",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

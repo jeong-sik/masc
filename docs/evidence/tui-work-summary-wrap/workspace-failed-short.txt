@@ -1,0 +1,16 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace (28)  15:50:07  HTTP [connected]                              
+ ────────────────────────────────────────────────────────────────────────────── 
+  ┌ Repositories · j/k select                                                ┐  
+  │ NAME               BRANCH       STATUS    SYNC   PATH                    │  
+  │ failed-repo        main         error     auto   /srv/ma…ent/failed-repo │  
+  └──────────────────────────────────────────────────────────────────────────┘  
+  ┌ failed-repo                                                              ┐  
+  │ Error: checkout unavailable: refresh credentials                         │  
+  │ Path:                                                                    │  
+  │ More context · enlarge the terminal                                      │  
+  └──────────────────────────────────────────────────────────────────────────┘  
+
+  j/k:scroll  H:recent activity  Enter:browse  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                      

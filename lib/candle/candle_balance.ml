@@ -1,5 +1,13 @@
 module Names = Map.Make (String)
 module Goals = Set.Make (String)
+module Grant_key = struct
+  type t = string * string
+  let compare (keeper, reason) (keeper', reason') =
+    match String.compare keeper keeper' with
+    | 0 -> String.compare reason reason'
+    | order -> order
+end
+module Grants = Set.Make (Grant_key)
 
 type t =
   { balances : int Names.t
@@ -9,6 +17,7 @@ type t =
   ; issued : Z.t
   ; burned : Z.t
   ; paid_goals : Goals.t
+  ; grants : Grants.t
   ; owned : Keeper_portrait_item.t list Names.t
   ; selections : (Keeper_portrait_item.slot * Candle_event.equipment_choice) list Names.t
   }
@@ -21,6 +30,8 @@ type error =
   | Duplicate_payment of string
   | Balance_overflow of string
   | Negative_purchase of string
+  | Invalid_grant of { keeper : string; amount_milli : int }
+  | Duplicate_grant of { keeper : string; reason : string }
   | Unowned_equipment of {keeper : string; item : Keeper_portrait_item.t}
   | Wrong_equipment_slot of Keeper_portrait_item.t
   | Already_owned of
@@ -46,6 +57,10 @@ let error_to_string = function
   | Unowned_equipment {keeper;item} -> keeper ^ " does not own " ^ Keeper_portrait_item.id item
   | Wrong_equipment_slot item -> "wrong equipment slot for " ^ Keeper_portrait_item.id item
   | Negative_purchase keeper -> "negative purchase amount for " ^ keeper
+  | Invalid_grant { keeper; amount_milli } ->
+    Printf.sprintf "invalid grant of %d milli-Candle to %s" amount_milli keeper
+  | Duplicate_grant { keeper; reason } ->
+    Printf.sprintf "%s was already granted %S" keeper reason
   | Already_owned { keeper; item } ->
     Printf.sprintf "%s already owns %s" keeper (Keeper_portrait_item.id item)
   | Insufficient_balance { keeper; available_milli; required_milli } ->
@@ -57,7 +72,8 @@ let error_to_string = function
 ;;
 
 let empty = { balances = Names.empty; last_at = Names.empty; half_life = None; through_at = None;
-  issued = Z.zero; burned = Z.zero; paid_goals = Goals.empty; owned = Names.empty; selections = Names.empty }
+  issued = Z.zero; burned = Z.zero; paid_goals = Goals.empty; grants = Grants.empty;
+  owned = Names.empty; selections = Names.empty }
 
 let half_life state = state.half_life
 
@@ -175,6 +191,27 @@ let purchase state ~at ~keeper ~item ~amount_milli =
       }
 ;;
 
+let grant state ~at ~keeper ~amount_milli ~reason =
+  let* () = match state.half_life with None -> Error Missing_half_life | Some _ -> Ok () in
+  let* state = stamp state ~at in
+  let* state = advance_keeper state ~at ~keeper in
+  let current = balance state ~keeper in
+  if amount_milli <= 0
+  then Error (Invalid_grant { keeper; amount_milli })
+  else if Grants.mem (keeper, reason) state.grants
+  then Error (Duplicate_grant { keeper; reason })
+  else if amount_milli > max_int - current
+  then Error (Balance_overflow keeper)
+  else
+    Ok
+      { state with
+        balances = Names.add keeper (current + amount_milli) state.balances
+      ; last_at = Names.add keeper at state.last_at
+      ; issued = Z.add state.issued (Z.of_int amount_milli)
+      ; grants = Grants.add (keeper, reason) state.grants
+      }
+;;
+
 let choices state ~keeper =
   match Names.find_opt keeper state.selections with Some choices -> choices | None -> []
 
@@ -210,6 +247,8 @@ let of_events ~at events =
          | Candle_event.Equipped e -> equip state ~keeper:e.keeper ~slot:e.slot ~choice:e.choice
          | Candle_event.Purchased p ->
            purchase state ~at:event.at ~keeper:p.keeper ~item:p.item ~amount_milli:p.amount_milli
+         | Candle_event.Granted g ->
+           grant state ~at:event.at ~keeper:g.keeper ~amount_milli:g.amount_milli ~reason:g.reason
          | Candle_event.Snapshot _
          | Candle_event.Payout_owed _
          | Candle_event.Candidates _

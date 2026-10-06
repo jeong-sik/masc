@@ -136,7 +136,6 @@ val turn_progress_callbacks :
   downstream:(Agent_core.Types.sse_event -> unit) option ->
   turn_id:int ->
   (string -> unit)
-  * bool
-  * (unit -> unit) option
-  * (unit -> unit) option
+  * (unit -> unit)
+  * (unit -> unit)
   * (Agent_core.Types.sse_event -> unit) option

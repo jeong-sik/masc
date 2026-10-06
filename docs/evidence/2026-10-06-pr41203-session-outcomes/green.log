@@ -1,0 +1,15 @@
+compdef:153: _comps: assignment to invalid subscript range
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/p2-41203/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  169 passed (169)
+   Start at  10:07:58
+   Duration  2.58s (tests 33%, transform 27%, import 25%, environment 8%, setup 7%)
+
+  Transform  transforming modules took 2.21s · 27% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+vitest_exit=0

@@ -1,0 +1,52 @@
+{
+  "base": "d819bd3221b614a0f7c1731752556ccac715de3a",
+  "pre_response_head": "2c9198d38fd142fc970fe95612b7887c92b71109",
+  "finding": "Old comparison could bypass fresh-read recovery after authority change",
+  "response": "Clear current on changed-authority settlement and guard useCurrent with idle/needsRead",
+  "regression_before": {
+    "failed": 2,
+    "log": "response-before.log"
+  },
+  "regression_after": {
+    "passed": 59,
+    "failed": 0,
+    "files": 4,
+    "log": "response-after.log"
+  },
+  "typecheck_exit": 0,
+  "eslint_exit": 0,
+  "source_sha256": {
+    "dashboard/src/lib/lane-declaration-sessions.ts": "5c785f31f6a9b77b3e2b49661cef8e19bb5dbfc42fc64dd5e9e5b1eeb6dbae0b",
+    "dashboard/src/components/lane-declaration-editor.ts": "76ab9e0896fbcdff9f68eb01c68e918d323fcc80a520f2bd333ff53a74703d57",
+    "dashboard/src/components/lane-addons-panel.ts": "624e705fb50080985626a8c1bc744f5ea7fb46e30d91476d7df10d0ff965192e",
+    "dashboard/src/components/lane-declaration-editor.test.ts": "f7b1284bf68cb4f05c8ee9b5fb29cd387ac6ccccb8328dd1f021d2062557a11f",
+    "dashboard/src/components/lane-addons-panel.test.ts": "8c22c090367d6856d9cc2bd743d330fab5d57236fbe86ce759468ba0816238eb",
+    "docs/guides/lane-declaration-editor.md": "c1a534c89ecd90d7efd87020d5b6a7f33bb4bbab5b1195203398c321e80cb43a"
+  },
+  "limits": [
+    "Frontend-only; no native/backend/deployment proof",
+    "Pending requests remain busy until settlement; no immediate cancellation claim"
+  ],
+  "browser": {
+    "assertions_passed": 10,
+    "result": "response-browser/browser-result.json",
+    "screenshots_visually_inspected": true,
+    "scope": "Actual Status/router/editor with synthetic HTTP; new A-B-A stale comparison cases covered by component tests, not this browser driver"
+  },
+  "evidence_sha256": {
+    "response-after.log": "702d44b545845b7309d08d13b55d6aba32330490ac94e907da77f010f65f7eb2",
+    "response-before.log": "0e36eb1ecde37376baff8b3b815aa7a693638a8613f63e50d027c8a3bb228884",
+    "response-browser/browser-result.json": "ba3a716d2492106995cba268785c792b0bee18d125d45a24d26a8766a7429efe",
+    "response-browser/browser.log": "a92a8f3d2d16185fcbc9cd5823a55fb44db271aae9bd420e9305c4e4bac372bb",
+    "response-browser/late-create-restored.png": "a576a8aa929ba74da9ab301819fe1173fd90465611f99474c2d65ffe1ea67e1e",
+    "response-browser/workspace-a-restored.png": "313fc2109f3c372283cc3415582c7978035795ac672028ceb097aacd802a9962",
+    "response-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "response-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "artifact_normalization": {
+    "response-before.log": {
+      "original_sha256": "986daa82e2d35b14f5096e91d7524167a8f1ed5eaa5d1f97909251eadfff1429",
+      "change": "Trimmed trailing whitespace in captured Vitest DOM diagnostic; failure and assertions unchanged"
+    }
+  }
+}

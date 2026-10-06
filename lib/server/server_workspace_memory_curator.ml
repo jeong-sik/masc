@@ -53,7 +53,10 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
   let* snapshot = Exact.snapshot_flow ~first ~rest ~messages requirement
     |> Result.map_error (function Exact.Duplicate_flow_candidate_id { candidate_id; _ } ->
       "duplicate candidate: " ^ candidate_id) |> failed in
-  let* attempt = Exact.start_flow snapshot
+  let* attempt =
+    Exact.start_flow
+      ~admission_class:(Standalone_lane.admission_class Workspace_curator)
+      snapshot
     |> Result.map_error (function Exact.Flow_id_generation_failed detail -> detail) |> failed in
   match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
   | Some net, Some clock ->
@@ -305,6 +308,7 @@ let configured () = match Runtime_exact_output_registry.current () with
     | Error _ -> false
     | Ok registry ->
       (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+       | Error (Runtime_exact_output_registry.Exact_lane_off _)
        | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
        | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true)
 

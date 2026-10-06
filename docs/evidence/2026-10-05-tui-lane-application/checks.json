@@ -1,0 +1,28 @@
+{
+  "source_checkpoint": "41e4a96a38605a29e59e93437ffdeeca48236caf",
+  "base": "8f5b84e793edf7e15e54cf5eadc596ce4c2ab437",
+  "checked_at": "2026-10-04T23:40:37.357585+00:00",
+  "pure_scenarios": {
+    "total": 5,
+    "passed": 5,
+    "compiler": "5.5.0",
+    "scope": "Actual App, Declaration and TOML editor compiled together; no substitute module"
+  },
+  "ocaml_syntax_files": 11,
+  "python_fixture_syntax": {
+    "test/test_tui_lane_package_pty.py": "29568946946aaf3bf8cd47f8ace7f2624a42fde74d694ec7461ffc5011010839",
+    "test/test_tui_lane_visual_pty.py": "c3b58ad9d3c17d6f93bab1afc5bbba262711a8610d3a4ba967241bd02e881b78",
+    "test/test_tui_lane_operator_pty.py": "dc7e35c1331117f8c3169a32e2954303f575e28a08608579d70327058f441eac"
+  },
+  "authored_only": [
+    "Add-ons editor/receipt/rendering integration scenario",
+    "Updated three existing PTY fixture contracts"
+  ],
+  "not_executed": [
+    "Full TUI typecheck/link",
+    "Native TUI/PTY",
+    "Actual server or worker",
+    "Web consumer",
+    "CI, main integration or deployment"
+  ]
+}

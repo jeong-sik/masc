@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "actual Status/router/editor with synthetic HTTP and accepted execution authority; no backend or deployment",
+  "assertions": [
+    "actual Status unmount removes editor DOM",
+    "dirty beforeunload guard remains on Skills",
+    "return restores same file draft without refetch",
+    "late create after unmount migrates to file identity",
+    "edits typed during create remain unsaved",
+    "new-file key rotates after late creation",
+    "previous file draft survives new-file flow",
+    "identical configured directory does not join workspace A/B drafts",
+    "return to each workspace restores its own draft",
+    "only one explicit create POST"
+  ],
+  "writes": [
+    {
+      "file_name": "travel.toml",
+      "source_text": "# server A\nid = \"custom\"\nrun_id = \"fixture\"\nmanifest_path = \"./lane.toml\"\n[binding]\nsources = []\n",
+      "mode": "create"
+    }
+  ],
+  "reads": [
+    {
+      "workspace": "A",
+      "path": "/fixture/shared-config/lane-addons/custom.toml"
+    },
+    {
+      "workspace": "B",
+      "path": "/fixture/shared-config/lane-addons/custom.toml"
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [],
+  "unhandled": []
+}

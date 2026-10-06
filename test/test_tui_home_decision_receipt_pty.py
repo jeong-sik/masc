@@ -56,6 +56,7 @@ def accepted_but_pending(executable, *, followed_by_held=False):
     fixtures[CONFIRM_PATH] = h.RequestHttpResponse(confirm)
     held_path = "/api/v1/keepers/tool-approval"
     held_rows = []
+    expected_workspace = None
     held_item = cards.held("call-after-receipt", "new-held-decision")
 
     def answer_held(body):
@@ -63,10 +64,8 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         assert payload["name"] == held_item["keeper"]
         assert payload["tool_call_id"] == "call-after-receipt"
         assert payload["decision"] == "approve"
-        assert payload["expected_workspace"] == {
-            "base_path": "",
-            "masc_root": "",
-        }
+        assert expected_workspace is not None
+        assert payload["expected_workspace"] == expected_workspace, payload
         held_rows.clear()
         return 200, {"settled": True, "remembered": False}
 
@@ -75,7 +74,12 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         fixtures[held_path] = h.RequestHttpResponse(answer_held)
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"[home-a]", start=0, timeout=10)
+        nonlocal expected_workspace
+        expected_workspace = {"base_path": _base, "masc_root": str(Path(_base, ".masc"))}
+        # The initial workspace identity withdraws the operator ticket sent
+        # before it. Request the receipt's source under that applied authority.
+        h.wait_for_output(process, fd, output, b"Health: ok", start=0, timeout=10)
+        h.send_and_wait(process, fd, output, b"r", b"[home-a]")
         cards.select_home(process, fd, output, b"[home-a]", destinations=3)
         opened = h.send_and_wait(process, fd, output, b"\r",
                                  b"home-receipt-exact-reason")
@@ -141,7 +145,7 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         h.drain_until_quiet(process, fd, output)
         assert sum(path == CONFIRM_PATH for path, _body in requests) == 1, requests
         fixtures[cards.OPERATOR_PATH] = (503, {"error": "confirm source offline"})
-        h.send_and_wait(process, fd, output, b"r", b"confirm queue not fully read")
+        h.send_and_wait(process, fd, output, b"r", "not fully read · confirm queue".encode())
         visible = cards.frame(process, fd, output, "removed-request-source-unavailable")
         assert b"No decision is waiting" not in visible and b"[home-a]" not in visible, visible
         os.write(fd, b"\ryy")

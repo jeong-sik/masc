@@ -16,6 +16,7 @@ type t =
   | Discord
   | Repositories
   | Browser
+  | Machines
   | Memory_os
 [@@deriving enumerate]
 
@@ -37,6 +38,7 @@ let key = function
   | Discord -> "discord"
   | Repositories -> "repositories"
   | Browser -> "browser"
+  | Machines -> "machines"
   | Memory_os -> "memory_os"
 ;;
 

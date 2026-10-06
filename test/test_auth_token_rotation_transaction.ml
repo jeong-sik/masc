@@ -559,7 +559,12 @@ let test_fifo_diagnostic_listing_refuses_without_blocking () =
   match Unix.fork () with
   | 0 ->
     Sys.set_signal Sys.sigalrm Sys.Signal_default;
-    let _previous_alarm_seconds = Unix.alarm 5 in
+    (* The alarm is a hang watchdog, not a timing oracle: the child must
+       finish far inside it on any healthy tree, and only a deadlock on the
+       FIFO should ever fire it. Under a loaded CI runner a tight window
+       kills healthy children and the parent then reports a phantom
+       contract failure (see #41159 for the EINTR twin of this flake). *)
+    let _previous_alarm_seconds = Unix.alarm 60 in
     (try with_workspace (fun base_path ->
        Unix.mkfifo (Auth.credential_file base_path "fifo") 0o600;
        match Auth.list_credential_results base_path with
@@ -579,7 +584,7 @@ let test_publication_fifo_snapshots_refuse_without_blocking () =
   match Unix.fork () with
   | 0 ->
     Sys.set_signal Sys.sigalrm Sys.Signal_default;
-    let _previous_alarm_seconds = Unix.alarm 5 in
+    let _previous_alarm_seconds = Unix.alarm 60 in
     (try List.iter (fun raw_fifo -> with_workspace (fun base_path ->
        let _pair = seed_pair base_path in
        let named = Auth.credential_file base_path "aaa" in

@@ -793,7 +793,9 @@ let test_refused_turn_reports_its_spend_to_the_keeper () =
    output 2. *)
 let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
   let frames =
-    In_channel.with_open_bin "fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl"
+    In_channel.with_open_bin
+      (Masc_test_deps.source_path
+         "test/fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl")
       In_channel.input_all
     |> String.split_on_char '\n'
     |> List.filter (fun line -> String.trim line <> "")
@@ -2538,7 +2540,7 @@ let test_quota_after_native_tool_remains_fenced () =
             | Ok _ -> fail "post-native-tool quota completed the Keeper turn"))
 ;;
 
-let test_spawn_failure_releases_claim () =
+let test_spawn_failure_fences_claim () =
   let base_path = temp_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -2547,18 +2549,20 @@ let test_spawn_failure_releases_claim () =
        with_fixture ~remove_after_auth:true [] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL"
              ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
-          | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)) ->
+          | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "claude_code"; _ })) ->
             ()
           | Error error -> fail (Agent_core.Error.to_string error)
           | Ok _ -> fail "removed CLI unexpectedly completed the Keeper turn");
          check int "prepared turn with missing CLI reports no input" 0 !reports;
          let state = load_state base_path in
          (match state.phase with
-          | Ready -> ()
-          | _ -> fail "transient spawn failure left the claim occupied");
+          | Recovery_required { failure = Protocol_failed; _ } -> ()
+          | _ ->
+            fail "a fatal missing-CLI spawn failure did not fence the claim for recovery");
          match state.last_transient_release with
-         | Some { failure = Transient_spawn_failed; _ } -> ()
-         | _ -> fail "transient release evidence was not persisted"))
+         | None -> ()
+         | Some _ ->
+           fail "a fatal missing-CLI spawn failure persisted a transient release"))
 ;;
 
 let run_direct_attempt
@@ -2638,7 +2642,8 @@ let run_direct_attempt
 
 let check_pre_dispatch_attempt label attempt =
   (match attempt.Keeper_claude_code_runtime.result with
-   | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)) -> ()
+   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "claude_code"; _ })) ->
+     ()
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok _ -> fail (label ^ " unexpectedly ran"));
   check string
@@ -3649,6 +3654,13 @@ let test_a_working_state_that_displaces_nothing_goes () =
 ;;
 
 let () =
+  (* Pin the prompt directory explicitly. Under dune the registry falls back to
+     [DUNE_SOURCEROOT], but a test executable run directly has neither that
+     variable nor a [config/prompts] under its cwd; the unified autonomous
+     cycle then dies in setup with "missing prompt keeper.worldview", which
+     reads like a lifecycle regression and has already been misattributed as
+     one. Sibling keeper suites pin the same directory the same way. *)
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
     [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
@@ -3743,9 +3755,9 @@ let () =
         ; test_case "quota after native tool remains fenced" `Quick
             test_quota_after_native_tool_remains_fenced
         ; test_case
-            "spawn failure releases claim"
+            "spawn failure fences the claim for recovery"
             `Quick
-            test_spawn_failure_releases_claim
+            test_spawn_failure_fences_claim
         ; test_case
             "subscription spawn failure is pre-dispatch"
             `Quick

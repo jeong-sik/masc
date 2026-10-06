@@ -281,7 +281,7 @@ let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir 
   let worker = unwrap (start ~instance_id:"worker-test" env sw dir docker "good") in
   let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:(Some (Worker.container_id worker)) ~max_reply_bytes:4096
+      ~instance_id ~container_id:(Some (Worker.container_id worker))
       ~docker_command:docker () in
   check bool "another binding cannot remove this container" true
     (Result.is_error (recover "different-owner"));
@@ -296,7 +296,7 @@ let test_restart_without_create_receipt () = with_fixture (fun env sw dir docker
   let other = unwrap (start env sw dir docker "good") in
   let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id ~container_id:None ~docker_command:docker () in
   unwrap (recover ());
   check bool "container is found without a retained create response" false
     (Sys.file_exists (Filename.concat dir (Worker.container_id worker ^ ".json")));
@@ -318,7 +318,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
   write path (Yojson.Safe.to_string changed);
   let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id ~container_id:None ~docker_command:docker () in
   check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
   check bool "foreign owner survives recovery refusal" true (Sys.file_exists path);
   check bool "failed creation does not clean up a foreign name collision" true
@@ -331,7 +331,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
 let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir docker ->
   let recover container_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id:"not-created" ~container_id ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~instance_id:"not-created" ~container_id ~docker_command:docker () in
   unwrap (recover None);
   let marker = Filename.concat dir "daemon-unavailable" in
   write marker "unavailable";
@@ -349,7 +349,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
   let started_at = Eio.Time.now clock in
   let result = Worker.recover_stop ~clock ~control_timeout_sec:0.05
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
-      ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+      ~container_id:None ~docker_command:docker () in
   check bool "hung control command is reported" true (Result.is_error result);
   check bool "timeout names the failed control operation" true
     (match result with
@@ -368,7 +368,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
      starved 0.05 one. The hung-command assertions above stay unchanged. *)
   unwrap (Worker.recover_stop ~clock ~control_timeout_sec:1.
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
-    ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker ()))
+    ~container_id:None ~docker_command:docker ()))
 
 let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fun env sw dir docker ->
   let other = unwrap (start env sw dir docker "good") in
@@ -467,12 +467,42 @@ let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir
   write (Filename.concat dir "daemon-unavailable") "offline";
   check bool "daemon failure stays an error rather than absence" true (Result.is_error (inspect ())))
 
-(* Tests deliberately collect their small fixture history; production recovery streams. *)
+(* The Docker CLI answers the host, not the package, so a small manifest reply
+   bound must not decide whether an image can be inspected. *)
+let test_docker_control_ignores_the_package_reply_bound () = with_fixture (fun env _sw dir docker ->
+  let small = package dir "good" in
+  let small = {small with resources={small.resources with max_reply_bytes=16}} in
+  let identity = "sha256:" ^ String.make 64 'a' in
+  check bool "the engine reply is longer than the declared reply bound" true
+    (String.length identity > small.resources.max_reply_bytes);
+  check string "image identity is returned" identity
+    (unwrap (Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
+      ~package:small ~docker_command:docker ())))
+
+(* Lists every request of one instance and reads each through the production
+   loader, which prefers the terminal outcome over the pending index row. *)
 let sampling_requests store ~instance_id =
-  let rows = ref [] in
-  match Masc.Lane_addon_store.iter_sampling_requests store ~instance_id ~max_bytes:65536
-    ~f:(fun row -> rows := row :: !rows; Ok ()) with
-  | Error detail -> Error detail | Ok () -> Ok (List.rev !rows)
+  let module Store = Masc.Lane_addon_store in
+  let digest = Digestif.SHA256.(to_hex (digest_string instance_id)) in
+  let request_ids directory =
+    let path = Filename.concat (Store.root store) (Filename.concat directory digest) in
+    try Array.to_list (Sys.readdir path) |> List.filter_map (fun name ->
+      match Yojson.Safe.from_file (Filename.concat path name) with
+      | `Assoc fields -> (match List.assoc_opt "request_id" fields with
+          | Some (`String id) -> Some id | _ -> None)
+      | _ -> None)
+    with Sys_error _ -> [] in
+  let ids = List.sort_uniq compare (request_ids "sampling" @ request_ids "sampling-outcomes") in
+  List.fold_left (fun rows id -> match rows with
+    | Error _ -> rows
+    | Ok rows ->
+        (match Store.load_sampling_request_bounded
+          ~budget:(Store.read_budget ~max_bytes:65536) store ~instance_id ~request_id:id with
+         | Ok (Some row) -> Ok (row :: rows)
+         | Ok None -> Ok rows
+         | Error _ -> Error ("unreadable sampling request " ^ id))) (Ok []) ids
+  |> Result.map List.rev
 
 let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun env sw dir docker ->
   let calls = ref 0 in
@@ -666,15 +696,9 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       |> Yojson.Safe.Util.to_string);
   let interrupted = match sampling_requests recovered ~instance_id:"sampling-worker" with
     | Ok rows -> rows | Error detail -> fail detail in
-  check bool "recovery resolves the authoritative terminal journal" true
+  check bool "the loader resolves the authoritative terminal journal" true
     (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "finished"
       && Yojson.Safe.Util.member "request" row = Yojson.Safe.Util.member "request" recovered_references) interrupted);
-  let request_id = recovered_references |> Yojson.Safe.Util.member "request" |> read_reference
-    |> Yojson.Safe.Util.member "request_id" |> Yojson.Safe.Util.to_string in
-  let pending_intent = Yojson.Safe.from_file
-    (Filename.concat index_directory (Masc.Lane_addon_store.digest request_id ^ ".json")) in
-  check string "primary index also records the terminal answer" "finished"
-    Yojson.Safe.Util.(pending_intent |> member "state" |> to_string);
   let projected_refs = ["request";"outcome"] |> List.map (fun key ->
     match Types.evidence_of_json (Yojson.Safe.Util.member key recovered_references) with
     | Ok value -> value | Error detail -> fail detail) in
@@ -786,17 +810,21 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check int "out-of-observation callback never invokes provider" before_outside !calls;
   check bool "out-of-observation callback creates no durable request" true
     (before_records = sampling_requests store ~instance_id:"sampling-worker");
-  let tiny_package = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=1}} in
-  let bounded = match Masc.Lane_addon_sampling.create ~store ~package:tiny_package
+  (* A file where the evidence directory belongs makes every blob write fail,
+     whoever runs the test. *)
+  let unretainable = Masc.Lane_addon_store.create ~root:(Filename.concat dir "unretainable-model-evidence") in
+  Unix.mkdir (Masc.Lane_addon_store.root unretainable) 0o700;
+  write (Filename.concat (Masc.Lane_addon_store.root unretainable) "evidence") "not a directory";
+  let sampling_package = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let bounded = match Masc.Lane_addon_sampling.create ~store:unretainable ~package:sampling_package
       ~instance_id:"bounded-model" ~route:"fixture-route" ~invoke () with
     | Ok handler -> handler | Error detail -> fail detail in
   let before = !calls in
-  check bool "unretained oversized request is refused before invocation" true
+  check bool "unretained request is refused before invocation" true
     (Result.is_error (Masc.Lane_addon_sampling.with_observation bounded
       ~binding:(`Assoc []) ~sources:(`List []) ~on_error:Fun.id (fun () ->
       Result.map (fun _ -> {Types.rows=[];coverage=[]}) ((match Masc.Lane_addon_sampling.for_worker bounded
-        ~package:tiny_package ~instance_id:"bounded-model" with
+        ~package:sampling_package ~instance_id:"bounded-model" with
         | Ok handler -> handler | Error detail -> fail detail) params))));
   check int "retention is required before the model is called" before !calls;
   let argv = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".json"))
@@ -846,13 +874,6 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
       (Result.is_ok (Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
         ~on_error:Fun.id (fun () -> Ok {Types.rows=[];coverage=[]})));
     if fail_index then (
-      (* Discover the immutable fallback even while the primary index is broken. *)
-      let found = ref false in
-      let recovered = Store.create ~root:(Store.root store) in
-      let result = Store.iter_sampling_requests recovered ~instance_id ~max_bytes:65536
-        ~f:(fun row -> found := Yojson.Safe.Util.member "state" row = `String "finished"; Ok ()) in
-      check bool "journal recovery visits the known outcome despite broken primary" true !found;
-      check bool "unreadable primary prevents complete recovery claim" true (Result.is_error result);
       Unix.unlink index_directory;
       Unix.rename saved_index index_directory);
     let request_record = match sampling_requests store ~instance_id with
@@ -996,128 +1017,6 @@ let test_sampling_refuses_nonfinite_evidence () = with_fixture (fun _env _sw dir
   Ok {Types.rows=[];coverage=[]}) in
   check bool "finite evidence fixture completes an active observation" true (Result.is_ok result))
 
-let test_sampling_recovery_reports_unreadable_pending_index () = with_fixture (fun _env _sw dir _docker ->
-  let module Store = Masc.Lane_addon_store in
-  let store = Store.create ~root:(Filename.concat dir "partial-recovery") in
-  let instance_id = "partial" in
-  let save result = match result with Ok () -> () | Error detail -> fail detail in
-  save (Store.save_sampling_request store ~instance_id ~request_id:"pending" (`Assoc ["state",`String "pending"]));
-  save (Store.save_sampling_request store ~instance_id ~request_id:"finished" (`Assoc ["state",`String "finished"]));
-  save (Store.save_sampling_outcome store ~instance_id ~request_id:"finished"
-    (`Assoc ["state",`String "finished"; "instance_id",`String instance_id;
-             "request_id",`String "finished"]));
-  let parent = Filename.concat (Store.root store) "sampling" in
-  let primary = Filename.concat parent (Sys.readdir parent).(0) in
-  let backup = primary ^ ".saved" in
-  Unix.rename primary backup;
-  write primary "unreadable index";
-  Fun.protect ~finally:(fun () -> Unix.unlink primary; Unix.rename backup primary) (fun () ->
-    let visited = ref 0 in
-    let result = Store.iter_sampling_requests (Store.create ~root:(Store.root store))
-      ~instance_id ~max_bytes:65536 ~f:(fun row ->
-        check string "journal still visits finished record" "finished"
-          (Yojson.Safe.Util.member "state" row |> Yojson.Safe.Util.to_string);
-        incr visited; Ok ()) in
-    check int "available journal visited once" 1 !visited;
-    check bool "missing pending index is not full success" true (Result.is_error result));
-  let rows = match sampling_requests store ~instance_id with Ok rows -> rows | Error detail -> fail detail in
-  check int "restored primary includes pending and finished" 2 (List.length rows))
-
-let test_pending_sampling_recovery_syncs_reopened_root () = with_fixture (fun _env _sw dir _docker ->
-  let module Store = Masc.Lane_addon_store in
-  let require = function Ok value -> value | Error detail -> fail detail in
-  let store = Store.create ~root:(Filename.concat dir "pending-root-recovery") in
-  let instance_id = "pending-only" in
-  List.iter (fun request_id ->
-    require (Store.save_sampling_request store ~instance_id ~request_id
-      (`Assoc ["state", `String "pending"; "request_id", `String request_id])))
-    ["first"; "second"];
-  let reopened = Store.create ~root:(Store.root store) in
-  let root_parent = Unix.stat (Filename.dirname (Store.root store)) in
-  let syncs = ref 0 and delivered = ref [] in
-  let recover ~fail_sync =
-    Store.For_testing.iter_sampling_requests reopened ~instance_id ~max_bytes:65536
-      ~sync_file:(fun _ -> fail "pending requests must not require a terminal blob")
-      ~sync_parent:(fun fd ->
-        let actual = Unix.fstat fd in
-        check bool "syncs the store root's parent" true
-          (actual.Unix.st_dev = root_parent.Unix.st_dev && actual.Unix.st_ino = root_parent.Unix.st_ino);
-        incr syncs;
-        if fail_sync then raise (Unix.Unix_error (Unix.EIO, "fsync", "pending root parent"));
-        Unix.fsync fd)
-      ~f:(fun row ->
-        check string "pending state survives recovery" "pending"
-          Yojson.Safe.Util.(row |> member "state" |> to_string);
-        delivered := Yojson.Safe.Util.(row |> member "request_id" |> to_string) :: !delivered;
-        Ok ()) in
-  check bool "failed root sync refuses pending recovery" true (Result.is_error (recover ~fail_sync:true));
-  check int "no pending request delivered before root durability" 0 (List.length !delivered);
-  require (recover ~fail_sync:false);
-  check (list string) "same handle retry delivers both pending requests" ["first"; "second"]
-    (List.sort String.compare !delivered);
-  require (recover ~fail_sync:false);
-  check int "later recovery still delivers both requests" 4 (List.length !delivered);
-  check int "one failed and one successful root sync, no duplicate obligation" 2 !syncs)
-
-let test_sampling_recovery_rejects_replaced_root_parent () = with_fixture (fun _env _sw dir _docker ->
-  let module Store = Masc.Lane_addon_store in
-  let require = function Ok value -> value | Error detail -> fail detail in
-  List.iter (fun replace_parent ->
-    let parent = Filename.concat dir (if replace_parent then "swapped-parent" else "swapped-root") in
-    Unix.mkdir parent 0o700;
-    let root = Filename.concat parent "store" in
-    let store = Store.create ~root in
-    let instance_id = "pending" in
-    require (Store.save_sampling_request store ~instance_id ~request_id:"one"
-      (`Assoc ["state", `String "pending"]));
-    let reopened = Store.create ~root in
-    let target = if replace_parent then parent else root in
-    let saved = target ^ ".saved" in
-    let swapped = ref false and visited = ref 0 and syncs = ref 0 in
-    let recover ~swap =
-      Store.For_testing.iter_sampling_requests reopened ~instance_id ~max_bytes:65536
-        ~sync_file:Unix.fsync ~sync_parent:(fun fd ->
-          incr syncs;
-          if swap then (
-            Unix.rename target saved;
-            swapped := true;
-            Unix.mkdir target 0o700;
-            if replace_parent then Unix.mkdir root 0o700);
-          Unix.fsync fd)
-        ~f:(fun _ -> incr visited; Ok ()) in
-    Fun.protect ~finally:(fun () ->
-      if !swapped then (
-        if replace_parent then Unix.rmdir root;
-        Unix.rmdir target;
-        Unix.rename saved target)) (fun () ->
-      check bool "directory replacement invalidates root sync" true
-        (Result.is_error (recover ~swap:true));
-      check int "old root records are not delivered after replacement" 0 !visited);
-    require (recover ~swap:false);
-    check int "restored root can retry on the same handle" 1 !visited;
-    check int "identity failure retains the root sync obligation" 2 !syncs)
-    [false; true])
-
-let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _sw dir _docker ->
-  let module Store = Masc.Lane_addon_store in
-  let store = Store.create ~root:(Filename.concat dir "streaming-recovery") in
-  let instance_id = "streaming" in
-  for n = 1 to 128 do
-    match Store.save_sampling_request store ~instance_id ~request_id:(string_of_int n)
-      (`Assoc ["n",`Int n]) with Ok () -> () | Error detail -> fail detail
-  done;
-  let count = ref 0 in
-  let result = Store.iter_sampling_requests store ~instance_id ~max_bytes:64
-    ~f:(fun _ -> incr count; if !count = 3 then Error "requested stop" else Ok ()) in
-  check bool "callback can stop without reading whole history" true (result = Error "requested stop");
-  check int "only requested prefix reaches callback" 3 !count;
-  let result = Store.iter_sampling_requests store ~instance_id ~max_bytes:1 ~f:(fun _ -> fail "oversized record decoded") in
-  check bool "per-record envelope is enforced before JSON allocation" true (Result.is_error result);
-  count := 0;
-  (match Store.iter_sampling_requests store ~instance_id ~max_bytes:64
-    ~f:(fun _ -> incr count; Ok ()) with Ok () -> () | Error detail -> fail detail);
-  check int "complete scan still visits every retained request" 128 !count)
-
 let test_receipt_projection_reads_shared_outcome_once () = with_fixture (fun _env _sw dir _docker ->
   let module Sampling = Masc.Lane_addon_sampling in
   let module Store = Masc.Lane_addon_store in
@@ -1211,6 +1110,35 @@ let test_sampling_receipt_requires_durable_journal () = with_fixture (fun _env _
   check string "projection carries the retained outcome" "answered"
     Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "status" |> to_string))
 
+(* The reply the worker receives is measured against its bound. The outcome the
+   host stores for itself carries the same answer plus its identity fields, so
+   it is larger, and that larger record must not turn a deliverable answer
+   into a refusal. *)
+let test_stored_outcome_is_not_measured_against_the_reply_bound () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module S = Mcp_protocol.Sampling in
+  let store = Store.create ~root:(Filename.concat dir "stored-outcome") in
+  let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  let answer : S.create_message_result = {role=Assistant;
+    content=Text {type_="text";text=String.make 700 'x'};model="model";stop_reason=None;_meta=None} in
+  let placeholder = Types.evidence_to_json (Store.blob_reference "") in
+  let reply = {answer with _meta=Some (`Assoc ["masc.lane_sampling",
+    `Assoc ["request",placeholder;"outcome",placeholder]])} in
+  let reply_size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson reply)) in
+  let p = {(package dir "sampling") with model_access=Types.Host_sampling;
+    resources={(package dir "sampling").resources with max_reply_bytes=reply_size}} in
+  (* The stored outcome also names its route, which the worker's reply does not. *)
+  let long_route = String.make 400 'r' in
+  let broker = match Sampling.create ~store ~package:p ~instance_id:"stored-outcome" ~route:long_route
+    ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) () with
+    | Ok value -> value | Error detail -> fail detail in
+  let handler = match Sampling.for_worker broker ~package:p ~instance_id:"stored-outcome" with
+    | Ok value -> value | Error detail -> fail detail in
+  check bool "an answer whose reply fits the bound is delivered" true
+    (Result.is_ok (run_sampling_observation broker handler params)))
+
 let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
@@ -1282,141 +1210,7 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   let overflow_blob = match Store.read_blob store overflow_outcome_ref with
     | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
   check string "overflow outcome recovers actual host error from storage" secret
-    (Yojson.Safe.Util.member "error" overflow_blob |> Yojson.Safe.Util.to_string);
-  let journal = Filename.concat (Store.root store) "sampling-outcomes" in
-  let backup = journal ^ ".saved" in
-  Unix.rename journal backup;
-  write journal "unavailable journal";
-  Fun.protect ~finally:(fun () -> Unix.unlink journal; Unix.rename backup journal) (fun () ->
-    check bool "primary terminal index succeeds when journal is unavailable" true
-      (Result.is_ok (invoke "journal-failure" (Ok (answer `Null))));
-    let recovered = ref [] in
-    let result = Store.iter_sampling_requests (Store.create ~root:(Store.root store))
-      ~instance_id:"journal-failure" ~max_bytes:65536
-      ~f:(fun row -> recovered := row :: !recovered; Ok ()) in
-    check int "reopened recovery reads primary while journal stays unavailable" 1
-      (List.length !recovered);
-    check bool "unreadable journal prevents complete recovery claim" true (Result.is_error result);
-    check bool "unavailable journal with absent primary remains an error" true
-      (Result.is_error (sampling_requests (Store.create ~root:(Store.root store))
-        ~instance_id:"no-primary-fallback")));
-  let rows = match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail in
-  let row = match rows with [row] -> row | _ -> fail "missing terminal recovery row" in
-  let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with
-    | Ok value -> value | Error detail -> fail detail in
-  let hash = match reference.sha256 with Some hash -> hash | None -> fail "missing digest" in
-  let bytes = match Store.read_blob store reference with Ok bytes -> bytes | Error detail -> fail detail in
-  let request_id = Yojson.Safe.Util.(row |> member "request_id" |> to_string) in
-  let first_terminal = match row with `Assoc fields -> `Assoc (("outcome_bytes",`String bytes)::fields)
-    | _ -> fail "invalid terminal row" in
-  (match Store.save_sampling_request store ~instance_id:"journal-failure" ~request_id first_terminal with
-   | Ok () -> () | Error detail -> fail detail);
-  Unix.unlink (Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json"));
-  ignore (match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail);
-  check bool "recovery reconstructs outcome from first durable terminal record" true
-    (Result.is_ok (Store.read_blob store reference));
-  let blob_path = Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json") in
-  let before = Unix.stat blob_path in
-  ignore (match sampling_requests store ~instance_id:"journal-failure" with
-    | Ok rows -> rows | Error detail -> fail detail);
-  let after = Unix.stat blob_path in
-  check bool "intact recovery blob is not replaced" true
-    (before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino);
-  let recover ?(store=store) ~sync_file ~sync_parent ~visited () =
-    Store.For_testing.iter_sampling_requests ~sync_file ~sync_parent store
-      ~instance_id:"journal-failure" ~max_bytes:65536
-      ~f:(fun _ -> incr visited; Ok ()) in
-  let synced = ref [] and visited = ref 0 in
-  let sync label fd = synced := !synced @ [label]; Unix.fsync fd in
-  (match recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited () with
-   | Ok () -> () | Error detail -> fail detail);
-  check (list string) "intact recovery establishes file and parent durability" ["file"; "parent"] !synced;
-  check int "only durable evidence reaches recovery callback" 1 !visited;
-  List.iter (fun failing ->
-    visited := 0;
-    let sync label fd =
-      if label = failing then raise (Unix.Unix_error (Unix.EIO, "fsync", label))
-      else Unix.fsync fd in
-    check bool "failed durability is not successful recovery" true
-      (Result.is_error (recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited ()));
-    check int "unsynced evidence is not delivered" 0 !visited) ["file"; "parent"];
-  let reopened = Store.create ~root:(Store.root store) in
-  let root_parent = Unix.stat (Filename.dirname (Store.root store)) in
-  let root_syncs = ref 0 in
-  let sync_root ~fail_sync fd =
-    let stat = Unix.fstat fd in
-    if stat.Unix.st_dev = root_parent.Unix.st_dev && stat.Unix.st_ino = root_parent.Unix.st_ino then (
-      incr root_syncs;
-      if fail_sync then raise (Unix.Unix_error (Unix.EIO, "fsync", "root parent")));
-    Unix.fsync fd in
-  visited := 0;
-  check bool "reopened root sync failure prevents successful recovery" true
-    (Result.is_error (recover ~store:reopened ~sync_file:Unix.fsync
-      ~sync_parent:(sync_root ~fail_sync:true) ~visited ()));
-  check int "unestablished root is not delivered" 0 !visited;
-  List.iter (fun () ->
-    match recover ~store:reopened ~sync_file:Unix.fsync
-      ~sync_parent:(sync_root ~fail_sync:false) ~visited () with
-    | Ok () -> () | Error detail -> fail detail) [(); ()];
-  check int "failed root sync retries and successful sync clears its obligation" 2 !root_syncs;
-  let external_path = Filename.concat dir "external-outcome.json" in
-  write external_path bytes;
-  let saved_blob = blob_path ^ ".saved" in
-  Unix.rename blob_path saved_blob;
-  Unix.symlink external_path blob_path;
-  Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
-    check bool "matching external symlink is not owned recovery evidence" true
-      (Result.is_error (sampling_requests store ~instance_id:"journal-failure")));
-  Unix.rename blob_path saved_blob;
-  Unix.link external_path blob_path;
-  Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
-    check bool "matching external hardlink is not owned recovery evidence" true
-      (Result.is_error (sampling_requests store ~instance_id:"journal-failure")));
-  let added_link = blob_path ^ ".linked" in
-  visited := 0;
-  Fun.protect ~finally:(fun () -> Unix.unlink added_link) (fun () ->
-    check bool "hardlink created during sync cannot satisfy recovery" true
-      (Result.is_error (recover ~visited ~sync_parent:Unix.fsync ~sync_file:(fun fd ->
-        Unix.fsync fd; Unix.link blob_path added_link) ()));
-    check int "multiply linked evidence is not delivered" 0 !visited);
-  visited := 0;
-  Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
-    check bool "a symlink swap during file sync cannot satisfy recovery" true
-      (Result.is_error (recover ~visited ~sync_parent:Unix.fsync ~sync_file:(fun fd ->
-        Unix.fsync fd; Unix.rename blob_path saved_blob; Unix.symlink external_path blob_path) ()));
-    check int "swapped evidence is not delivered" 0 !visited);
-  Unix.unlink blob_path;
-  Unix.mkfifo blob_path 0o600;
-  Fun.protect ~finally:(fun () -> Unix.unlink blob_path) (fun () ->
-    check bool "FIFO recovery blob is rejected without waiting for a writer" true
-      (Result.is_error (sampling_requests store ~instance_id:"journal-failure"))))
-
-let test_sampling_recovery_reports_unreadable_terminal_journal () = with_fixture (fun _env _sw dir _docker ->
-  let module Store = Masc.Lane_addon_store in
-  let store = Store.create ~root:(Filename.concat dir "stale-primary-recovery") in
-  let require = function Ok value -> value | Error detail -> fail detail in
-  let instance_id = "journal-only" and request_id = "completed" in
-  require (Store.save_sampling_request store ~instance_id ~request_id (`Assoc ["state", `String "pending"]));
-  require (Store.save_sampling_outcome store ~instance_id ~request_id
-    (`Assoc ["state", `String "finished"; "instance_id", `String instance_id;
-             "request_id", `String request_id]));
-  let journal = Filename.concat (Store.root store) "sampling-outcomes" in
-  let backup = journal ^ ".saved" in
-  Unix.rename journal backup;
-  write journal "unreadable terminal journal";
-  Fun.protect ~finally:(fun () -> Unix.unlink journal; Unix.rename backup journal) (fun () ->
-    let visited = ref 0 in
-    let result = Store.iter_sampling_requests (Store.create ~root:(Store.root store))
-      ~instance_id ~max_bytes:65536 ~f:(fun row ->
-        check string "readable primary still exposes its stale state" "pending"
-          Yojson.Safe.Util.(row |> member "state" |> to_string);
-        incr visited; Ok ()) in
-    check int "readable primary is visited" 1 !visited;
-    check bool "stale primary is not complete recovery" true (Result.is_error result));
-  let rows = require (sampling_requests store ~instance_id) in
-  check int "restored journal owns the completed request" 1 (List.length rows);
-  check string "terminal journal supersedes stale pending primary" "finished"
-    Yojson.Safe.Util.(List.hd rows |> member "state" |> to_string))
+    (Yojson.Safe.Util.member "error" overflow_blob |> Yojson.Safe.Util.to_string))
 
 let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_recovery ->
   with_fixture (fun _env _sw dir _docker ->
@@ -1479,29 +1273,27 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
   check bool "request evidence remains readable" true (Result.is_ok (Store.read_blob store request));
   let rows = match sampling_requests store ~instance_id:"blob-failure" with
     | Ok rows -> rows | Error detail -> fail detail in
-  List.iter (fun path ->
-    if Filename.dirname path = recovery_directory then (
-      check bool "canonical repair preserves the obstructing recovery entry" true
-        ((Unix.lstat path).Unix.st_kind = Unix.S_DIR);
-      Unix.rmdir path)) !blocked_paths;
   let row = match rows with [row] -> row | _ -> fail "missing terminal record" in
   check string "known result remains finished" "finished"
     Yojson.Safe.Util.(row |> member "state" |> to_string);
-  let outcome = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with
-    | Ok value -> value | Error detail -> fail detail in
-  let terminal = match Store.read_blob store outcome with
-    | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
-  check string "recovery preserves known model result" "answered"
-    Yojson.Safe.Util.(terminal |> member "status" |> to_string);
-  let output : Types.output = {rows=[{id="answer";lane_id="fusion/computation";
-    kind=Types.Value;title="answer";observed_at=1.;subject_id="analysis";clock=None;
-    actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
-  let receipts = match Sampling.retained_receipts ~store ~instance_id:"blob-failure"
-    ~max_bytes:p.resources.max_reply_bytes output with
-    | Ok value -> value | Error detail -> fail detail in
-  check int "downstream projection resolves the recovered outcome" 1 (List.length receipts);
-  check string "receipt keeps actual model identity" "actual-model"
-    Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response" |> member "model" |> to_string);
+  (* Reading the outcome back needs a readable canonical or recovery copy; the
+     doubly blocked case has neither. *)
+  if not block_recovery then (
+    let outcome = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with
+      | Ok value -> value | Error detail -> fail detail in
+    let terminal = match Store.read_blob store outcome with
+      | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+    check string "recovery preserves known model result" "answered"
+      Yojson.Safe.Util.(terminal |> member "status" |> to_string);
+    let output : Types.output = {rows=[{id="answer";lane_id="fusion/computation";
+      kind=Types.Value;title="answer";observed_at=1.;subject_id="analysis";clock=None;
+      actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
+    let receipts = match Sampling.retained_receipts ~store ~instance_id:"blob-failure"
+      ~max_bytes:p.resources.max_reply_bytes output with
+      | Ok value -> value | Error detail -> fail detail in
+    check int "downstream projection resolves the recovered outcome" 1 (List.length receipts);
+    check string "receipt keeps actual model identity" "actual-model"
+      Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response" |> member "model" |> to_string););
   let saved_recovery = recovery_directory ^ ".saved" in
   Unix.rename recovery_directory saved_recovery;
   write recovery_directory "unavailable recovery directory";
@@ -1513,57 +1305,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
         (Result.is_ok (Store.read_blob_bounded
           ~budget:(Store.read_budget ~max_bytes:p.resources.max_reply_bytes) store request))))) [false;true]
 
-(* The transport measures the whole JSON-RPC error, so the host tells the
-   handler how many bytes its message may encode for this request. A receipt
-   that fits [max_reply_bytes] but not that budget must not be returned as is. *)
-let test_sampling_refusal_reserves_error_envelope () = with_fixture (fun _env _sw dir _docker ->
-  let module Store = Masc.Lane_addon_store in
-  let module Sampling = Masc.Lane_addon_sampling in
-  let module S = Mcp_protocol.Sampling in
-  let require = function Ok value -> value | Error detail -> fail detail in
-  let reference = Types.evidence_to_json (Store.blob_reference "") in
-  let raw_receipt = Yojson.Safe.to_string (`Assoc ["status", `String "retention_error";
-    "evidence", `Assoc ["request", reference; "outcome", reference]]) in
-  let quoted_receipt_bytes = String.length (Yojson.Safe.to_string (`String raw_receipt)) in
-  let max_reply_bytes = quoted_receipt_bytes + 64 in
-  let base = package dir "sampling" in
-  let p = {base with model_access=Types.Host_sampling;
-    resources={base.resources with max_reply_bytes}} in
-  let params = require (S.create_message_params_of_yojson
-    (`Assoc ["messages", `List []; "maxTokens", `Int 1])) in
-  let refusal ~name ~error_bytes =
-    let store = Store.create ~root:(Filename.concat dir name) in
-    let broker = require (Sampling.create ~store ~package:p ~instance_id:"x" ~route:"r"
-      ~invoke:(fun ~route:_ ~request _ ->
-        let bytes = Yojson.Safe.to_string ~std:true (`Assoc [
-          "kind", `String "model_outcome"; "instance_id", `String "x";
-          "route", `String "r"; "request", Types.evidence_to_json request;
-          "status", `String "host_error"; "error", `String "failed"]) in
-        List.iter (fun directory ->
-          let directory = Filename.concat (Store.root store) directory in
-          if not (Sys.file_exists directory) then Unix.mkdir directory 0o700;
-          Unix.mkdir (Filename.concat directory (Store.digest bytes ^ ".json")) 0o700)
-          ["evidence"; "sampling-evidence"];
-        Error "failed") ()) in
-    let handler = require (Sampling.for_worker broker ~package:p ~instance_id:"x") in
-    let handler params = handler ?error_bytes params in
-    match run_sampling_observation broker handler params with
-    | Ok _ -> fail "failed host call cannot report success"
-    | Error message -> message in
-  let is_receipt message = match Yojson.Safe.from_string message with
-    | `Assoc fields -> List.assoc_opt "status" fields = Some (`String "retention_error")
-    | _ -> false
-    | exception Yojson.Json_error _ -> false in
-  check bool "a receipt within the error budget is delivered" true
-    (is_receipt (refusal ~name:"error-budget-fits" ~error_bytes:(Some quoted_receipt_bytes)));
-  let tight = refusal ~name:"error-budget-tight" ~error_bytes:(Some (quoted_receipt_bytes - 1)) in
-  check bool "a receipt beyond the error budget is not returned" false (is_receipt tight);
-  check bool "the replacement fits the error budget" true
-    (String.length (Yojson.Safe.to_string (`String tight)) <= quoted_receipt_bytes - 1);
-  check bool "without a budget only the reply bound applies" true
-    (is_receipt (refusal ~name:"error-budget-absent" ~error_bytes:None)))
-
-let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fun _env _sw dir _docker ->
+let test_sampling_retention_error_carries_receipt () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
   let module S = Mcp_protocol.Sampling in
@@ -1573,8 +1315,6 @@ let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fu
   let raw_receipt = Yojson.Safe.to_string (`Assoc ["status", `String "retention_error";
     "evidence", `Assoc ["request", reference; "outcome", reference]]) in
   let max_reply_bytes = String.length raw_receipt in
-  check bool "fixture distinguishes object bytes from the encoded error string" true
-    (String.length (Yojson.Safe.to_string (`String raw_receipt)) > max_reply_bytes);
   let base = package dir "sampling" in
   let p = {base with model_access=Types.Host_sampling;
     resources={base.resources with max_reply_bytes}} in
@@ -1602,8 +1342,12 @@ let test_sampling_retention_error_uses_encoded_reply_bound () = with_fixture (fu
   (match reply with
    | Ok _ -> fail "failed host call cannot report success"
    | Error message ->
-       check bool "MCP error string fits the package wire envelope" true
-         (String.length (Yojson.Safe.to_string (`String message)) <= max_reply_bytes));
+       let receipt = Yojson.Safe.from_string message in
+       let member key json = Yojson.Safe.Util.member key json in
+       check bool "the retention error carries the host receipt" true
+         (member "status" receipt = `String "retention_error"
+          && member "request" (member "evidence" receipt) <> `Null
+          && member "outcome" (member "evidence" receipt) <> `Null));
   let journal = Filename.concat (Store.root store)
     (Filename.concat "sampling-outcomes" (Store.digest "x")) in
   let paths = Sys.readdir journal in
@@ -1719,7 +1463,7 @@ let test_sampling_fallback_rejects_external_links name link () =
         (Result.is_error (Store.read_blob_bounded ~budget:(Store.read_budget ~max_bytes:4096) store reference)))))
     [false; true]
 
-let test_canonical_parent_owns_recovery ~journal ~directory () =
+let test_canonical_parent_is_not_followed ~directory () =
   with_fixture (fun _ _ dir _ ->
     let module Store = Masc.Lane_addon_store in
     let require = function Ok value -> value | Error detail -> fail detail in
@@ -1746,13 +1490,7 @@ let test_canonical_parent_owns_recovery ~journal ~directory () =
     Unix.symlink external_parent canonical_parent;
     Fun.protect ~finally:(fun () -> Unix.unlink canonical_parent; Unix.rename saved canonical_parent)
       (fun () ->
-        if journal then (
-          let visited = ref 0 in
-          let result = Store.iter_sampling_requests store ~instance_id:"parent-test" ~max_bytes:4096
-            ~f:(fun _ -> incr visited; Ok ()) in
-          check bool "journal recovery rejects a replaced canonical parent" true (Result.is_error result);
-          check int "no recovery callback accepts that boundary" 0 !visited)
-        else (
+        (
           check bool "public read rejects a replaced canonical parent" true
             (Result.is_error (Store.read_blob store reference));
           check bool "bounded read rejects a replaced canonical parent" true
@@ -1781,13 +1519,9 @@ let test_relative_store_root ~sequence () =
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "canonical missing under external parent refuses public read" `Quick
-    (test_canonical_parent_owns_recovery ~journal:false ~directory:false);
+    (test_canonical_parent_is_not_followed ~directory:false);
   test_case "canonical directory under external parent refuses public read" `Quick
-    (test_canonical_parent_owns_recovery ~journal:false ~directory:true);
-  test_case "canonical missing under external parent refuses recovery scan" `Quick
-    (test_canonical_parent_owns_recovery ~journal:true ~directory:false);
-  test_case "canonical directory under external parent refuses recovery scan" `Quick
-    (test_canonical_parent_owns_recovery ~journal:true ~directory:true);
+    (test_canonical_parent_is_not_followed ~directory:true);
   test_case "relative store root blob roundtrip" `Quick (test_relative_store_root ~sequence:false);
   test_case "relative store root sequence roundtrip" `Quick (test_relative_store_root ~sequence:true);
   test_case "sampling publication rejects canonical parent symlink" `Quick
@@ -1802,22 +1536,18 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling fallback rejects external hardlinks" `Quick
     (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
-  test_case "sampling retention error uses encoded wire bound" `Quick test_sampling_retention_error_uses_encoded_reply_bound;
-  test_case "sampling refusal reserves error envelope" `Quick test_sampling_refusal_reserves_error_envelope;
+  test_case "sampling retention error carries the receipt" `Quick test_sampling_retention_error_carries_receipt;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
-  test_case "sampling recovery reports unreadable terminal journal" `Quick test_sampling_recovery_reports_unreadable_terminal_journal;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
+  test_case "stored outcome is not measured against the reply bound" `Quick test_stored_outcome_is_not_measured_against_the_reply_bound;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling refuses nonfinite retained evidence" `Quick test_sampling_refuses_nonfinite_evidence;
-  test_case "sampling recovery reports unreadable pending index" `Quick test_sampling_recovery_reports_unreadable_pending_index;
-  test_case "pending sampling recovery syncs reopened root" `Quick test_pending_sampling_recovery_syncs_reopened_root;
-  test_case "sampling recovery rejects replaced root and parent" `Quick test_sampling_recovery_rejects_replaced_root_parent;
-  test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
+  test_case "docker control ignores the package reply bound" `Quick test_docker_control_ignores_the_package_reply_bound;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
   test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;

@@ -1,0 +1,21 @@
+{
+  "helper_sha256": "a77083a58897b2e14b47e184c374333e42c02cc1e0c474ebe9e022e6b5890bfe",
+  "script": "import {readMachineActivity} from './src/lib/machine-lane-activity.ts';\nconst source=process.argv[1]; const before=Object.getOwnPropertyNames(Object.prototype);\nconst read=()=>{try{return readMachineActivity(source,'msx')}catch(error){return {error:String(error)}}};\nconst result=read(); const empty=readMachineActivity('','msx');\nconsole.log(JSON.stringify({source,result,empty,prototypeAdded:Object.getOwnPropertyNames(Object.prototype).filter(k=>!before.includes(k))}));",
+  "results": [
+    {
+      "exit_code": 0,
+      "stdout": "{\"source\":\"[__proto__.machines.msx]\\nenabled = false\",\"result\":{\"enabled\":false},\"empty\":{\"enabled\":false},\"prototypeAdded\":[\"machines\"]}\n",
+      "stderr": ""
+    },
+    {
+      "exit_code": 0,
+      "stdout": "{\"source\":\"[machines.__proto__]\\nenabled = false\",\"result\":{\"enabled\":true},\"empty\":{\"enabled\":true},\"prototypeAdded\":[\"enabled\"]}\n",
+      "stderr": ""
+    },
+    {
+      "exit_code": 0,
+      "stdout": "{\"source\":\"[machines]\\n__proto__ = true\",\"result\":{\"enabled\":true},\"empty\":{\"enabled\":true},\"prototypeAdded\":[]}\n",
+      "stderr": ""
+    }
+  ]
+}

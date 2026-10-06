@@ -543,7 +543,7 @@ let controller_json () =
     ]
   | Error Dos_lane.No_machine -> [ ("machine", `Bool false); ("controller", `Null); ("saves_name", `Null) ]
   | Error
-      (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+      (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
        | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
        | Dos_lane.Other_program _ ) as err) ->
     [ ("machine", `Bool true); ("controller", `Null); ("saves_name", `Null)

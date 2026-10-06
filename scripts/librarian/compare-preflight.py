@@ -51,7 +51,7 @@ def canonical_chunks(value: Json) -> Iterator[bytes]:
     if isinstance(value, str):
         yield b'"'
         for start in range(0, len(value), 64 * 1024):
-            yield json.dumps(value[start:start + 64 * 1024])[1:-1].encode("ascii")
+            yield json.dumps(value[start : start + 64 * 1024])[1:-1].encode("ascii")
         yield b'"'
     elif isinstance(value, list):
         yield b"["
@@ -119,7 +119,12 @@ def array(value: Json, name: str) -> list[Json]:
 def turn_ref(value: Json) -> None:
     raw = text(value, "turn_ref")
     trace, separator, turn = raw.rpartition("#")
-    if not trace or not separator or not turn.removeprefix("-").isascii() or not turn.removeprefix("-").isdigit():
+    if (
+        not trace
+        or not separator
+        or not turn.removeprefix("-").isascii()
+        or not turn.removeprefix("-").isdigit()
+    ):
         raise ValueError("turn_ref must contain a trace and integer turn")
 
 
@@ -129,7 +134,13 @@ def goals(value: Json) -> None:
     for item in array(value, "goals"):
         goal = obj(item, "goal")
         text(goal.get("goal_id"), "goal_id")
-        if goal.get("phase") not in ("executing", "verifying", "awaiting_confirmation", "completed", "dropped"):
+        if goal.get("phase") not in (
+            "executing",
+            "verifying",
+            "awaiting_confirmation",
+            "completed",
+            "dropped",
+        ):
             raise ValueError("unknown Goal phase")
         criterion = obj(goal.get("criterion"), "criterion")
         text(criterion.get("revision"), "criterion revision")
@@ -172,22 +183,80 @@ def goal_source_error(value: Json) -> None:
         kind = text(error.get("kind"), "unix error kind")
         # Goal_store_unavailable.unix_error_of_name, independent of host errno.
         named = {
-            "e2big", "eacces", "eagain", "ebadf", "ebusy", "echild", "edeadlk",
-            "edom", "eexist", "efault", "efbig", "eintr", "einval", "eio", "eisdir",
-            "emfile", "emlink", "enametoolong", "enfile", "enodev", "enoent",
-            "enoexec", "enolck", "enomem", "enospc", "enosys", "enotdir",
-            "enotempty", "enotty", "enxio", "eperm", "epipe", "erange", "erofs",
-            "espipe", "esrch", "exdev", "ewouldblock", "einprogress", "ealready",
-            "enotsock", "edestaddrreq", "emsgsize", "eprototype", "enoprotoopt",
-            "eprotonosupport", "esocktnosupport", "eopnotsupp", "epfnosupport",
-            "eafnosupport", "eaddrinuse", "eaddrnotavail", "enetdown", "enetunreach",
-            "enetreset", "econnaborted", "econnreset", "enobufs", "eisconn",
-            "enotconn", "eshutdown", "etoomanyrefs", "etimedout", "econnrefused",
-            "ehostdown", "ehostunreach", "eloop", "eoverflow",
+            "e2big",
+            "eacces",
+            "eagain",
+            "ebadf",
+            "ebusy",
+            "echild",
+            "edeadlk",
+            "edom",
+            "eexist",
+            "efault",
+            "efbig",
+            "eintr",
+            "einval",
+            "eio",
+            "eisdir",
+            "emfile",
+            "emlink",
+            "enametoolong",
+            "enfile",
+            "enodev",
+            "enoent",
+            "enoexec",
+            "enolck",
+            "enomem",
+            "enospc",
+            "enosys",
+            "enotdir",
+            "enotempty",
+            "enotty",
+            "enxio",
+            "eperm",
+            "epipe",
+            "erange",
+            "erofs",
+            "espipe",
+            "esrch",
+            "exdev",
+            "ewouldblock",
+            "einprogress",
+            "ealready",
+            "enotsock",
+            "edestaddrreq",
+            "emsgsize",
+            "eprototype",
+            "enoprotoopt",
+            "eprotonosupport",
+            "esocktnosupport",
+            "eopnotsupp",
+            "epfnosupport",
+            "eafnosupport",
+            "eaddrinuse",
+            "eaddrnotavail",
+            "enetdown",
+            "enetunreach",
+            "enetreset",
+            "econnaborted",
+            "econnreset",
+            "enobufs",
+            "eisconn",
+            "enotconn",
+            "eshutdown",
+            "etoomanyrefs",
+            "etimedout",
+            "econnrefused",
+            "ehostdown",
+            "ehostunreach",
+            "eloop",
+            "eoverflow",
         }
         if kind == "eunknownerr":
             if error.keys() != {"kind", "code"} or type(error.get("code")) is not int:
-                raise ValueError("unknown Unix error requires exactly kind and integer code")
+                raise ValueError(
+                    "unknown Unix error requires exactly kind and integer code"
+                )
         elif kind not in named or error.keys() != {"kind"}:
             raise ValueError("Unix error must use a known variant and its exact fields")
 
@@ -264,7 +333,9 @@ def rendered_prompt_bytes(template: str, variables: dict[str, Json]) -> bytes:
         raise ValueError("effective_template must be a nonblank string")
     bindings: dict[str, str] = {}
     for name, value in variables.items():
-        bindings.setdefault(name.strip(" \t\n\r\f"), string(value, "rendered variable " + name))
+        bindings.setdefault(
+            name.strip(" \t\n\r\f"), string(value, "rendered variable " + name)
+        )
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1).strip(" \t\n\r\f")
@@ -285,9 +356,14 @@ def input_payload(value: Json, actor: str) -> None:
     turn_ref(actual.get("turn_ref"))
     goal_context(actual.get("goal_context"))
     string(actual.get("keeper_instructions"), "keeper_instructions")
-    for item in array(actual.get("historical_task_contexts"), "historical_task_contexts"):
+    for item in array(
+        actual.get("historical_task_contexts"), "historical_task_contexts"
+    ):
         history = obj(item, "historical task range")
-        for first, after in (("first_message", "after_message"), ("first_tool_observation", "after_tool_observation")):
+        for first, after in (
+            ("first_message", "after_message"),
+            ("first_tool_observation", "after_tool_observation"),
+        ):
             lower = count(history.get(first), first)
             upper = count(history.get(after), after)
             if lower > upper or (after == "after_message" and upper > messages):
@@ -295,7 +371,9 @@ def input_payload(value: Json, actor: str) -> None:
         source = obj(history.get("source"), "historical task source")
         if source.get("kind") == "atoms":
             text(source.get("trace_id"), "historical source trace_id")
-            if count(source.get("start_atom"), "start_atom") > count(source.get("end_atom"), "end_atom"):
+            if count(source.get("start_atom"), "start_atom") > count(
+                source.get("end_atom"), "end_atom"
+            ):
                 raise ValueError("reversed historical atom range")
         elif source.get("kind") not in ("official_turn", "boundary_only"):
             raise ValueError("unknown historical source kind")
@@ -316,33 +394,70 @@ def input_payload(value: Json, actor: str) -> None:
     template = string(prompt.get("effective_template"), "effective_template")
     count(prompt.get("rendered_bytes"), "rendered_bytes")
     sha(prompt.get("rendered_sha256"), "rendered prompt hash")
-    variables = obj(actual.get("rendered_prompt_variables"), "rendered_prompt_variables")
-    for key in ("keeper_id", "facts_budget", "keeper_instructions", "historical_task_contexts",
-                "continuity", "working_context", "working_contexts_rule", "goal_context", "current_memory",
-                "conversation_history", "turn_tool_observations", "counterpart_observations"):
+    variables = obj(
+        actual.get("rendered_prompt_variables"), "rendered_prompt_variables"
+    )
+    for key in (
+        "keeper_id",
+        "facts_budget",
+        "keeper_instructions",
+        "historical_task_contexts",
+        "continuity",
+        "working_context",
+        "working_contexts_rule",
+        "goal_context",
+        "current_memory",
+        "conversation_history",
+        "turn_tool_observations",
+        "counterpart_observations",
+    ):
         string(required(variables, key), "rendered variable " + key)
     for key, variable in variables.items():
         string(variable, "rendered variable " + key)
     rendered = rendered_prompt_bytes(template, variables)
-    if len(rendered) != prompt["rendered_bytes"] or hashlib.sha256(rendered).hexdigest() != prompt["rendered_sha256"]:
-        raise ValueError("rendered prompt bytes or SHA-256 disagree with recorded material")
+    if (
+        len(rendered) != prompt["rendered_bytes"]
+        or hashlib.sha256(rendered).hexdigest() != prompt["rendered_sha256"]
+    ):
+        raise ValueError(
+            "rendered prompt bytes or SHA-256 disagree with recorded material"
+        )
     if variables["keeper_id"] != actor:
         raise ValueError("run actor must match the frozen keeper_id")
     # Keeper_librarian.format_keeper_instructions_for_prompt uses OCaml String.trim.
-    instructions = string(actual["keeper_instructions"], "keeper_instructions").strip(" \t\n\r\f")
+    instructions = string(actual["keeper_instructions"], "keeper_instructions").strip(
+        " \t\n\r\f"
+    )
     if variables["keeper_instructions"] != (instructions or "[no keeper instructions]"):
-        raise ValueError("rendered keeper instructions disagree with frozen typed instructions")
-    rendered_history = json.loads(string(variables["historical_task_contexts"], "rendered historical_task_contexts"), object_pairs_hook=unique_object)
+        raise ValueError(
+            "rendered keeper instructions disagree with frozen typed instructions"
+        )
+    rendered_history = json.loads(
+        string(
+            variables["historical_task_contexts"], "rendered historical_task_contexts"
+        ),
+        object_pairs_hook=unique_object,
+    )
     if digest(rendered_history) != digest(actual["historical_task_contexts"]):
-        raise ValueError("rendered historical task context disagrees with frozen typed context")
-    rendered_goal = json.loads(string(variables["goal_context"], "rendered goal_context"), object_pairs_hook=unique_object)
+        raise ValueError(
+            "rendered historical task context disagrees with frozen typed context"
+        )
+    rendered_goal = json.loads(
+        string(variables["goal_context"], "rendered goal_context"),
+        object_pairs_hook=unique_object,
+    )
     goal_context(rendered_goal)
     if rendered_goal != actual["goal_context"]:
         raise ValueError("rendered goal context disagrees with frozen typed context")
-    continuity = json.loads(string(variables["continuity"], "continuity"), object_pairs_hook=unique_object)
+    continuity = json.loads(
+        string(variables["continuity"], "continuity"), object_pairs_hook=unique_object
+    )
     if continuity is not None:
         raise ValueError("evaluated preflight requires null frozen continuity")
-    context = json.loads(string(variables["working_context"], "working_context"), object_pairs_hook=unique_object)
+    context = json.loads(
+        string(variables["working_context"], "working_context"),
+        object_pairs_hook=unique_object,
+    )
     # Keeper_librarian_context.prompt_json empty. This is the recorded
     # projection, not proof of unexported fields in the runtime input record.
     if context != {"sources": [], "previous": None, "unavailable": []}:
@@ -373,14 +488,20 @@ def attempts(value: Json, name: str) -> list[Json]:
                 raise ValueError("HTTP refusal status must be an integer")
             text(refusal.get("destination_uri"), "HTTP refusal destination")
             if refusal["destination_uri"] != attempt["destination_uri"]:
-                raise ValueError("HTTP refusal destination disagrees with attempted destination")
+                raise ValueError(
+                    "HTTP refusal destination disagrees with attempted destination"
+                )
             body = refusal.get("body")
             if not isinstance(body, str):
                 encoded = obj(body, "HTTP refusal body")
-                if encoded.get("encoding") != "base64" or not isinstance(encoded.get("content"), str):
+                if encoded.get("encoding") != "base64" or not isinstance(
+                    encoded.get("content"), str
+                ):
                     raise ValueError("HTTP refusal body must contain base64 text")
                 raw = base64.b64decode(cast(str, encoded["content"]), validate=True)
-                if type(encoded.get("total_bytes")) is not int or encoded["total_bytes"] != len(raw):
+                if type(encoded.get("total_bytes")) is not int or encoded[
+                    "total_bytes"
+                ] != len(raw):
                     raise ValueError("HTTP refusal body byte count disagrees")
         elif refusal.get("kind") != "transport":
             raise ValueError("unknown preflight refusal kind")
@@ -389,33 +510,54 @@ def attempts(value: Json, name: str) -> list[Json]:
 
 def validate_observation(observation: dict[str, Json]) -> None:
     status = observation.get("status")
-    received_fields = ("destination", "model", "request_body_sha256", "decision",
-                       "probabilities", "confidence", "passed_over")
+    received_fields = (
+        "destination",
+        "model",
+        "request_body_sha256",
+        "decision",
+        "probabilities",
+        "confidence",
+        "passed_over",
+    )
     forbidden = {
         "awaiting_answer": ("reason", "failure"),
-        "skipped": ("failure",), "ineligible": ("failure",),
-        "question_unavailable": ("failure",), "failed": ("reason",),
+        "skipped": ("failure",),
+        "ineligible": ("failure",),
+        "question_unavailable": ("failure",),
+        "failed": ("reason",),
         "invalid_answer": ("failure", "decision", "confidence", "probabilities"),
         "judged": ("failure", "reason"),
     }
     for key in forbidden.get(str(status), ()):
         if key in observation:
             raise ValueError(f"preflight {status} must not report {key}")
-    if status in ("awaiting_answer", "failed", "skipped", "ineligible", "question_unavailable") and any(key in observation for key in received_fields):
+    if status in (
+        "awaiting_answer",
+        "failed",
+        "skipped",
+        "ineligible",
+        "question_unavailable",
+    ) and any(key in observation for key in received_fields):
         raise ValueError("answerless preflight cannot contain received-answer evidence")
     if status in ("awaiting_answer", "skipped", "ineligible", "question_unavailable"):
         if status != "awaiting_answer":
             text(observation.get("reason"), "uncalled preflight reason")
         if "elapsed_s" not in observation or observation["elapsed_s"] is not None:
-            raise ValueError("uncalled or awaiting preflight must record null elapsed time")
+            raise ValueError(
+                "uncalled or awaiting preflight must record null elapsed time"
+            )
         if "failure" in observation:
-            raise ValueError("uncalled or awaiting preflight cannot contain completed failure evidence")
+            raise ValueError(
+                "uncalled or awaiting preflight cannot contain completed failure evidence"
+            )
         return
     if number(observation.get("elapsed_s"), "preflight elapsed_s") < 0:
         raise ValueError("preflight elapsed_s must be nonnegative")
     if status == "failed":
         failure = obj(observation.get("failure"), "preflight failure")
-        if failure.get("kind") != "every_destination_refused" or not attempts(failure.get("attempts"), "failure attempts"):
+        if failure.get("kind") != "every_destination_refused" or not attempts(
+            failure.get("attempts"), "failure attempts"
+        ):
             raise ValueError("failed preflight must record destination refusals")
         return
     if status not in ("judged", "invalid_answer"):
@@ -433,11 +575,19 @@ def validate_observation(observation: dict[str, Json]) -> None:
     decision = text(observation.get("decision"), "preflight decision")
     probabilities = obj(observation.get("probabilities"), "preflight probabilities")
     if decision not in labels or set(probabilities) != set(labels):
-        raise ValueError("preflight probabilities must cover exactly the declared choices")
+        raise ValueError(
+            "preflight probabilities must cover exactly the declared choices"
+        )
     confidence = number(observation.get("confidence"), "preflight confidence")
-    values = {label: number(probabilities[label], "preflight probability") for label in labels}
-    if not 0 <= confidence <= 1 or any(not 0 <= value <= 1 for value in values.values()):
-        raise ValueError("preflight confidence and probabilities must be within zero and one")
+    values = {
+        label: number(probabilities[label], "preflight probability") for label in labels
+    }
+    if not 0 <= confidence <= 1 or any(
+        not 0 <= value <= 1 for value in values.values()
+    ):
+        raise ValueError(
+            "preflight confidence and probabilities must be within zero and one"
+        )
     # Match Typesafeai_types.decode_choice's one-rounding-error-per-option bound.
     if abs(sum(values.values()) - 1) > sys.float_info.epsilon * len(labels):
         raise ValueError("preflight probabilities must sum to one")
@@ -461,8 +611,12 @@ def completed_memory_output(output: dict[str, Json], current_fact_count: int) ->
     if before.get("present") is not True and before.get("present") is not False:
         raise ValueError("completed before.present must be boolean")
     before_count = count(before.get("fact_count"), "before fact_count")
-    if before_count != current_fact_count or (before["present"] is False and before_count != 0):
-        raise ValueError("completed before receipt disagrees with frozen current fact count")
+    if before_count != current_fact_count or (
+        before["present"] is False and before_count != 0
+    ):
+        raise ValueError(
+            "completed before receipt disagrees with frozen current fact count"
+        )
     after = obj(output.get("after"), "completed after")
     if after.get("commit") not in ("rewritten", "unchanged"):
         raise ValueError("unknown completed Memory commit")
@@ -473,7 +627,9 @@ def completed_memory_output(output: dict[str, Json], current_fact_count: int) ->
     change = obj(after.get("change"), "completed change")
     for key in ("added_count", "removed_count", "retained"):
         count(change.get(key), "completed change " + key)
-    if after["commit"] == "unchanged" and (change["added_count"] != 0 or change["removed_count"] != 0):
+    if after["commit"] == "unchanged" and (
+        change["added_count"] != 0 or change["removed_count"] != 0
+    ):
         raise ValueError("unchanged Memory cannot record additions or removals")
     for identity in array(output.get("claims_not_applied"), "claims_not_applied"):
         text(identity, "unapplied claim identity")
@@ -511,7 +667,9 @@ def completed_memory_output(output: dict[str, Json], current_fact_count: int) ->
             for source in array(check.get("sources"), "copy sources"):
                 text(source, "copy source")
             if check.get("verdict") == "copy":
-                for statement in array(check.get("conveyed_statements"), "conveyed statements"):
+                for statement in array(
+                    check.get("conveyed_statements"), "conveyed statements"
+                ):
                     string(statement, "conveyed statement")
             elif check.get("verdict") == "carries_new_statement":
                 count(check.get("statements"), "copy statements")
@@ -544,7 +702,9 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     run = obj(envelope.get("run"), "run")
     if run.get("run_kind") != "exact_output":
         raise ValueError("Librarian detail must record exact_output run_kind")
-    if obj(run.get("skill_evidence"), "skill_evidence") != {"state": "no_keeper_skills"}:
+    if obj(run.get("skill_evidence"), "skill_evidence") != {
+        "state": "no_keeper_skills"
+    }:
         raise ValueError("Librarian detail must record no_keeper_skills provenance")
     if run.get("lane") != "librarian_exact":
         raise ValueError("both arms must be Librarian runs")
@@ -578,11 +738,19 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     payload = source_input.get("payload")
     input_payload(payload, text(run.get("actor"), "run actor"))
     if run["status"] == "succeeded":
-        completed_memory_output(output, count(obj(payload, "input payload")["current_fact_count"], "current_fact_count"))
+        completed_memory_output(
+            output,
+            count(
+                obj(payload, "input payload")["current_fact_count"],
+                "current_fact_count",
+            ),
+        )
     return run, payload, output, elapsed
 
 
-def compare(data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callable[[], str]) -> dict[str, Json]:
+def compare(
+    data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callable[[], str]
+) -> dict[str, Json]:
     sample_ids: set[str] = set()
     run_ids: set[str] = set()
     records: list[Json] = []
@@ -598,7 +766,9 @@ def compare(data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callabl
         preflight, after, preflight_output, preflight_s = read_run(
             pair.get("preflight")
         )
-        if text(baseline.get("actor"), "baseline actor") != text(preflight.get("actor"), "preflight actor"):
+        if text(baseline.get("actor"), "baseline actor") != text(
+            preflight.get("actor"), "preflight actor"
+        ):
             raise ValueError("paired runs must use the same Keeper actor")
         for run in (baseline, preflight):
             run_id = text(run.get("run_id"), "run_id")
@@ -620,7 +790,10 @@ def compare(data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callabl
         ):
             raise ValueError("baseline must record disabled preflight and no skip")
         validate_observation(baseline_jev)
-        if "preflight_domain_rejection" not in baseline_output or baseline_output["preflight_domain_rejection"] is not None:
+        if (
+            "preflight_domain_rejection" not in baseline_output
+            or baseline_output["preflight_domain_rejection"] is not None
+        ):
             raise ValueError("baseline must explicitly record null domain rejection")
         observation = obj(
             preflight_output.get("jev_preflight"), "preflight observation"
@@ -657,17 +830,25 @@ def compare(data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callabl
         ):
             raise ValueError("preflight route must be explicitly recorded")
         rejection = preflight_output.get("preflight_domain_rejection")
-        keep_fallback = status == "judged" and observation.get("decision") == "keep_current" and path == "full_lane"
+        keep_fallback = (
+            status == "judged"
+            and observation.get("decision") == "keep_current"
+            and path == "full_lane"
+        )
         if keep_fallback:
             text(rejection, "keep-current fallback domain rejection")
         elif rejection is not None:
-            raise ValueError("domain rejection requires keep-current full-lane fallback")
+            raise ValueError(
+                "domain rejection requires keep-current full-lane fallback"
+            )
         if path == "not_entered" and (
             status != "awaiting_answer"
             or preflight.get("status") not in ("failed", "cancelled")
             or preflight.get("selected_slot") is not None
         ):
-            raise ValueError("generation not entered requires interrupted awaiting preflight without slot")
+            raise ValueError(
+                "generation not entered requires interrupted awaiting preflight without slot"
+            )
         if skipped:
             if (
                 path != "jev_no_change"
@@ -694,9 +875,11 @@ def compare(data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callabl
                 "preflight_selected_slot": preflight["selected_slot"],
                 "preflight_domain_rejection": rejection,
                 "baseline_failure": {key: baseline[key] for key in ("code", "detail")}
-                    if baseline["status"] == "failed" else None,
+                if baseline["status"] == "failed"
+                else None,
                 "preflight_failure": {key: preflight[key] for key in ("code", "detail")}
-                    if preflight["status"] == "failed" else None,
+                if preflight["status"] == "failed"
+                else None,
                 "preflight_observation": observation,
                 "baseline_elapsed_s": baseline_s,
                 "preflight_elapsed_s": preflight_s,
@@ -706,7 +889,17 @@ def compare(data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callabl
             }
         )
         # Release each pair before requesting the next decoded value.
-        del item, pair, run, baseline, preflight, before, after, baseline_output, preflight_output
+        del (
+            item,
+            pair,
+            run,
+            baseline,
+            preflight,
+            before,
+            after,
+            baseline_output,
+            preflight_output,
+        )
     if not records:
         raise ValueError("pairs must be a nonempty list")
     source_head = sha(data.get("source_head"), "source_head", 40)
@@ -742,7 +935,7 @@ class JsonValueReader:
         self.decoder = json.JSONDecoder(object_pairs_hook=unique_object)
 
     def compact(self) -> None:
-        self.buffer = self.buffer[self.position:]
+        self.buffer = self.buffer[self.position :]
         self.position = 0
 
     def read_more(self, size: int) -> None:
@@ -796,8 +989,12 @@ class JsonValueReader:
             self.read_more(max(64 * 1024, len(self.buffer)))
 
 
-def manifest_pairs(reader: JsonValueReader, data: dict[str, Json], spool: BinaryIO,
-                   fields: dict[str, tuple[int, int]]) -> Iterator[Json]:
+def manifest_pairs(
+    reader: JsonValueReader,
+    data: dict[str, Json],
+    spool: BinaryIO,
+    fields: dict[str, tuple[int, int]],
+) -> Iterator[Json]:
     reader.take("{")
     if reader.peek() != "}":
         while True:
@@ -828,7 +1025,12 @@ def manifest_pairs(reader: JsonValueReader, data: dict[str, Json], spool: Binary
                 spool.write(b"]")
             else:
                 value = reader.value()
-                if key in ("source_head", "config_sha256", "environment", "evidence_kind"):
+                if key in (
+                    "source_head",
+                    "config_sha256",
+                    "environment",
+                    "evidence_kind",
+                ):
                     data[key] = value
                 spool.writelines(canonical_chunks(value))
                 del value

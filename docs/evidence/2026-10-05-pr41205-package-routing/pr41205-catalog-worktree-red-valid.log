@@ -1,0 +1,45 @@
+ASSERT Git worktree fixture setup
+ASSERT Git worktree fixture setup
+ASSERT Git worktree fixture setup
+ASSERT Git worktree fixture setup
+[2026-10-05 07:02:44] [INFO] [Workspace] MASC base resolved: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-h2-body-admissionb727fd/active-checkout → /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-h2-body-admissionb727fd (git root)
+[2026-10-05 07:02:44] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-h2-body-admissiondb6dae for requested path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-h2-body-admissionb727fd/active-checkout
+[2026-10-05 07:02:44] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-h2-body-admissionb727fd for test executable test_h2_request_body_admission.exe
+[2026-10-05 07:02:44] [WARN] [Subscriptions] WARNING: session push fn already set, overwriting
+ASSERT workspace config retains linked checkout
+ASSERT workspace config shares main state root
+ASSERT catalog starts at active checkout
+File "test/test_h2_request_body_admission.ml", line 430, character 4:
+FAIL catalog starts at active checkout
+
+   Expected: `"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-h2-body-admissionb727fd/active-checkout"'
+
+   Received: `"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-h2-body-admissionb727fd"'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_h2_request_body_admission.test_package_active_worktree_payloads. in file "test/test_h2_request_body_admission.ml", line 430, characters 4-118
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+

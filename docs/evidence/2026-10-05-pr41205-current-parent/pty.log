@@ -1,0 +1,7 @@
+Package preview / schema fields / review / explicit declaration save: PASS
+Package metadata bottom / immediate PageUp / no mutation: PASS
+Compact Machine help hidden key: b'?'
+Compact Machine help hidden key: b'\x1b'
+Machine compact quit PTY: PASS (synthetic HTTP)
+Machine unavailable file / independent server activity / no save: PASS
+Five selected PTY flows: PASS

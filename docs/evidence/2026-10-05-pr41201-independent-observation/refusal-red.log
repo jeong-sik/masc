@@ -1,0 +1,20 @@
+Compact Machine help hidden key: b'?'
+Compact Machine help hidden key: b'\x1b'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import test_tui_machine_activity_pty as t; t.run("/tmp/pr41201-observation-before.exe")
+                                               ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_machine_activity_pty.py", line 153, in run
+    h.run_terminal_scenario(binary, description='machine activity draft, conflict and ambiguous save',
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            interact=interact, http_fixtures=fixtures,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            terminal_cols=120, terminal_rows=40)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/tui_keyboard_harness.py", line 2394, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_machine_activity_pty.py", line 120, in interact
+    assert b'Server activity: Off' in h.screen_text(bytes(output)), 'known preview refusal erased the last server reading'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: known preview refusal erased the last server reading

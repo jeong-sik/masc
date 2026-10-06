@@ -14,6 +14,8 @@ import {
 } from './fleet-aside-extras'
 import type { Keeper } from '../types'
 import type { RuntimeResolvedResponse } from '../api'
+import type { Signal } from '@preact/signals'
+import type { AsyncState } from '../lib/async-state'
 import { loaded, idle } from '../lib/async-state'
 
 vi.mock('../keeper-waiting-inventory-store', async importOriginal => {
@@ -24,16 +26,20 @@ vi.mock('../keeper-waiting-inventory-store', async importOriginal => {
   }
 })
 
+const resolvedMock = vi.hoisted(() => ({ state: null as unknown as Signal<AsyncState<RuntimeResolvedResponse>> }))
+
 vi.mock('../lib/runtime-resolved-resource', async importOriginal => {
   const original = await importOriginal<typeof import('../lib/runtime-resolved-resource')>()
+  const { signal } = await import('@preact/signals')
+  resolvedMock.state = signal<AsyncState<RuntimeResolvedResponse>>({ status: 'idle' })
   return {
     ...original,
+    runtimeResolvedState: resolvedMock.state,
     loadRuntimeResolved: vi.fn(() => Promise.resolve()),
   }
 })
 
 import { keeperWaitingInventoryStates } from '../keeper-waiting-inventory-store'
-import { runtimeResolvedState } from '../lib/runtime-resolved-resource'
 
 function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
   return {
@@ -207,6 +213,14 @@ describe('FleetQueueSection (fl-q-*)', () => {
 describe('FleetRotationSection (fl-rot-*)', () => {
   let container: HTMLDivElement
 
+  it('shows a failed reading without presenting a retained candidate chain', async () => {
+    resolvedMock.state.value = { status: 'error', message: 'workspace B unavailable' }
+    render(html`<${FleetRotationSection} keeper=${makeKeeper()} />`, container)
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('workspace B unavailable')
+    expect(container.querySelector('.fl-rot-chain')).toBeNull()
+  })
+
   const RESOLVED: RuntimeResolvedResponse = {
     config_path: '/tmp/runtime.toml',
     default_route: null,
@@ -228,13 +242,13 @@ describe('FleetRotationSection (fl-rot-*)', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    runtimeResolvedState.value = idle
+    resolvedMock.state.value = idle
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
-    runtimeResolvedState.value = idle
+    resolvedMock.state.value = idle
   })
 
   it('renders nothing until runtime/resolved has loaded', async () => {
@@ -246,7 +260,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
   })
 
   it('renders the lane candidate chain with head + current markers', async () => {
-    runtimeResolvedState.value = loaded(RESOLVED)
+    resolvedMock.state.value = loaded(RESOLVED)
 
     await act(async () => {
       render(html`<${FleetRotationSection} keeper=${makeKeeper({ runtime_canonical: 'codex/main' })} />`, container)
@@ -262,7 +276,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
   })
 
   it('renders the na arm for a single-runtime assignment', async () => {
-    runtimeResolvedState.value = loaded(RESOLVED)
+    resolvedMock.state.value = loaded(RESOLVED)
 
     await act(async () => {
       render(html`<${FleetRotationSection} keeper=${makeKeeper({ name: 'solo' })} />`, container)
@@ -275,7 +289,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
   })
 
   it('renders the na arm when the assignment is absent', async () => {
-    runtimeResolvedState.value = loaded(RESOLVED)
+    resolvedMock.state.value = loaded(RESOLVED)
 
     await act(async () => {
       render(html`<${FleetRotationSection} keeper=${makeKeeper({ name: 'ghost' })} />`, container)
@@ -287,7 +301,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
   })
 
   it('does not invent failover events (fl-rot-ev has no live source)', async () => {
-    runtimeResolvedState.value = loaded(RESOLVED)
+    resolvedMock.state.value = loaded(RESOLVED)
 
     await act(async () => {
       render(html`<${FleetRotationSection} keeper=${makeKeeper()} />`, container)

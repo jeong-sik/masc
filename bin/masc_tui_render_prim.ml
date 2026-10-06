@@ -3284,8 +3284,18 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
   ^ piece note ^ tail
 
 
+let runtime_config_unmatched_current (state : state) =
+  match runtime_config_edit_session state, state.runtime_config_view with
+  | Some {rce_view=Config_edit_current _;rce_session={current=Some current;_};_}, Some reading
+    when current.source_revision <> reading.rcv_metadata.source_revision -> Some current
+  | _ -> None
+
 let config_metadata_summary (state : state) =
-  match state.runtime_config_view with
+  match runtime_config_unmatched_current state with
+  | Some current -> [Masc_tui_runtime_config_view.Neutral,
+      "Current snapshot revision: " ^ current.source_revision;
+      Masc_tui_runtime_config_view.Warning, "Validation and application state not read for this snapshot"]
+  | None -> match state.runtime_config_view with
   | None -> []
   | Some reading ->
       let lines = Masc_tui_runtime_config_view.summary_lines reading.rcv_metadata in
@@ -3299,7 +3309,12 @@ let runtime_config_status_lines state ~cols =
     (match state.runtime_config_view_error with
      | None -> []
      | Some detail -> [Masc_tui_runtime_config_view.Bad, detail])
-    @ match state.runtime_config_view with
+    @ match runtime_config_unmatched_current state with
+      | Some current ->
+          [Masc_tui_runtime_config_view.Neutral, "Source: " ^ current.path;
+           Masc_tui_runtime_config_view.Neutral, "Current snapshot revision: " ^ current.source_revision;
+           Masc_tui_runtime_config_view.Warning, "Validation and application state not read for this snapshot"]
+      | None -> match state.runtime_config_view with
       | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
       | Some reading ->
           [Masc_tui_runtime_config_view.Neutral,

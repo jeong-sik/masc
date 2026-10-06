@@ -61,7 +61,7 @@ def run_case(executable: str, fixture_path: Path) -> None:
     gate = cast(dict[str, Any], run["output"]["absorb_gate"])
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     fixtures[_keyboard_keepers.lane_runs_path("librarian_exact")] = (200, fixture["page"])
     detail_reads: list[str] = []
 

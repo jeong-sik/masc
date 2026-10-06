@@ -105,7 +105,7 @@ let start_flow snapshot =
   match frozen with
   | Error _ -> fail "flow snapshot was rejected"
   | Ok frozen ->
-    (match EO.start_flow frozen with
+    (match EO.start_flow ~admission_class:Llm_provider.Admission_class.Standard frozen with
      | Ok flow -> flow
      | Error (EO.Flow_id_generation_failed detail) ->
        failf "flow identity allocation failed: %s" detail)

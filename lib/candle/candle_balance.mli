@@ -11,6 +11,8 @@ type error =
   | Duplicate_payment of string
   | Balance_overflow of string
   | Negative_purchase of string
+  | Invalid_grant of { keeper : string; amount_milli : int }
+  | Duplicate_grant of { keeper : string; reason : string }
   | Unowned_equipment of {keeper : string; item : Keeper_portrait_item.t}
   | Wrong_equipment_slot of Keeper_portrait_item.t
   | Already_owned of
@@ -43,8 +45,9 @@ type supply =
   }
 
 val supply : t -> supply
-(** Issuance counts actual credited allocations after deduction. Purchases
-    burn their recorded debit; equipment changes do not move currency. *)
+(** Issuance counts actual credited allocations after deduction, plus
+    granted gifts. Purchases burn their recorded debit; equipment changes
+    do not move currency. *)
 
 (** Purchased items, in canonical catalog order. Starting portrait equipment
     does not imply ownership. *)
@@ -63,9 +66,20 @@ val purchase
   -> item:Keeper_portrait_item.t
   -> amount_milli:int
   -> (t, error) result
+val grant
+  :  t
+  -> at:Candle_time.t
+  -> keeper:string
+  -> amount_milli:int
+  -> reason:string
+  -> (t, error) result
+(** Credit an operator gift. A non-positive amount is [Invalid_grant]; a
+    second gift to the same keeper under the same reason is
+    [Duplicate_grant], so a retried grant run cannot pay twice. *)
 
-(** Replay payments and purchases in file order. A repeated purchase, negative
-    amount, overspend, duplicate payment or overflow rejects the whole fold. *)
+(** Replay payments, purchases and grants in file order. A repeated purchase,
+    negative amount, overspend, duplicate payment, duplicate grant or
+    overflow rejects the whole fold. *)
 val of_events : at:Candle_time.t -> Candle_event.t list -> (t, error) result
 (** Observe wallets at [at] after replaying chronological monetary and policy
     facts. Current configuration never rewrites historical intervals or debits.

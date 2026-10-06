@@ -1,0 +1,99 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-runtime-raw-save.test.ts src/components/exact-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+
+ ❯ src/components/exact-lane-activity-panel.test.ts (46 tests | 2 failed) 1017ms
+   ❯ Exact activity operator flow (37)
+     × keeps unload guarded during verified receipt setup follow-up 58ms
+     × settles a superseded raw-save basis after follow-up while preserving dirty=false 53ms
+ ❯ src/api/dashboard-runtime-raw-save.test.ts (26 tests | 2 failed) 12ms
+   ❯ raw runtime.toml revision-checked write (26)
+     × classifies structured raw-save authorization status 401 as pre-handler refusal 6ms
+     × classifies structured raw-save authorization status 403 as pre-handler refusal 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/dashboard-runtime-raw-save.test.ts > raw runtime.toml revision-checked write > classifies structured raw-save authorization status 401 as pre-handler refusal
+ FAIL  src/api/dashboard-runtime-raw-save.test.ts > raw runtime.toml revision-checked write > classifies structured raw-save authorization status 403 as pre-handler refusal
+AssertionError: expected ApiRequestError: POST /api/v1/runtime/con… { …(13) } to match object { name: 'RuntimeTomlSaveRejected' }
+(15 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "name": "RuntimeTomlSaveRejected",
++ ApiRequestError {
++   "name": "ApiRequestError",
+  }
+
+ ❯ src/api/dashboard-runtime-raw-save.test.ts:26:60
+     24|   it.each([401, 403])('classifies structured raw-save authorization st…
+     25|     const fetchMock = reply({ error: 'authorization rejected', auth_er…
+     26|     await expect(saveRuntimeTomlConfig('# draft', revision)).rejects.t…
+       |                                                            ^
+     27|     expect(fetchMock).toHaveBeenCalledTimes(1)
+     28|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > keeps unload guarded during verified receipt setup follow-up
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:87:36
+     85|     expect(session.modified()).toBe(false)
+     86|     const event = new Event('beforeunload', { cancelable: true }); win…
+     87|     expect(event.defaultPrevented).toBe(true)
+       |                                    ^
+     88|     pending.resolve(); await saving
+     89|     const finished = new Event('beforeunload', { cancelable: true }); …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > settles a superseded raw-save basis after follow-up while preserving dirty=false
+AssertionError: expected '# notes stay\n[runtime.exact_output_l…' to be '# notes stay\n[runtime.exact_output_l…' // Object.is equality
+
+- Expected
++ Received
+
+  # notes stay
+  [runtime.exact_output_lanes.librarian_exact]
+  slots = ["first", "second"]
+  cli_slots = ["client"]
+- enabled = false # preserve this comment
++ enabled = true # preserve this comment
+
+  [providers.extra]
+  value = "keep"
+  # raw commit
+
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:117:51
+    115|       expect(api.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(reads)
+    116|     } else {
+    117|       expect(raw.state.value.config?.source_text).toBe(stored)
+       |                                                   ^
+    118|       expect(raw.state.value.needsRead).toBe(false)
+    119|       expect(raw.writable(authority)).toBe(true)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 68 passed (72)
+   Start at  05:18:32
+   Duration  3.27s (tests 34%, import 24%, transform 21%, environment 12%, setup 10%)
+
+    Isolate  2 workers spawned · ~281ms startup each (spawn + environment, per file)
+             at least ~281ms faster with isolate: false — reuses workers across files instead of one per file
+
+ ELIFECYCLE  Test failed. See above for more details.

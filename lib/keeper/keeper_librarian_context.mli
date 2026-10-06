@@ -25,6 +25,12 @@ val empty : input
 val source_of_event : Keeper_event_queue_state.pending_selection -> source
 val source_of_chat : Keeper_chat_operation.t -> source
 val prompt_json : input -> Yojson.Safe.t
+val shows_no_working_context : input -> bool
+(** [prompt_json input] equals [prompt_json empty]: no pending source and no
+    unavailable source. [prompt_json] shows a prior snapshot only beside a
+    source and never shows the execution basis, so neither decides this.
+    It describes the Librarian prompt only; {!render} still shows prior
+    pockets to the Keeper. *)
 val pockets_of_json : sources:source list -> Yojson.Safe.t -> (pocket list, string) result
 val select : input -> Yojson.Safe.t -> (pocket list, string) result
 val pockets_to_json : pocket list -> Yojson.Safe.t

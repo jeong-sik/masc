@@ -1,0 +1,37 @@
+{
+  "base": "6e2f49595a0a328cfe6192062428615549aefa8e",
+  "scope": "TUI machine editor source and focused evidence; no full native/PTY proof",
+  "source_sha256": {
+    "bin/dune": "d9e00776f3424565bc1aec5a9fbd84901511e06e17e8f2d8405deb2d009937c0",
+    "bin/masc_tui.ml": "4602872ee8aea3eacb3b484061c87f7ef3a4907cb4a311e16ff1ef9e9551d4ed",
+    "bin/masc_tui_async_protocol.ml": "71b2136060e627a74e37a9a44862fbce12905e1df8c41f09b0664a571ce683b1",
+    "bin/masc_tui_async_protocol.mli": "71b2136060e627a74e37a9a44862fbce12905e1df8c41f09b0664a571ce683b1",
+    "bin/masc_tui_keys.ml": "4bd2be5e49e8f5732dd401cb6c9e59616b194ab41f16fb7794e1817e29b8a125",
+    "bin/masc_tui_lane_inventory.ml": "e9cf35550e41896fd8ea620a8e7ae8af69bc5995637d39572800103f1343b1ac",
+    "bin/masc_tui_machine_activity.ml": "ecf4080ed9c3e393171a79fccd7dcb758c0be91ee0151fb016dbd36a7bc600ec",
+    "bin/masc_tui_machine_activity.mli": "c0aeaf3b5e6ad54a5066d774e21ca7443cbb786d24926c67b03cf9fc3ea3cfd5",
+    "bin/masc_tui_render.ml": "1a09237d94d5f3a6e045c27aecde94a1e3f994000a0e2f18f7ddeaff685924b9",
+    "bin/masc_tui_types.ml": "653eac5a8f3a282e105b4cf18380e91d8bf214329c16576ece33599759f6b466",
+    "docs/guides/machine-activity.md": "fd91eb53d6e1df5724d1bf9595d3cf4a49bf8284eed45bea222bbceb578340f4",
+    "lib/toml_line_editor/toml_line_editor.ml": "379798dbce2df44e01139e52217325d00587dc24068ddf667f862afea3abf610",
+    "lib/toml_line_editor/toml_line_editor.mli": "c04068627dd76c76a5db57b3a05bbf9103ef7691cdd81c019dae90fd1cac68d5",
+    "test/dune": "9c1038024b1eb3ddab4b5869b07facfde6a293c0694b5a531c4ef5334843311b",
+    "test/test_tui_machine_activity.ml": "c1b59a1248525d915b21c18390a09f85286f10bc62fd431b07361d205d5a21c4",
+    "test/test_tui_machine_activity_pty.py": "25671b37a4567fc20835a1903b8bac393f059fe8010b31889b2f8c9d10cc8179",
+    "test/toml_line_editor/test_toml_line_editor.ml": "de65dde1467f61077ede281ed9f2c470363c39ff784f7f4a5bbfc96a14ace65f"
+  },
+  "artifact_sha256": {
+    "docs/evidence/2026-10-05-tui-machine-activity/README.md": "f1eba29bd09b8831c4fb77215000616f4668927b1783a6055859110d3cebc10a",
+    "docs/evidence/2026-10-05-tui-machine-activity/after-provenance.json": "ec085e8a162890e2bdcf844d00155d5be5c1e5753cc3e2a379a85436113edadb",
+    "docs/evidence/2026-10-05-tui-machine-activity/after.txt": "15a40b50f1549fe7315a38ab5d328b7493451f781c71e5b8756e670455547b36",
+    "docs/evidence/2026-10-05-tui-machine-activity/bool-comment-after.json": "554f74260c5bae7913273d706d4c3419151d9444f1d3bf7323e624584e466ed1",
+    "docs/evidence/2026-10-05-tui-machine-activity/bool-comment-after.txt": "83dff724c027dd43525b138f086df334b155c2413645e8d9a2eab4d377082e88",
+    "docs/evidence/2026-10-05-tui-machine-activity/bool-comment-before.json": "3aae65dfa55d3c7e54b75e848107bb9352fcee51d7252cfbab01aaa5870e3432",
+    "docs/evidence/2026-10-05-tui-machine-activity/bool-comment-before.txt": "238aaa1d1257ad24423bcf8541e7717e1ca772df8b3f6d8960478f239d80a07f",
+    "docs/evidence/2026-10-05-tui-machine-activity/check-bool-comments.py": "c342c0dfa49274fac42f3aa0bdbd255ae861dd2fdfbbe0579cb100be1ac3b6fa",
+    "docs/evidence/2026-10-05-tui-machine-activity/check-draft.py": "79721e57d3cb39de78c095d01260d02065aef29f9ed96ebc7b67ec4adf08efe4",
+    "docs/evidence/2026-10-05-tui-machine-activity/initial-draft-check.txt": "bcbb70c651964426d951d85e2b1f87682bafc3495b7a1bb5bb68dbcebaa9e1ef",
+    "docs/evidence/2026-10-05-tui-machine-activity/initial-draft-provenance.json": "a85e8456d6bbdbd514d0dd425e791618087c658c3cb063eabd7f573ea2bc17cb",
+    "docs/evidence/2026-10-05-tui-machine-activity/syntax.json": "2852cb373b82eef6334dd15811166bc30afb90dcd4c7767cdb2b5588fb96f7e4"
+  }
+}

@@ -1,0 +1,73 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-runtime-observation-workspace-20261004/dashboard
+
+ ✓ src/components/runtime-observation-workspace.test.ts > withdraws A metrics and reads B when workspace changes 19ms
+ ✓ src/components/runtime-observation-workspace.test.ts > discards delayed A metrics after B becomes current 5ms
+ ✓ src/components/runtime-observation-workspace.test.ts > does not join a delayed A probe to the B runtime spec 66ms
+ ✓ src/components/runtime-observation-workspace.test.ts > withdraws readings and sends no observation requests without a confirmed workspace 25ms
+ ✓ src/components/runtime-observation-workspace.test.ts > cannot revive an old A metrics response after A to B to A 5ms
+ ✓ src/components/runtime-observation-workspace.test.ts > late A errors cannot replace B metrics or probe observations 10ms
+ ✓ src/components/runtime-observation-workspace.test.ts > provider usage responses remain owned by their workspace even when provider IDs match 106ms
+ ✓ src/components/runtime-observation-workspace.test.ts > late manual login results never appear on a new workspace account with the same ID 6ms
+ ✓ src/components/runtime-observation-workspace.test.ts > cancels owned observation requests when the panels unmount 4ms
+ ✓ src/components/runtime-observation-workspace.test.ts > accepts a login click immediately after the account mounts, before passive effects flush 1ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog hides loaded A immediately and automatically reads B for existing consumers 107ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved hides loaded A immediately and automatically reads B for existing consumers 103ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog refuses a late A response after B becomes current 53ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved refuses a late A response after B becomes current 50ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog withdraws data and refuses reads until authority is restored 52ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved withdraws data and refuses reads until authority is restored 51ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog waits for demand, and repeated unknown-workspace loads remain stable 1ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved waits for demand, and repeated unknown-workspace loads remain stable 0ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog keeps a failed B reading explicit without retrying on every render 53ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved keeps a failed B reading explicit without retrying on every render 51ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog ignores old errors and finally without clearing B request deduplication 155ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved ignores old errors and finally without clearing B request deduplication 154ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog cannot revive an old A response after A-B-A 155ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved cannot revive an old A response after A-B-A 155ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > catalog cancels demand on reset and can register it again later 53ms
+ ✓ src/lib/runtime-workspace-resource.test.ts > resolved cancels demand on reset and can register it again later 51ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > renders resolved paths, root-relative config paths, and runtime diagnostics 236ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > keeps the keeper runtime panel on a default install where every threshold is a fail-safe floor 15ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > surfaces provider catalog spec beside provider reachability rows 10ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > keeps the full path on hover title and hides duplicate source badges 2ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > does not collapse sibling paths that only share the root prefix 1ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > renders the same-as-root case without repeating the full path 1ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > keeps runtime paths usable when the installed binary has no repository path 4ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > treats slash root as a valid root-relative prefix 1ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > renders local .masc source label 1ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > ConfigResolutionPanel > calls out repo fallback config roots separately from copied runtime roots 1ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > returns the input reference when the query is empty 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > returns the input reference when the query is whitespace-only 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > trims the query before matching 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > matches kind case-insensitively 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > matches signal case-insensitively 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > matches substring in the message body 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > returns an empty array when nothing matches 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > skips undefined signal fields without crashing 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > returns an empty array when the input is empty 0ms
+ ✓ src/components/tools/config-resolution-panel.test.ts > filterDiagnostics > does not mutate the input array 0ms
+ ✓ src/components/overview/runtime-stats.test.ts > shows each official client account once with its provider-reported usage 29ms
+ ✓ src/components/overview/runtime-stats.test.ts > shows a catalog failure instead of silently omitting account monitoring 5ms
+ ✓ src/components/overview/runtime-stats.test.ts > keeps stale values explicit until a refresh returns fresh cache metadata 8ms
+ ✓ src/components/overview/runtime-stats.test.ts > does not invent freshness from absent or unsupported cache metadata 3ms
+ ✓ src/components/overview/runtime-stats.test.ts > shows lane measurements and provenance with a direct detail route 4ms
+ ✓ src/components/overview/runtime-stats.test.ts > distinguishes unreported metrics and unavailable ledger from recorded zero 3ms
+ ✓ src/components/overview/runtime-stats.test.ts > does not interpret an empty initial cache as zero usage 2ms
+ ✓ src/components/overview/runtime-stats.test.ts > rejects malformed inventories: {} 1ms
+ ✓ src/components/overview/runtime-stats.test.ts > rejects malformed inventories: {"models":[null]} 1ms
+ ✓ src/components/overview/runtime-stats.test.ts > rejects malformed inventories: {"models":[{}]} 1ms
+ ✓ src/components/overview/runtime-stats.test.ts > retries HTTP failure without numeric placeholders 3ms
+ ✓ src/components/overview/runtime-stats.test.ts > requests the chosen period and ignores superseded responses 4ms
+ ✓ src/components/overview/runtime-stats.test.ts > follows the real pending cache envelope through to available without operator refresh 4ms
+ ✓ src/components/overview/runtime-stats.test.ts > stops a pending refresh lifecycle when unmounted 1ms
+ ✓ src/components/overview/runtime-stats.test.ts > aborts the old pending window and prevents a late follow-up from replacing the new window 4ms
+ ✓ src/components/overview/runtime-stats.test.ts > distinguishes an available empty aggregate from a pending initial cache 2ms
+
+ Test Files  4 passed (4)
+      Tests  62 passed (62)
+   Start at  22:53:16
+   Duration  4.58s (tests 44%, import 23%, transform 12%, environment 12%, setup 8%)
+
+    Isolate  4 workers spawned · ~215ms startup each (spawn + environment, per file)
+             at least ~644ms faster with isolate: false — reuses workers across files instead of one per file

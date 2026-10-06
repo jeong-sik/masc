@@ -1,0 +1,52 @@
+{
+  "head": "798b1950f5f98cb716af972ce285b3f85f1b0348",
+  "comment": 4179544817,
+  "source_sha256": {
+    "lib/browser_lane/browser_lane.ml": "870686abae714c4650dc5d7e94f2ce61bca0f784aa2056d6f0129ba434f145df",
+    "lib/server/server_browser_configuration.ml": "8f448007dc6797beeefacddd7de6d4c9921b8460159da23d4ee3e32e5d51c150",
+    "lib/server/server_browser_configuration.mli": "9fb3b5bb2c7e60e969a35b0d4fc00c74b94be978d811d33c34eead0044ef3f66",
+    "lib/server/server_lane_inventory.ml": "66047ba2721493cd3097b9b7a7e412a23ef4f4ffe0f39034b21395d3f77d7ec3",
+    "test/test_server_lane_inventory.ml": "5e3349eafb2c96ec713071f473a12b11232f8bd085497babbb89b7a0058679a6",
+    "test/dune": "721ecffa9ee8621f3e699e2956c57669f92791cc2b0eac0f8afb8bbae3e496a4"
+  },
+  "raw_sha256": {
+    "pr41185-inventory-red-build.log": "d26b4c2af68dc659a270e4fb9250aa3b67f6acb1ab3633e90dd025452672c958",
+    "pr41185-inventory-red-build2.log": "3be4bc05d70a4fdf577911bddd93cd60951ac898cfc5c10a0fcf7d9237e3f845",
+    "pr41185-inventory-red.log": "a5abdbce47f1040d3f8979615d195932332ae43026ed35f02625e0f3e69ba1b6",
+    "pr41185-inventory-green-build.log": "2cda217b02d6e100a74436d7437afd157aab1b7af00243d687da44ac8f30b380",
+    "pr41185-inventory-green.log": "9bc089ce8dffecab95885cb686fd801f003178cf6007f6151d52de00fb51181d",
+    "pr41185-inventory-browser-activity.log": "3d74eff1d2f100442d714ec36af7afae51f5eefc8e255bcfb4e9c4dc78b38caf",
+    "pr41185-inventory-browser-lane.log": "cd3ea9ebf884ac5c1f19a5d3d9288a6be47941b15b51bbfd7d0744d782cc86d0"
+  },
+  "binary_sha256": {
+    "test/test_server_lane_inventory.exe": "f85f214bfaa6f98ff0897931d01d12e8b1c8c7e23a12b9a4bd9953435980485c",
+    "test/test_browser_activity.exe": "fc51decc24220a5ef221368214ce1ff1a788acf227dc0dd10f4b1a4d813830fa",
+    "test/test_browser_lane.exe": "b0e8ea1c086e29563b8492a826e109e6159a24b40aa779b6bd5f87157ce934c6"
+  },
+  "red": {
+    "build_handle": 51955,
+    "test_handle": 81463,
+    "exit": 1,
+    "expected": [
+      "on",
+      "on",
+      "on"
+    ],
+    "actual": [
+      "on",
+      "off",
+      "off"
+    ]
+  },
+  "green": {
+    "build_handle": 50678,
+    "test_handle": 9539,
+    "inventory_cases": 9,
+    "activity_cases": 15,
+    "routing_cases": 8,
+    "all_success": true
+  },
+  "initial_setup_failure": "32337: missing direct masc.browser_lane test dependency; excluded from behavior RED",
+  "full_suite": false,
+  "published": false
+}

@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-workspace-boundary-20261005/test/test_tui_machine_activity_pty.py", line 273, in run_workspace_boundary
+    h.run_terminal_scenario(binary, description='Machine workspace switch after ' + switch_after,
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=40)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-workspace-boundary-20261005/test/tui_keyboard_harness.py", line 2394, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-workspace-boundary-20261005/test/test_tui_machine_activity_pty.py", line 265, in interact
+    assert switched.wait(3), 'fixture never switched workspace'
+           ~~~~~~~~~~~~~^^^
+AssertionError: fixture never switched workspace

@@ -1,0 +1,196 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/runtime-toml-editor.test.ts -t 'automatically rereads a clean load'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+
+ ❯ src/components/runtime-toml-editor.test.ts (81 tests | 1 failed | 80 skipped) 5027ms
+   ❯ RuntimeTomlEditor (81)
+     × automatically rereads a clean load superseded by an external write 5026ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/runtime-toml-editor.test.ts > RuntimeTomlEditor > automatically rereads a clean load superseded by an external write
+AssertionError: expected '' to be '[runtime]\ndefault = "runpod_mtp.qwen…' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden v2-monitoring-panel"[39m
+        [33mdata-section-card[39m=[32m"true"[39m
+        [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+        [33mdata-section-card-class-length[39m=[32m"19"[39m
+        [33mdata-section-card-content-state[39m=[32m"node"[39m
+        [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+        [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+        [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+        [33mdata-section-card-has-right-slot[39m=[32m"true"[39m
+        [33mdata-section-card-has-status[39m=[32m"false"[39m
+        [33mdata-section-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-section-card-has-tone[39m=[32m"false"[39m
+        [33mdata-section-card-label-source[39m=[32m"label"[39m
+        [33mdata-section-card-label-state[39m=[32m"text"[39m
+        [33mdata-section-card-label-text-length[39m=[32m"12"[39m
+        [33mdata-section-card-status[39m=[32m""[39m
+        [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+        [33mdata-section-card-status-length[39m=[32m"0"[39m
+        [33mdata-section-card-tail-source[39m=[32m"right"[39m
+        [33mdata-section-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-section-card-tone-length[39m=[32m"0"[39m
+        [33mdata-section-card-variant[39m=[32m"light"[39m
+        [33mdata-surface-card[39m=[32m"true"[39m
+        [33mdata-surface-card-class-length[39m=[32m"19"[39m
+        [33mdata-surface-card-content-state[39m=[32m"node"[39m
+        [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-surface-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+        [33mdata-surface-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-surface-card-tone[39m=[32m""[39m
+        [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+        [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+        [33mdata-surface-card-variant[39m=[32m"light"[39m
+        [33mdata-testid[39m=[32m"runtime-toml-editor"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+          [36m>[39m
+            [0mruntime.toml[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-section-head-tail[39m=[32m"true"[39m
+            [33mstyle[39m=[32m"margin-left: auto; display: inline-flex; gap: 4px; align-items: center;"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"rt-status "[39m
+              [33mdata-testid[39m=[32m"runtime-toml-status"[39m
+            [36m>[39m
+              [0midle[0m
+            [36m</span>[39m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+            [33mclass[39m=[32m"set-card"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m설정 재개[0m
+            [36m</button>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rt-shell"[39m
+          [36m>[39m
+            [36m<nav[39m
+              [33maria-label[39m=[32m"런타임 편집기 섹션"[39m
+              [33mclass[39m=[32m"rt-nav"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rt-nav-h"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"eyebrow"[39m
+                [36m>[39m
+                  [0mOperator[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-title"[39m
+                [36m>[39m
+                  [0m런타임 편집기[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-sub mono"[39m
+                [36m>[39m
+                  [0mconfig/runtime.toml[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"rt-nav-item on"[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-routing"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◷[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m라우팅[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-lanes"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m⇄[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0mLane 후보[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-providers"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◇[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m프로바이더[0m
+        ...
+
+- Expected
++ Received
+
+- [runtime]
+- default = "runpod_mtp.qwen"
+- # latest writer
+-
+
+ ❯ src/components/runtime-toml-editor.test.ts:375:76
+    373|     await act(() => announceRuntimeTomlWritten())
+    374|     await act(async () => { finish(baseConfig); await Promise.resolve(…
+    375|     await waitFor(() => expect(container.querySelector('textarea')?.va…
+       |                                                                            ^
+    376|     expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(2)
+    377|     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 80 skipped (81)
+   Start at  22:43:11
+   Duration  6.24s (tests 82%, transform 8%, import 5%, environment 3%, setup 2%)
+
+ ELIFECYCLE  Test failed. See above for more details.

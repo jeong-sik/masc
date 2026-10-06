@@ -1,0 +1,152 @@
+E401 [*] Multiple imports on one line
+ --> test/test_stdio_browser_activity.py:7:1
+  |
+5 | Its model endpoint is unreachable loopback and autonomous work is disabled.
+6 | """
+7 | import json, os, selectors, subprocess, tempfile, shutil, time, sys
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+8 | from pathlib import Path
+9 | repo=Path(os.environ.get('DUNE_SOURCEROOT', Path(__file__).resolve().parents[1]))
+  |
+help: Split imports
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:13:17
+   |
+11 | for enabled in [False,True]:
+12 |  with tempfile.TemporaryDirectory(prefix='masc-stdio-browser-fixture-') as tmp:
+13 |   base=Path(tmp);cfg=base/'.masc/config';cfg.mkdir(parents=True)
+   |                 ^
+14 |   auth=base/'.masc/auth';auth.mkdir();(auth/'config.json').write_text(json.dumps({'enabled':False,'workspace_secret_hash':None,'requir…
+15 |   (cfg/'keepers').mkdir();shutil.copytree(repo/'config/prompts',cfg/'prompts')
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:13:41
+   |
+11 | for enabled in [False,True]:
+12 |  with tempfile.TemporaryDirectory(prefix='masc-stdio-browser-fixture-') as tmp:
+13 |   base=Path(tmp);cfg=base/'.masc/config';cfg.mkdir(parents=True)
+   |                                         ^
+14 |   auth=base/'.masc/auth';auth.mkdir();(auth/'config.json').write_text(json.dumps({'enabled':False,'workspace_secret_hash':None,'requir…
+15 |   (cfg/'keepers').mkdir();shutil.copytree(repo/'config/prompts',cfg/'prompts')
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:14:25
+   |
+12 |  with tempfile.TemporaryDirectory(prefix='masc-stdio-browser-fixture-') as tmp:
+13 |   base=Path(tmp);cfg=base/'.masc/config';cfg.mkdir(parents=True)
+14 |   auth=base/'.masc/auth';auth.mkdir();(auth/'config.json').write_text(json.dumps({'enabled':False,'workspace_secret_hash':None,'requir…
+   |                         ^
+15 |   (cfg/'keepers').mkdir();shutil.copytree(repo/'config/prompts',cfg/'prompts')
+16 |   (cfg/'runtime.toml').write_text('[providers.fixture]\nprotocol="ollama-http"\nendpoint="http://127.0.0.1:9"\n[models.fixture]\napi-n…
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:14:38
+   |
+12 |  with tempfile.TemporaryDirectory(prefix='masc-stdio-browser-fixture-') as tmp:
+13 |   base=Path(tmp);cfg=base/'.masc/config';cfg.mkdir(parents=True)
+14 |   auth=base/'.masc/auth';auth.mkdir();(auth/'config.json').write_text(json.dumps({'enabled':False,'workspace_secret_hash':None,'requir…
+   |                                      ^
+15 |   (cfg/'keepers').mkdir();shutil.copytree(repo/'config/prompts',cfg/'prompts')
+16 |   (cfg/'runtime.toml').write_text('[providers.fixture]\nprotocol="ollama-http"\nendpoint="http://127.0.0.1:9"\n[models.fixture]\napi-n…
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:15:26
+   |
+13 |   base=Path(tmp);cfg=base/'.masc/config';cfg.mkdir(parents=True)
+14 |   auth=base/'.masc/auth';auth.mkdir();(auth/'config.json').write_text(json.dumps({'enabled':False,'workspace_secret_hash':None,'requir…
+15 |   (cfg/'keepers').mkdir();shutil.copytree(repo/'config/prompts',cfg/'prompts')
+   |                          ^
+16 |   (cfg/'runtime.toml').write_text('[providers.fixture]\nprotocol="ollama-http"\nendpoint="http://127.0.0.1:9"\n[models.fixture]\napi-n…
+17 |   env={'PATH':os.environ['PATH'],'HOME':tmp,'DUNE_SOURCEROOT':str(repo),'MASC_KEEPER_AUTONOMOUS_ENABLED':'false','MASC_ORCHESTRATOR_EN…
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:22:105
+   |
+20 |    try:
+21 |     def call(i,method,params):
+22 |      p.stdin.write((json.dumps({'jsonrpc':'2.0','id':i,'method':method,'params':params})+'\n').encode());p.stdin.flush()
+   |                                                                                                         ^
+23 |      sel=selectors.DefaultSelector();sel.register(p.stdout,selectors.EVENT_READ);deadline=time.monotonic()+30
+24 |      while time.monotonic()<deadline:
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:23:37
+   |
+21 |     def call(i,method,params):
+22 |      p.stdin.write((json.dumps({'jsonrpc':'2.0','id':i,'method':method,'params':params})+'\n').encode());p.stdin.flush()
+23 |      sel=selectors.DefaultSelector();sel.register(p.stdout,selectors.EVENT_READ);deadline=time.monotonic()+30
+   |                                     ^
+24 |      while time.monotonic()<deadline:
+25 |       if sel.select(.2):
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:23:81
+   |
+21 |     def call(i,method,params):
+22 |      p.stdin.write((json.dumps({'jsonrpc':'2.0','id':i,'method':method,'params':params})+'\n').encode());p.stdin.flush()
+23 |      sel=selectors.DefaultSelector();sel.register(p.stdout,selectors.EVENT_READ);deadline=time.monotonic()+30
+   |                                                                                 ^
+24 |      while time.monotonic()<deadline:
+25 |       if sel.select(.2):
+   |
+
+E701 Multiple statements on one line (colon)
+  --> test/test_stdio_browser_activity.py:27:19
+   |
+25 |       if sel.select(.2):
+26 |        line=p.stdout.readline()
+27 |        if not line:raise AssertionError('stdio closed: '+(base/'stderr.log').read_text()[-3000:])
+   |                   ^
+28 |        answer=json.loads(line)
+29 |        if answer.get('id')==i:return answer
+   |
+
+E701 Multiple statements on one line (colon)
+  --> test/test_stdio_browser_activity.py:29:30
+   |
+27 |        if not line:raise AssertionError('stdio closed: '+(base/'stderr.log').read_text()[-3000:])
+28 |        answer=json.loads(line)
+29 |        if answer.get('id')==i:return answer
+   |                              ^
+30 |      raise AssertionError('stdio response timeout: '+(base/'stderr.log').read_text()[-3000:])
+31 |     initialized=call(1,'initialize',{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'browser-activity-fixture',…
+   |
+
+E701 Multiple statements on one line (colon)
+  --> test/test_stdio_browser_activity.py:43:8
+   |
+41 |    finally:
+42 |     p.terminate()
+43 |     try:p.wait(timeout=10)
+   |        ^
+44 |     except subprocess.TimeoutExpired:p.kill();p.wait()
+   |
+
+E701 Multiple statements on one line (colon)
+  --> test/test_stdio_browser_activity.py:44:37
+   |
+42 |     p.terminate()
+43 |     try:p.wait(timeout=10)
+44 |     except subprocess.TimeoutExpired:p.kill();p.wait()
+   |                                     ^
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> test/test_stdio_browser_activity.py:44:46
+   |
+42 |     p.terminate()
+43 |     try:p.wait(timeout=10)
+44 |     except subprocess.TimeoutExpired:p.kill();p.wait()
+   |                                              ^
+   |
+
+Found 14 errors.
+[*] 1 fixable with the `--fix` option.

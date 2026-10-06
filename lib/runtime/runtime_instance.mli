@@ -100,15 +100,18 @@ val resolve_max_context_of_runtime : t -> (int * max_context_source) option
 
 val muse_prompt_capacity : t -> (int, Runtime_muse_prompt_capacity.error) result
 (** The start-prompt ceiling of a Muse runtime: derived from its resolved
-    window ({!resolve_max_context_of_runtime}) and narrowed by a declared
-    [max-prompt-bytes] ({!Runtime_muse_prompt_capacity.start_prompt_bytes}).
+    window ({!resolve_max_context_of_runtime})
+    ({!Runtime_muse_prompt_capacity.start_prompt_bytes}).
     A Muse turn applies this and refuses with the error's cause. *)
 
 val prompt_capacity_bytes : t -> int option
-(** The start-prompt ceiling a turn on this runtime applies: the model's
-    declared [max-prompt-bytes], or for a Muse model {!muse_prompt_capacity}.
-    [None] when no ceiling applies, which for Muse means the ceiling cannot
-    be derived and the turn itself refuses. *)
+(** The start-prompt ceiling a turn on this runtime applies, from
+    {!Runtime_client_prompt_ceiling}: the window-derived ceiling for
+    Antigravity and {!muse_prompt_capacity} for Muse, the two hosts that cut
+    an oversized input without saying so. [None] when no ceiling applies:
+    Claude Code, Codex and every HTTP format send the whole range and rely on
+    the provider's typed overflow, and for Muse or Antigravity it means the window cannot be resolved, so the
+    turn itself refuses. *)
 
 val capabilities_for_runtime : t -> Llm_provider.Capabilities.capabilities option
 val is_local_provider : provider -> bool

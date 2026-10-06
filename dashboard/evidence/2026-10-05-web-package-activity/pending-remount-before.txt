@@ -1,0 +1,450 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-package-activity-20261005/dashboard
+
+ ❯ src/components/lane-package-activity-panel.test.ts (12 tests | 1 failed | 11 skipped) 5050ms
+   ❯ Web package on/off without deleting configuration (12)
+     × refreshes a remounted inventory when its retained pending save completes 5049ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-package-activity-panel.test.ts > Web package on/off without deleting configuration > refreshes a remounted inventory when its retained pending save completes
+TestingLibraryElementError: Unable to find an element with the text: Observed configuration: Off requested · worker cleanup not yet confirmed. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<section[39m
+  [33maria-label[39m=[32m"Package activity pkg"[39m
+  [33mclass[39m=[32m"min-w-0 rounded border border-[var(--border)] p-4 space-y-3"[39m
+[36m>[39m
+  [36m<header[39m
+    [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+  [36m>[39m
+    [36m<h3[39m
+      [33mclass[39m=[32m"font-semibold"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [0mPackage on/off · [0m
+      [0mpkg[0m
+    [36m</h3>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mClose activity[0m
+    [36m</button>[39m
+  [36m</header>[39m
+  [36m<p>[39m
+    [0mOff keeps this declaration and retained observations, and asks the server to clean up its worker. On makes it eligible for reconciliation again. Existing TOML editor drafts are unchanged.[0m
+  [36m</p>[39m
+  [36m<p[39m
+    [33mrole[39m=[32m"status"[39m
+  [36m>[39m
+    [0mFile activity (last read): [0m
+    [0mOn[0m
+  [36m</p>[39m
+  [36m<p[39m
+    [33mrole[39m=[32m"status"[39m
+  [36m>[39m
+    [0mObserved configuration: On · not yet applied[0m
+  [36m</p>[39m
+  [36m<button[39m
+    [33maria-checked[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Activity draft for pkg"[39m
+    [33mclass[39m=[32m"rounded border border-[var(--border)] px-3 py-2 disabled:opacity-50"[39m
+    [33mrole[39m=[32m"switch"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m>[39m
+    [0mDraft: [0m
+    [0mOn[0m
+    [0m · [0m
+    [0mTurn off[0m
+  [36m</button>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+  [36m>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover opacity-50 pointer-events-none"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"true"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mSave activity[0m
+    [36m</button>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mRead current activity[0m
+    [36m</button>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mDiscard activity draft[0m
+    [36m</button>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mEdit original TOML[0m
+    [36m</button>[39m
+  [36m</div>[39m
+  [36m<p[39m
+    [33mrole[39m=[32m"status"[39m
+  [36m>[39m
+    [0mLast save response: [0m
+    [0msaved[0m
+    [0m · durability [0m
+    [0mdurable[0m
+    [0m. [0m
+    [0m[0m
+  [36m</p>[39m
+  [36m<details>[39m
+    [36m<summary>[39m
+      [0mFile and save revisions[0m
+    [36m</summary>[39m
+    [36m<p[39m
+      [33mclass[39m=[32m"break-all"[39m
+    [36m>[39m
+      [0m/workspace/.masc/config/lane-addons/pkg.toml[0m
+    [36m</p>[39m
+    [36m<p[39m
+      [33mclass[39m=[32m"break-all"[39m
+    [36m>[39m
+      [0mDraft base: [0m
+      [0mr1[0m
+    [36m</p>[39m
+    [36m<p[39m
+      [33mclass[39m=[32m"break-all"[39m
+    [36m>[39m
+      [0mLast read: [0m
+      [0mr1[0m
+    [36m</p>[39m
+  [36m</details>[39m
+[36m</section>[39m
+
+Ignored nodes: comments, script, style
+[36m<section[39m
+  [33maria-label[39m=[32m"Package activity pkg"[39m
+  [33mclass[39m=[32m"min-w-0 rounded border border-[var(--border)] p-4 space-y-3"[39m
+[36m>[39m
+  [36m<header[39m
+    [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+  [36m>[39m
+    [36m<h3[39m
+      [33mclass[39m=[32m"font-semibold"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [0mPackage on/off · [0m
+      [0mpkg[0m
+    [36m</h3>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mClose activity[0m
+    [36m</button>[39m
+  [36m</header>[39m
+  [36m<p>[39m
+    [0mOff keeps this declaration and retained observations, and asks the server to clean up its worker. On makes it eligible for reconciliation again. Existing TOML editor drafts are unchanged.[0m
+  [36m</p>[39m
+  [36m<p[39m
+    [33mrole[39m=[32m"status"[39m
+  [36m>[39m
+    [0mFile activity (last read): [0m
+    [0mOn[0m
+  [36m</p>[39m
+  [36m<p[39m
+    [33mrole[39m=[32m"status"[39m
+  [36m>[39m
+    [0mObserved configuration: On · not yet applied[0m
+  [36m</p>[39m
+  [36m<button[39m
+    [33maria-checked[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Activity draft for pkg"[39m
+    [33mclass[39m=[32m"rounded border border-[var(--border)] px-3 py-2 disabled:opacity-50"[39m
+    [33mrole[39m=[32m"switch"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m>[39m
+    [0mDraft: [0m
+    [0mOn[0m
+    [0m · [0m
+    [0mTurn off[0m
+  [36m</button>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+  [36m>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover opacity-50 pointer-events-none"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"true"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mSave activity[0m
+    [36m</button>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mRead current activity[0m
+    [36m</button>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mDiscard activity draft[0m
+    [36m</button>[39m
+    [36m<button[39m
+      [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"[39m
+      [33mdata-action-button[39m=[32m"true"[39m
+      [33mdata-action-button-aria-label-length[39m=[32m"0"[39m
+      [33mdata-action-button-block[39m=[32m"false"[39m
+      [33mdata-action-button-busy[39m=[32m"false"[39m
+      [33mdata-action-button-class-length[39m=[32m"0"[39m
+      [33mdata-action-button-disabled[39m=[32m"false"[39m
+      [33mdata-action-button-has-aria-label[39m=[32m"false"[39m
+      [33mdata-action-button-has-children[39m=[32m"true"[39m
+      [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+      [33mdata-action-button-has-custom-class[39m=[32m"false"[39m
+      [33mdata-action-button-has-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+      [33mdata-action-button-has-title[39m=[32m"false"[39m
+      [33mdata-action-button-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+      [33mdata-action-button-size[39m=[32m"md"[39m
+      [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+      [33mdata-action-button-title-length[39m=[32m"0"[39m
+      [33mdata-action-button-type[39m=[32m"button"[39m
+      [33mdata-action-button-variant[39m=[32m"primary"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0mEdit original TOML[0m
+    [36m</button>[39m
+  [36m</div>[39m
+  [36m<p[39m
+    [33mrole[39m=[32m"status"[39m
+  [36m>[39m
+    [0mLast save response: [0m
+    [0msaved[0m
+    [0m · durability [0m
+    [0mdurable[0m
+    [0m. [0m
+    [0m[0m
+  [36m</p>[39m
+  [36m<details>[39m
+    [36m<summary>[39m
+      [0mFile and save revisions[0m
+    [36m</summary>[39m
+    [36m<p[39m
+      [33mclass[39m=[32m"break-all"[39m
+    [36m>[39m
+      [0m/workspace/.masc/config/lane-addons/pkg.toml[0m
+    [36m</p>[39m
+    [36m<p[39m
+      [33mclass[39m=[32m"break-all"[39m
+    [36m>[39m
+      [0mDraft base: [0m
+      [0mr1[0m
+    [36m</p>[39m
+    [36m<p[39m
+      [33mclass[39m=[32m"break-all"[39m
+    [36m>[39m
+      [0mLast read: [0m
+      [0mr1[0m
+    [36m</p>[39m
+  [36m</details>[39m
+[36m</section>[39m
+ ❯ waitForWrapper ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/lane-package-activity-panel.test.ts:61:25
+     59|     ] } })
+     60|     await act(() => finish(receipt(`enabled = false\n${original}`)))
+     61|     await panel(screen).findByText('Observed configuration: Off reques…
+       |                         ^
+     62|     expect(files.saveLaneDeclaration).toHaveBeenCalledTimes(1)
+     63|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 skipped (12)
+   Start at  06:08:58
+   Duration  6.35s (tests 81%, import 8%, transform 7%, environment 2%, setup 2%)

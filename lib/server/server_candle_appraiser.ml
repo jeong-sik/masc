@@ -152,7 +152,10 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
     let messages = Agent_core.Types.[make_message ~role:User [Text prompt]] in
     let* snapshot = Exact.snapshot_flow ~first ~rest ~messages requirement
       |> Result.map_error (function Exact.Duplicate_flow_candidate_id {candidate_id;_} -> Terminal (A.Transport_unavailable ("duplicate slot: " ^ candidate_id))) in
-    let* attempt = Exact.start_flow snapshot
+    let* attempt =
+      Exact.start_flow
+        ~admission_class:(Standalone_lane.admission_class Candle_appraiser)
+        snapshot
       |> Result.map_error (function Exact.Flow_id_generation_failed detail -> Terminal (A.Transport_unavailable detail)) in
     match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
     | Some net, Some clock ->

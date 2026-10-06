@@ -25,6 +25,10 @@ type config_observation = private
   ; source_revision : config_source_revision
   }
 
+type config_edit_error =
+  | Config_source_conflict of config_observation
+  | Config_edit_failed of string
+
 type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
@@ -619,25 +623,30 @@ val verifier_exact_lane_resolution : unit -> (verifier_exact_lane_slots, string)
     registry carries the ids verbatim because only this module holds the
     runtime table that answers admission. *)
 
-val verifier_exact_lane_slot_ids : unit -> (string list, string) result
-(** The slot ids this lane can judge through, catalog first then official
+val verifier_exact_lane_slots : unit -> ((string * Types_core.verifier_slot_kind) list, string) result
+(** Acquire slot ids with their immutable admission kind, catalog first then official
     clients, in declaration order — the single provider-selection SSOT for
     completion-authority judgement calls. [Error] names why the lane cannot
     judge (registry not published, lane unconfigured, or every declared slot
-    rejected); there is no fallback to another route. *)
+    rejected); there is no fallback to another route. New acquisitions remain
+    fenced during publication. The acquired kind survives later activity or
+    declaration changes; it does not freeze the runtime execution binding. *)
 
 val verifier_exact_lane_readiness : unit -> (verifier_slot_rejection list, string) result
 (** Whether the [verifier_exact] lane has a slot that can be dispatched now,
     for a caller that reports authority readiness rather than walking the lane.
     [Ok] carries the declared slots the lane cannot judge through, so a short
     lane says why it is short; [Error] names every rejection. This answers from
-    the same admission as {!verifier_exact_lane_slot_ids}: the two used to
+    the same admission as {!verifier_exact_lane_slots}: the two used to
     apply different predicates to catalog slots, and that disagreement let the
     authority start on a lane that refused every review (#37382). *)
 
-val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
+val verifier_exact_slot_admission : candidate_kind:Types_core.verifier_slot_kind -> runtime_id:string -> (unit, string) result
 (** Validate one configured direct slot. A declared CLI slot retains its
-    execution-kind constraint; a replacing registry cannot grant admission. *)
+    execution-kind constraint, including when the lane is off. New implicit
+    reviews acquire the lane through [verifier_exact_lane_slots] first; this
+    candidate check does not revoke an already acquired review when activity
+    changes. Explicit single-runtime overrides remain independent of lane activity. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the
@@ -654,6 +663,15 @@ val declared_media_failover : unit -> string list
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
     an ordered list of runtime ids validated at load. *)
+
+val browser_configuration : unit -> Browser_configuration.t option
+(** Published Browser configuration. [None] means the runtime configuration
+    is unavailable. Activity follows this snapshot immediately; backend paths
+    are consumed when the server installs its executors. *)
+
+val machine_configuration : unit -> Machine_configuration.t option
+(** Activity from the same atomic published configuration as Runtime. [None]
+    means no valid configuration is currently published. *)
 
 val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
 (** [\[lsp.servers\]] applied over the client's own table: the command that
@@ -680,14 +698,14 @@ val entry_runtime_id_of_route : string -> string option
     route here first — {!get_runtime_by_id} knows nothing about lanes and
     answers [None] for a lane name. *)
 
-val smallest_max_prompt_bytes_of_route : string -> int option
+val smallest_prompt_capacity_bytes_of_route : string -> int option
 (** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of any
     candidate the route may walk: every candidate of a declared lane, or the
     runtime itself when the route names one. A candidate without one adds no
     ceiling and does not erase one a sibling has. [None] when no candidate
     has a ceiling, or when the route names neither a lane nor a runtime. *)
 
-val smallest_max_prompt_bytes_of_runtime_ids : string list -> int option
+val smallest_prompt_capacity_bytes_of_runtime_ids : string list -> int option
 (** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of the
     named runtimes, for a walk whose candidate list is already fixed (a
     deferred lane suffix). An id without one, or that the loaded catalog does
@@ -755,7 +773,7 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
-val max_prompt_bytes_of_runtime_id : string -> int option
+val prompt_capacity_bytes_of_runtime_id : string -> int option
 (** {!Runtime_instance.prompt_capacity_bytes} of the runtime with this id, or [None] when the
     id is unknown or no ceiling applies. *)
 
@@ -853,6 +871,19 @@ val save_config_text :
     model catalog cannot serve. So removing or renaming a
     [\[runtime.lanes.<id>\]] table here is refused while a seat names it, as it
     is through {!remove_runtime_lane}. *)
+
+val save_config_text_if_current :
+  ?runtime_config_path:string ->
+  expected_source_path:string ->
+  expected_source_revision:string ->
+  string ->
+  (config_commit_receipt, config_edit_error) result
+(** Save an editor's complete source only if its observed path and lowercase
+    SHA-256 revision still identify the file. Read, comparison and commit share the config
+    write lock. A conflict returns the current immutable observation without
+    writing the file or changing runtime/registry state. A matching revision
+    uses {!save_config_text}'s validation, durability and application contract.
+    Invalid revisions and read/validation/write failures are [Config_edit_failed]. *)
 
 val commit_config_text_locked :
   ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->

@@ -49,14 +49,18 @@ let home_decision_rows (state : state) =
     approval_row_lists reading @ ["questions", reading.questions]
     |> List.filter_map (fun (name, status) -> match status with
         | List_read -> None
-        | List_not_read _ -> Some (name ^ " not fully read"))
+        | List_not_read _ -> Some name)
   in
   let approvals =
+    let unread = match source_notes with
+      | [] -> []
+      | names -> ["not fully read · " ^ String.concat ", " names]
+    in
     let notes =
       match state.approval_snapshot with
       | Some snapshot when snapshot.aps_hidden_count > 0 ->
-          source_notes @ [Printf.sprintf "%d requests outside current filter" snapshot.aps_hidden_count]
-      | Some _ | None -> source_notes
+          unread @ [Printf.sprintf "%d requests outside current filter" snapshot.aps_hidden_count]
+      | Some _ | None -> unread
     in
     match notes with
     | [] ->

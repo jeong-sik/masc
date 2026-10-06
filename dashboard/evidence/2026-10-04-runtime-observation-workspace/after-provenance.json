@@ -1,0 +1,47 @@
+{
+  "scope": "62 tests in 4 files, TypeScript and scoped lint. Real components and shared state; API mocks. No native/backend/deployment.",
+  "files": {
+    "src/components/runtime-observation-workspace.test.ts": "e590d4ef29bcac8d379f76cc6d1b142c1bce9c7d9a7b1d89338581f9464c5161",
+    "src/components/overview/runtime-stats.ts": "d09b35e543817c338ba54685c7d86ed3c8fe142e7eaeff21334f1016d22eae7c",
+    "src/components/overview/runtime-stats.test.ts": "428fdc14ad5693d0fb42a54115ade59330e1dfc60b4c0b655f09b4c3ecca8c04",
+    "src/components/tools/config-resolution-panel.ts": "a6c5a4068d54479c011bc7b813a720eef1ef209ef67caaf0fb212aa411ee18b4",
+    "src/components/tools/config-resolution-panel.test.ts": "801b4a597b21bd12255e8d2907bbb81c2ec3855f37278aa394207510de756862",
+    "src/lib/runtime-workspace-resource.ts": "e7fa1d977cb4c9f2027b8d8de8a77e211215de3258f190abc78d75993392f05f",
+    "src/lib/runtime-workspace-resource.test.ts": "b979d9f2a727759a688e7186d3d2e35a477ca1a624c0226a158a8b7f6c81a6a8",
+    "src/lib/runtime-catalog-resource.ts": "6c4166aed7ed5dc3d0a21322dcca9d70b4b59cd3dba66bc86cfdc7eabaa5afc7",
+    "src/store.ts": "1c9380c0826f8f032fe56ac4167bec22dfb8af72c49b80c9ed007ea69c6d0365",
+    "package.json": "2c820c3d81db9d2c81263f91b15232d532dbad22302d84ec660fb0cba4d0f101",
+    "pnpm-lock.yaml": "1a85e066a8baf940cf65df3cf18e76224684fcff6b47254b9c37d6647fd607a0"
+  },
+  "recorded_at": "2026-10-04T13:59:21.055036+00:00",
+  "base": "70a3abb094378f7cf7f28468be3ba5c966ad703d",
+  "checks": [
+    {
+      "name": "tests",
+      "exit_code": 0,
+      "result": "62 passed in 4 files",
+      "log": "tests.txt",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 --reporter=verbose src/components/runtime-observation-workspace.test.ts src/components/overview/runtime-stats.test.ts src/components/tools/config-resolution-panel.test.ts src/lib/runtime-workspace-resource.test.ts"
+    },
+    {
+      "name": "typecheck",
+      "exit_code": 0,
+      "log": "typecheck.txt",
+      "command": "node node_modules/typescript/bin/tsc --noEmit"
+    },
+    {
+      "name": "lint",
+      "exit_code": 0,
+      "log": "lint.txt",
+      "command": "node node_modules/eslint/bin/eslint.js src/components/runtime-observation-workspace.test.ts src/components/overview/runtime-stats.ts src/components/overview/runtime-stats.test.ts src/components/tools/config-resolution-panel.ts"
+    },
+    {
+      "name": "browser",
+      "exit_code": 0,
+      "result": "8 checks passed",
+      "log": "browser.txt",
+      "command": "MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:9 node dashboard/evidence/2026-10-04-runtime-observation-workspace/browser-fixture.mjs",
+      "cwd": "repository root"
+    }
+  ]
+}

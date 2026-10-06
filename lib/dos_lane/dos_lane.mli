@@ -76,6 +76,8 @@ type observation = {
 type entry = { at_step : int; who : string; key_name : string }
 
 type error =
+  | Activity_disabled
+  | Activity_unobserved
   | No_machine  (** nothing loaded — [masc_dos_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
   | Unreadable of string
@@ -99,6 +101,14 @@ type error =
           the one loaded is kept under [loaded]; nothing was pressed. *)
 
 val error_to_string : error -> string
+
+val install_activity_observer : (unit -> Machine_configuration.activity) option -> unit
+(** Install the published Runtime observer. [None] means unobserved, so new
+    execution is refused. Installation never changes the machine itself. *)
+val activity : unit -> Machine_configuration.activity
+(** Lock-free activity reading. New execution is admitted once at entry; already
+    admitted work finishes even if activity changes while it waits/runs.
+    Inspection, checkpoint saving, eject and controller release remain available. *)
 
 val max_steps_per_call : int
 (** 4,000,000 instructions. The core runs about 24 million a second on this

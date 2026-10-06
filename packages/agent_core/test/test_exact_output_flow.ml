@@ -173,7 +173,15 @@ let with_catalog ?(getenv = fun _ -> Ok None) entries f =
   | Ok snapshot -> f snapshot
 ;;
 
-let with_bound_targets ~base_url ~body_timeout_s f =
+let with_bound_targets ?admission_priority_run_limit ~base_url ~body_timeout_s f =
+  (* The admission registry lives for the whole process and admits one
+     allowance per endpoint identity. A loopback port can come back in a
+     later case, so each allowance gets its own key. *)
+  let key_for name =
+    match admission_priority_run_limit with
+    | None -> name
+    | Some limit -> Printf.sprintf "%s-run-limit-%d" name limit
+  in
   let binding key =
     Provider_config.make
       ~kind:Provider_config.OpenAI_compat
@@ -183,6 +191,7 @@ let with_bound_targets ~base_url ~body_timeout_s f =
       ~api_key:key
       ~request_path:"/chat/completions"
       ~max_concurrent_requests:1
+      ?admission_priority_run_limit
       ()
   in
   let target id key : EO.declared_target =
@@ -198,12 +207,12 @@ let with_bound_targets ~base_url ~body_timeout_s f =
       ~io
       ~catalog:
         (EO.Embedded_with_targets
-           [ target "bound-primary" "primary-test-key"
-           ; target "bound-successor" "successor-test-key"
+           [ target "bound-primary" (key_for "primary-test-key")
+           ; target "bound-successor" (key_for "successor-test-key")
            ])
       ()
   with
-  | Ok snapshot -> f snapshot (binding "primary-test-key")
+  | Ok snapshot -> f snapshot (binding (key_for "primary-test-key"))
   | Error _ -> fail "bound exact targets should resolve"
 ;;
 
@@ -317,7 +326,7 @@ let frozen_flow ?messages snapshot ids =
 ;;
 
 let start_flow ready =
-  match EO.start_flow ready with
+  match EO.start_flow ~admission_class:Llm_provider.Admission_class.Standard ready with
   | Ok flow -> flow
   | Error (EO.Flow_id_generation_failed detail) ->
     failf "flow identity allocation failed: %s" detail
@@ -5028,6 +5037,134 @@ let test_bound_exact_waits_for_shared_provider_permit () =
   | Error _ -> fail "bound exact generation should succeed after release"
 ;;
 
+(* The exact request carries no admission declaration of its own: the flow
+   takes the binding's permit around it. A binding that declares a priority
+   run limit is admitted the same way and its request is sent. *)
+let test_bound_exact_with_a_priority_run_limit_is_sent () =
+  let result, posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~admission_priority_run_limit:3 ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot _config ->
+    execute_ok
+      ~net
+      ~clock
+      (start_flow
+         (frozen_candidates
+            [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary" ]))
+  in
+  check int "exact generation sent once" 1 posts;
+  match result with
+  | Ok _ -> ()
+  | Error error ->
+    failf
+      "bound exact generation with a run limit should succeed: %s"
+      (EO.flow_execution_error_to_string
+         ~callback_error_to_string:(fun () -> "callback")
+         ~raw_response_to_string:EO.raw_response_sha256_to_string
+         error)
+;;
+
+(* A flow started as Priority takes the endpoint's freed permit ahead of a
+   Standard request that queued before it, on an endpoint that declares a
+   priority run limit. The run limit reaches the flow's admission through
+   the binding; a flow that dropped it would be refused as a conflicting
+   declaration. *)
+let exact_flow_grant_order ~admission_class =
+  let order, posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~admission_priority_run_limit:3 ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot config ->
+    let flow =
+      match
+        EO.start_flow
+          ~admission_class
+          (frozen_candidates
+             [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary" ])
+      with
+      | Ok flow -> flow
+      | Error (EO.Flow_id_generation_failed detail) ->
+        failf "flow identity allocation failed: %s" detail
+    in
+    let occupied, occupied_resolver = Eio.Promise.create () in
+    let release, release_resolver = Eio.Promise.create () in
+    let order = ref [] in
+    let note label = order := label :: !order in
+    (* Steps on the permit queue itself, so the arrival order does not depend
+       on how fast the machine runs the fibers. *)
+    let await_queued count =
+      let deadline = Eio.Time.now clock +. 30.0 in
+      let rec loop () =
+        match Provider_admission.snapshot_for ~config with
+        | Some snapshot when snapshot.queue_length >= count -> ()
+        | Some _ | None ->
+          if Eio.Time.now clock > deadline
+          then failf "%d requests never queued for the permit" count
+          else (
+            Eio.Time.sleep clock 0.001;
+            loop ())
+      in
+      loop ()
+    in
+    Eio.Fiber.all
+      [ (fun () ->
+          Provider_admission.with_admission ~config (fun () ->
+            Eio.Promise.resolve occupied_resolver ();
+            Eio.Promise.await release))
+      ; (fun () ->
+          Eio.Promise.await occupied;
+          Provider_admission.with_admission ~config (fun () -> note "standard"))
+      ; (fun () ->
+          Eio.Promise.await occupied;
+          await_queued 1;
+          match
+            execute_with_accepting_test_validator
+              ~net
+              ~clock
+              ~on_measurement_terminal:(fun _ -> Ok ())
+              ~before_measurement_dispatch:(fun _ -> Ok ())
+              ~before_dispatch:(fun _ ->
+                note "flow";
+                Ok ())
+              ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+              flow
+          with
+          | Ok _ -> ()
+          | Error error ->
+            failf
+              "bound exact generation should succeed after release: %s"
+              (EO.flow_execution_error_to_string
+                 ~callback_error_to_string:(fun () -> "callback")
+                 ~raw_response_to_string:EO.raw_response_sha256_to_string
+                 error))
+      ; (fun () ->
+          Eio.Promise.await occupied;
+          await_queued 2;
+          Eio.Promise.resolve release_resolver ())
+      ];
+    List.rev !order
+  in
+  check int "exact generation sent once" 1 posts;
+  order
+;;
+
+let test_priority_exact_flow_takes_the_freed_permit_first () =
+  check
+    (list string)
+    "the priority flow is granted before the earlier standard request"
+    [ "flow"; "standard" ]
+    (exact_flow_grant_order ~admission_class:Admission_class.Priority)
+;;
+
+let test_standard_exact_flow_keeps_arrival_order () =
+  check
+    (list string)
+    "a standard flow waits behind the earlier standard request"
+    [ "standard"; "flow" ]
+    (exact_flow_grant_order ~admission_class:Admission_class.Standard)
+;;
+
 let test_bound_exact_queue_expiry_advances_without_post () =
   let (result, evidence), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
@@ -5457,6 +5594,18 @@ let () =
             "bound exact queue expiry advances without a POST"
             `Quick
             test_bound_exact_queue_expiry_advances_without_post
+        ; test_case
+            "bound exact with a priority run limit is sent"
+            `Quick
+            test_bound_exact_with_a_priority_run_limit_is_sent
+        ; test_case
+            "a priority exact flow takes the freed permit first"
+            `Quick
+            test_priority_exact_flow_takes_the_freed_permit_first
+        ; test_case
+            "a standard exact flow keeps arrival order"
+            `Quick
+            test_standard_exact_flow_keeps_arrival_order
         ; test_case
             "bound count-tokens waits for shared provider permit"
             `Quick

@@ -464,13 +464,13 @@ let test_runtime_text_transform () =
     Preset.runtime_text_with
       ~current_assignments:[ "routingtest", "openai.gpt"; "budgettest", "openai.gpt" ]
       ~current_lanes:
-        [ { Preset.id = "librarian_exact"; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = [] }
-        ; { Preset.id = "hitl_auto_judge"; slots = [ "openai.gpt" ]; cli_slots = [] }
+        [ { Preset.id = "librarian_exact"; enabled = true; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = [] }
+        ; { Preset.id = "hitl_auto_judge"; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
         ]
       ~assignments:[ "routingtest", "runpod_mtp.qwen" ]
       ~lanes:
-        [ { Preset.id = "librarian_exact"; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] }
-        ; { Preset.id = "hitl_auto_judge"; slots = [ "openai.gpt" ]; cli_slots = [] }
+        [ { Preset.id = "librarian_exact"; enabled = true; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] }
+        ; { Preset.id = "hitl_auto_judge"; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
         ]
       runtime_fixture
   in
@@ -494,11 +494,102 @@ let test_runtime_text_transform () =
    | Error message -> fail ("transformed runtime.toml does not parse: " ^ message))
 ;;
 
+let test_saved_lane_activity_shape () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"activity-shape" ~description:"") in
+    or_fail (Preset.save ~base_path snapshot);
+    let path = Filename.concat (Preset.source_directory ~base_path snapshot) "runtime.json" in
+    let original = Yojson.Safe.from_file path in
+    let with_activity enabled =
+      match original with
+      | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        if key <> "exact_output_lanes" then key, value else
+        key, (match value with
+          | `Assoc lanes -> `Assoc (List.map (fun (id, lane) ->
+            id, (match lane with
+              | `Assoc fields -> `Assoc (enabled @ List.remove_assoc "enabled" fields)
+              | _ -> Alcotest.fail "saved lane must be an object")) lanes)
+          | _ -> Alcotest.fail "saved lanes must be an object")) fields)
+      | _ -> Alcotest.fail "saved runtime must be an object" in
+    (* A preset saved before lanes carried activity has no [enabled]; every
+       lane in it was live, so it loads with each lane enabled. *)
+    Yojson.Safe.to_file path (with_activity []);
+    (match Preset.load ~base_path "activity-shape" with
+     | Ok legacy ->
+       Alcotest.(check bool) "a legacy preset lists lanes" true (legacy.Preset.lanes <> []);
+       List.iter (fun (lane : Preset.lane) ->
+         Alcotest.(check bool) ("legacy lane " ^ lane.id ^ " is enabled") true lane.enabled)
+         legacy.Preset.lanes
+     | Error detail -> Alcotest.failf "a legacy preset without activity must load: %s" detail);
+    (* A present value that is not a boolean is still refused, not coerced. *)
+    Yojson.Safe.to_file path (with_activity ["enabled", `String "false"]);
+    match Preset.load ~base_path "activity-shape" with
+    | Error detail -> Alcotest.(check bool) "mistyped activity is explicitly refused" true
+        (contains_substring detail "enabled must be a boolean")
+    | Ok _ -> Alcotest.fail "mistyped activity was coerced")
+;;
+
+let test_restore_preserves_lane_activity_and_autosave () =
+  let open Alcotest in
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  let catalog = or_fail (Llm_provider.Model_catalog.of_toml_string ~source:"preset activity fixture"
+    "[[models]]\nid_prefix = \"qwen\"\nprovider_name = \"runpod_mtp\"\nbase = \"openai_chat\"\nmax_context_tokens = 128000\n\n[[models]]\nid_prefix = \"gpt\"\nprovider_name = \"openai\"\nbase = \"openai_chat\"\nmax_context_tokens = 64000\n") in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore previous_runtime;
+    match previous_catalog with
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+    | None -> Llm_provider.Model_catalog.clear_global ()) @@ fun () ->
+  Llm_provider.Model_catalog.set_global catalog;
+  List.iter (fun saved_enabled ->
+    with_base (fun ~base_path ~keepers:_ ~config ->
+      let path = Filename.concat config "runtime.toml" in
+      let fixture = Toml_line_editor.edit_table_multiline_array
+        (runtime_fixture ^ "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n")
+        ~path:"runtime.exact_output_lanes.librarian_exact" ~key:"slots"
+        ~values:["openai.gpt"; "runpod_mtp.qwen"] in
+      let rec add_note = function
+        | line :: rest when String.trim line = "slots = [" ->
+          line :: "  # retained candidate note" :: rest
+        | line :: rest -> line :: add_note rest
+        | [] -> fail "fixture has no candidate array" in
+      let fixture = String.concat "\n" (add_note (String.split_on_char '\n' fixture)) in
+      let set_activity enabled =
+        write_file path (Toml_line_editor.edit_table_bool fixture
+          ~path:"runtime.exact_output_lanes.librarian_exact" ~key:"enabled" ~value:enabled)
+      in
+      set_activity saved_enabled;
+      let saved = or_fail (Preset.capture ~base_path ~name:"activity" ~description:"") in
+      or_fail (Preset.save ~base_path saved);
+      let loaded = or_fail (Preset.load ~base_path "activity") in
+      let librarian lanes = List.find (fun (lane : Preset.lane) -> lane.id = "librarian_exact") lanes in
+      check bool "saved activity survives preset JSON" saved_enabled (librarian loaded.lanes).enabled;
+      set_activity (not saved_enabled);
+      check bool "same candidates with changed activity are a drift" false
+        (or_fail (Preset.matches_saved_settings ~base_path loaded));
+      let report = or_fail (Preset.restore ~base_path "activity") in
+      (match report.runtime_result with
+       | Preset.Runtime_committed -> ()
+       | Preset.Runtime_unchanged -> fail "activity drift must commit"
+       | Preset.Runtime_failed error -> fail error);
+      let restored = or_fail (Preset.capture ~base_path ~name:"restored" ~description:"") in
+      check bool "restore reinstates the saved activity" saved_enabled (librarian restored.lanes).enabled;
+      check bool "activity-only restore preserves candidate notes" true
+        (contains_substring (Fs_compat.load_file path) "# retained candidate note");
+      check (list string) "restore retains exactly the candidates"
+        (librarian saved.lanes).slots (librarian restored.lanes).slots;
+      let autosave = or_fail (Preset.load ~base_path report.autosave) in
+      check bool "autosave retains pre-restore activity" (not saved_enabled)
+        (librarian autosave.lanes).enabled)) [false; true]
+;;
+
 let () =
   Alcotest.run
     "Prompt_preset"
     [ ( "presets"
-      , [ Alcotest.test_case "capture, save, load, list round trip" `Quick
+      , [ Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
+        ; Alcotest.test_case "activity restore and autosave roundtrip" `Quick test_restore_preserves_lane_activity_and_autosave
+        ; Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip
         ; Alcotest.test_case "an invalid name is refused" `Quick test_invalid_name_is_refused
         ; Alcotest.test_case "a preset that does not load is listed as unreadable" `Quick

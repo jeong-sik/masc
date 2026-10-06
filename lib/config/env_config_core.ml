@@ -61,8 +61,8 @@ let reject_malformed_env ~name ~raw ~type_name =
 (** Safe getters with defaults *)
 let get_string ~default name =
   match raw_value_opt name with
-  | Some v -> v
   | None -> default
+  | Some v -> if String.trim v = "" then default else v
 
 let get_int ~default name =
   match raw_value_opt name with

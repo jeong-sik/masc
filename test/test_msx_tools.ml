@@ -22,9 +22,12 @@ let with_workspace f =
   let base_path = Filename.temp_dir "masc-msx-tools-" "" in
   Fun.protect
     ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
       ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
       Fs_compat.remove_tree base_path)
-    (fun () -> f base_path)
+    (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      f base_path)
 ;;
 
 let member name = function

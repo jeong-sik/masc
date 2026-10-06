@@ -1,0 +1,43 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-onboarding-retry-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts src/components/onboarding-settings.test.ts src/components/model-setup-resume-control.test.ts src/components/runtime-toml-editor.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-onboarding-retry-20261005/dashboard
+
+ ❯ src/components/onboarding-settings.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/onboarding-settings.test.ts [ src/components/onboarding-settings.test.ts ]
+Error: [vitest] No "subscribeStoredTokenChanges" export is defined on the "../api/core" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+vi.mock(import("../api/core"), async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ src/tool-call-output-store.ts:219:1
+    217|
+    218| // Raw results belong to the credentials that authorized their retriev…
+    219| subscribeStoredTokenChanges(resetToolCallOutputs)
+       | ^
+    220|
+ ❯ src/keeper-state.ts:13:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  142 passed (142)
+   Start at  07:43:19
+   Duration  5.06s (tests 52%, import 16%, transform 13%, environment 11%, setup 8%)
+
+    Isolate  4 workers spawned · ~221ms startup each (spawn + environment, per file)
+             at least ~663ms faster with isolate: false — reuses workers across files instead of one per file
+
+ ELIFECYCLE  Test failed. See above for more details.

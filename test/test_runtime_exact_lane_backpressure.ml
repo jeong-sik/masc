@@ -191,7 +191,7 @@ let test_rebound_account_observation env ~rate_limited () =
   let snapshot = Exact.snapshot_flow ~first ~rest:[]
     ~messages:[Agent_core.Types.user_msg "return JSON"] requirement
     |> require_ok "freeze old flow" in
-  let attempt = Exact.start_flow snapshot |> require_ok "start old flow" in
+  let attempt = Exact.start_flow ~admission_class:Llm_provider.Admission_class.Standard snapshot |> require_ok "start old flow" in
   Masc_test_deps.with_process_env "OPENROUTER_API_KEY" (Some "synthetic-rebound-account")
     (fun () -> Runtime.save_config_text ~runtime_config_path:path runtime_text
       |> require_ok "rebind same runtime ID" |> ignore);

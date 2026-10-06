@@ -41,6 +41,8 @@ def run(executable, baseline=False):
         def interact(process, fd, _slave, output, _base):
             _keyboard_harness.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
             _keyboard_harness.wait_for_output(process, fd, output, b"Memory saved", start=0, timeout=10)
+            if not baseline:
+                _keyboard_harness.send_and_wait(process, fd, output, b"u", b"256.0 KiB")
             for columns in (140, 80):
                 frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=columns,
                                          needle=b"Memory saved", controls=(_keyboard_harness.FULL_REDRAW,),

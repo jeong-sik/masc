@@ -238,6 +238,10 @@ let resolver_catalog_generation (snapshot : resolver_snapshot) = snapshot.genera
 let resolver_catalog_evidence (snapshot : resolver_snapshot) = snapshot.evidence
 let resolver_rejected_target_bindings snapshot = snapshot.rejected_target_bindings
 let target_identity_fingerprint identity = identity.fingerprint
+let selected_target_with_admission_class (target : selected_target) admission_class =
+  { target with config = { target.config with admission_class } }
+;;
+
 let selected_target_identity (target : selected_target) = target.identity
 let selected_target_catalog_generation (target : selected_target) = target.generation
 let selected_target_catalog_evidence (target : selected_target) = target.evidence
@@ -816,10 +820,11 @@ let load_resolver_snapshot
          let* () =
            validate_model_path ~target_ref:target.target_ref kind target.model_id
          in
-         let max_concurrent_requests =
+         let max_concurrent_requests, admission_priority_run_limit =
            match target.wire with
-           | Catalog_provider_wire -> None
-           | Binding_wire { config = binding; _ } -> binding.PC.max_concurrent_requests
+           | Catalog_provider_wire -> None, None
+           | Binding_wire { config = binding; _ } ->
+             binding.PC.max_concurrent_requests, binding.PC.admission_priority_run_limit
          in
          let projection_config =
            PC.make
@@ -837,6 +842,7 @@ let load_resolver_snapshot
              ~reasoning_uncontrolled
              ?connect_timeout_s:target.connect_timeout_s
              ?max_concurrent_requests
+             ?admission_priority_run_limit
              ()
          in
          let codec =

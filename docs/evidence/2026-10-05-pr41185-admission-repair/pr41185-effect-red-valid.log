@@ -1,0 +1,55 @@
+Testing `browser surface'.
+This run has ID `DGW1F4PA'.
+
+  [OK]          behavior          0   input correction resumes on the same co...
+  [OK]          behavior          1   scoped scene acknowledgement.
+  [OK]          behavior          2   read any website by active or explicit ...
+  [OK]          behavior          3   empty browser has no page.
+  [OK]          behavior          4   no active tab is not guessed.
+  [OK]          behavior          5   scene node requires sourceContext.
+  [OK]          behavior          6   invalid input is refused.
+  [OK]          behavior          7   backend failure is visible.
+  [OK]          behavior          8   an absent lane names its own setup.
+  [OK]          behavior          9   capture target and image identity.
+  [OK]          behavior         10   Keeper discovers ambiguous clients with...
+> [FAIL]        behavior         11   off precedes live client guidance.
+  [OK]          behavior         12   Keeper hears why no browser is connected.
+  [OK]          behavior         13   live read pins client across both hops.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        behavior         11   off precedes live client guidance.       │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT off effect is proven pre-effect
+File "list.ml", line 114, character 12:
+FAIL off effect is proven pre-effect
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Dune__exe__Test_browser_surface.test_off_precedes_client_guidance.(fun) in file "test/test_browser_surface.ml", lines 291-295, characters 6-70
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-admission-20261005/_build/_tests/browser surface/behavior.011.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-admission-20261005/_build/_tests/browser surface'.
+1 failure! in 0.031s. 14 tests run.

@@ -35,14 +35,15 @@ let configure_prompt_registry () =
 ;;
 
 let with_lane_and_reviewer ~slots ~reviewer f =
-  let saved_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn in
+  let saved_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn in
   let saved_reviewer = Atomic.get AR.run_llm_reviewer_fn in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn saved_slots;
+      Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn saved_slots;
       Atomic.set AR.run_llm_reviewer_fn saved_reviewer)
     (fun () ->
-       Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn slots;
+       Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+         (fun () -> Result.map (List.map (fun id -> id, Types_core.Catalog_slot)) (slots ()));
        Atomic.set AR.run_llm_reviewer_fn reviewer;
        f ())
 ;;
@@ -65,7 +66,7 @@ let review () = review_with request ()
 
 (* A reviewer that answers per slot and records the attempt order. *)
 let recording_reviewer calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
     | Some behavior -> Result.map
@@ -186,7 +187,7 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "slot-a" ])
     ~reviewer:
-      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_
+      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
            ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
            ~on_runtime_attempt_error () ->
          on_runtime_attempt_error
@@ -216,7 +217,7 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
 let test_nested_retry_does_not_invent_a_serving_outer_slot () =
   with_lane_and_reviewer
     ~slots:(fun () -> Ok ["outer-slot"])
-    ~reviewer:(fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_
+    ~reviewer:(fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~on_runtime_attempt_error () ->
       let failure = Agent_core.Error.Api
@@ -270,7 +271,7 @@ let test_recorded_images_ride_to_the_reviewer_as_blocks () =
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "slot-a" ])
     ~reviewer:
-      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks
+      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks
            ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
            ~on_runtime_attempt_error:_ () ->
          received := goal_blocks;
@@ -331,6 +332,27 @@ let test_unconfigured_lane_is_unavailable_not_rerouted () =
            true
            (String_util.contains_substring detail "verifier_exact")
        | None -> Alcotest.fail "unconfigured lane must carry a reason")
+;;
+
+let test_acquired_candidate_kinds_survive_failover () =
+  let seen = ref [] in
+  let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind ~prompt:_
+      ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+      ~on_runtime_attempt_error:_ () =
+    seen := !seen @ [evaluator_runtime, candidate_kind];
+    Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+      (fun () -> Error "new acquisition is now fenced");
+    if evaluator_runtime = "catalog" then rate_limited
+    else Ok {AR.selected_runtime_id=evaluator_runtime; verdict=Some (AR.Approve "")}
+  in
+  with_lane_and_reviewer ~slots:(fun () -> Error "installed below") ~reviewer
+    (fun () ->
+      Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+        (fun () -> Ok ["catalog", Types_core.Catalog_slot; "cli", Types_core.Cli_slot]);
+      let result = review () in
+      Alcotest.(check bool) "already acquired kinds survive later acquisition refusal" true
+        (!seen = ["catalog", Types_core.Catalog_slot; "cli", Types_core.Cli_slot]);
+      Alcotest.(check string) "failover reaches the acquired CLI candidate" "cli" result.evaluator_runtime)
 ;;
 
 let test_explicit_override_never_consults_the_lane () =
@@ -418,7 +440,7 @@ let load_verifier_snapshot () =
 (* Runs before any publication below: with no registry the judgement path
    defers loudly instead of inventing a runtime. *)
 let test_unpublished_registry_is_an_explicit_error () =
-  match Runtime.verifier_exact_lane_slot_ids () with
+  match Result.map (List.map fst) (Runtime.verifier_exact_lane_slots ()) with
   | Error detail ->
     Alcotest.(check bool)
       "error explains the registry is not published"
@@ -468,11 +490,13 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
      Runtime.publish_exact_output_registry
        ~lanes:
          [ { Runtime_schema.id = "verifier_exact"
+           ; enabled = true
            ; slot_ids = [ "http.verifier-b"; "verifier-missing"; "http.verifier-a" ]
            ; cli_slot_ids = [ "official.verifier" ]
            ; max_output_tokens = Some 4_096; thinking = None
            }
          ; { Runtime_schema.id = "auxiliary_exact"
+           ; enabled = true
            ; slot_ids = [ "http.verifier-a" ]
            ; cli_slot_ids = []
            ; max_output_tokens = Some 4_096; thinking = None
@@ -482,7 +506,7 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
    with
    | Ok _ -> ()
    | Error detail -> Alcotest.failf "lane publication failed: %s" detail);
-  match Runtime.verifier_exact_lane_slot_ids () with
+  match Result.map (List.map fst) (Runtime.verifier_exact_lane_slots ()) with
   | Error detail -> Alcotest.failf "verifier_exact lane should resolve: %s" detail
   | Ok slots ->
     Alcotest.(check (list string))
@@ -537,6 +561,7 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
      Runtime.publish_exact_output_registry
        ~lanes:
          [ { Runtime_schema.id = "verifier_exact"
+           ; enabled = true
            ; slot_ids = [ "http.verifier-a"; "verifier-missing" ]
            ; cli_slot_ids = []
            ; max_output_tokens = Some 4_096; thinking = None
@@ -644,6 +669,7 @@ let publish_verifier_lane ~slot_ids ~cli_slot_ids =
     Runtime.publish_exact_output_registry
       ~lanes:
         [ { Runtime_schema.id = "verifier_exact"
+          ; enabled = true
           ; slot_ids
           ; cli_slot_ids
           ; max_output_tokens = Some 4_096; thinking = None
@@ -680,7 +706,10 @@ let test_rejected_cli_slot_leaves_the_lane_usable () =
   publish_verifier_lane
     ~slot_ids:[ judging_catalog_slot ]
     ~cli_slot_ids:[ native_only_client; judging_client ];
-  (match Runtime.verifier_exact_lane_slot_ids () with
+  Alcotest.(check bool) "retained CLI kind cannot admit an HTTP runtime" true
+    (Result.is_error (Runtime.verifier_exact_slot_admission
+      ~candidate_kind:Types_core.Cli_slot ~runtime_id:judging_catalog_slot));
+  (match Result.map (List.map fst) (Runtime.verifier_exact_lane_slots ()) with
    | Error detail ->
      Alcotest.failf "one unusable cli slot must not fail the lane: %s" detail
    | Ok slots ->
@@ -709,6 +738,9 @@ let test_readiness_names_the_cli_slot_that_cannot_judge () =
   publish_verifier_lane
     ~slot_ids:[ judging_catalog_slot ]
     ~cli_slot_ids:[ native_only_client; judging_client ];
+  Alcotest.(check bool) "retained CLI kind cannot admit an HTTP runtime" true
+    (Result.is_error (Runtime.verifier_exact_slot_admission
+      ~candidate_kind:Types_core.Cli_slot ~runtime_id:judging_catalog_slot));
   match Runtime.verifier_exact_lane_readiness () with
   | Error detail ->
     Alcotest.failf "readiness refused a lane that still has a judge: %s" detail
@@ -736,7 +768,7 @@ let test_lane_with_no_judge_refuses_before_dispatch () =
   with_mixed_verifier_clients
   @@ fun _path ->
   publish_verifier_lane ~slot_ids:[] ~cli_slot_ids:[ native_only_client ];
-  (match Runtime.verifier_exact_lane_slot_ids () with
+  (match Result.map (List.map fst) (Runtime.verifier_exact_lane_slots ()) with
    | Ok slots ->
      Alcotest.failf
        "a lane with no judge must not hand out slots: %s"
@@ -894,7 +926,7 @@ let test_catalog_slot_without_a_runtime_is_dropped () =
   publish_verifier_lane
     ~slot_ids:[ target_only_catalog_slot; judging_catalog_slot ]
     ~cli_slot_ids:[];
-  (match Runtime.verifier_exact_lane_slot_ids () with
+  (match Result.map (List.map fst) (Runtime.verifier_exact_lane_slots ()) with
    | Error detail -> Alcotest.failf "the lane still has a judge: %s" detail
    | Ok slots ->
      Alcotest.(check (list string))
@@ -920,7 +952,7 @@ let test_lane_walker_and_readiness_refuse_the_same_lane () =
   with_mixed_verifier_clients
   @@ fun _path ->
   publish_verifier_lane ~slot_ids:[ target_only_catalog_slot ] ~cli_slot_ids:[];
-  (match Runtime.verifier_exact_lane_slot_ids () with
+  (match Result.map (List.map fst) (Runtime.verifier_exact_lane_slots ()) with
    | Ok slots ->
      Alcotest.failf
        "the lane walker handed out a slot that cannot judge: %s"
@@ -976,6 +1008,7 @@ let () =
             "unconfigured lane is unavailable, not rerouted"
             `Quick
             test_unconfigured_lane_is_unavailable_not_rerouted
+        ; Alcotest.test_case "acquired kinds survive failover" `Quick test_acquired_candidate_kinds_survive_failover
         ; Alcotest.test_case
             "explicit override never consults the lane"
             `Quick

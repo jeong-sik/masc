@@ -1,19 +1,21 @@
 module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
+module Application = Masc_tui_lane_application
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
-  installation_id : string option; source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
+  installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; desired : string option;
+  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
+  application : Application.observation option;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -49,6 +51,7 @@ type evidence_prompt = {
 }
 type t = {
   installer : Masc_tui_lane_installer.t option;
+  package_directory : string option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
   pending_broadcasts : (Yojson.Safe.t * string) list;
@@ -56,13 +59,14 @@ type t = {
   current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
+  application_reading : configuration Application.reading;
   snapshot_read_error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
+let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; application_reading=Application.empty; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -97,12 +101,11 @@ let configuration = function
       let* directory = get text "directory" json in
       let* complete = get boolean "complete" json in
       let* declarations = get (array (fun json ->
-        let* source_path = get text "source_path" json in
-        let* installation_id = get text "id" json in
-        let* desired = get text "desired_revision" json in
+        let* application = Application.decode json in
+        let {Application.source_path;installation_id;enabled;desired_revision=desired;_} = application.target in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration})) "declarations" json in
+        Ok {source_path;installation_id=Some installation_id;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration;application=Some application})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -110,8 +113,22 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only;application=None}]) declarations issues in
       Ok (Some {directory;complete;declarations})
+let decode_configuration json =
+  let* configuration = get configuration "configuration" json in
+  match configuration with Some configuration -> Ok configuration
+  | None -> Error "Configuration observation is unavailable"
+let begin_application_read view =
+  if view.loading then None else
+  Option.map (fun (application_reading, ticket) ->
+    {view with application_reading}, ticket)
+    (Application.start ~generation:view.generation view.application_reading)
+let finish_application_read view ticket result =
+  {view with application_reading=Application.finish ~generation:view.generation
+      ticket result view.application_reading}
+let receive_application_inventory view result =
+  {view with application_reading=Application.accept result}
 let phase json =
   let* kind = get text "kind" json in
   match kind with
@@ -141,9 +158,11 @@ let instance json =
   let* owner = optional "configuration" (fun config ->
     let* installation_id = get text "id" config in
     let* source_path = get text "source_path" config in
-    Ok (installation_id, source_path)) json in
-  let installation_id = Option.map fst owner in
-  let source_path = Option.map snd owner in
+    let* configuration_revision = get text "revision" config in
+    Ok (installation_id, source_path, configuration_revision)) json in
+  let installation_id = Option.map (fun (id,_,_) -> id) owner in
+  let source_path = Option.map (fun (_,path,_) -> path) owner in
+  let configuration_revision = Option.map (fun (_,_,revision) -> revision) owner in
   let* binding = field "binding" json in
   let* package = field "package" json in
   let* outputs = get output_ports "outputs" package in
@@ -159,7 +178,7 @@ let instance json =
     | None -> Ok Masc.Lane_addon_presentation.empty
     | Some value -> Masc.Lane_addon_presentation.of_json value in
   Ok { id; run_id; addon_id; title; revision; phase; runtime_presence; observation_seq; rows_count;
-    installation_id;source_path;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
+    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
 let output json =
   let* rows = field "rows" json in
   let* coverage = field "coverage" json in
@@ -593,6 +612,34 @@ let timeline_lines ?(instances=[]) ?selected ~width rows =
           if List.exists (fun (row : Row.row) ->
             String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) rows then None
           else Some (instance.title ^ " | " ^ phase_label instance.phase ^ " | no observations in this view")) instances
+let track_application view target =
+  match Application.value view.application_reading with
+  | None -> Application.Unavailable "Waiting for an application observation"
+  | Some (Error detail) -> Application.Unavailable detail
+  | Some (Ok configuration) ->
+      (* The server folds a parsed declaration's issues into its own application
+         observation, which a complete inventory reports as Failed. Only a file
+         that has no observation, because it could not be parsed, answers with
+         its raw issues. *)
+      let issues = List.concat_map (fun (d : declaration) ->
+        match d.application with
+        | Some _ -> []
+        | None ->
+            if d.source_path=target.Application.source_path
+               || d.installation_id=Some target.installation_id then d.issues else []) configuration.declarations in
+      if issues <> [] then Application.Unavailable (String.concat "; " issues)
+      else Application.track ~target ~complete:configuration.complete
+        (List.filter_map (fun (d : declaration) -> d.application) configuration.declarations)
+let declaration_application view (declaration : declaration) =
+  match declaration.application with
+  | None -> "Application unknown · declaration could not be read"
+  | Some observation -> Application.describe (track_application view observation.target)
+let document_application_lines view session =
+  ["Accepted file application · " ^ (match Document.application_target session with
+    | Error detail -> Application.describe (Application.Unavailable detail)
+    | Ok target -> Application.describe (track_application view target));
+   (if Application.pending view.application_reading then "Refreshing application · draft remains editable"
+    else "Application follows visible-pane refresh · r:read now")]
 let configuration_lines view snapshot = match snapshot.configuration with
   | None -> ["TOML configuration status unknown"]
   | Some config ->
@@ -600,6 +647,12 @@ let configuration_lines view snapshot = match snapshot.configuration with
       @ List.concat (List.mapi (fun index (declaration : declaration) ->
         [Printf.sprintf "%s %s · %s" (if view.configuration_cursor=index then ">" else " ")
            (Option.value ~default:"unresolved installation" declaration.installation_id) declaration.source_path;
+         (match declaration.enabled, declaration.instance_id with
+          | Some false, Some _ -> "   Off requested · worker cleanup not yet confirmed"
+          | Some false, None -> "   Configured off · no current worker observed"
+          | Some true, _ -> "   Configured on"
+          | None, _ -> "   Desired activity unknown");
+         "   " ^ declaration_application view declaration;
          "   desired " ^ Option.value ~default:"unknown" declaration.desired;
          "   applied " ^ Option.value ~default:"none" declaration.applied]
         @ (if Document.editable_source_path ~directory:config.directory declaration.source_path then []
@@ -830,9 +883,9 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
         @ ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json)) in
   let draft = match view.draft with
     | None -> []
-    | Some text -> [(if view.naming then "New TOML filename: " else ":") ^ text] in
+    | Some text -> [(if view.naming then "New TOML filename: " else "Add-on command: ") ^ text] in
   let document = match selected_document view with
-    | None -> [] | Some session -> Document.summary session in
+    | None -> [] | Some session -> document_application_lines view session @ Document.summary session in
   List.concat_map wrap
     (["?:help  Esc:back  J/K:scroll"] @ diagnostic_lines view @ content @ draft @ document
      @ action_lines view @ receipt)
@@ -866,20 +919,48 @@ let can_observe (instance : instance) = match instance.phase with
   | Row.Attached | Row.Observing | Row.Failed _ -> true
   | Row.Detaching | Row.Detached -> false
 
-let instance_controls (instance : instance) = match instance.phase with
+let removal_block_reason view (instance : instance) =
+  let refusal detail = Some (detail ^ "; correct TOML or refresh before removal; nothing was removed.") in
+  match instance.installation_id, instance.source_path, instance.configuration_revision with
+  | None, None, _ -> None
+  | Some id, Some path, Some revision ->
+      (match view.snapshot with
+       | Some {configuration=Some config;_} when config.complete ->
+           let matches = List.filter (fun (d : declaration) ->
+             d.origin=Parsed_declaration && d.installation_id=Some id) config.declarations in
+           let conflicts = List.exists (fun (d : declaration) ->
+             d.issues<>[] && d.installation_id=Some id) config.declarations in
+           (match matches with
+            | _ when conflicts -> refusal "Lane configuration identity has issues"
+            | [d] when d.desired=Some revision -> None
+            | [_] -> refusal "Lane configuration changed"
+            | [] when List.exists (fun (d : declaration) -> d.source_path=path) config.declarations ->
+                refusal "Lane declaration is invalid"
+            | [] -> None
+            | _ -> refusal "Lane configuration identity is ambiguous")
+       | _ -> refusal "Lane configuration inventory is incomplete")
+  | _ -> refusal "Lane configuration owner is incomplete"
+
+let instance_controls view (instance : instance) =
+  let removal = match removal_block_reason view instance with
+    | Some reason -> "  " ^ reason
+    | None -> match instance.source_path with
+    | Some _ -> "  d:remove TOML + worker"
+    | None -> "  d:remove worker" in
+  match instance.phase with
   | Row.Attached | Row.Observing ->
-      "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:remove"
-  | Row.Detaching -> "removal pending"
+      "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
+  | Row.Detaching -> "worker cleanup pending"
   | Row.Detached -> "retained history · D:details"
   | Row.Failed _ -> "o:retry observation" ^
-      (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:cleanup"
+      (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
 
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
+    "?:help  Esc:back  Space:on/off draft  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
@@ -892,7 +973,7 @@ let overview_hints view =
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
       "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
-      (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
+      (match selected_instance view with None -> "" | Some instance -> instance_controls view instance ^ "  ") ^
       "D:raw  J/K:scroll"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
 
@@ -994,9 +1075,9 @@ let instance_heading _snapshot (item : instance) =
   | None -> item.title
   | Some name -> name ^ " · " ^ item.title
 
-let empty_result_lines (item : instance) =
+let empty_result_lines view (item : instance) =
   match item.phase with
-  | Row.Failed detail -> ["Add-on failed: " ^ detail; instance_controls item]
+  | Row.Failed detail -> ["Add-on failed: " ^ detail; instance_controls view item]
   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached ->
       if item.observation_seq=0 then ["No completed observation received yet."]
       else if item.rows_count=0 then
@@ -1066,11 +1147,13 @@ let overview_lines ~width view =
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
                 let status = if Option.is_none declaration.desired then "configuration issue"
                   else if declaration.issues<>[] then "needs attention"
+                  else if declaration.enabled=Some false then "configured off"
                   else if Option.is_some declaration.applied then "no current worker" else "pending" in
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
                   then Some "  E:edit" else None) |> Option.value ~default:"" in
                 [marker ^ name ^ " · " ^ status ^ " · " ^ Filename.basename declaration.source_path;
+                 "    " ^ declaration_application view declaration;
                  "    Enter:installation" ^ edit]
             | `Instance item ->
                 let group_header = match view.overview_mode with
@@ -1086,10 +1169,17 @@ let overview_lines ~width view =
                         [name ^ " · add-on " ^ item.addon_id ^ " · run " ^ item.run_id] in
                 let count_text = if item.observation_seq=0 then "awaiting first observation"
                   else Printf.sprintf "%d records" item.rows_count in
+                let activity = match snapshot.configuration with
+                  | Some config when List.exists (fun (d : declaration) ->
+                      d.enabled = Some false && d.instance_id = Some item.id
+                      && Some d.source_path = item.source_path) config.declarations ->
+                      "off requested · "
+                  | Some _ | None -> "" in
                 let lead = marker ^ instance_heading snapshot item ^ " · " ^
+                  activity ^
                   (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^
                   " · " ^ count_text in
-                let controls = "    Enter:open  " ^ instance_controls item in
+                let controls = "    Enter:open  " ^ instance_controls view item in
                 let detail = match item.phase with
                   | Row.Failed detail ->
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
@@ -1097,6 +1187,12 @@ let overview_lines ~width view =
                       |> List.map (fun line -> "    " ^ line)
                   | _ -> [] in
                 group_header @ [lead]
+                @ (match view.overview_mode, snapshot.configuration with
+                   | Current_installations, Some config ->
+                       List.filter_map (fun (d : declaration) ->
+                         if Some d.source_path=item.source_path && d.installation_id=item.installation_id
+                         then Some ("    " ^ declaration_application view d) else None) config.declarations
+                   | Current_installations, None | Retained_runs, _ -> [])
                 @ (match view.overview_mode with Current_installations -> []
                    | Retained_runs -> ["    Instance " ^ item.id])
                 @ (if index=view.instance_cursor then
@@ -1112,13 +1208,17 @@ let help_lines = [
   "List: j/k select · Enter open · h history/current · i install · n new TOML";
   "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
   "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
-  "Actions: o observe/retry · d remove/cleanup · a advertised actions";
+  "Actions: o observe/retry · d remove TOML/worker · a advertised actions";
+  "TOML-managed removal deletes the matching declaration from disk and cleans up its owned worker.";
+  "Manual attachments remove only the worker and its owned resources.";
+  "Declarations now owned by another instance are preserved; observations and evidence remain.";
   "Actions: t check last request · D raw details · f flow";
-  "Installation: E edit · s save · l reload · u/U revision";
+  "Installation: Space on/off draft · E edit · s save · l reload · u/U revision";
+  "Saving off keeps the TOML and evidence; r reads the actual worker cleanup state.";
   "Links: S subscriptions · Left/Right lane";
   "Records: Space mark row · e export marked rows";
   "Navigation: : command palette · Esc returns to Lane Add-ons";
-  "Advanced: A command (including act)";
+  "Advanced: A opens Add-on commands · Enter submits (including act or detach ID)";
 ]
 
 let detail_lines ~width view =
@@ -1140,7 +1240,7 @@ let detail_lines ~width view =
           let selected = Option.bind selected (fun selected ->
             List.find_opt (fun (row : Row.row) -> row.id = selected.id) rows) in
           if rows=[] then Option.to_list item.display.description
-            @ (if record_rows=[] then empty_result_lines item
+            @ (if record_rows=[] then empty_result_lines view item
                else ["No declared result rows in this received view.";
                      "Supporting records remain available in 4 Records."])
             @ snapshot_coverage_lines snapshot.output.coverage
@@ -1185,12 +1285,16 @@ let detail_lines ~width view =
              | Some config ->
                  List.concat_map (fun (declaration : declaration) ->
                    if Some declaration.source_path = item.source_path
-                   then ["Desired: " ^ Option.value ~default:"unknown" declaration.desired;
+                   then ["Current declaration: " ^ (match declaration.enabled with
+                           | Some true -> "configured on"
+                           | Some false -> "configured off"
+                           | None -> "desired activity unknown");
+                         "Desired: " ^ Option.value ~default:"unknown" declaration.desired;
                          "Applied: " ^ Option.value ~default:"unknown" declaration.applied]
                         @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
                    else []) config.declarations)
       | Rows ->
-          if record_rows=[] then empty_result_lines item
+          if record_rows=[] then empty_result_lines view item
           else List.concat_map (fun (row : Row.row) ->
             [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
                  selected then "> " else "  ")
@@ -1375,11 +1479,10 @@ let flow_lines ?(embedded=false) view =
 let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.installer with
   | Some installer ->
-      ((if view.loading then ["Reading package and image state · Esc:cancel"] else [])
-       @ diagnostic_lines view
-       @ Masc_tui_lane_installer.lines installer)
-      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-        (Masc.Tui_terminal_text.sanitize_terminal_text line))
+      let render line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+        (Masc.Tui_terminal_text.sanitize_terminal_text line) in
+      let diagnostics = List.concat_map render (diagnostic_lines view) in
+      diagnostics @ Masc_tui_lane_installer.lines ~height:(max 1 (height - List.length diagnostics)) ~render installer
   | None -> match view.evidence_prompt with
   | Some prompt ->
       (diagnostic_lines view @ evidence_lines prompt)

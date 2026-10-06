@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   fetchExactLaneRun: vi.fn(),
   fetchExactLaneRuns: vi.fn(),
   fetchVerificationRuns: vi.fn(),
+  fetchGoalVerificationRuns: vi.fn(),
   fetchFusionRuns: vi.fn(),
   fetchStandaloneLanes: vi.fn(),
 }))
@@ -35,6 +36,7 @@ import { keepers, shellRuntimeResolution } from '../store'
 import { ApiRequestError } from '../api/core'
 import { parseExactLaneRunResponse } from '../api/dashboard-exact-lane-runs'
 import { parseVerificationRunsResponse } from '../api/dashboard-verification-runs'
+import { parseGoalVerificationRunsResponse } from '../api/dashboard-goal-verification-runs'
 
 const journalFact = (claim: string, category: 'fact' | 'blocker', firstSeen: number) => ({
   claim,
@@ -84,6 +86,7 @@ describe('Librarian prompt evidence', () => {
 describe('InternalAgentsMonitor', () => {
   beforeEach(() => {
     rawApi.fetchKeeperRawTraces.mockResolvedValue([])
+    api.fetchGoalVerificationRuns.mockResolvedValue({ runs: [], skippedScans: [], count: 0, generatedAt: 'now' })
     api.fetchStandaloneLanes.mockResolvedValue({
       schema: 'masc.standalone_llm_lanes.v2',
       generatedAt: 'now',
@@ -514,6 +517,65 @@ describe('InternalAgentsMonitor', () => {
     const detail = await screen.findByText('review fiber cancelled: owner stopped')
     expect(detail.className).toBe('ia-note')
     expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
+  })
+
+  const taskReview = parseVerificationRunsResponse({
+    generated_at: '2026-10-06T00:00:00Z', count: 1,
+    runs: [{
+      verification_id: 'vrf-task', task_id: 'task-reviewed', producer: 'keeper-a',
+      authority_kind: 'system_llm_agent', authority_actor: 'judge-a', started_at: 1786000000,
+      status: 'approved', elapsed_s: 1, tools: [], reason: 'output matches the task',
+    }],
+  })
+  const goalReview = parseGoalVerificationRunsResponse({
+    generated_at: '2026-10-06T00:00:00Z', count: 1,
+    runs: [{
+      kind: 'review', run_id: 'goal-run', goal_id: 'goal-reviewed', request_id: 'request-a',
+      criterion: { revision: 'criterion-a', title: 'ships the fixture', metric: null, target_value: null },
+      evaluated_verdict: { decision: 'approved', reason: 'proof matches' }, review_kind: 'proof',
+      authority_actor: 'verifier_exact', started_at: 1786000100, status: 'committed', elapsed_s: 1, tools: [],
+    }],
+  })
+
+  it('counts Goal reviews as Verification runs without inventing a Keeper owner', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue(taskReview)
+    api.fetchGoalVerificationRuns.mockResolvedValue(goalReview)
+
+    render(html`<${InternalAgentsMonitor} />`)
+    const filters = screen.getByRole('group', { name: 'Internal agent filters' })
+    fireEvent.click(await within(filters).findByRole('button', { name: 'Verification 2' }))
+    expect(screen.getByRole('button', { name: /committed Goal verification goal-reviewed/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /approved Verification task-reviewed/ })).toBeTruthy()
+
+    const inventory = screen.getByRole('heading', { name: 'Observed run inventory' }).closest('section')!
+    expect(within(inventory).getByRole('button', { name: /^Verification/ }).querySelector('.v')?.textContent).toBe('2')
+    expect(screen.getByText('2 runs · 1 Keeper owners')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'verifier_exact' })).toBeNull()
+  })
+
+  it('withholds the Verification count while Goal reviews are unread', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue(taskReview)
+    api.fetchGoalVerificationRuns.mockRejectedValue(new Error('goal registry offline'))
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    const inventory = screen.getByRole('heading', { name: 'Observed run inventory' }).closest('section')!
+    const verification = within(inventory).getByRole('button', { name: /^Verification/ })
+    await vi.waitFor(() => expect(verification.textContent).toContain('관측 불가'))
+    expect(verification.querySelector('.v')?.textContent).toBe('—')
+    expect(container.textContent).toContain('Goal verification: Error: goal registry offline')
+
+    api.fetchGoalVerificationRuns.mockResolvedValue(goalReview)
+    sse.refresh?.()
+    await vi.waitFor(() => expect(verification.querySelector('.v')?.textContent).toBe('2'))
+    api.fetchGoalVerificationRuns.mockRejectedValue(new Error('goal registry offline'))
+    sse.refresh?.()
+    await vi.waitFor(() => expect(verification.textContent).toContain('STALE'))
+    expect(verification.querySelector('.v')?.textContent).toBe('2')
+    expect(screen.getByRole('button', { name: /Goal verification goal-reviewed/ }).textContent).toContain('STALE')
   })
 
   it('keeps Auto Judge and Board Attention as separate exact execution kinds', async () => {

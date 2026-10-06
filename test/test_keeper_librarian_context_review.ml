@@ -146,7 +146,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   let resolver = Fixture.resolver_snapshot ~source:"context-review-fixture"
       [{Fixture.id = "context-librarian"; base_url = librarian.base_url}] in
   (match Runtime_exact_output_registry.publish ~lanes:[{Runtime_schema.id = "librarian_exact";
-      slot_ids = ["context-librarian"]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None}] resolver with
+      enabled = true; slot_ids = ["context-librarian"]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None}] resolver with
    | Ok _ -> () | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-context-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
@@ -231,7 +231,15 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require |> Option.get in
     Alcotest.(check int) "queue-triggered conversation still commits Memory" (seeded.revision + 1) current.revision;
     Alcotest.(check int) "conversation evidence applies its disposition" 0 (List.length current.facts));
-  let run = match List.filter (fun (r : Runs.run) -> r.actor = keeper_id) (Runs.list_runs registry) with
+  (* Exact-run rows only: since #40709 the absorb gate also registers each
+     pre-dispatch evaluation in this registry under the same actor, with run
+     ids the runtime builds from the "librarian-absorb-" prefix
+     (keeper_librarian_runtime.ml). Only Cancel_absorb reaches the gate here,
+     so only it saw two rows. Same rule as test_keeper_librarian_absorb_gate. *)
+  let run = match List.filter (fun (r : Runs.run) ->
+      r.actor = keeper_id
+      && not (String.starts_with ~prefix:"librarian-absorb-" r.run_id))
+      (Runs.list_runs registry) with
     | [run] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "expected one run" in
   let output = match run.status with Runs.Completed {output; _} -> output
@@ -282,8 +290,24 @@ let () =
   let registry = Runs.create ~path:(Filename.concat base_path Runs.storage_filename) () in
   (match Runs.install_global registry with Ok () -> () | Error _ -> Alcotest.fail "registry already installed");
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
-  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  let prompts_dir = Filename.concat root "config/prompts" in
+  Prompt_registry.set_markdown_dir prompts_dir;
   Prompt_defaults.init ();
+  (* The runtime renders these prompts before it sends a request, and
+     [run_best_effort] logs a render failure instead of raising it. Without
+     them every case waits out its budget and then reports zero Librarian
+     requests, which reads like a product regression. Name the cause here,
+     before any case runs. *)
+  (match List.filter (fun key -> String.trim (Prompt_registry.get_prompt key) = "")
+     [Prompt_names.librarian; Prompt_names.librarian_working_context;
+      Prompt_names.librarian_working_contexts_rule] with
+   | [] -> ()
+   | missing ->
+     Printf.eprintf
+       "prompt markdown dir unresolved: %s does not provide %s; run under dune \
+        or set DUNE_SOURCEROOT to the repository root\n%!"
+       prompts_dir (String.concat ", " missing);
+     exit 2);
   let cases = [Faithful; Rejected; Uncertain; Missing; Invalid; Http_failure; Excluded; Stale; Cancel_absorb; Cancel_review] in
   if Array.length Sys.argv = 3 && Sys.argv.(1) = "--emit-tui-fixtures" then
     List.iter (fun scenario -> test_case ~base_path ~registry ~fixture_dir:Sys.argv.(2) scenario ()) cases

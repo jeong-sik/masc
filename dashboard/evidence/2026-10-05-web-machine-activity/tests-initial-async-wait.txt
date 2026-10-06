@@ -1,0 +1,180 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard
+
+ ❯ src/components/machine-lane-activity-panel.test.ts (48 tests | 2 failed) 490ms
+   ❯ Machine inventory and backend isolation (13)
+     × refreshes inventory after save without model resume (remount: false) 70ms
+     × refreshes inventory after save without model resume (remount: true) 77ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine inventory and backend isolation > refreshes inventory after save without model resume (remount: false)
+ FAIL  src/components/machine-lane-activity-panel.test.ts > Machine inventory and backend isolation > refreshes inventory after save without model resume (remount: true)
+TestingLibraryElementError: Unable to find an element with the text: /Off · machine state retained/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<section[39m
+  [33maria-label[39m=[32m"Details for MSX"[39m
+  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-4 space-y-3"[39m
+[36m>[39m
+  [36m<h3[39m
+    [33mclass[39m=[32m"font-semibold"[39m
+  [36m>[39m
+    [0mMSX[0m
+  [36m</h3>[39m
+  [36m<p>[39m
+    [0mPublished machine state.[0m
+  [36m</p>[39m
+  [36m<code[39m
+    [33mclass[39m=[32m"break-all"[39m
+  [36m>[39m
+    [0mmachine/msx[0m
+  [36m</code>[39m
+  [36m<p>[39m
+    [0mNew execution and input enabled[0m
+  [36m</p>[39m
+  [36m<p>[39m
+    [0mNo screen observed[0m
+  [36m</p>[39m
+  [36m<section[39m
+    [33maria-label[39m=[32m"MSX 활동 설정"[39m
+    [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-3 space-y-3"[39m
+  [36m>[39m
+    [36m<button[39m
+      [33maria-expanded[39m=[32m"true"[39m
+      [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m>[39m
+      [0m활동 설정 닫기[0m
+      [0m[0m
+    [36m</button>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"space-y-3"[39m
+    [36m>[39m
+      [36m<p>[39m
+        [0m끄면 새 실행과 입력을 받지 않습니다. 기계 상태와 checkpoint는 보존하며, 이미 접수한 작업과 상태 확인·저장·해제는 계속할 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p>[39m
+        [0m켜도 기계를 불러오거나 checkpoint를 복구하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m파일 설정: 꺼짐[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m서버 활동 (마지막 조회): [0m
+        [0m꺼짐[0m
+      [36m</p>[39m
+      [36m<p>[39m
+        [0m조회 시각: [0m
+        [0m2026-08-24T07:47:49.715Z[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33maria-checked[39m=[32m"false"[39m
+          [33maria-label[39m=[32m"MSX 활동 초안"[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [33mrole[39m=[32m"switch"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m활동 초안: [0m
+          [0m꺼짐[0m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [33mdisabled[39m=[32m""[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m활동 설정 저장[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m현재 설정 읽기[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m초안 버리기[0m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m커밋 #7 · 라우팅 적용됨 · Skill catalog 변경 없음 (configured) · Exact registry 적용됨 · 파일 내구성 확인됨[0m
+      [36m</p>[39m
+      [36m<details>[39m
+        [36m<summary>[39m
+          [0m설정 파일과 저장 기준[0m
+        [36m</summary>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"break-all"[39m
+        [36m>[39m
+          [0m/workspace/runtime.toml[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"break-all"[39m
+        [36m>[39m
+          [0m초안 기준: [0m
+          [0m8cad89753d62467f7312cc61cf819ae1d92b25683f89531ae2ce5768fd0c8381[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"break-all"[39m
+        [36m>[39m
+          [0m현재 파일: [0m
+          [0m8cad89753d62467f7312cc61cf819ae1d92b25683f89531ae2ce5768fd0c8381[0m
+        [36m</p>[39m
+      [36m</details>[39m
+    [36m</div>[39m
+  [36m</section>[39m
+  [36m<p>[39m
+    [0mUse the TUI detail or operator tools to load, inspect or restore this machine.[0m
+  [36m</p>[39m
+  [36m<details>[39m
+    [36m<summary>[39m
+      [0mObserved configuration and worker details[0m
+    [36m</summary>[39m
+    [36m<pre[39m
+      [33mclass[39m=[32m"whitespace-pre-wrap break-all"[39m
+    [36m>[39m
+      [0m{
+  "kind": "machine",
+  "activity": "on",
+  "publication": "no_screen"
+}[0m
+    [36m</pre>[39m
+  [36m</details>[39m
+[36m</section>[39m
+ ❯ Object.getElementError ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../../../../../../private/tmp/masc-test-prune-20261002/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/machine-lane-activity-panel.test.ts:331:84
+    329|     await act(async () => { stored = off; response.resolve(receipt(off…
+    330|     await next.panel.findByText('파일 설정: 꺼짐')
+    331|     expect(within(next.view.getByRole('region', { name: `Details for $…
+       |                                                                                    ^
+    332|     expect(next.view.getByRole('button', { name: '활동 설정 닫기' })).toBeTr…
+    333|     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  2 failed | 132 passed (134)
+   Start at  03:42:45
+   Duration  6.10s (tests 36%, import 28%, transform 16%, environment 12%, setup 8%)
+
+    Isolate  4 workers spawned · ~285ms startup each (spawn + environment, per file)
+             at least ~856ms faster with isolate: false — reuses workers across files instead of one per file

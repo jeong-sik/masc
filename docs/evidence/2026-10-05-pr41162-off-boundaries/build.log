@@ -1,0 +1,4 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-607639589.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004 test/test_runtime_config_validity.exe test/test_runtime_account_removal.exe

@@ -1,0 +1,39 @@
+name: Main check
+
+# main has no push or pull-request workflow that type-checks the tree: ci.yml
+# and full-check.yml are workflow_call/manual only, and main-minimal-build runs
+# on a schedule. A broken `dune build @check` therefore reaches main and is only
+# found at the next release. Run the same check on every main push and pull
+# request so the break is attributed to the change that caused it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # A pull request only needs its latest head checked, so a newer run may
+  # supersede an older one. A main push is the gate itself; never cancel it
+  # mid-build.
+  group: main-check-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: dune build @check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DUNE_JOBS: '4'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+      - name: Type-check the tree
+        run: dune build @check

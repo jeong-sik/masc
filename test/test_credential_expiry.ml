@@ -150,16 +150,18 @@ let test_malformed_expiry_keeps_the_controller () =
   let dos_ok = function
     | Ok value -> value
     | Error error -> fail (Dos_lane.error_to_string error) in
-  (* See the controller assertions below: loading establishes the holder; its observation is unused. *)
-  ignore (dos_ok (Dos_lane.load ~who:"operator"
-    ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
-    ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~program_name:"spin.com"
-    (* See fixture isolation: synthetic machine announcements are discarded. *)
-    ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
   Fun.protect
     (* See fixture cleanup: eject best effort after assertions, with no shared announcements. *)
-    ~finally:(fun () -> ignore (Dos_lane.eject ~who:"operator" ~announce:ignore ()))
+    ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
+      ignore (Dos_lane.eject ~who:"operator" ~announce:ignore ()))
     (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      (* Loading establishes the holder; its observation is unused. *)
+      ignore (dos_ok (Dos_lane.load ~who:"operator"
+        ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
+        ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~program_name:"spin.com"
+        ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
       Auth.save_credential base_path { credential with expires_at = Some stamp };
       auth_ok (Masc.Keeper_dos_controller.before_move
         ~config:(Masc.Workspace.default_config base_path) ~who:"visitor");

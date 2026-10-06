@@ -1,0 +1,78 @@
+{
+    "version": "1.1.409",
+    "time": "1791140806064",
+    "generalDiagnostics": [
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_browser_activity_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 63,
+                    "character": 19
+                },
+                "end": {
+                    "line": 63,
+                    "character": 24
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_exact_activity_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 70,
+                    "character": 36
+                },
+                "end": {
+                    "line": 70,
+                    "character": 41
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_exact_activity_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 71,
+                    "character": 34
+                },
+                "end": {
+                    "line": 71,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_machine_activity_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 67,
+                    "character": 19
+                },
+                "end": {
+                    "line": 67,
+                    "character": 24
+                }
+            },
+            "rule": "reportIndexIssue"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 3,
+        "errorCount": 4,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.275
+    }
+}
+

@@ -1,0 +1,56 @@
+Testing `workspace curator lane'.
+This run has ID `GNLP3GOK'.
+
+> [FAIL]        changed-fact ledger          0   changed facts persist; no wo...
+  [FAIL]        changed-fact ledger          1   failed call preserves ledger...
+  [OK]          changed-fact ledger          2   invalid answer cannot be saved.
+  [OK]          changed-fact ledger          3   missing Keeper directory pre...
+  [FAIL]        changed-fact ledger          4   initial inventory drains in ...
+  [OK]          changed-fact ledger          5   owner switch closes.
+  [FAIL]        changed-fact ledger          6   re-enable wakes retained facts.
+  [FAIL]        changed-fact ledger          7   failed write reopens deferre...
+  [FAIL]        changed-fact ledger          8   exception reopens deferred w...
+  [FAIL]        changed-fact ledger          9   retained commit reopens defe...
+  [FAIL]        changed-fact ledger         10   first publication wakes park...
+  [FAIL]        changed-fact ledger         11   off preserves accepted work ...
+  [FAIL]        changed-fact ledger         12   cancelled owner does not con...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        changed-fact ledger          0   changed facts persist; no...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-05 03:36:33] [ERROR] [Server] workspace curator request: workspace curator prompt render: Prompt 'workspace_memory_curator' is missing
+ASSERT one initial model call
+File "test/test_workspace_memory_curator_lane.ml", line 52, character 4:
+FAIL one initial model call
+
+   Expected: `1'
+   Received: `0'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_workspace_memory_curator_lane.test_changed_facts_update_ledger_a in file "test/test_workspace_memory_curator_lane.ml", line 52, characters 4-58
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41180-current-file-integration-20261005/_build/_tests/workspace curator lane/changed-fact ledger.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41180-current-file-integration-20261005/_build/_tests/workspace curator lane'.
+10 failures! in 20.067s. 13 tests run.

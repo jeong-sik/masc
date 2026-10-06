@@ -1,0 +1,28 @@
+{
+  "head": "026a52a548665de62a00d98aa0a47050a2db77d6",
+  "parent": "2e229fb3fefc258015f6732485a6d035e8f109f2",
+  "build_handle": 98702,
+  "build_exit": 0,
+  "run_handle": 95225,
+  "run_exit": 0,
+  "results": [
+    {
+      "name": "test_server_lane_inventory",
+      "exit": 0
+    },
+    {
+      "name": "test_lane_addon_skills",
+      "exit": 0
+    },
+    {
+      "name": "test_tui_lane_inventory",
+      "exit": 0
+    }
+  ],
+  "logs": {
+    "build.log": "e1391b378c67abaf614469af7b942d55cc918a71864cfbb696edcd58cc94a6e7",
+    "test_server_lane_inventory.log": "74a0780623702d8498d2fe92e6d1ca2a2527ee4eb3001af3e2b1ba8aec240b44",
+    "test_lane_addon_skills.log": "5acd4ec8ff576e10a92114c1dc6963193688ac79332dde6bf0bde830c91e9960",
+    "test_tui_lane_inventory.log": "c655ad992116f81197549730d9724c89c157d76359e1fffa82534491ea6b4afe"
+  }
+}

@@ -234,7 +234,7 @@ let graphql_body = {|{"query":"{ status { project paused } }"}|}
 
 (* A workspace whose auth config requires a token, published as the running
    server's state, and the H2 gateway's own request handler serving it. *)
-let with_gateway f =
+let with_gateway ?(prepare_workspace=Fun.id) f =
   let base_path = Filename.temp_file "masc-h2-body-admission" "" in
   Sys.remove base_path;
   Unix.mkdir base_path 0o700;
@@ -253,7 +253,8 @@ let with_gateway f =
         ~mono_clock:(Eio.Stdenv.mono_clock env)
         ~sw
         (fun () ->
-          let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+          let workspace_path = prepare_workspace base_path in
+          let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace_path in
           ignore
             (Masc.Workspace.init (Masc.Mcp_server.workspace_config state)
                ~agent_name:None);
@@ -365,6 +366,91 @@ let test_board_reads_require_a_token_under_strict_auth () =
       Yojson.Safe.from_string reply.body |> member "slug" |> to_string);
   check int "board list with a token" 200 (get ~token "/api/v1/board").status
 
+let catalog_path = "/api/v1/lane-addons/package-catalog"
+let preview_path = "/api/v1/lane-addons/package-preview"
+let package_manifest title = Printf.sprintf {|id="catalog-fixture"
+revision="1"
+title=%S
+image="fixture/image"
+command=["observer"]
+contributions=["observe"]
+[resources]
+cpus=0.5
+memory_bytes=67108864
+pids=16
+max_reply_bytes=4096
+|} title
+let write_file path text = Out_channel.with_open_bin path (fun out -> output_string out text)
+let reader_token base_path = match Auth.create_token base_path ~agent_name:"catalog-reader" ~role:Masc_domain.Worker with
+  | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error)
+let get_h2 ~clock ~handler ?token path =
+  let headers = Option.fold ~none:[] ~some:(fun token -> ["authorization","Bearer " ^ token]) token in
+  exchange ~clock ~handler ~meth:`GET ~headers ~send:H2.Body.Writer.close path
+let query path key value = path ^ "?" ^ Uri.encoded_of_query [key,[value]]
+
+let test_package_h2_read_auth_and_payloads () = with_gateway (fun ~base_path ~clock handler ->
+  let manifest = Filename.concat base_path "lane.toml" in
+  write_file manifest (package_manifest "HTTP2 package");
+  let token = reader_token base_path in
+  List.iter (fun path ->
+    check int "catalog and preview require a token" 401 (get_h2 ~clock ~handler path).status;
+    check int "invalid bearer is refused" 401 (get_h2 ~clock ~handler ~token:"invalid-token" path).status)
+    [catalog_path;query preview_path "manifest_path" manifest];
+  let catalog = get_h2 ~clock ~handler ~token catalog_path in
+  check int "authenticated H2 catalog" 200 catalog.status;
+  check string "catalog title is parsed from manifest" "HTTP2 package"
+    Yojson.Safe.Util.(Yojson.Safe.from_string catalog.body |> member "entries" |> to_list |> List.hd |> member "title" |> to_string);
+  let preview = get_h2 ~clock ~handler ~token (query preview_path "manifest_path" "lane.toml") in
+  check int "authenticated H2 preview" 200 preview.status;
+  check string "preview title is parsed from manifest" "HTTP2 package"
+    Yojson.Safe.Util.(Yojson.Safe.from_string preview.body |> member "package" |> member "title" |> to_string);
+  List.iter (fun path -> check int "same strict query contract" 400 (get_h2 ~clock ~handler ~token path).status)
+    [catalog_path ^ "?unknown=x";catalog_path ^ "?directory=.&directory=.";preview_path;preview_path ^ "?manifest_path=lane.toml&unexpected=x"])
+
+let git root args =
+  let command = "git -C " ^ Filename.quote root ^ " " ^ String.concat " " (List.map Filename.quote args) ^ " >/dev/null 2>&1" in
+  check int "Git worktree fixture setup" 0 (Sys.command command)
+let prepare_linked_workspace root =
+  git root ["init"];
+  write_file (Filename.concat root "lane.toml") (package_manifest "Main checkout package");
+  git root ["add";"lane.toml"];
+  git root ["-c";"user.name=fixture";"-c";"user.email=fixture@example.invalid";"commit";"-m";"fixture"];
+  let active = Filename.concat root "active-checkout" in
+  git root ["worktree";"add";"-b";"active-fixture";active];
+  write_file (Filename.concat active "lane.toml") (package_manifest "Active branch package");
+  active
+let test_package_active_worktree_payloads () =
+  with_gateway ~prepare_workspace:prepare_linked_workspace (fun ~base_path ~clock handler ->
+    let state = match Server_auth.For_testing.snapshot_server_state () with Some state -> state | None -> fail "state missing" in
+    let config = Masc.Mcp_server.workspace_config state in
+    let active = Unix.realpath (Filename.concat base_path "active-checkout") in
+    check string "workspace config retains linked checkout" active (Unix.realpath config.workspace_path);
+    check string "workspace config shares main state root" (Unix.realpath base_path) config.base_path;
+    let catalog = Server_routes_http_routes_lane_addons.package_catalog_payload state [] |> Result.get_ok in
+    check string "catalog starts at active checkout" active Yojson.Safe.Util.(member "directory" catalog |> to_string);
+    let preview fields = Server_routes_http_routes_lane_addons.package_preview_payload state fields in
+    let result = preview ["manifest_path","lane.toml"] |> Result.get_ok in
+    check string "relative preview reads active branch metadata" "Active branch package"
+      Yojson.Safe.Util.(member "package" result |> member "title" |> to_string);
+    Unix.symlink (Filename.concat base_path "lane.toml") (Filename.concat active "outside.toml");
+    List.iter (fun path -> check bool "preview cannot escape active worktree" true
+      (Result.is_error (preview ["manifest_path",path])))
+      [Filename.concat base_path "lane.toml";"../lane.toml";"outside.toml"];
+    let token = reader_token base_path in
+    List.iter (fun path -> check int "H2 preview enforces the active worktree boundary" 400
+      (get_h2 ~clock ~handler ~token (query preview_path "manifest_path" path)).status)
+      [Filename.concat base_path "lane.toml";"../lane.toml";"outside.toml"];
+    check int "H2 catalog cannot browse the main checkout" 400
+      (get_h2 ~clock ~handler ~token (query catalog_path "directory" base_path)).status;
+    let response = get_h2 ~clock ~handler ~token catalog_path in
+    check int "H2 serves linked worktree catalog" 200 response.status;
+    check string "H2 active directory equals H1 payload" active
+      Yojson.Safe.Util.(Yojson.Safe.from_string response.body |> member "directory" |> to_string);
+    let response = get_h2 ~clock ~handler ~token (query preview_path "manifest_path" "lane.toml") in
+    check int "H2 accepts active-worktree preview" 200 response.status;
+    check string "H2 active preview title" "Active branch package"
+      Yojson.Safe.Util.(Yojson.Safe.from_string response.body |> member "package" |> member "title" |> to_string))
+
 let with_request_scope test () =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -373,7 +459,10 @@ let with_request_scope test () =
 
 let () =
   run "H2 request body admission"
-    [ ( "body ceiling"
+    [ ("package catalog", [
+        test_case "H2 read auth and payload parity" `Quick test_package_h2_read_auth_and_payloads;
+        test_case "active linked worktree controls discovery and preview" `Quick test_package_active_worktree_payloads])
+    ; ( "body ceiling"
       , [ test_case "a declared length over the ceiling is refused before any byte"
             `Quick
             (with_request_scope test_declared_length_over_the_ceiling_is_refused_before_any_byte)

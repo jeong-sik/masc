@@ -1,0 +1,23 @@
+{
+  "head": "c82f1ac2c1c733c2608eee5d7a3d4b86b882ab66",
+  "source_sha256": {
+    "dashboard/src/api/dashboard-runtime.ts": "46632336f03d87336613bf47ef6fe6d7233b39233d241c5ee8f3d3f63e8b3dd5",
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": "97ac88bfdf8e69b6b7aff193ab6b99c60e317cc4542d15e5973b372cf2ffe602",
+    "dashboard/src/lib/runtime-toml-session.ts": "840afac22d1d4a42f31fca96ff27cbe00642999e6af9438f83223ce38e4906b5",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "d91e54f0dc7366a33fa4239664b446c4e83d95a3a9c5863b9260ac3d891bf389",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "fd80e25de34b8b5d7c0f6a3bf184a02336c2181c831e3efce94a14f9c71db265"
+  },
+  "raw_logs_sha256": {
+    "red.log": "fb66e650d5c721a88c5f4ecb5be0f11b1379ef83e07c34c100e2f1654c617e05",
+    "green.log": "7b818a4e1738bdbae8b247227160b36154776272a07f22f8641db51649fe6cf9",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "7917f420463d581df3e14836f0eeb59a319b34cfde27ebbd021fe035e3040d57",
+    "eslint-baseline.log": "7917f420463d581df3e14836f0eeb59a319b34cfde27ebbd021fe035e3040d57",
+    "eslint-other.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "tests": 219,
+  "suites": 4,
+  "tsc_exit": 0,
+  "eslint": "baseline2/current2/new0; other4changedfiles0",
+  "scope": "actual local owner suites with mocked HTTP; no native/browser/provider/full-suite/chain qualification"
+}

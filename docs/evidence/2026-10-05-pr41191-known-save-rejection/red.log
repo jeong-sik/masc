@@ -1,0 +1,74 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41191-parent-sync-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/browser-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41191-parent-sync-20261005/dashboard
+
+ ❯ src/components/browser-lane-activity-panel.test.ts (40 tests | 2 failed) 416ms
+   ❯ Browser activity operator flow (17)
+     × keeps the current Browser basis retryable after a typed pre-write rejection 4ms
+     × does not resurrect Browser current source after an external write and late known rejection 54ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/browser-lane-activity-panel.test.ts > Browser activity operator flow > keeps the current Browser basis retryable after a typed pre-write rejection
+AssertionError: expected null to be { …(3) } // Object.is equality
+
+- Expected:
+{
+  "source_path": "/workspace/runtime.toml",
+  "source_revision": "914e9fa0511bc2ad4f0d55206086183e031ec09d6572dfe104cbaf7577a79618",
+  "source_text": "# notes stay
+[browser.automation]
+geckodriver = \"/tools/geckodriver\"
+binary = \"/tools/firefox\"
+enabled = true # preserve this comment
+
+[browser.stagehand]
+enabled = false
+
+[providers.extra]
+value = \"keep\"
+",
+}
+
++ Received:
+null
+
+ ❯ src/components/browser-lane-activity-panel.test.ts:195:41
+    193|     api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlSav…
+    194|     expect(await session.save(authority)).toBe(false)
+    195|     expect(session.state.value.current).toBe(before)
+       |                                         ^
+    196|     expect(session.state.value.uncertain).toBe(false)
+    197|     expect(session.state.value.draft?.enabled).toBe(false)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/browser-lane-activity-panel.test.ts > Browser activity operator flow > does not resurrect Browser current source after an external write and late known rejection
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/browser-lane-activity-panel.test.ts:217:43
+    215|     expect(await saving).toBe(false)
+    216|     expect(session.state.value.current).toBeNull()
+    217|     expect(session.state.value.uncertain).toBe(false)
+       |                                           ^
+    218|     expect(session.ready(authority)).toBe(false)
+    219|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 38 passed (40)
+   Start at  04:26:27
+   Duration  1.96s (import 33%, transform 24%, tests 22%, environment 11%, setup 9%)
+
+ ELIFECYCLE  Test failed. See above for more details.

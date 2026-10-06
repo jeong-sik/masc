@@ -1,0 +1,16 @@
+{
+  "head": "562142b1f8705f57dfa73877d4fc26a669215908",
+  "parent": "78caa40b4707d0ebf1951ce47632c8ab72eecf88",
+  "own_web_blobs_equal": {
+    "dashboard/src/api/fixtures/lane-inventory.json": true,
+    "dashboard/src/api/lane-inventory.test.ts": true,
+    "dashboard/src/api/lane-inventory.ts": true,
+    "dashboard/src/components/lane-inventory-panel.test.ts": true,
+    "dashboard/src/components/lane-inventory-panel.ts": true,
+    "dashboard/src/components/status.ts": true,
+    "dashboard/src/config/navigation.test.ts": true,
+    "dashboard/src/config/navigation.ts": true
+  },
+  "native_parent_exact": true,
+  "tests": "combined affected Web execution deferred to immediate child41153"
+}

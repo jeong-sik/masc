@@ -1,0 +1,137 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+
+ ❯ src/components/exact-lane-activity-panel.test.ts (37 tests | 5 failed) 634ms
+   ❯ Exact activity operator flow (28)
+     × invalidates a retained activity basis after an owned raw file commit 3ms
+     × invalidates a retained activity basis after an owned patch file commit 1ms
+     × keeps a clean activity reading unavailable when a raw commit changes its file 1ms
+     × preserves a retryable source after typed pre-replacement raw-save rejection 1ms
+     × does not restore an invalidated current source when a known rejection arrives late 54ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > invalidates a retained activity basis after an owned raw file commit
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > invalidates a retained activity basis after an owned patch file commit
+AssertionError: expected { …(3) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "source_path": "/workspace/runtime.toml",
+  "source_revision": "2000a59f940a65b987b51444534690264f09956c65f48b7435ebd163d9d13d3c",
+  "source_text": "# notes stay
+[runtime.exact_output_lanes.librarian_exact]
+slots = [\"first\", \"second\"]
+cli_slots = [\"client\"]
+enabled = true # preserve this comment
+
+[providers.extra]
+value = \"keep\"
+",
+}
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:282:41
+    280|       return receipt(off)
+    281|     }, mode === 'raw' ? off : undefined)).toBe(true)
+    282|     expect(session.state.value.current).toBeNull()
+       |                                         ^
+    283|     expect(session.state.value.draft?.base).toBe(activityBase)
+    284|     expect(session.state.value.draft?.enabled).toBe(false)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > keeps a clean activity reading unavailable when a raw commit changes its file
+AssertionError: expected { …(3) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "source_path": "/workspace/runtime.toml",
+  "source_revision": "2000a59f940a65b987b51444534690264f09956c65f48b7435ebd163d9d13d3c",
+  "source_text": "# notes stay
+[runtime.exact_output_lanes.librarian_exact]
+slots = [\"first\", \"second\"]
+cli_slots = [\"client\"]
+enabled = true # preserve this comment
+
+[providers.extra]
+value = \"keep\"
+",
+}
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:295:41
+    293|     const raw = runtimeTomlSessionFor(authority); await raw.read(autho…
+    294|     expect(await raw.write(authority, async () => { stored = off; retu…
+    295|     expect(session.state.value.current).toBeNull()
+       |                                         ^
+    296|     expect(session.ready(authority)).toBe(false)
+    297|     await session.read(authority)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > preserves a retryable source after typed pre-replacement raw-save rejection
+AssertionError: expected null to be { …(3) } // Object.is equality
+
+- Expected:
+{
+  "source_path": "/workspace/runtime.toml",
+  "source_revision": "2000a59f940a65b987b51444534690264f09956c65f48b7435ebd163d9d13d3c",
+  "source_text": "# notes stay
+[runtime.exact_output_lanes.librarian_exact]
+slots = [\"first\", \"second\"]
+cli_slots = [\"client\"]
+enabled = true # preserve this comment
+
+[providers.extra]
+value = \"keep\"
+",
+}
+
++ Received:
+null
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:306:41
+    304|     api.saveRuntimeTomlConfig.mockRejectedValueOnce(new RuntimeTomlSav…
+    305|     expect(await session.save(authority)).toBe(false)
+    306|     expect(session.state.value.current).toBe(before)
+       |                                         ^
+    307|     expect(session.state.value.uncertain).toBe(false)
+    308|     expect(session.state.value.draft?.enabled).toBe(false)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > does not restore an invalidated current source when a known rejection arrives late
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/exact-lane-activity-panel.test.ts:329:43
+    327|     expect(await saving).toBe(false)
+    328|     expect(session.state.value.current).toBeNull()
+    329|     expect(session.state.value.uncertain).toBe(false)
+       |                                           ^
+    330|     expect(session.ready(authority)).toBe(false)
+    331|     expect(followup.resumeSavedModelSetup).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 32 passed (37)
+   Start at  04:22:23
+   Duration  2.30s (tests 29%, import 29%, transform 26%, environment 9%, setup 7%)
+
+ ELIFECYCLE  Test failed. See above for more details.

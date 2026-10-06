@@ -1,0 +1,7 @@
+
+/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-activity-recovery-20261005/dashboard/src/api/dashboard-runtime.ts
+  989:56  error  Do not nest ternary expressions  no-nested-ternary
+  991:7   error  Do not nest ternary expressions  no-nested-ternary
+
+✖ 2 problems (2 errors, 0 warnings)
+

@@ -6,7 +6,8 @@
     Codex app-server also answers [account/rateLimits/read] without a turn,
     four HTTP providers answer a usage endpoint without a model call, and
     the Antigravity CLI answers a print-mode [/usage] without a turn
-    ({!Runtime_provider_usage_read}).  This module decodes those reports at
+    ({!Runtime_provider_usage_read}).  Muse Code pushes [usage/changed]
+    during a session and answers [usage/read] ({!Runtime_muse_usage}).  This module decodes those reports at
     the wire and keeps the latest one per quota scope and window, with the
     time MASC heard it.
 
@@ -51,6 +52,11 @@ type source =
   | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
   | Antigravity_usage_read
       (** Antigravity [agy -p "/usage" --output-format json], no turn. *)
+  | Muse_subscription_usage
+      (** Muse Code's subscription windows, from [usage/changed] during a
+          session or a [usage/read] answer ({!Runtime_muse_usage}). Both
+          state the same two windows, so they are one source: a complete
+          report from either replaces the other's rows. *)
 
 (** What a window limits, set by each decoder from the provider's own
     shape, never from a label. *)
@@ -59,7 +65,7 @@ type window_role =
       (** Spending it refuses model calls on the account: Claude and Codex
           windows, OpenRouter's credit limit, Z.AI's TOKENS_LIMIT, both Kimi
           counts, Ollama's session and weekly usage, Antigravity's 5-hour and
-          weekly buckets. *)
+          weekly buckets, Muse Code's rolling and weekly windows. *)
   | Counts_other_use
       (** It counts something a model call does not need: Z.AI's
           TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
@@ -110,6 +116,10 @@ type decode_error =
 
 val decode_error_to_string : decode_error -> string
 val source_to_string : source -> string
+
+val window_kind_of_minutes : int -> window_kind
+(** A window length stated in minutes: exactly 300 is {!Five_hour}, exactly
+    10080 is {!Seven_day}, any other length is {!Duration_minutes}. *)
 
 val window_role_to_string : window_role -> string
 (** The wire word for a role: ["gates_model_calls"], ["counts_other_use"]

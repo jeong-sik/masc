@@ -14,7 +14,7 @@ type session = {
 }
 type request = Read of string | Save of session
 type response = Read_document of document | Written of receipt | Rejected of failure
-let template = "id = \"\"\nrun_id = \"\"\nmanifest_path = \"\"\n\n[binding]\nsources = []\n"
+let template = "enabled = true\nid = \"\"\nrun_id = \"\"\nmanifest_path = \"\"\n\n[binding]\nsources = []\n"
 let ( let* ) = Result.bind
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some value -> Ok value | None -> Error ("missing " ^ name))
@@ -62,12 +62,28 @@ let failure json =
 let create file_name =
   if String.trim file_name = "" || file_name <> Filename.basename file_name
     || String.contains file_name '\\' || String.contains file_name '\000'
-    || String.length file_name <= String.length ".toml" || not (Filename.check_suffix file_name ".toml")
+    || String.length file_name < String.length ".toml" || not (Filename.check_suffix file_name ".toml")
   then Error "Choose one direct-child .toml filename"
   else Ok {file_name;base=None;current=None;text=template;message=None}
 let editable_source_path ~directory source_path =
   let file_name = Filename.basename source_path in
   source_path=Filename.concat directory file_name && Result.is_ok (create file_name)
+let find_for_path ?create_directory ~path sessions =
+  match List.find_opt (fun (session : session) ->
+    session.file_name = Filename.basename path) sessions with
+  | None -> Ok None
+  | Some session ->
+      let source = match session.base with
+        | Some base -> Some base.source_path
+        | None -> Option.map (fun (current : document) -> current.source_path) session.current in
+      (match source with
+       | Some source when source = path -> Ok (Some session)
+       | Some source -> Error ("Draft retained for " ^ source
+           ^ "; it cannot be opened as " ^ path)
+       | None when Option.exists (fun directory ->
+           path = Filename.concat directory session.file_name) create_directory -> Ok (Some session)
+       | None -> Error ("Create-only draft " ^ session.file_name
+           ^ " retained; it cannot be opened as " ^ path))
 let from_document (document : document) =
   {file_name=document.file_name;base=Some document;current=Some document;text=document.source_text;message=None}
 let write_json (session : session) =
@@ -100,7 +116,7 @@ let decode_response request ~status ~body =
 let write_summary receipt =
   (match receipt.state with Created -> "Created" | Saved -> "Saved" | Unchanged -> "Unchanged")
   ^ (match receipt.durability with Durable -> " · durable" | Unconfirmed detail -> " · durability unconfirmed: " ^ detail)
-  ^ " · pending reconciliation (r inspects application)"
+  ^ " · file receipt; worker application is tracked separately"
 let after_response (session : session) = function
   | Read_document document -> {session with current=Some document;
       message=Some "Current file loaded; draft preserved. u uses this revision; U replaces the draft."}
@@ -114,9 +130,53 @@ let replace_with_current session = match session.current with
   | None -> Error "Read the current file first (l)"
   | Some current -> Ok {session with base=Some current;text=current.source_text;
       message=Some "Draft replaced with the current file; E edits TOML."}
+let parse_source text =
+  try match Otoml.Parser.from_string_result text with
+    | Ok (Otoml.TomlTable fields) -> Ok fields
+    | Ok _ -> Error "Declaration requires a TOML table"
+    | Error detail -> Error detail
+  with Otoml.Duplicate_key detail -> Error detail
+let application_target (session : session) =
+  match session.base with
+  | None -> Error "Save this draft before tracking application"
+  (* [valid] also carries inventory facts from the moment of the read, such as
+     an incomplete inventory or an ID collision. The application observation
+     reports those as they are now; the server sends a desired revision only
+     for a file it could parse. *)
+  | Some document ->
+      let* fields = parse_source document.source_text in
+      let* installation_id = match List.assoc_opt "id" fields with
+        | Some (Otoml.TomlString id) when String.trim id <> "" -> Ok id
+        | _ -> Error "Accepted file has no valid installation ID" in
+      let* enabled = match List.assoc_opt "enabled" fields with
+        | None -> Ok true | Some (Otoml.TomlBoolean enabled) -> Ok enabled
+        | Some _ -> Error "Accepted file has no valid activity setting" in
+      let* desired_revision = match document.desired_revision with
+        | Some revision -> Ok revision | None -> Error "Accepted file has no worker input revision" in
+      Ok {Masc_tui_lane_application.source_path=document.source_path;installation_id;
+        source_revision=document.source_revision;desired_revision;enabled}
+let draft_enabled (session : session) =
+  let* fields = parse_source session.text in
+  match List.assoc_opt "enabled" fields with
+  | None -> Ok true
+  | Some (Otoml.TomlBoolean enabled) -> Ok enabled
+  | Some _ -> Error "enabled requires a boolean; repair the draft with E"
+let toggle_enabled (session : session) =
+  let* enabled = draft_enabled session in
+  let text = Toml_line_editor.edit_root_bool session.text ~key:"enabled" ~value:(not enabled) in
+  let changed = {session with text} in
+  let* observed = draft_enabled changed in
+  if observed = enabled then Error "The draft enabled key did not change"
+  else Ok {changed with message=Some
+    ((if observed then "Enable" else "Disable")
+     ^ " staged in draft; s saves. Worker application refreshes separately.")}
 let summary (session : session) =
   ["TOML draft " ^ session.file_name;
-   " E:edit  s:save  l:read current  u:use current revision  U:replace draft  Esc:back (draft kept)";
+   (match draft_enabled session with
+    | Ok true -> "Draft: enabled · saved configuration and worker state are separate"
+    | Ok false -> "Draft: disabled · save requests worker cleanup and keeps this file"
+    | Error detail -> "Draft activity unknown: " ^ detail);
+   " Space:on/off draft  E:edit  s:save  l:read current  u:use current revision  U:replace draft  Esc:back (draft kept)";
    (match session.base with None -> "Create only; no existing file will be overwritten"
     | Some base -> "Base " ^ base.source_revision ^ " · " ^ base.source_path)]
   @ (match session.message with None -> [] | Some message -> [message])

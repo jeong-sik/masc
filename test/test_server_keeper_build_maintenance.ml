@@ -42,7 +42,7 @@ let with_fixture f =
       f config profile seed)
 
 let microvm_profile =
-  "[keeper]\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"apple_container\"\nsandbox_image = \"fixture-image\"\n"
+  "[keeper]\ninstructions = \"fixture instructions for keeper build maintenance\"\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"apple_container\"\nsandbox_image = \"fixture-image\"\n"
 
 let test_cleanup_reads_toml_owned_backend () =
   with_fixture (fun config profile seed ->
@@ -73,7 +73,7 @@ let test_cleanup_rejects_other_owner () =
 
 let test_cleanup_rejects_invalid_profile () =
   with_fixture (fun config profile seed ->
-    profile "cleanup-owner" "[keeper]\nsandbox_profile = \"invalid-profile\"\n";
+    profile "cleanup-owner" "[keeper]\ninstructions = \"fixture instructions\"\nsandbox_profile = \"invalid-profile\"\n";
     seed ~owner:"cleanup-owner" ~payload_name:"cleanup-owner";
     match Server_keeper_build_maintenance.read_cleanup_meta ~config
             ~keeper_name:"cleanup-owner" with

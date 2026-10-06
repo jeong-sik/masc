@@ -207,9 +207,14 @@ let test_bounded_inline_rejects_oversized_result () =
   with
   | Ok _ -> Alcotest.fail "oversized bounded-inline result was accepted"
   | Error { message; recoverable; error_class } ->
+    (* The refusal names the limit and the byte counts, so the model and the
+       operator can tell an oversized result from a storage failure. *)
     Alcotest.(check string)
       "provider receives bounded projection failure"
-      "tool output exceeds descriptor budget"
+      (Printf.sprintf
+         "inline tool output exceeds descriptor budget (%d > %d bytes)"
+         (String.length payload)
+         B.default_externalize_threshold_bytes)
       message;
     Alcotest.(check bool) "bounded projection carries no recovery hint" false recoverable;
     (match error_class with
@@ -783,10 +788,16 @@ let test_blob_store_failure_is_typed () =
        with
        | Ok _ -> Alcotest.fail "projection failure became AGENT_CORE success"
        | Error { message; recoverable; error_class } ->
-         Alcotest.(check string)
-           "provider error hides storage internals"
-           "tool output artifact storage failed"
-           message;
+         (* The boundary phrase names where the failure happened; the typed
+            cause follows it. Dropping the cause left the model and the
+            operator with a bare label they could not act on. *)
+         (match !observed with
+          | Some diagnostic ->
+            Alcotest.(check string)
+              "provider error names the boundary and keeps the cause"
+              ("tool output artifact storage failed: " ^ String.trim diagnostic)
+              message
+          | None -> Alcotest.fail "projection failure observer was not called");
          Alcotest.(check bool) "provider gets no replay hint" false recoverable;
          (match error_class with
           | Some Agent_core.Types.Unknown -> ()

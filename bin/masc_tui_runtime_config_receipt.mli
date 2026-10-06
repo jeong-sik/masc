@@ -85,6 +85,14 @@ type t =
 val decode : Yojson.Safe.t -> (t, string) result
 val summary : t -> string
 
+val lane_summary : t -> string
+(** Operator-facing file and application outcome for a lane edit. Retains the
+    reason when exact lanes kept their prior configuration and names restart
+    requirements independently of a subsequent list refresh. *)
+
+val lane_needs_attention : t -> bool
+(** Whether the lane receipt carries a durability, application or lock warning. *)
+
 (** What POST /api/v1/runtime/config/raw/preview answers: whether the save
     route would take the text, and when it would not, why. *)
 type preview =

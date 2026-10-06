@@ -148,12 +148,18 @@ let verified_save_refresh () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; activation=Login.Active {exact_output_available=true}; refresh_failed} in
   t.phase<-finished false;
+  t.result_scroll <- 3;
   Login.refresh_saved t Login.Saved_verified (Error "network unavailable");
+  check int "failed refresh returns result to summary" 0 t.result_scroll;
   check bool "transport failure cannot revoke verified save" true (t.phase=finished true);
   check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved Login.Saved_verified);
+  t.result_scroll <- 3;
   Login.refresh_saved t Login.Saved_verified (Ok (`Assoc []));
+  check int "invalid refreshed inventory returns result to summary" 0 t.result_scroll;
   check bool "bad inventory cannot revoke verified save" true (t.phase=finished true);
+  t.result_scroll <- 3;
   Login.refresh_saved t Login.Saved_verified (Ok inventory);
+  check int "successful refresh returns result to summary" 0 t.result_scroll;
   check bool "successful refresh retains saved screen" true (t.phase=finished false)
 let saved_activation_retry () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
@@ -943,6 +949,54 @@ let already_bound_model_is_not_offered () =
        | _ -> fail "expected Save"))
     [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
+let long_result_rows_are_reachable () =
+  let t = Login.create "codex" in
+  let ids = List.init 12 (fun i -> Printf.sprintf "codex-account-model-%02d-long-runtime-identifier" i) in
+  let receipt = `Assoc ["configured", `Bool true; "readiness", `String "usage_limited";
+    "commit", `Assoc ["durability", `String "durable"; "warnings", `List []];
+    "runtime_ids", `List (List.map (fun id -> `String id) ids);
+    "unverified", `List (List.map (fun id -> `Assoc ["runtime_id", `String id;
+      "code", `String "quota_exhausted"]) ids)] in
+  let saved = ok (Login.saved t receipt) in
+  let drawn () = List.map Login.row_text (Login.visible_lines ~height:5 ~width:40 t) in
+  let first = drawn () in
+  check bool "result starts with saved summary" true (contains (List.hd first) "저장했습니다");
+  check bool "first page has an overflow indicator" true (List.exists (fun line -> contains line "[결과") first);
+  let seen = ref first in
+  for _ = 1 to 80 do
+    ignore (Login.key t "j"); let page = drawn () in
+    check bool "every result row fits the viewport" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= 40) page);
+    seen := !seen @ page
+  done;
+  let text = String.concat "" !seen in
+  List.iter (fun id -> check bool "every wrapped runtime identifier is reachable" true (contains text id)) ids;
+  let bottom = t.result_scroll in
+  ignore (Login.key t "j"); ignore (drawn ());
+  check int "scroll clamps at the last result row" bottom t.result_scroll;
+  Login.activating t saved;
+  check int "activation retry starts at the summary" 0 t.result_scroll;
+  for _ = 1 to 80 do ignore (Login.key t "j"); ignore (drawn ()) done;
+  ignore (Login.activated t saved (Error "activation unavailable"));
+  check int "activation failure starts at the summary" 0 t.result_scroll;
+  for _ = 1 to 80 do ignore (Login.key t "j"); ignore (drawn ()) done;
+  List.iter (fun result ->
+    Login.refresh_saved t saved result;
+    check int "every refreshed result starts at its summary" 0 t.result_scroll;
+    check bool "refreshed summary is visible" true
+      (contains (List.hd (drawn ())) "저장했습니다");
+    for _ = 1 to 80 do ignore (Login.key t "j"); ignore (drawn ()) done)
+    [ Error "network unavailable"; Ok inventory ];
+  for _ = 1 to 80 do ignore (Login.key t "k"); ignore (drawn ()) done;
+  check int "scroll returns to the summary" 0 t.result_scroll;
+  Login.save_failed t (String.concat " " (List.init 30 (fun _ -> "verification detail")) ^ " reason-at-end");
+  let failed = ref [] in
+  for _ = 1 to 80 do failed := !failed @ drawn (); ignore (Login.key t "down") done;
+  check bool "a long failure's diagnostic end is reachable" true
+    (contains (String.concat "" !failed) "reason-at-end");
+  Login.refresh_retry t (Error "still offline");
+  check int "a refreshed failure starts at its diagnostic" 0 t.result_scroll
+
 let disabled_login_templates_and_existing_accounts () =
   let disabled={provider with enabled=false} in
   let state () =
@@ -1067,14 +1121,19 @@ let grouped_existing_accounts () =
 
 let quota_scope_group_id_is_opaque () =
   let scope_id = String.make 32 'd' in
-  let json = `Assoc ["account_groups", `List [`Assoc ["id", `String scope_id;
-    "integration_ids", `List [`String provider.id]; "runtime_ids", `List []]]] in
-  match Login.groups_of_inventory [provider] json with
-  | Ok [group] -> check string "32-character history scope ID is retained unchanged" scope_id group.group_id
-  | Ok _ | Error _ -> fail "quota scope group was lost or rejected"
+  let json = match inventory with
+    | `Assoc fields -> `Assoc (("account_groups", `List [`Assoc ["id", `String scope_id;
+        "integration_ids", `List [`String provider.id]; "runtime_ids", `List []]]) :: fields)
+    | _ -> assert false in
+  let t = Login.create "codex" in
+  ok (Login.inventory t json);
+  match t.account_groups with
+  | [group] -> check string "32-character history scope ID is retained unchanged" scope_id group.group_id
+  | _ -> fail "quota scope group was lost or rejected"
 
 
 let () = run "TUI account login" ["workflow",[
+  test_case "long result and failure rows are reachable" `Quick long_result_rows_are_reachable;
   test_case "quota scope group ID remains an opaque string" `Quick quota_scope_group_id_is_opaque;
   test_case "disabled client templates stay distinct from existing-account login" `Quick disabled_login_templates_and_existing_accounts;
   test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;

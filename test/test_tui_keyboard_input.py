@@ -345,7 +345,11 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         "HTTP badge refresh timing regression",
         (run_http_badge_refresh_regression,),
     ),
-    ScenarioFamily("http-conditional-read", "HTTP conditional read regression", (run_http_conditional_read_regression,)),
+    ScenarioFamily(
+        "http-conditional-read",
+        "HTTP conditional read regression",
+        (run_http_conditional_read_regression,),
+    ),
     ScenarioFamily(
         "observer-reconnect",
         "observer reconnect regression",

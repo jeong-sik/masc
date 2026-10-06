@@ -23,12 +23,14 @@ def screen_text(output: bytearray) -> bytes:
 
 def run(executable: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
 
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        _keyboard_harness.wait_for_output(process, fd, output, KEPT[0], start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        _keyboard_harness.send_and_wait(process, fd, output, b"d", KEPT[0])
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         _keyboard_harness.read_available(fd, output)
         pane = screen_text(output)
         for needle in MOVED:
@@ -42,21 +44,19 @@ def run(executable: str) -> None:
             if needle not in pane:
                 raise AssertionError(
                     f"the lane detail lost what the lane answers: {needle!r}")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Lanes")
         # The words are not gone from the product, only from the pane.
         _keyboard_harness.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
-        # The slot-editor help above [e] puts [catalog-ref] below the first
-        # viewport. Exercise the sheet's scroll to reach the full [e] hint.
-        # On a thirty-row terminal the sheet shows 22 lines; [s] wraps to
-        # nine, so [e] starts on sheet line 21 and [catalog-ref] sits on its
-        # sixth wrapped line, line 26. Four presses show lines 5-26, which
-        # still hold [preview-checked] on line 24. A longer Lanes hint above
-        # [e] moves both lines down and needs more presses here.
-        _keyboard_harness.send_and_wait(process, fd, output, b"jjjj", IN_THE_SHEET[0])
-        _keyboard_harness.read_available(fd, output)
-        sheet = screen_text(output)
-        for needle in IN_THE_SHEET:
-            if needle not in sheet:
-                raise AssertionError(f"the sheet does not carry {needle!r}")
+        # New common-inventory keys may wrap above this entry; look at the
+        # current sheet while scrolling instead of hardcoding a row offset.
+        for _ in range(24):
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            sheet = screen_text(output)
+            if all(needle in sheet for needle in IN_THE_SHEET):
+                break
+            _keyboard_harness.send_and_wait(process, fd, output, b"j", b"MASC Cheat Sheet")
+        else:
+            raise AssertionError(f"sheet omitted slot-editor guidance: {sheet!r}")
         # Close the sheet before quitting: the two keys sent back to back
         # left the pane mid-transition and the exit snapshot never settled.
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Lanes")

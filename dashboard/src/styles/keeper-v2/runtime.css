@@ -261,5 +261,6 @@
 @media (max-width: 720px) {
   .rt-shell { grid-template-columns: 1fr; }
   .rt-nav { flex-direction: row; overflow-x: auto; }
+  .rt-nav-item { flex: 0 0 auto; white-space: nowrap; }
   .rt-nav-h, .rt-nav-foot { display: none; }
 }

@@ -1,0 +1,28 @@
+{
+  "parent": "156d2bf8bf0b53903a2fd77258233a088ee02286",
+  "native_pass": 78,
+  "native_known_failure": 1,
+  "known_issue": 41174,
+  "web_pass": 52,
+  "tui_sha256": "f4c419ddea897edf09ac9263062297754d54ae9e18a2d3e0afe88c6c4c4c8e39",
+  "files": {
+    "docs/evidence/2026-10-04-pr41135-parent-integration/README.md": "5cf8c9270591a268836a0ac8bf8db7e762a02980c81e7c52b3fbc30cc3e5d999",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/focused-build.log": "6b14ac59685b471d8315bb23757a3958f940ee1e3b928e777925128a36224c87",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/inventory-pty.log": "a2c32bb739d3e42d5a65137d5f32e9d546410ee6475e856c8eeb2fc4f60ceca8",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/package-pty-fixed4.log": "1dcd9244a9017d89828fee2fe6857b07b8c7b129a0ca6f1005d87ff1f18b5172",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/package-pyright.json": "325d1d35a0756f0fba645e7b18c74bb15323c0a87c7d6a84e400e21767c7d26f",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/package-ruff-final.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/restored-build.log": "e846a40a58989e4d048333af2ede9c1c81ab208dc2e05f14ba3242ebd73efdf3",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/skills-red.log": "69303ed0eed489cddf6550fd30e6328deb0d969819df71dc7a15f8322cd3dc79",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/skills-restored-green.log": "2343e3a2119c011a4d2a42b475195a340b3958358cad31116e573fe197df7312",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/test_lane_addon_declaration.log": "44a3de915d996a430cce8fddcc79f186a044b726d34b43f77a428ad8824fe27f",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/test_lane_addon_reconcile.log": "9bbff1bdeddbe6bece0405a49a746394b2485bc31094935a7592d9b75b09a89d",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/test_tui_lane_addon_reading.log": "9fd8dfc44250f96d81c9a9510b1c5bd31032a6a6015421dc134813b7346c59fe",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/test_tui_lane_addons.log": "a982c7e9a84d9644cd83dc17d8f52b1216b778cde3dd75652a162a323798b68f",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/test_tui_lane_declaration_path.log": "87e609461a263a5b44bd419d42d3f6e5141b5c8f110399a47e6373664489240b",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/test_tui_lane_inventory.log": "31b16665677fc4e4fc2926451461389729736b8248f6ee4199d45d111fa99b3a",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/web-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/web-tests.log": "53b5dd02e8463489267f0ba855ca2847f709ce90270a526259f5d91b77339671",
+    "docs/evidence/2026-10-04-pr41135-parent-integration/web-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

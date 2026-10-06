@@ -1,0 +1,40 @@
+import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser'
+import type { LaneInventoryRow } from '../api/lane-inventory'
+import { isRecord } from './type-guards'
+import { setRuntimeTomlKey } from './runtime-toml-config'
+
+export type MachineActivityLane = Extract<LaneInventoryRow['selection'], { kind: 'machine' }>['machine']
+
+function table(value: unknown, path: string, keys: readonly string[]): Record<string, unknown> {
+  if (value === undefined) return {}
+  if (!isRecord(value) || ![null, Object.prototype].includes(Object.getPrototypeOf(value)))
+    throw new Error(`${path}는 TOML table이어야 합니다.`)
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key)) throw new Error(`${path}.${key}는 지원하지 않는 설정입니다.`)
+  }
+  return value
+}
+
+/** Match Machine_configuration: omitted flags are on, but unknown machines,
+ * keys and non-booleans are errors. Full Runtime validation remains server-owned. */
+export function readMachineActivity(source: string, lane: MachineActivityLane): { enabled: boolean } {
+  const root = getStaticTOMLValue(parseTOML(source, { tomlVersion: '1.0' }))
+  const machines = table(root.machines, 'machines', ['msx', 'dos'])
+  const values = new Map<MachineActivityLane, boolean>()
+  for (const machine of ['msx', 'dos'] as const) {
+    const selected = table(machines[machine], `machines.${machine}`, ['enabled'])
+    const enabled = Object.hasOwn(selected, 'enabled') ? selected.enabled : true
+    if (typeof enabled !== 'boolean') throw new Error(`machines.${machine}.enabled는 true 또는 false여야 합니다.`)
+    values.set(machine, enabled)
+  }
+  return { enabled: values.get(lane)! }
+}
+
+/** Parsed value ranges retain comments and support tables, dotted keys and
+ * inline tables. Only the selected machine's enabled value is changed. */
+export function writeMachineActivity(source: string, lane: MachineActivityLane, enabled: boolean): string {
+  readMachineActivity(source, lane)
+  const next = setRuntimeTomlKey(source, `machines.${lane}`, 'enabled', enabled)
+  readMachineActivity(next, lane)
+  return next
+}

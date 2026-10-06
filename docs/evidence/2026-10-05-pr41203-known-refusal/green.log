@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/lib/machine-lane-activity.test.ts src/components/machine-lane-activity-panel.test.ts src/components/lane-inventory-panel.test.ts src/components/settings-surface.test.ts src/components/runtime-toml-editor.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41203-parent-integration-20261005/dashboard
+
+
+ Test Files  5 passed (5)
+      Tests  264 passed (264)
+   Start at  04:18:52
+   Duration  7.68s (tests 52%, import 20%, transform 14%, environment 8%, setup 6%)
+
+    Isolate  5 workers spawned · ~203ms startup each (spawn + environment, per file)
+             at least ~814ms faster with isolate: false — reuses workers across files instead of one per file
+

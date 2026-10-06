@@ -1,0 +1,27 @@
+{
+  "parent": "45b9888ef761f5c532169bd67fef0396fb1329ec",
+  "results": {
+    "new_actual_red_failures": 1,
+    "web_tests": 39,
+    "matched_files": 1,
+    "tsc": 0,
+    "eslint": 0,
+    "unchanged_native_reused": 17
+  },
+  "source_sha256": {
+    "dashboard/src/components/lane-addons-panel.ts": "842d3f3fb1e935bb6a696a9eae6b4ce91afa23d46619f6f6e2c1a13b7c052cff",
+    "dashboard/src/components/lane-addons-panel.test.ts": "49dea38413777de02035ea10a399d0481befd8f9f89899acca98aadbb3a8d15d",
+    "dashboard/src/components/lane-addon-readings.ts": "3bcc2bf1fb853ecb24417047f95459ceaff01c1bf1600973c744079c0df6284a"
+  },
+  "artifact_sha256": {
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/renamed-owner-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/web.log": "aa16c1327fc7699054ebfcd5f5471577b9153c2cc9ded8322fd60b9d31cfe646",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/checks.json": "012d804e938425fe508698edf02d95630ba3774ef84b92fce8d8dbec812ec3ed",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/README.md": "8a068df2c70d729ce412f7f3faf66adf6745072bee005771c4b64dbf4cfadf97",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/renamed-owner-red.log": "7c354735ae821926b85c42156857bd44dbea7ba8a59a74b8d1ede6e93fa1585d",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/renamed-owner-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-lane-removal-parent-integration/renamed-owner-green.log": "7031ef35eb3aa376e3f43e0a7d1d3d865ec139cb87c3e352fb26932131829568"
+  }
+}

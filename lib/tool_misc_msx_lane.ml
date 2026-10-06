@@ -73,7 +73,7 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
       ~data:(`Assoc (observation_fields ?sprites o @ extra))
       ?metadata
       ()
-  | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
+  | Error ((Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
   | Error (Msx_lane.Unreadable _ as e) ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time

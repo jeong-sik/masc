@@ -1,0 +1,563 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-runtime-observation-workspace-20261004/dashboard
+
+ ↓ src/components/runtime-observation-workspace.test.ts > withdraws A metrics and reads B when workspace changes
+ ↓ src/components/runtime-observation-workspace.test.ts > discards delayed A metrics after B becomes current
+ ↓ src/components/runtime-observation-workspace.test.ts > does not join a delayed A probe to the B runtime spec
+ ↓ src/components/runtime-observation-workspace.test.ts > withdraws readings and sends no observation requests without a confirmed workspace
+ ↓ src/components/runtime-observation-workspace.test.ts > cannot revive an old A metrics response after A to B to A
+ ↓ src/components/runtime-observation-workspace.test.ts > late A errors cannot replace B metrics or probe observations
+ ↓ src/components/runtime-observation-workspace.test.ts > provider usage responses remain owned by their workspace even when provider IDs match
+ ↓ src/components/runtime-observation-workspace.test.ts > late manual login results never appear on a new workspace account with the same ID
+ ↓ src/components/runtime-observation-workspace.test.ts > cancels owned observation requests when the panels unmount
+ × src/components/runtime-observation-workspace.test.ts > accepts a login click immediately after the account mounts, before passive effects flush 5018ms
+   → expected '런타임 사용 통계집계 요청 기간 30분1시간6시간24시간통계 새로 …' to contain 'CLI 자체 보고: ready'
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33maria-label[39m=[32m"런타임 사용 통계"[39m
+        [33mclass[39m=[32m"ov-card min-w-0"[39m
+        [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0m런타임 사용 통계[0m
+          [36m</h2>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [0m집계 요청 기간 [0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"30"[39m
+                [36m>[39m
+                  [0m30분[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"60"[39m
+                [36m>[39m
+                  [0m1시간[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"360"[39m
+                [36m>[39m
+                  [0m6시간[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"1440"[39m
+                [36m>[39m
+                  [0m24시간[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m통계 새로 읽기[0m
+            [36m</button>[39m
+            [36m<a[39m
+              [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+              [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+            [36m>[39m
+              [0m토큰·지연 상세[0m
+            [36m</a>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm text-text-muted"[39m
+        [36m>[39m
+          [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+        [36m</p>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+          [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+          [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+            [33mdata-testid[39m=[32m"overview-client-shared"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"font-medium"[39m
+            [36m>[39m
+              [0mCatalog A[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+            [36m>[39m
+              [0m([0m
+              [0mshared[0m
+              [0m)[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ml-2"[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m로그인 검사 중[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ml-2 underline"[39m
+              [33mdisabled[39m=[32m""[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m로그인 확인[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-text-muted"[39m
+              [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+            [36m>[39m
+              [0m제공자 사용량 상태 미보고[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs text-text-muted"[39m
+        [36m>[39m
+          [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0m서버 집계 창: [0m
+          [0m60분[0m
+          [0m · 응답 수신 [0m
+          [0m10/4/2026, 10:52:55 PM[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+          [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+        [36m>[39m
+          [0m집계 갱신 상태 미보고[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs text-text-muted"[39m
+        [36m>[39m
+          [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs"[39m
+        [36m>[39m
+          [0m비용 원장 읽기 상태 미보고[0m
+        [36m</p>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+          [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+          [33mrole[39m=[32m"region"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<table[39m
+            [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+          [36m>[39m
+            [36m<thead[39m
+              [33mclass[39m=[32m"hidden md:table-header-group"[39m
+            [36m>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"border-b border-border"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m런타임[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</th>[39m
+              [36m</tr>[39m
+            [36m</thead>[39m
+            [36m<tbody[39m
+              [33mclass[39m=[32m"block md:table-row-group"[39m
+            [36m>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                  [33mscope[39m=[32m"row"[39m
+                [36m>[39m
+                  [0mOnly-current-metric[0m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m기록 결과[0m
+                  [36m</span>[39m
+                  [0m오류 없음 [0m
+                  [0m1[0m
+                  [36m<br />[39m
+                  [0m오류 [0m
+                  [0m0[0m
+                [36m</td>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m보고된 토큰[0m
+                  [36m</span>[39m
+                  [0m입력 [0m
+                  [0m123[0m
+                  [36m<br />[39m
+                  [0m출력 [0m
+                  [0m12[0m
+                [36m</td>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m보고된 지연[0m
+                  [36m</span>[39m
+                  [0mp50 [0m
+                  [0m5 ms[0m
+                  [36m<br />[39m
+                  [0mp95 [0m
+                  [0m8 ms[0m
+                [36m</td>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m관측 누락[0m
+                  [36m</span>[39m
+                  [0m사용량 보고 [0m
+                  [0m1[0m
+                  [0m · 누락 [0m
+                  [0m0[0m
+                  [36m<br />[39m
+                  [0m텔레메트리 보고 [0m
+                  [0m1[0m
+                  [0m · 누락 [0m
+                  [0m0[0m
+                [36m</td>[39m
+              [36m</tr>[39m
+            [36m</tbody>[39m
+          [36m</table>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > accepts a login click immediately after the account mounts, before passive effects flush
+AssertionError: expected '런타임 사용 통계집계 요청 기간 30분1시간6시간24시간통계 새로 …' to contain 'CLI 자체 보고: ready'
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33maria-label[39m=[32m"런타임 사용 통계"[39m
+        [33mclass[39m=[32m"ov-card min-w-0"[39m
+        [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0m런타임 사용 통계[0m
+          [36m</h2>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [0m집계 요청 기간 [0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"30"[39m
+                [36m>[39m
+                  [0m30분[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"60"[39m
+                [36m>[39m
+                  [0m1시간[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"360"[39m
+                [36m>[39m
+                  [0m6시간[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"1440"[39m
+                [36m>[39m
+                  [0m24시간[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m통계 새로 읽기[0m
+            [36m</button>[39m
+            [36m<a[39m
+              [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+              [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+            [36m>[39m
+              [0m토큰·지연 상세[0m
+            [36m</a>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm text-text-muted"[39m
+        [36m>[39m
+          [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+        [36m</p>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+          [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+          [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+            [33mdata-testid[39m=[32m"overview-client-shared"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"font-medium"[39m
+            [36m>[39m
+              [0mCatalog A[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+            [36m>[39m
+              [0m([0m
+              [0mshared[0m
+              [0m)[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ml-2"[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m로그인 검사 중[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ml-2 underline"[39m
+              [33mdisabled[39m=[32m""[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m로그인 확인[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-text-muted"[39m
+              [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+            [36m>[39m
+              [0m제공자 사용량 상태 미보고[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs text-text-muted"[39m
+        [36m>[39m
+          [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0m서버 집계 창: [0m
+          [0m60분[0m
+          [0m · 응답 수신 [0m
+          [0m10/4/2026, 10:52:55 PM[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+          [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+        [36m>[39m
+          [0m집계 갱신 상태 미보고[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs text-text-muted"[39m
+        [36m>[39m
+          [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs"[39m
+        [36m>[39m
+          [0m비용 원장 읽기 상태 미보고[0m
+        [36m</p>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+          [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+          [33mrole[39m=[32m"region"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<table[39m
+            [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+          [36m>[39m
+            [36m<thead[39m
+              [33mclass[39m=[32m"hidden md:table-header-group"[39m
+            [36m>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"border-b border-border"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m런타임[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</th>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"p-2 text-left"[39m
+                  [33mscope[39m=[32m"col"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</th>[39m
+              [36m</tr>[39m
+            [36m</thead>[39m
+            [36m<tbody[39m
+              [33mclass[39m=[32m"block md:table-row-group"[39m
+            [36m>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                  [33mscope[39m=[32m"row"[39m
+                [36m>[39m
+                  [0mOnly-current-metric[0m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m기록 결과[0m
+                  [36m</span>[39m
+                  [0m오류 없음 [0m
+                  [0m1[0m
+                  [36m<br />[39m
+                  [0m오류 [0m
+                  [0m0[0m
+                [36m</td>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m보고된 토큰[0m
+                  [36m</span>[39m
+                  [0m입력 [0m
+                  [0m123[0m
+                  [36m<br />[39m
+                  [0m출력 [0m
+                  [0m12[0m
+                [36m</td>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m보고된 지연[0m
+                  [36m</span>[39m
+                  [0mp50 [0m
+                  [0m5 ms[0m
+                  [36m<br />[39m
+                  [0mp95 [0m
+                  [0m8 ms[0m
+                [36m</td>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                  [36m>[39m
+                    [0m관측 누락[0m
+                  [36m</span>[39m
+                  [0m사용량 보고 [0m
+                  [0m1[0m
+                  [0m · 누락 [0m
+                  [0m0[0m
+                  [36m<br />[39m
+                  [0m텔레메트리 보고 [0m
+                  [0m1[0m
+                  [0m · 누락 [0m
+                  [0m0[0m
+                [36m</td>[39m
+              [36m</tr>[39m
+            [36m</tbody>[39m
+          [36m</table>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+Expected: "CLI 자체 보고: ready"
+Received: "런타임 사용 통계집계 요청 기간 30분1시간6시간24시간통계 새로 읽기토큰·지연 상세Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.Catalog A(shared)로그인 검사 중로그인 확인제공자 사용량 상태 미보고로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.서버 집계 창: 60분 · 응답 수신 10/4/2026, 10:52:55 PM집계 갱신 상태 미보고응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.비용 원장 읽기 상태 미보고런타임기록 결과보고된 토큰보고된 지연관측 누락Only-current-metric기록 결과오류 없음 1오류 0보고된 토큰입력 123출력 12보고된 지연p50 5 msp95 8 ms관측 누락사용량 보고 1 · 누락 0텔레메트리 보고 1 · 누락 0"
+
+ ❯ src/components/runtime-observation-workspace.test.ts:231:55
+    229|     await waitFor(() => expect(button.disabled).toBe(true))
+    230|     await act(async () => { finish({ runtime_id: 'shared.model', measu…
+    231|     await waitFor(() => expect(container.textContent).toContain('CLI 자…
+       |                                                       ^
+    232|     expect(button.disabled).toBe(false)
+    233|   } finally { renderDirectly(null, container); container.remove() }
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  22:52:53
+   Duration  6.27s (tests 81%, transform 8%, import 5%, environment 3%, setup 2%)

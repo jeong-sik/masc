@@ -91,13 +91,14 @@ let parse = function
   | _ -> Error "browser interaction arguments must be an object"
 
 let perform request =
-  let* target = Browser_lane.resolve_target request.route
-    |> Result.map_error Browser_lane.selection_error_code in
+  let verb = Browser_lane.Page_interact {tab_id=request.tab_id;
+    expected_url=request.expected_url; action=request.action} in
+  let* target = Browser_lane.resolve_target ~verb request.route
+    |> Result.map_error Browser_lane.selection_error_message in
   let* answer = Browser_lane.issue_for ~target
-    ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
-      expected_url=request.expected_url; action=request.action})
+    ~verb
     ~timeout_sec:20.
-    |> Result.map_error Browser_lane.selection_error_code in
+    |> Result.map_error Browser_lane.selection_error_message in
   Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer
 
 let script = {js|function interactInPage(args) {

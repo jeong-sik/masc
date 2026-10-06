@@ -1,0 +1,60 @@
+[2026-10-04 23:55:48] [INFO] [MCP] Tag registry initialized: 190 tools registered
+Testing `operator lane inventory'.
+This run has ID `CTXO8TVN'.
+
+  [SKIP]        read boundaries          0   all builtin and invalid/duplicat...
+  [SKIP]        read boundaries          1   retained manual/managed owners s...
+  [SKIP]        read boundaries          2   confirmed cleanup leaves history...
+  [SKIP]        read boundaries          3   HTTP inventory requires operator...
+> [FAIL]        read boundaries          4   H2 inventory has the same admin ...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        read boundaries          4   H2 inventory has the same adm...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-04 23:55:48] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-inventory-60dab0 (no git root found)
+[2026-10-04 23:55:48] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/Users/dancer/me for requested path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-inventory-60dab0
+[2026-10-04 23:55:48] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/lane-inventory-60dab0 for test executable test_server_lane_inventory.exe
+[2026-10-04 23:55:48] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+ASSERT H2 admin inventory is registered
+File "test/test_server_lane_inventory.ml", line 218, character 2:
+FAIL H2 admin inventory is registered
+
+   Expected: `200'
+   Received: `404'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_server_lane_inventory.h2_operator_route.(fun) in file "test/test_server_lane_inventory.ml", line 218, characters 2-57
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41130-parent-sync-20261004/_build/_tests/operator lane inventory/read boundaries.004.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41130-parent-sync-20261004/_build/_tests/operator lane inventory'.
+1 failure! in 0.010s. 1 test run.

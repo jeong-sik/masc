@@ -430,14 +430,11 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
   const [pendingAction, setPendingAction] = useState<GoalTransitionAction | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastAction, setLastAction] = useState<GoalTransitionAction | null>(null)
+  // Drop opens a reason instead of sending: the server refuses a drop that
+  // does not say why, and each cancelled Task's author is told that sentence.
+  const [dropReason, setDropReason] = useState<string | null>(null)
 
-  useEffect(() => {
-    setPendingAction(null)
-    setError(null)
-    setLastAction(null)
-  }, [node.id])
-
-  const runAction = useCallback((action: GoalTransitionAction) => {
+  const runAction = useCallback((action: GoalTransitionAction, note?: string) => {
     const actorId = currentDashboardActor()
     setPendingAction(action)
     setError(null)
@@ -447,12 +444,14 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
         await callMcpTool('masc_goal_transition', {
           goal_id: node.id,
           action,
+          ...(note === undefined ? {} : { note }),
           actor: {
             id: actorId,
             display_name: actorId,
           },
         })
         setLastAction(action)
+        setDropReason(null)
         await Promise.all([
           refreshTree(),
           refreshGoalDetail(node.id),
@@ -489,13 +488,62 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
               ariaBusy=${isPending}
               ariaLabel=${label}
               title=${label}
-              onClick=${() => runAction(action)}
+              onClick=${() => {
+                if (action === 'drop') {
+                  setDropReason(current => current ?? '')
+                } else {
+                  setDropReason(null)
+                  runAction(action)
+                }
+              }}
             >
               ${isPending ? 'Working...' : label}
             <//>
           `
         })}
       </div>
+      ${dropReason === null ? null : html`
+        <form
+          class="mt-3 flex flex-col gap-2"
+          data-goal-drop-reason
+          onSubmit=${(event: Event) => {
+            event.preventDefault()
+            const reason = dropReason.trim()
+            if (reason !== '') runAction('drop', reason)
+          }}
+        >
+          <label class="flex flex-col gap-1 text-xs text-text-muted">
+            <span>Drop 사유 · 연결된 Task 중 아무도 안 집은 것은 취소되고, 만든 사람에게 이 사유가 전달돼요</span>
+            <textarea
+              rows=${2}
+              class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2 text-text-strong"
+              value=${dropReason}
+              disabled=${pendingAction !== null}
+              autoFocus
+              onInput=${(event: Event) => setDropReason((event.target as HTMLTextAreaElement).value)}
+            ></textarea>
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <${ActionButton}
+              type="submit"
+              variant="danger"
+              size="sm"
+              disabled=${pendingAction !== null || dropReason.trim() === ''}
+              ariaBusy=${pendingAction === 'drop'}
+            >
+              Drop goal
+            <//>
+            <${ActionButton}
+              variant="ghost"
+              size="sm"
+              disabled=${pendingAction !== null}
+              onClick=${() => setDropReason(null)}
+            >
+              Cancel
+            <//>
+          </div>
+        </form>
+      `}
       ${lastAction ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-[var(--ok-25)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]" data-testid="goal-lifecycle-action-status">
           ${GOAL_TRANSITION_LABELS[lastAction]} applied
@@ -966,7 +1014,7 @@ function GoalDetailPanel({
       <${GoalTaskRelationStrip} node=${selectedNode} />
       <${GoalMeasurementDetail} node=${selectedNode} />
       <${GoalProofDetail} proof=${selectedNode.verification} />
-      <${GoalLifecycleActionPanel} node=${selectedNode} />
+      <${GoalLifecycleActionPanel} key=${selectedNode.id} node=${selectedNode} />
       ${selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed' ? html`
         <${GoalConfirmationPanel} key=${selectedNode.id} goalId=${selectedNode.id}
           onConfirmed=${() => { void Promise.all([refreshGoalDetail(selectedNode.id), refreshTree()]) }} />` : null}

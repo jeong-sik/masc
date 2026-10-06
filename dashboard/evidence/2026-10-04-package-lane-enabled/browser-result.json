@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual component and decoder with synthetic HTTP; no native backend, worker cleanup or deployment proof",
+  "assertions": [
+    "desired off despite equal payload revisions",
+    "incomplete read and cleanup failure visible",
+    "refresh reads configured off with no current worker",
+    "retained worker and evidence still visible",
+    "desktop and mobile screenshots",
+    "zero writes, page errors or unexpected API routes"
+  ],
+  "errors": [],
+  "unhandled": [],
+  "writes": []
+}

@@ -368,7 +368,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "keeper_library_search"
     ; "masc_library_add"
     ; "masc_library_list"
-    ; "masc_gc"
     ; "masc_get_metrics"
     ];
   List.iter
@@ -404,6 +403,9 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_agent_card"
     ; "masc_agent_timeline"
     ; "masc_plan_set_task"
+      (* CanAdmin in Tool_catalog with no handler-level owner check: a Keeper
+         call swept the whole workspace on 09-20. *)
+    ; "masc_gc"
     ];
   List.iter
     (fun (name, projected_by) ->
@@ -1486,7 +1488,8 @@ let test_masc_board_registry_has_descriptor_projection () =
            descriptor.policy.readonly_hint;
          let operator_only =
            match board_name with
-           | Tool_name.Board_name.Board_sub_board_create
+           | Tool_name.Board_name.Board_cleanup
+           | Board_sub_board_create
            | Board_sub_board_update | Board_sub_board_delete
            | Board_sub_board_get | Board_sub_board_list -> true
            | _ -> false

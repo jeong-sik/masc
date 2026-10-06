@@ -9,8 +9,30 @@ let test_board_registry_advertises_cleanup_tool () =
 
 let test_model_surface_exposes_direct_board_operations () =
   let names = Masc.Keeper_tool_policy.keeper_model_tool_names () in
-  check_member "board cleanup is model-visible" "masc_board_cleanup" true names;
+  check_member "board cleanup is operator-only" "masc_board_cleanup" false names;
   check_member "board delete is model-visible" "masc_board_delete" true names
+
+(* The keeper lane admits any name on the model surface and never reads
+   [required_permission], so the projection is the only thing keeping a
+   Worker-level Keeper away from an operator tool. Every model-visible tool
+   the catalog classifies must therefore be one a Worker token could call over
+   MCP. [masc_board_delete] is the one exception: its handler refuses anyone
+   but the post's author. *)
+let test_model_surface_stays_within_worker_permissions () =
+  let names = Masc.Keeper_tool_policy.keeper_model_tool_names () in
+  let handler_checks_the_author = [ "masc_board_delete" ] in
+  let beyond_worker =
+    Tool_catalog.explicit_metadata
+    |> List.filter_map (fun (name, (meta : Tool_catalog.metadata)) ->
+      if
+        List.mem name names
+        && (not (List.mem name handler_checks_the_author))
+        && not (Masc_domain.has_permission Masc_domain.Worker meta.required_permission)
+      then Some name
+      else None)
+    |> List.sort_uniq String.compare
+  in
+  check (list string) "model-visible tools a Worker token may not call" [] beyond_worker
 
 let test_model_surface_exposes_working_capability_families () =
   let names = Masc.Keeper_tool_policy.keeper_model_tool_names () in
@@ -66,6 +88,10 @@ let () =
             "exposes direct Board operations"
             `Quick
             test_model_surface_exposes_direct_board_operations;
+          test_case
+            "stays within Worker permissions"
+            `Quick
+            test_model_surface_stays_within_worker_permissions;
           test_case
             "exposes code web media voice and Fusion"
             `Quick

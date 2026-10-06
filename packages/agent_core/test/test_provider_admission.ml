@@ -258,11 +258,13 @@ let test_a_queued_request_reports_its_wait () =
     }
   in
   let reports = ref [] in
+  let remove =
+    Provider_admission.install_wait_observer (fun (wait : Provider_admission.wait) ->
+      reports := wait :: !reports)
+  in
   Fun.protect
-    ~finally:(fun () -> Provider_admission.set_wait_observer None)
+    ~finally:remove
     (fun () ->
-       Provider_admission.set_wait_observer
-         (Some (fun (wait : Provider_admission.wait) -> reports := wait :: !reports));
        Provider_admission.with_admission ~config:(config ()) (fun () -> ());
        check int "a permit granted at once reports nothing" 0 (List.length !reports);
        let occupied, occupied_resolver = Eio.Promise.create () in
@@ -308,7 +310,7 @@ let test_a_queued_request_reports_its_wait () =
             check string "model" "admission-model" wait.model_id;
             check string "kind" "openai_compat" wait.kind)
          !reports;
-       Provider_admission.set_wait_observer None;
+       remove ();
        reports := [];
        let occupied, occupied_resolver = Eio.Promise.create () in
        let release, release_resolver = Eio.Promise.create () in
@@ -325,6 +327,39 @@ let test_a_queued_request_reports_its_wait () =
                  Eio.Time.sleep clock 0.02;
                  Eio.Promise.resolve release_resolver ()));
        check int "no observer, no report" 0 (List.length !reports))
+;;
+
+(* A remover clears only its own installation, so an older install's
+   remover cannot take away the observer installed after it. *)
+let test_a_stale_remover_keeps_the_later_observer () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let config =
+    make_config ~base_url:"http://stale-remover.test:1" ~max_concurrent_requests:1 ()
+  in
+  let first = ref 0
+  and second = ref 0 in
+  let remove_first = Provider_admission.install_wait_observer (fun _ -> incr first) in
+  let remove_second = Provider_admission.install_wait_observer (fun _ -> incr second) in
+  Fun.protect ~finally:remove_second (fun () ->
+    remove_first ();
+    let occupied, occupied_resolver = Eio.Promise.create () in
+    let release, release_resolver = Eio.Promise.create () in
+    Eio.Fiber.both
+      (fun () ->
+         Provider_admission.with_admission ~config (fun () ->
+           Eio.Promise.resolve occupied_resolver ();
+           Eio.Promise.await release))
+      (fun () ->
+         Eio.Promise.await occupied;
+         Eio.Fiber.both
+           (fun () -> Provider_admission.with_admission ~config (fun () -> ()))
+           (fun () ->
+              Eio.Time.sleep clock 0.02;
+              Eio.Promise.resolve release_resolver ())));
+  check int "the replaced observer saw nothing" 0 !first;
+  check int "the later observer saw the wait" 1 !second
 ;;
 
 let reject_dispatch_transport : Llm_transport.t =
@@ -908,6 +943,10 @@ let () =
             "a queued request reports its wait"
             `Quick
             test_a_queued_request_reports_its_wait
+        ; test_case
+            "a stale remover keeps the later observer"
+            `Quick
+            test_a_stale_remover_keeps_the_later_observer
         ; test_case
             "zero declaration rejected before dispatch"
             `Quick

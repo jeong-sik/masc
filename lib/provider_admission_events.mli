@@ -16,6 +16,7 @@ val event : Llm_provider.Provider_admission.wait -> Agent_core.Event_bus.event
     ["expired"]). *)
 
 val install : sw:Eio.Switch.t -> Agent_core.Event_bus.t -> unit
-(** Publish every reported wait to the bus until [sw] is released, when the
-    observer is removed. Publishing only enqueues on the subscribers' queues,
-    so it does not hold up the request that reports. *)
+(** Publish every reported wait to the bus until [sw] is released, when
+    this observer is removed. Publishing adds the event to each subscriber's
+    queue under the bus's mutexes and never waits for a subscriber to read
+    it, so the reporting request is held only for that. *)

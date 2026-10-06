@@ -31,8 +31,9 @@ let event (wait : Llm_provider.Provider_admission.wait) =
 ;;
 
 let install ~sw bus =
-  Llm_provider.Provider_admission.set_wait_observer
-    (Some (fun wait -> Runtime_event_bus.publish bus (event wait)));
-  Eio.Switch.on_release sw (fun () ->
-    Llm_provider.Provider_admission.set_wait_observer None)
+  let remove =
+    Llm_provider.Provider_admission.install_wait_observer (fun wait ->
+      Runtime_event_bus.publish bus (event wait))
+  in
+  Eio.Switch.on_release sw remove
 ;;

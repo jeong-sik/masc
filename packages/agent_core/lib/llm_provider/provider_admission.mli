@@ -70,12 +70,15 @@ type wait =
   ; outcome : wait_outcome
   }
 
-(** Install ([Some]) or remove ([None]) the process-wide observer queued
-    requests report to. With none installed, nothing is timed. The observer
-    runs on the requesting fiber when the wait ends: a granted request
-    reports before it is sent. It must not block. A raise from it fails that
+(** Install the process-wide observer queued requests report to, replacing
+    any installed before, and return the function that removes it. That
+    function removes only this installation: after a later install it does
+    nothing. With none installed, nothing is timed. The observer runs on
+    the requesting fiber when the wait ends: a granted request reports
+    before it is sent. It must not wait on I/O; taking an Eio mutex briefly,
+    as an event bus publish does, is fine. A raise from it fails that
     request but leaves no permit held. *)
-val set_wait_observer : (wait -> unit) option -> unit
+val install_wait_observer : (wait -> unit) -> unit -> unit
 
 (** The allowance this process already admits for [config]'s endpoint
     identity, when [config] declares a different one: [authoritative] is the

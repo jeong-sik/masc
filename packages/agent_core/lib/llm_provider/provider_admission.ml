@@ -111,15 +111,24 @@ type wait =
   ; outcome : wait_outcome
   }
 
-let wait_observer : (wait -> unit) option Atomic.t = Atomic.make None
-let set_wait_observer observer = Atomic.set wait_observer observer
+(* Boxed so an installation is compared by identity: the remover an
+   install returns clears only that installation. *)
+type installed_observer = { observe : wait -> unit }
+
+let wait_observer : installed_observer option Atomic.t = Atomic.make None
+
+let install_wait_observer observe =
+  let installed = Some { observe } in
+  Atomic.set wait_observer installed;
+  fun () -> ignore (Atomic.compare_and_set wait_observer installed None : bool)
+;;
 
 (* The observer is read once, as the request is admitted: with none
    installed the scheduler is handed no callback and nothing is timed. *)
 let on_queue_for ?clock (config : Provider_config.t) =
   match Atomic.get wait_observer with
   | None -> None
-  | Some observe ->
+  | Some { observe } ->
     Some
       (fun () ->
         let latency = Complete_common.start_latency_counter ?clock () in

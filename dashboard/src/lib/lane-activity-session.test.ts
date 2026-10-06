@@ -5,10 +5,13 @@ import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecut
 import { committedRuntimeTomlConfigFixture } from './runtime-config-receipt.test-fixture'
 import { runtimeTomlSourceGeneration } from './runtime-toml-source-generation'
 import { laneActivitySessions, type LaneActivitySpec } from './lane-activity-session'
+import { modelSetupResumeState, resumeSavedModelSetup } from './model-setup-resume'
 
 const api = vi.hoisted(() => ({ fetchRuntimeTomlConfig: vi.fn(), previewRuntimeTomlConfig: vi.fn(), saveRuntimeTomlConfig: vi.fn() }))
 const settings = vi.hoisted(() => ({ announceRuntimeTomlCommitted: vi.fn() }))
 const consumers = vi.hoisted(() => ({ refreshRuntimeConfigConsumers: vi.fn() }))
+const core = vi.hoisted(() => ({ post: vi.fn() }))
+vi.mock('../api/core', async original => ({ ...await original<typeof import('../api/core')>(), ...core }))
 vi.mock('../api/dashboard-runtime', async original => ({ ...await original<typeof import('../api/dashboard-runtime')>(), ...api }))
 vi.mock('./runtime-toml-session', async original => ({ ...await original<typeof import('./runtime-toml-session')>(), ...settings }))
 vi.mock('./runtime-config-refresh', () => consumers)
@@ -46,6 +49,7 @@ function workspace(root: string): ExecutionWorkspaceAuthority {
 }
 beforeEach(() => {
   vi.resetAllMocks(); fakes.resetForTesting(); others.resetForTesting(); stored = base
+  modelSetupResumeState.value = { kind: 'idle' }
   ++epoch; generation = 0; invalidateExecutionSnapshotGeneration(`lane-activity-${epoch}`, 0); workspace('/fixture/A')
   api.fetchRuntimeTomlConfig.mockImplementation(async () => config(stored))
   api.previewRuntimeTomlConfig.mockResolvedValue({ ok: true, can_save: true })
@@ -100,10 +104,10 @@ describe('Lane activity session', () => {
   })
 
   it.each([
-    ['unchanged file', (): string => base, null, true],
-    ['submitted text', (): string => stored, null, false],
-    ['another change', (): string => base.replace('# kept', '# edited elsewhere'), 'answered', true],
-  ] as const)('settles an unanswered write by what a read finds: %s', async (_label, file, uncertainAfter, modifiedAfter) => {
+    ['unchanged file', (): string => base, /아직 저장 전 그대로/, true],
+    ['submitted text', (): string => stored, /보낸 내용이 파일에 보입니다/, false],
+    ['another change', (): string => base.replace('# kept', '# edited elsewhere'), /다른 내용으로 바뀌었습니다/, true],
+  ] as const)('keeps an unanswered write in doubt after a read and says what the file shows: %s', async (_label, file, notice, pendingAfterReapply) => {
     const { authority, session } = await draft()
     api.saveRuntimeTomlConfig.mockImplementationOnce(async (text: string, _expected: string, options: SaveOptions) => {
       options.beforeDispatch?.(); stored = text; throw new Error('connection lost')
@@ -115,13 +119,12 @@ describe('Lane activity session', () => {
     stored = file()
     await session.read(authority)
     expect(api.fetchRuntimeTomlConfig.mock.calls.length).toBe(reads + 1)
-    expect(session.state.value.uncertain?.stage ?? null).toBe(uncertainAfter)
-    expect(session.modified()).toBe(modifiedAfter)
-    if (uncertainAfter !== null) {
-      expect(await session.save(authority)).toBe(false)
-      session.reapply(authority)
-      expect(session.state.value.uncertain).toBeNull()
-    }
+    expect(session.state.value.uncertain?.stage).toBe('answered')
+    expect(session.state.value.notice).toMatch(notice)
+    expect(await session.save(authority)).toBe(false)
+    session.reapply(authority)
+    expect(session.state.value.uncertain).toBeNull()
+    expect(session.modified()).toBe(pendingAfterReapply)
   })
 
   it('does not reread after an unanswered write but tells other screens the file may have changed', async () => {
@@ -138,10 +141,10 @@ describe('Lane activity session', () => {
   })
 
   it.each([
-    ['unchanged file', (): string => base, null],
-    ['submitted text', (): string => stored, null],
-    ['another change', (): string => base.replace('# kept', '# edited elsewhere'), 'answered'],
-  ] as const)('settles doubt against the saved-over file after a discard left no draft: %s', async (_label, file, uncertainAfter) => {
+    ['unchanged file', (): string => base, /아직 저장 전 그대로/],
+    ['submitted text', (): string => stored, /보낸 내용이 파일에 보입니다/],
+    ['another change', (): string => base.replace('# kept', '# edited elsewhere'), /다른 내용으로 바뀌었습니다/],
+  ] as const)('rebuilds a draft after a discard left none, compared with the saved-over file: %s', async (_label, file, notice) => {
     const { authority, session } = await draft()
     api.saveRuntimeTomlConfig.mockImplementationOnce(async (text: string, _expected: string, options: SaveOptions) => {
       options.beforeDispatch?.(); stored = text; throw new Error('connection lost')
@@ -152,7 +155,8 @@ describe('Lane activity session', () => {
     expect(session.state.value.uncertain?.stage).toBe('answered')
     stored = file()
     await session.read(authority)
-    expect(session.state.value.uncertain?.stage ?? null).toBe(uncertainAfter)
+    expect(session.state.value.uncertain?.stage).toBe('answered')
+    expect(session.state.value.notice).toMatch(notice)
     expect(session.state.value.draft?.base.source_text).toBe(stored)
     session.reapply(authority)
     expect(session.state.value.uncertain).toBeNull()
@@ -187,7 +191,8 @@ describe('Lane activity session', () => {
     })
     expect(await session.save(authority)).toBe(true)
     expect(session.state.value.current?.source_text).toBe(stored)
-    expect(session.state.value.uncertain?.stage).toBe('committed')
+    expect(session.state.value.uncertain?.stage).toBe('answered')
+    expect(session.state.value.notice).toMatch(/보낸 내용이 파일에 보입니다/)
     expect(session.state.value.draft?.base.source_text).toBe(base)
     expect(await session.save(authority)).toBe(false)
     session.reapply(authority)
@@ -196,12 +201,15 @@ describe('Lane activity session', () => {
     expect(session.state.value.notice).toMatch(/저장할 변경이 없습니다/)
   })
 
-  it('treats a vanished unconfirmed commit as no write', async () => {
+  it('keeps an unconfirmed commit in doubt when the file no longer shows it', async () => {
     const { authority, session } = await draft()
     api.saveRuntimeTomlConfig.mockImplementationOnce(async (text: string, _expected: string, options: SaveOptions) => {
       options.beforeDispatch?.(); return receipt(text, 'unconfirmed')
     })
     expect(await session.save(authority)).toBe(true)
+    expect(session.state.value.uncertain?.stage).toBe('answered')
+    expect(session.state.value.notice).toMatch(/아직 저장 전 그대로/)
+    session.reapply(authority)
     expect(session.state.value.uncertain).toBeNull()
     expect(session.modified()).toBe(true)
   })
@@ -225,6 +233,24 @@ describe('Lane activity session', () => {
     expect(session.state.value.uncertain).toBeNull()
     expect(session.state.value.followupError).toMatch(/resume crashed/)
     expect(session.state.value.notice).toBeNull()
+  })
+
+  it('clears a setup-resume error only when the latest resume succeeds, from any screen', async () => {
+    const active = { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
+    afterCommit.mockResolvedValueOnce('setup resume unconfirmed')
+    const { authority, session } = await draft()
+    expect(await session.save(authority)).toBe(true)
+    expect(session.state.value.setupResumeError).toBe('setup resume unconfirmed')
+    const older = deferred<unknown>()
+    core.post.mockReturnValueOnce(older.promise).mockRejectedValueOnce(new Error('activation failed'))
+    const first = resumeSavedModelSetup(), second = resumeSavedModelSetup()
+    expect((await second).kind).toBe('failed')
+    older.resolve(active)
+    expect((await first).kind).toBe('active')
+    expect(session.state.value.setupResumeError).toBe('setup resume unconfirmed')
+    core.post.mockResolvedValueOnce(active)
+    expect((await resumeSavedModelSetup()).kind).toBe('active')
+    expect(session.state.value.setupResumeError).toBeNull()
   })
 
   it('aborts the follow-up when ownership moves and leaves a durable commit certain', async () => {

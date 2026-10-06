@@ -61,9 +61,11 @@ drafts, retained across dashboard navigation. The Runtime source editor keeps
 its own draft. Web editing supports standard tables, dotted keys and inline
 tables while retaining comments and unrelated settings.
 
-The editor rereads the file and server activity after a successful or unanswered
-save. It shows the last observation and its time separately from the saved file
-and commit receipt. A failed read remains visible and can be retried. A mismatch
+The editor rereads the file and server activity after a successful save. After
+an unanswered save it waits for **현재 설정 읽기** (Read current settings); that
+read shows what the file holds but does not settle the save. It shows the
+last observation and its time separately from the saved file and commit
+receipt. A failed read remains visible and can be retried. A mismatch
 does not claim that the file has been applied. An uncertain write requires an
 explicit reapply or discard after reading; it is never automatically repeated.
 Reapply changes only the selected machine's activity in the freshly read file.

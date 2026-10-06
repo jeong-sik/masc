@@ -317,6 +317,36 @@ let save ~base_path t =
        | Eio.Cancel.Cancelled _ as exn -> Printexc.raise_with_backtrace exn failure.backtrace
        | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)))
 
+(* The digest a Keeper turn sees without a tool call: one opening line per
+   claim, in claim_id order, under a byte budget. Full claim bodies stay
+   behind [keeper_workspace_memory_read]; a line cut mid-character would not
+   round-trip through the prompt, so the cut follows [String_util.utf8_prefix]. *)
+let digest_line_max_bytes = 160
+let digest_budget_bytes = 8192
+
+let digest_line (claim_id, claim) =
+  let first_line = match String.index_opt claim '\n' with
+    | None -> claim
+    | Some cut -> String.sub claim 0 cut in
+  let prefix = String_util.utf8_prefix ~max_bytes:digest_line_max_bytes first_line in
+  let ellipsized =
+    if String.length prefix < String.length first_line then prefix ^ "…"
+    else prefix in
+  "- " ^ claim_id ^ ": " ^ ellipsized
+
+let claims_digest ledger =
+  (* The budget bounds what the prompt renders, so the join newline between
+     two lines counts with the line that introduces it. *)
+  let rec take_budget spent acc = function
+    | [] -> List.rev acc, false
+    | (claim_id, _) as row :: rest ->
+      let line = digest_line row in
+      let spent' = spent + String.length line + 1 in
+      if spent' > digest_budget_bytes && acc <> [] then List.rev acc, true
+      else take_budget spent' (line :: acc) rest
+  in
+  take_budget 0 [] (claims ledger)
+
 type observation =
   | Missing
   | Unavailable of string
@@ -325,6 +355,7 @@ type observation =
       ; claim_count : int
       ; conflict_count : int
       ; classified_count : int
+      ; claims_digest : string list
       }
 
 let observe ~base_path =
@@ -342,9 +373,11 @@ let observe ~base_path =
        | Ok ledger ->
          let ledger_sha256 = Digestif.SHA256.(digest_string
            (Yojson.Safe.to_string (to_json ledger)) |> to_hex) in
+         let digest, _truncated = claims_digest ledger in
          Available { ledger_sha256; claim_count = List.length (claims ledger);
                      conflict_count = List.length (conflicts ledger);
-                     classified_count = List.length (dispositions ledger) })
+                     classified_count = List.length (dispositions ledger);
+                     claims_digest = digest })
     | _ -> Unavailable (ledger_path ^ ": not a regular file")
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing

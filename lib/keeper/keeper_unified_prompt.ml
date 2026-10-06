@@ -1451,11 +1451,15 @@ let format_workspace_memory_observation = function
   | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
   | Workspace_memory_ledger.Available descriptor ->
+    let claims_digest = match descriptor.claims_digest with
+      | [] -> "None yet."
+      | lines -> String.concat "\n" lines in
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
       [ "ledger_sha256", descriptor.ledger_sha256;
         "claim_count", string_of_int descriptor.claim_count;
         "conflict_count", string_of_int descriptor.conflict_count;
-        "classified_count", string_of_int descriptor.classified_count ] ^ "\n\n")
+        "classified_count", string_of_int descriptor.classified_count;
+        "claims_digest", claims_digest ] ^ "\n\n")
 
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)

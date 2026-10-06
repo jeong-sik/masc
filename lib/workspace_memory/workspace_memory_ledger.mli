@@ -61,6 +61,15 @@ val save : base_path:string -> t -> (unit, string) result
     a failure after it can leave the new one in place, so an error does not
     say which ledger the next [load] reads. Cancellation propagates. *)
 
+val digest_line_max_bytes : int
+(** Opening-line byte cap for one [claims_digest] row. A longer line is cut
+    at a UTF-8 character boundary and marked with an ellipsis. *)
+
+val digest_budget_bytes : int
+(** Total byte cap for the [claims_digest] list an observation carries. The
+    digest holds a prefix of the claims in [claim_id] order, never a
+    relevance selection. *)
+
 type observation =
   | Missing
   | Unavailable of string
@@ -69,6 +78,10 @@ type observation =
       ; claim_count : int
       ; conflict_count : int
       ; classified_count : int
+      ; claims_digest : string list
+            (** One rendered opening line per claim, in [claim_id] order,
+                byte-bounded. Each line is ["- <claim_id>: <opening line>"];
+                the full body stays behind [keeper_workspace_memory_read]. *)
       }
 
 val observe : base_path:string -> observation

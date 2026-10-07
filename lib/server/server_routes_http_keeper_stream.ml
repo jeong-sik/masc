@@ -1133,9 +1133,6 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   Ok { payload; source }
 ;;
 
-let strip_keeper_visible_reply (reply : string) =
-  String.trim reply
-
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
   if len = 0 then
@@ -1501,7 +1498,7 @@ let canonical_reply_payload_of_body ~redact_text body =
   let visible_reply =
     match public_reply_of_outcome ~turn_outcome ~reply:reply_raw with
     | None -> "" (* The public wire requires a reply string beside its typed outcome. *)
-    | Some reply -> strip_keeper_visible_reply reply |> redact_text |> String.trim
+    | Some reply -> redact_text reply
   in
   let payload_json =
     `Assoc (assoc_replace "reply" (`String visible_reply) fields)

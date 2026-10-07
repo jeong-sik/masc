@@ -1736,6 +1736,12 @@ let test_direct_reply_visible_text () =
        [ ("reply", `String "all done");
          ("turn_outcome", `String "visible_reply")
        ]);
+  let spaced_reply = "    첫 줄\n    둘째 줄  \n\n" in
+  check_ok "visible reply keeps indentation and paragraph breaks" (Some spaced_reply)
+    (body
+       [ ("reply", `String spaced_reply);
+         ("turn_outcome", `String "visible_reply")
+       ]);
   check_ok "empty reply -> None" None
     (body
        [ ("reply", `String "   ");

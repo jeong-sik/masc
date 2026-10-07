@@ -4,8 +4,8 @@
     It holds three fields: which provider to copy, the new provider id, and
     where the new account signs in. The file it was opened on only supplies
     the providers to choose from and the suggested id. The declaration is
-    made by {!declare_on} against the file as the server holds it when the
-    operator submits, so a change made while the form stood open is kept.
+    made by {!declare_on} against a fresh read. The UI compares that read to
+    {!source_revision} first and asks to reopen if the file changed.
     Saving goes through the pane's own preview and save. Signing in is not
     done here; the form shows how to do it, and after a save it stays open on
     the sign-in command until the operator copies it or closes it. *)
@@ -17,10 +17,14 @@ type field =
 
 type t
 
-val open_on : ?home_dir:string -> string -> (t, string) result
+val open_on : ?source_revision:string -> ?home_dir:string -> string -> (t, string) result
 (** [Error] says why there is nothing to copy: the text does not parse, or it
     declares no Claude Code, Codex, Antigravity or Muse provider. [home_dir]
     expands a location typed with [~/]. *)
+
+val source_revision : t -> string option
+(** The revision read alongside the opening source. Editing or refusing a
+    draft never advances it; the UI must reopen after a changed source. *)
 
 val field : t -> field
 

@@ -3823,9 +3823,18 @@ type gate_pending = {
           safely rearmed; it can still be decided by a human. *)
 }
 
+type gate_mode =
+  | Gate_mode of Keeper_gate_mode.t
+  | Unrecognised_gate_mode of string
+
+let gate_mode_of_wire raw =
+  match Keeper_gate_mode.of_string raw with
+  | Some mode -> Gate_mode mode
+  | None -> Unrecognised_gate_mode raw
+
 type gate_lane_modes = {
-  glm_workspace : string;
-  glm_external : string;
+  glm_workspace : gate_mode;
+  glm_external : gate_mode;
 }
 
 (* An always-allow rule standing behind the queue. It answers a request
@@ -4119,10 +4128,13 @@ let decode_gate_pending json =
 
 let decode_gate_lane_modes json =
   let* workspace = required_object_field json "gate_mode" in
-  let* glm_workspace = required_string_field workspace "mode" in
+  let* workspace_mode = required_string_field workspace "mode" in
   let* external_lane = required_object_field json "external_gate_mode" in
-  let* glm_external = required_string_field external_lane "mode" in
-  Ok { glm_workspace; glm_external }
+  let* external_mode = required_string_field external_lane "mode" in
+  Ok
+    { glm_workspace = gate_mode_of_wire workspace_mode
+    ; glm_external = gate_mode_of_wire external_mode
+    }
 
 let decode_gate_rule json =
   let* gr_id = required_string_field json "id" in
@@ -4268,7 +4280,7 @@ let decode_keeper_gate_settings json =
     rows "modes" (fun item ->
       let* keeper = required_string_field item "keeper_name" in
       let* mode = required_string_field item "mode" in
-      Ok (keeper, mode))
+      Ok (keeper, gate_mode_of_wire mode))
   in
   let* exact_lanes =
     rows "exact_lanes" (fun item ->

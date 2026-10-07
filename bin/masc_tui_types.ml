@@ -428,20 +428,13 @@ let gate_mode_word = function
   | Masc.Keeper_gate_mode.Auto_judge -> "Auto Judge"
   | Masc.Keeper_gate_mode.Always_allow -> "allow-all"
 
-(* A stance as it arrives on the wire. A value this build does not know keeps
+(* A stance as the decoder read it. A value this build does not know keeps
    the server's own spelling rather than collapsing to one word: the reader is
    deciding on it, and "unknown" would hide which unknown it is. *)
-let gate_mode_word_of_wire raw =
-  match Masc.Keeper_gate_mode.of_string raw with
-  | Some mode -> gate_mode_word mode
-  | None -> raw
+let gate_mode_reading_word = function
+  | Masc.Tui_decode.Gate_mode mode -> gate_mode_word mode
+  | Masc.Tui_decode.Unrecognised_gate_mode raw -> raw
 
-(* The chat header shows the effective stances, including their defaults. A
-   blank label here is worse than repetition: this is the surface where the
-   operator decides whether to send work, and AUTO/YOLO plus the Gate mode
-   change what can happen after that send. A Keeper-level [workspace] value is
-   inheritance, so resolve it through the workspace observation rather than
-   printing a setting that is not itself a mode. *)
 (* The stance's one word, the wire's own: the chat header, the Keeper Info
    row, the footer's [g:auto] and the event line all name it, and they named it
    four ways -- AUTO, "asked", auto, "(auto)" -- so a reader had to know that
@@ -455,7 +448,14 @@ let tool_mode_effect = function
   | Masc.Keeper_tool_approval_mode.Auto -> "per Gate policy"
   | Masc.Keeper_tool_approval_mode.Yolo -> "unasked"
 
-let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
+(* The chat header shows the effective stances, including their defaults. A
+   blank label here is worse than repetition: this is the surface where the
+   operator decides whether to send work, and AUTO/YOLO plus the Gate mode
+   change what can happen after that send. A Keeper with no override of its
+   own follows the workspace lane, so the header draws the workspace stance. *)
+let keeper_chat_mode_labels ~yolo
+    ~(keeper_gate_mode : Masc.Tui_decode.gate_mode option)
+    ~(workspace_gate_mode : Masc.Tui_decode.gate_mode option) =
   let chat_mode =
     String.uppercase_ascii
       (tool_mode_word
@@ -464,10 +464,10 @@ let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
   in
   let gate_mode =
     match keeper_gate_mode with
-    | Some mode when not (String.equal mode "workspace") -> Some mode
-    | Some _ | None -> workspace_gate_mode
+    | Some _ as own -> own
+    | None -> workspace_gate_mode
   in
-  chat_mode, Option.map gate_mode_word_of_wire gate_mode
+  chat_mode, Option.map gate_mode_reading_word gate_mode
 ;;
 
 (* Usage coverage can be warming independently of the catalog. Missing time
@@ -5043,8 +5043,8 @@ type state = {
      newest; the keys that move it re-fetch the exact provider input for the
      row they name, so every tab describes the turn the operator chose. *)
   mutable context_inspector_turn_back: int;
-  (* Chat shows its roster by default; other surfaces keep their columns.
-     An explicit Ctrl-B choice survives both navigation and resizing. *)
+  (* The roster starts closed. An explicit Ctrl-B choice survives both
+     navigation and resizing; Left navigation is transient. *)
   mutable roster_pane_preference: Masc_tui_roster_pane.preference;
   (* Left opens a temporary Keeper navigator without changing Ctrl-B's choice.
      On narrow screens it occupies the body until a selection or dismissal. *)
@@ -5610,7 +5610,7 @@ type state = {
      somebody singled out are here, so absence means "follows the workspace"
      rather than "unknown". Distinct from [keeper_yolo_names], which is the
      in-memory stance a restart clears. *)
-  mutable keeper_gate_modes: (string * string) list;
+  mutable keeper_gate_modes: (string * Masc.Tui_decode.gate_mode) list;
   (* Runtime_params registry rows, as the surface reads them: key, current,
      default, and whether somebody moved it. Loaded like the other config
      views rather than kept live -- these change when an operator changes
@@ -6187,7 +6187,7 @@ type state = {
   mutable system_logs_category: string option;
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
-  msg_input: Buffer.t;
+  msg_input: Masc_tui_message_input.t;
   mutable msg_command_menu: Masc_tui_command.menu_state;
   (* A draft restored from an unterminated terminal paste needs explicit
      confirmation before any chat send. Keep its owner across pane changes. *)
@@ -6211,6 +6211,10 @@ type state = {
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
+  (* The workspace the open chat belonged to while the server's identity is
+     unread. Its draft and queue stay with that workspace until the identity
+     reads again; [None] once it does, or when no chat was open. *)
+  mutable msg_unconfirmed_workspace: workspace_input_identity option;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -6457,6 +6461,18 @@ let identity_login_pending_for_keeper (state : state) keeper_name =
        && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
        state.identity_login_expectations
 
+(* Every Keeper this workspace still waits on a login for. The tick asks
+   after each one from any surface: an operator who consented in a browser
+   and then left the Identity tab, or opened another Keeper, still sees the
+   login land. *)
+let identity_login_pending_keepers (state : state) =
+  state.identity_login_expectations
+  |> List.filter_map (fun expectation ->
+       if identity_login_pending_for_keeper state expectation.ile_keeper
+       then Some expectation.ile_keeper
+       else None)
+  |> List.sort_uniq String.compare
+
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
 let start_identity_login_request (state : state) ~keeper_name ~provider_id =
@@ -6516,10 +6532,16 @@ let remember_identity_login (state : state) login =
    | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  (* The wait ends when consent lands (attached) or when it never can (the
+     provider is no longer declared). A provider removed mid-consent left
+     its wait polling for the life of the process before the inventory's
+     absence counted as an answer. *)
   state.identity_login_expectations <- List.filter
     (fun expectation ->
+      let provider_id = expectation.ile_provider in
       not (String.equal expectation.ile_keeper keeper_name
-           && identity_provider_attached ~providers ~provider_id:expectation.ile_provider))
+           && (identity_provider_attached ~providers ~provider_id
+               || not (identity_provider_declared ~providers ~provider_id))))
     state.identity_login_expectations;
   state.identity_logins <-
     List.filter
@@ -6538,7 +6560,6 @@ let retire_identity_login_expectations (state : state) =
 let roster_pane_hidden (state : state) =
   not state.keeper_navigation_open
   && Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
-       ~in_chat:(state.view = Keepers Keeper_message)
 
 (* Called at interaction and presentation boundaries with the surface width,
    after reserving any Activity pane. Visibility preference survives a resize;
@@ -7461,7 +7482,7 @@ let retain_preflight_inputs (state : state) entries =
          && state.msg_target_keeper_name = Some request.keeper_name
          && Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
               ~keeper_name:request.keeper_name = []
-         && Buffer.length state.msg_input = 0
+         && Masc_tui_message_input.length state.msg_input = 0
          && state.msg_attachments = [] && state.msg_references = []
          && Option.is_none state.msg_recall_replaces
       then begin
@@ -7470,7 +7491,7 @@ let retain_preflight_inputs (state : state) entries =
                && String.equal row.me_request_id request.request_id
                && match row.me_role with Message_user _ -> true | _ -> false))
           state.msg_history;
-        Buffer.add_string state.msg_input request.message;
+        Masc_tui_message_input.insert state.msg_input request.message;
         state.msg_attachments <- request.attachments;
         state.msg_references <- request.references;
         state.msg_attachments_since <- None
@@ -7535,6 +7556,22 @@ let resume_preflight_keeper_input ~owner_paused state keeper_name =
       name, id, intervention) state.keeper_interactive_waiting;
     true
   end else false
+
+(* The holds a queue keeps when its chat survives an unread identity: a hold
+   it already had stays as it was, and a steer queued behind a stop is held
+   before dispatch. An ordinary NEXT message is not turned into a hold. *)
+let retained_input_markers queue previous =
+  Masc_tui_keeper_chat_queue.waiting queue
+  |> List.filter_map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+    let name = item.request.keeper_name and id = item.request.request_id in
+    let prior = List.find_opt (fun (held_name, held_id, _) ->
+      held_name = name && held_id = id) previous in
+    match prior with
+    | Some (_, _, (Retained_before_dispatch | Retained_after_stop as held)) -> Some (name, id, held)
+    | Some (_, _, Awaiting_control _) | None ->
+      match item.intent with
+      | Next -> None
+      | Steer_after_interrupt -> Some (name, id, Retained_before_dispatch))
 
 let advance_keeper_chat_control state keeper_name =
   let generation = keeper_chat_control_generation state keeper_name + 1 in
@@ -8056,7 +8093,7 @@ let composer_is_live (state : state) =
 let composing_for_keeper (state : state) keeper_name =
   state.coalesce_queued_input
   && composer_is_live state
-  && Buffer.length state.msg_input > 0
+  && Masc_tui_message_input.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
 (* A fresh Enter may bypass input held by an explicit stop. A refused
@@ -8311,9 +8348,9 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  (* Wide chat starts with its Keeper roster. Other surfaces keep their
-     full width until Ctrl-B records an explicit choice. *)
-  roster_pane_preference = Masc_tui_roster_pane.Auto;
+  (* Keep the reading surface full-width until Left opens the navigator
+     or Ctrl-B explicitly pins the roster. *)
+  roster_pane_preference = Masc_tui_roster_pane.Hidden;
   keeper_navigation_open = false;
   acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
@@ -8877,7 +8914,7 @@ let create_state
   system_logs_category = None;
   system_logs_detail_seq = None;
   system_logs_detail_scroll = 0;
-  msg_input = Buffer.create 256;
+  msg_input = Masc_tui_message_input.create ();
   msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
   msg_attachments = [];
@@ -8886,6 +8923,7 @@ let create_state
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
+  msg_unconfirmed_workspace = None;
   msg_history = [];
   msg_recall_at = None;
   msg_recall_draft = ("", [], [], None);
@@ -9392,7 +9430,7 @@ let composer_extra_rows (state : state) =
   let lines =
     Masc_tui_message_layout.composer_lines
       ~max_rows:Masc_tui_message_layout.composer_max_rows
-      (Buffer.contents state.msg_input)
+      (Masc_tui_message_input.contents state.msg_input)
   in
   max 0 (List.length lines - 1)
 
@@ -12003,7 +12041,7 @@ let keeper_observed_turn (state : state) keeper_name =
 ;;
 
 let keeper_message_draft_empty (state : state) =
-  Buffer.length state.msg_input = 0
+  Masc_tui_message_input.length state.msg_input = 0
   && state.msg_attachments = [] && state.msg_references = []
 
 let keeper_message_turn_active (state : state) =
@@ -12547,7 +12585,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
   | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
     (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
-        (Buffer.contents state.msg_input) with
+        (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
        let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in

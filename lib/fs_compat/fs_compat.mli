@@ -730,10 +730,6 @@ val capability_directory_sync_error_to_string
     this module. Exposed for tests and recovery sweeps. *)
 val is_atomic_orphan_name : string -> bool
 
-type atomic_orphan_cleanup_scope =
-  | Directory_only
-  | Directory_and_immediate_subdirectories
-
 type atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory
@@ -774,17 +770,15 @@ val atomic_orphan_cleanup_failure_to_string
   :  atomic_orphan_cleanup_failure
   -> string
 
-(** No-follow orphan cleanup. [Directory_only] is bounded by the named
-    staging inventory. The broader scope also scans real immediate child
-    directories. Every failed mutation or unexpected orphan-shaped entry is
-    returned in the typed report. The caller must own stable directory
-    identities and quiesce the matching temp namespace; see
+(** No-follow orphan cleanup, bounded by the named staging inventory: it
+    scans exactly [base_path]. Every failed mutation or unexpected
+    orphan-shaped entry is returned in the typed report. The caller must own
+    stable directory identities and quiesce the matching temp namespace; see
     {!Atomic_write.cleanup_atomic_orphans} for the OCaml 5.4 dirfd
     limitation. *)
 val cleanup_atomic_orphans
   :  ownership_root:string
   -> base_path:string
-  -> scope:atomic_orphan_cleanup_scope
   -> unit
   -> atomic_orphan_cleanup_report
 

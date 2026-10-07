@@ -249,13 +249,6 @@ type _ command =
       ; outcome_ref : string
       }
       -> (Chat_operation.t, error) result command
-  | Fail_running_operation :
-      { operation_id : Operation_id.t
-      ; kind : Chat_operation.failure_kind
-      ; detail : string
-      ; outcome_ref : string option
-      }
-      -> (Chat_operation.t, error) result command
   | Observe_runtime_retry_waits : (unit, error) result command
   | Wake_operation_drain : (unit, error) result command
   | Run_if_idle :
@@ -613,7 +606,6 @@ let answer : type response. response command -> answer = function
   | Batch_operations _ -> In_its_drain_step
   | Claim_next_operation -> In_its_drain_step
   | Succeed_running_operation _ -> In_its_drain_step
-  | Fail_running_operation _ -> In_its_drain_step
   | Observe_runtime_retry_waits | Wake_operation_drain -> In_its_drain_step
   | Run_if_idle _ -> Possibly_when_the_child_finishes
   | Begin_shutdown _ -> In_its_drain_step
@@ -1843,23 +1835,6 @@ let start
                 t.operation_store
                 ~now:(t.now ())
                 ~operation_id
-                ~outcome_ref)
-            |> Result.map fst
-          in
-          Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
-        | Command
-            ( Fail_running_operation
-                { operation_id; kind; detail; outcome_ref }
-            , resolve ) ->
-          let response =
-            run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
-              Chat_operation_store.fail_running
-                t.operation_store
-                ~now:(t.now ())
-                ~operation_id
-                ~kind
-                ~detail
                 ~outcome_ref)
             |> Result.map fst
           in

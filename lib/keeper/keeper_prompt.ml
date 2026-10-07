@@ -46,9 +46,9 @@ let build_keeper_system_prompt
   in
   (* What this world values ([keeper.worldview]). Every keeper in a world reads
      the same text, so it follows the shared system block. The distribution
-     default says no value system is set and that each keeper's role decides;
-     an operator overrides the slot to give the world one. It always renders:
-     the slot never registers empty, so there is no absent case to branch on. *)
+     default is an empty [<world>] block; an operator overrides the slot to
+     give the world a value system. It always renders: the slot never
+     registers empty, so there is no absent case to branch on. *)
   let worldview_block =
     String.trim (render_instruction Prompt_names.keeper_worldview []) ^ "\n\n"
   in

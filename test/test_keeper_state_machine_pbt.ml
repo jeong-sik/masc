@@ -30,7 +30,6 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
        token_count = 5000; context_actions }));
     return SM.Operator_pause;
     return SM.Operator_resume;
-    return (SM.Operator_stop { remove_meta = false });
     return SM.Stop_requested;
     return SM.Drain_complete;
     return SM.Fiber_started;
@@ -53,7 +52,6 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
           context_actions = { handoff = false }};
         SM.Operator_pause;
         SM.Stop_requested;
-        SM.Operator_stop { remove_meta = false };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
       ]
     | SM.Failing ->
@@ -68,7 +66,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
     | SM.Paused ->
       [ SM.Operator_resume;
         SM.Operator_clear_requested { preserve_system = true; reason = "pbt" };
-        SM.Stop_requested; SM.Operator_stop { remove_meta = false };
+        SM.Stop_requested;
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
       ]
     | SM.Crashed ->

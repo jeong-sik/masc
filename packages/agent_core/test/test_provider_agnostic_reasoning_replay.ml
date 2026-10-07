@@ -846,31 +846,53 @@ let test_ollama_native_catalog_replay_overrides_win () =
     cases
 ;;
 
-(* The deployment shape: the ollama_cloud provider reached over its /v1 wire.
-   Each reasoning model ollama.com serves to keepers declares its replay
-   contract on its own catalog row, because the provider-scoped lookup matches
-   the id exactly and never borrows a sibling row's fields. *)
-let test_ollama_cloud_v1_reasoning_models_replay_within_the_user_turn () =
+(* Every ollama_cloud row that states no replay contract of its own gets the
+   provider's, on both wires a deployment may point at: the native /api/chat
+   and the /v1 one. The rows are read from the default catalog, so a row added
+   later is covered without being named here. *)
+let test_undeclared_ollama_cloud_rows_replay_within_the_user_turn_on_both_wires () =
+  let catalog =
+    match Model_catalog.load_default () with
+    | Ok catalog -> catalog
+    | Error detail -> Alcotest.failf "default catalog did not load: %s" detail
+  in
+  let undeclared =
+    Model_catalog.model_entries catalog
+    |> List.filter (fun (entry : Model_catalog.model_entry) ->
+      entry.provider_name = Some "ollama_cloud" && Option.is_none entry.reasoning_replay)
+  in
+  check_bool "ollama_cloud has rows without their own declaration" true (undeclared <> []);
+  let wires =
+    [ "native", Provider_config.Ollama, "https://ollama.com", "/api/chat"
+    ; "/v1", Provider_config.OpenAI_compat, "https://ollama.com/v1", "/chat/completions"
+    ]
+  in
   List.iter
-    (fun model_id ->
-       let config =
-         Provider_config.make
-           ~provider_id:"ollama_cloud"
-           ~kind:OpenAI_compat
-           ~model_id
-           ~base_url:"https://ollama.com/v1"
-           ~request_path:"/chat/completions"
-           ()
-       in
-       let actual = (Reasoning_dialect.for_provider_config config).replay_policy in
-       check_bool
-         (Printf.sprintf
-            "%s replays the latest user turn's tool-call reasoning (got %s)"
-            model_id
-            (Reasoning_replay_contract.show_replay_policy actual))
-         true
-         (actual = Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn))
-    [ "glm-5.3-flash"; "glm-5.3"; "deepseek-v4.1-flash" ]
+    (fun (entry : Model_catalog.model_entry) ->
+       let model_id = Model_identifiers.Id_prefix.to_string entry.id_prefix in
+       List.iter
+         (fun (wire, kind, base_url, request_path) ->
+            let config =
+              Provider_config.make
+                ~provider_id:"ollama_cloud"
+                ~kind
+                ~model_id
+                ~base_url
+                ~request_path
+                ()
+            in
+            let actual = (Reasoning_dialect.for_provider_config config).replay_policy in
+            check_bool
+              (Printf.sprintf
+                 "%s over %s replays the latest user turn's tool-call reasoning (got %s)"
+                 model_id
+                 wire
+                 (Reasoning_replay_contract.show_replay_policy actual))
+              true
+              (actual
+               = Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn))
+         wires)
+    undeclared
 ;;
 
 let test_openai_responses_replays_only_opaque_item () =
@@ -1361,9 +1383,9 @@ let () =
             `Quick
             test_ollama_native_catalog_replay_overrides_win
         ; Alcotest.test_case
-            "ollama_cloud /v1 reasoning models replay within the user turn"
+            "undeclared ollama_cloud rows replay within the user turn on both wires"
             `Quick
-            test_ollama_cloud_v1_reasoning_models_replay_within_the_user_turn
+            test_undeclared_ollama_cloud_rows_replay_within_the_user_turn_on_both_wires
         ; Alcotest.test_case
             "OpenAI Responses opaque boundary"
             `Quick

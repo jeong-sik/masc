@@ -158,14 +158,65 @@ let test_only_its_own_workspace_reopens_the_poll () =
   check Alcotest.bool "an unread workspace polls nothing" false
     (Masc_tui_types.identity_expectation_workspace_matches ~origin:admitted state)
 
-let test_the_recovery_read_retires_only_the_landed_login () =
+(* The tick asks after every Keeper a login waits on, wherever the operator
+   is: consent happens in a browser, and the Identity tab of one Keeper is
+   rarely what is on screen when it lands. *)
+let test_every_waiting_keeper_is_polled_from_any_surface () =
+  let state = identity_state () in
+  let pending () = Masc_tui_types.identity_login_pending_keepers state in
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
+  state.view <- Masc_tui_types.Overview;
+  hold_expectation state ~keeper:"B" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"C" ~provider:"slack" ~base_path:"/w/other"
+    ~masc_root:"/r";
+  check (Alcotest.list Alcotest.string)
+    "each waiting Keeper once, this workspace only" [ "A"; "B" ] (pending ());
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
+    ~providers:[declared ~tools:[ "sendMessage" ] "slack" "Slack"];
+  check (Alcotest.list Alcotest.string) "a landed login stops being polled"
+    [ "A" ] (pending ());
+  state.server_identity <- None;
+  check (Alcotest.list Alcotest.string) "an unread workspace polls nobody" []
+    (pending ())
+
+(* A provider removed while consent was pending never attaches. Its absence
+   from the inventory is the answer; a declared or unreadable one may still
+   finish. *)
+let test_a_removed_provider_ends_the_wait () =
   let state = identity_state () in
   hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
     ~masc_root:"/r";
   hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
     ~masc_root:"/r";
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
-    ~providers:[declared ~tools:[ "sendMessage" ] "slack" "Slack"];
+    ~providers:[declared "atlassian" "Atlassian"];
+  check (Alcotest.list Alcotest.string)
+    "the absent provider retires, the declared one still waits" [ "atlassian" ]
+    (held_expectations state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[unreadable "atlassian" "read failed"];
+  check (Alcotest.list Alcotest.string) "an unreadable declaration still waits"
+    [ "atlassian" ] (held_expectations state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A" ~providers:[];
+  check (Alcotest.list Alcotest.string) "gone from the inventory, the wait ends"
+    [] (held_expectations state "A")
+
+let test_the_recovery_read_retires_only_the_landed_login () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  (* The inventory lists every declared provider; atlassian is declared and
+     not attached yet, so its login is still owed. *)
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[ declared ~tools:[ "sendMessage" ] "slack" "Slack"
+               ; declared "atlassian" "Atlassian" ];
   check (Alcotest.list Alcotest.string) "the landed login stops being owed"
     [ "atlassian" ] (held_expectations state "A");
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
@@ -878,6 +929,10 @@ let () =
             `Quick test_withdrawal_retires_the_display_but_keeps_the_wait;
           Alcotest.test_case "only its own workspace reopens the poll" `Quick
             test_only_its_own_workspace_reopens_the_poll;
+          Alcotest.test_case "every waiting Keeper is polled from any surface"
+            `Quick test_every_waiting_keeper_is_polled_from_any_surface;
+          Alcotest.test_case "a removed provider ends the wait" `Quick
+            test_a_removed_provider_ends_the_wait;
           Alcotest.test_case "the recovery read retires only the landed login"
             `Quick test_the_recovery_read_retires_only_the_landed_login;
           Alcotest.test_case "restart and forget end the waiting login" `Quick

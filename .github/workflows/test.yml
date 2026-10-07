@@ -467,6 +467,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Where the same run's time went: seconds per kind of dune process
+      # (compile, link, test run) and the slowest of each, summarised by
+      # scripts/ci-run-test-suite.sh from dune's trace. The trace itself
+      # records the environment and is not uploaded.
+      - name: Upload the Dune suite timing
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-suite-timing
+          overwrite: ${{ inputs.candidate_verification == true }}
+          path: ${{ runner.temp }}/test-suite-timing.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       # The step output carries the heartbeat and the last 120 lines of the
       # runner log; every per-suite verdict lives only in the file. The
       # first root @runtest run on 2026-09-05 named its two hung suites and

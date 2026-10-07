@@ -887,9 +887,9 @@ let test_ollama_cloud_current_catalog_resolves () =
    direct rows took this value from the ollama_cloud rows (#33593). *)
 let test_deepseek_replay_contract_differs_by_who_serves_it () =
   (* The resolved policy, not the row's override, the way the frontier table
-     below reads it. It is what the request is built from, and it also fails
-     when a row loses its declaration: without one, the [Ollama_think]
-     dialect answers [no_replay]. *)
+     below reads it. It is what the request is built from. An ollama_cloud row
+     that loses its declaration still resolves the same value, from the
+     provider base; the deepseek rows fail here if they lose theirs. *)
   let replay_policy ~provider_label ~model_id =
     match
       Capabilities.for_provider_model_id
@@ -1621,7 +1621,7 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
          a schema guarantee nor a parseable json_object reply. *)
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud Kimi K2.7 Code"
       , Provider_qualified "ollama_cloud"
@@ -1637,14 +1637,14 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "minimax-m3"
       , Extended_thinking
       , Response_format_json
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "reasoning" )
     ; ( "Ollama Cloud Nemotron 3 Ultra"
       , Provider_qualified "ollama_cloud"
       , "nemotron-3-ultra"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud DeepSeek V4 Pro"
       , Provider_qualified "ollama_cloud"
@@ -1668,21 +1668,21 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "glm-5.2"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud GPT-OSS 20B"
       , Provider_qualified "ollama_cloud"
       , "gpt-oss:20b"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud GPT-OSS 120B"
       , Provider_qualified "ollama_cloud"
       , "gpt-oss:120b"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ]
   in

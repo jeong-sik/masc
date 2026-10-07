@@ -1311,6 +1311,130 @@ let test_settle_turn_log_commits_holds_and_clears_live () =
     (match state.msg_live with Some live -> live == other.log | None -> false)
 ;;
 
+(* A request the server ended while no closing event reached this log: a stop
+   or a restart settles the operation without writing its terminal, so the
+   journal stops at the last tool result and the end is known only from the
+   operation record (a replayed terminal). Settling the log alone leaves its
+   transcript Working, and the pane keeps drawing "IN PROGRESS" for a turn the
+   server no longer runs. *)
+let test_a_turn_the_server_ended_without_a_closing_event_is_closed () =
+  let phase_name entry =
+    match Keeper_chat_transcript.phase entry.Tui_types.log.Tui_types.tl_transcript with
+    | Keeper_chat_transcript.Waiting -> "waiting"
+    | Working -> "working"
+    | Stream_ended -> "ended"
+    | Stream_failed _ -> "failed"
+  in
+  List.iter
+    (fun (record, expected) ->
+      let state =
+        Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+      in
+      state.msg_target_keeper_name <- Some "alpha";
+      let entry =
+        inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+          [ Live.Run_started; Live.Text "partial" ]
+      in
+      state.msg_live <- Some entry.log;
+      check string "before settling it is the running turn" "working" (phase_name entry);
+      check bool "and the pane draws it" true
+        (Option.is_some (Tui_types.keeper_message_status_log state));
+      Tui_types.settle_turn_log_ended_by state entry ~record:(Some record);
+      check string "the operation record closes the transcript" expected (phase_name entry);
+      check bool "the settled turn is no longer the running one" true
+        (Option.is_none (Tui_types.keeper_message_status_log state));
+      check bool "its partial output is still held" true
+        (List.memq entry.log state.msg_settled_logs);
+      check bool "the server ran it, so it is not a rejection" true
+        (Option.is_none (Keeper_chat_transcript.rejection entry.log.tl_transcript)))
+    [ Keeper_chat.Operation_succeeded, "ended"
+    ; Keeper_chat.Operation_failed, "failed"
+    ; Keeper_chat.Operation_cancelled, "failed"
+    ]
+;;
+
+let test_an_ending_a_delta_already_wrote_is_not_overwritten () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entry =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [ Live.Run_started; Live.Text "hi"; visible_reply "hi"; Live.Run_finished ]
+  in
+  Tui_types.settle_turn_log_ended_by state entry
+    ~record:(Some Keeper_chat.Operation_cancelled);
+  check bool "a turn its own stream ended keeps that ending" true
+    (match Keeper_chat_transcript.phase entry.log.tl_transcript with
+     | Keeper_chat_transcript.Stream_ended -> true
+     | Waiting | Working | Stream_failed _ -> false)
+;;
+
+(* A log closed from the operation record never heard how the turn ended, so
+   it holds part of the turn at most. If it claimed the whole turn, the
+   durable keeper, tool and skill rows would be hidden behind a log that never
+   received them. *)
+let test_a_checkpoint_closed_by_the_record_does_not_claim_the_final_reply () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entry =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [ Live.Run_started
+      ; Live.Text "before the checkpoint"
+      ; Live.Reply_details
+          { reply = ""
+          ; turn_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint
+          ; turn_ref = "trace#1"
+          }
+      ; Live.Run_finished
+      ]
+  in
+  check bool "a checkpoint wait is not an ended turn" true
+    (match Keeper_chat_transcript.phase entry.log.tl_transcript with
+     | Keeper_chat_transcript.Waiting -> true
+     | Working | Stream_ended | Stream_failed _ -> false);
+  Tui_types.settle_turn_log_ended_by state entry
+    ~record:(Some Keeper_chat.Operation_succeeded);
+  check bool "the record closes the running indicator" true
+    (match Keeper_chat_transcript.phase entry.log.tl_transcript with
+     | Keeper_chat_transcript.Stream_ended -> true
+     | Waiting | Working | Stream_failed _ -> false);
+  check bool "the checkpoint it still holds is not the final reply" false
+    (Tui_types.turn_log_holds_the_turn entry.log)
+;;
+
+let test_a_failure_learned_only_from_the_record_keeps_the_log_partial () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entry =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [ Live.Run_started; Live.Text "partial" ]
+  in
+  Tui_types.settle_turn_log_ended_by state entry
+    ~record:(Some Keeper_chat.Operation_failed);
+  check bool "the record closes the running indicator" true
+    (match Keeper_chat_transcript.phase entry.log.tl_transcript with
+     | Keeper_chat_transcript.Stream_failed _ -> true
+     | Waiting | Working | Stream_ended -> false);
+  check bool "a log that never heard the end does not stand for the turn" false
+    (Tui_types.turn_log_holds_the_turn entry.log)
+;;
+
+let test_a_failure_the_stream_reported_still_stands_for_the_turn () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entry =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [ Live.Run_started; Live.Run_failed { message = "provider refused" } ]
+  in
+  Tui_types.settle_turn_log_ended_by state entry
+    ~record:(Some Keeper_chat.Operation_failed);
+  check bool "an ending the stream delivered is the log's own" true
+    (Tui_types.turn_log_holds_the_turn entry.log)
+;;
+
 let completed ?(outcome = Masc.Keeper_turn_outcome.Visible_reply) reply
     : Keeper_chat.completed_turn =
   { Keeper_chat.acceptance = { Keeper_chat.state = Keeper_chat.Succeeded; queued_count = 0; interactive = None }
@@ -4878,6 +5002,16 @@ let () =
             test_an_unfinished_settled_log_suppresses_nothing
         ; test_case "settle_turn_log commits, holds and clears live" `Quick
             test_settle_turn_log_commits_holds_and_clears_live
+        ; test_case "a turn the server ended without a closing event is closed" `Quick
+            test_a_turn_the_server_ended_without_a_closing_event_is_closed
+        ; test_case "an ending a delta already wrote is not overwritten" `Quick
+            test_an_ending_a_delta_already_wrote_is_not_overwritten
+        ; test_case "a checkpoint closed by the record does not claim the final reply" `Quick
+            test_a_checkpoint_closed_by_the_record_does_not_claim_the_final_reply
+        ; test_case "a failure learned only from the record keeps the log partial" `Quick
+            test_a_failure_learned_only_from_the_record_keeps_the_log_partial
+        ; test_case "a failure the stream reported still stands for the turn" `Quick
+            test_a_failure_the_stream_reported_still_stands_for_the_turn
         ; test_case "the scroll pin remembers the settled logs on screen" `Quick
             test_the_scroll_pin_remembers_the_settled_logs_on_screen
         ; test_case "a settled block sits before its request's output rows" `Quick

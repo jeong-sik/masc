@@ -371,6 +371,83 @@ let test_live_and_restart_projection () =
        | Ok _ | Error _ -> fail "locator from another directory was not rejected")
 ;;
 
+let test_settled_invocation_projection () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let runtime = Agent.create_execution_runtime ~sw ~domain_mgr:env#domain_mgr
+      ~domain_count:1 |> Result.map_error Error.to_string |> value in
+  let internal_runtime = Runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+      |> Result.map_error Runtime.create_error_to_string |> value in
+  let codec = Codec.of_runtime internal_runtime in
+  let dir = make_dir env#fs "agent_core-settled-projection-" in
+  Eio.Switch.on_release sw (fun () -> Eio.Path.rmtree ~missing_ok:true dir);
+  let open_call scope ordinal name =
+    let turn = scope_value (Scope.open_turn scope ~ordinal) in
+    let provider = scope_value (Scope.open_provider_attempt turn ~ordinal:0 (binding ())) in
+    let invocation = Tool_contract.Invocation.create
+        ~tool_use_id:"reused-provider-id" ~turn:ordinal
+        ~schedule:{Tool_contract.planned_index=0; batch_index=0; batch_size=1;
+                   execution_mode=Tool_contract.Serial}
+        ~completion:Tool_contract.Continue_after_success in
+    let call = scope_value (Scope.open_invocation provider ~invocation ~tool_name:name
+        ~input:(`Assoc ["occurrence", `Int ordinal])) in
+    turn, provider, call in
+  let close_call turn provider =
+    scope_value (Scope.close_provider_attempt provider Event.Succeeded);
+    scope_value (Scope.close_turn turn Event.Succeeded) in
+  let locator = writer_value (Writer.run ~codec ~dir (fun ~sw:_ writer ->
+    let root = scope_value (Scope.start ~writer ~agent_name:"settled-root") in
+    let locator = public_locator root in
+    let projection = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
+    let turn, provider, call = open_call root 1 "parent-tool" in
+    ignore (scope_value (Scope.execute call ~invoke:(fun ~start_child ~tool_name:_ ~input:_ ->
+      let child = scope_value (start_child ~agent_name:"nested-tool-agent") in
+      let child_turn, child_provider, child_call = open_call child 1 "nested-tool" in
+      ignore (scope_value (Scope.execute child_call ~invoke:(fun ~start_child:_ ~tool_name:_ ~input:_ ->
+        "nested result", Types.Tool_succeeded)));
+      close_call child_turn child_provider;
+      scope_value (Scope.finish child Event.Succeeded);
+      "parent result", Types.Tool_succeeded)));
+    close_call turn provider;
+    let turn, provider, blocked = open_call root 2 "blocked-tool" in
+    scope_value (Scope.settle_unattempted_invocation blocked ~content:"prehook denied"
+      ~outcome:(Types.Tool_failed {failure_kind=Non_retryable_tool_error;
+                                  error_class=Some Deterministic}));
+    close_call turn provider;
+    let turn, provider, invalid = open_call root 3 "invalid-tool" in
+    ignore (scope_value (Scope.execute invalid ~invoke:(fun ~start_child:_ ~tool_name:_ ~input:_ ->
+      "schema rejected", Types.Tool_failed {failure_kind=Validation_error;
+                                            error_class=Some Deterministic})));
+    close_call turn provider;
+    let records = projection_value (Projection.settled_tool_invocations projection) in
+    check (list string) "root results exclude recursive children"
+      ["parent-tool"; "blocked-tool"; "invalid-tool"]
+      (List.map (fun (record : Projection.settled_tool_invocation) -> record.tool_name) records);
+    check (list bool) "attempt evidence distinguishes prehook from validation"
+      [true; false; true]
+      (List.map (fun (record : Projection.settled_tool_invocation) -> record.attempt_admitted) records);
+    check (list int) "reused IDs keep separate turn occurrences" [1; 2; 3]
+      (List.map (fun (record : Projection.settled_tool_invocation) ->
+        Tool_contract.Invocation.turn record.invocation) records);
+    List.iter (fun (record : Projection.settled_tool_invocation) ->
+      let ordinal = Tool_contract.Invocation.turn record.invocation in
+      check bool "exact canonical input" true
+        (record.input = `Assoc ["occurrence", `Int ordinal])) records;
+    (match records with
+     | [first; second; third] -> check bool "canonical settlement order" true
+         (first.settlement_seq < second.settlement_seq && second.settlement_seq < third.settlement_seq)
+     | [] | _ :: _ -> fail "expected three settled root occurrences");
+    (* Unsettled admission never becomes an executed observation. *)
+    let (_turn, _provider, _pending) = open_call root 4 "unsettled-tool" in
+    check int "unsettled result is absent" 3
+      (List.length (projection_value (Projection.settled_tool_invocations projection)));
+    scope_value (Scope.abort root (Scope.Cancelled {reason=None; data=None}));
+    locator)) in
+  let reopened = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
+  check int "restart projection retains the same settled occurrences" 3
+    (List.length (projection_value (Projection.settled_tool_invocations reopened)))
+;;
+
 let test_cursor_codec_is_closed_and_versioned () =
   Eio_main.run
   @@ fun env ->
@@ -546,6 +623,7 @@ let () =
     "Execution projection"
     [ ( "authority"
       , [ test_case "live and restart projection" `Quick test_live_and_restart_projection
+        ; test_case "settled invocation projection" `Quick test_settled_invocation_projection
         ; test_case "terminal callback failure readback" `Quick test_terminal_callback_failure_readback
         ; test_case "terminal unknown-effect readback" `Quick test_terminal_unknown_effect_readback
         ; test_case

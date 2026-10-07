@@ -2882,6 +2882,8 @@
 (include stanzas/test_runtime_agent_execution_restart.inc)
 (include stanzas/test_keeper_native_result_retention.inc)
 (include stanzas/test_keeper_native_context_resume.inc)
+(include stanzas/test_keeper_ingress_native_restart.inc)
+(include stanzas/test_keeper_native_repetition_recovery.inc)
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
 

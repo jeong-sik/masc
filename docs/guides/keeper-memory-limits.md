@@ -26,6 +26,15 @@ rollout, `enforcement=advisory` means the store accepts temporary excess; these
 two settings do not reject writes. The existing aggregate rendered-byte commit
 boundary is separate. There is no new token injection budget.
 
+The existing Librarian lane checks for count overflow after boot catch-up,
+post-turn and intake wakes. It can review current memory even with no unread
+conversation. A successful decision on the same facts, Keeper instructions and
+limits is not repeated on every wake; failures remain retryable on the next wake.
+Restart clears that observation and rechecks persisted Keepers, including ones
+that did not launch. A partial consolidation is eligible again on a later wake.
+The cleanup uses the regular disposition and absorption checks; it leaves
+working contexts and history cursors untouched.
+
 The settings registry seeds these keys at process startup. Restart after editing
 this TOML; saving the file alone does not reload these values.
 `MASC_KEEPER_MEMORY_CATEGORY_CAP` and

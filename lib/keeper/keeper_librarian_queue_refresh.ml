@@ -45,6 +45,7 @@ let last_measurement ~config ~keeper_name =
 ;;
 
 let forget_measurement ~config ~keeper_name =
+  Keeper_memory_cleanup.forget ~base_path:config.Workspace.base_path ~keeper_name;
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () ->
     Hashtbl.remove measurements key;
@@ -583,11 +584,22 @@ let run_with_readers ~durable ~continuity ~base_path ~keeper_name =
   | Enabled, (Owner_absent | Owner_projection {meta = None; _}
              | Owner_projection {stopping = true; _}) -> ()
 
+let run_memory_cleanup ~base_path ~keeper_name =
+  match Keeper_memory_cleanup.run ~base_path ~keeper_name with
+  | Disabled | Within_limits | Already_reviewed -> ()
+  | Reviewed { remaining_excess } ->
+    Log.Keeper.info ~keeper_name
+      "Librarian memory count cleanup completed; remaining_excess=%b" remaining_excess
+  | Unavailable detail ->
+    Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
+;;
+
 let run ~base_path ~keeper_name =
   run_with_readers
     ~durable:(fun () -> run_durable ~base_path ~keeper_name)
     ~continuity:(fun () -> run_continuity ~base_path ~keeper_name ())
-    ~base_path ~keeper_name
+    ~base_path ~keeper_name;
+  run_memory_cleanup ~base_path ~keeper_name
 ;;
 
 let install () =
@@ -607,7 +619,8 @@ let submit_durable ~base_path ~keeper_name =
   let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
       run_durable ~base_path ~keeper_name;
-      run_continuity ~base_path ~keeper_name ())
+      run_continuity ~base_path ~keeper_name ();
+      run_memory_cleanup ~base_path ~keeper_name)
   in
   ()
 ;;

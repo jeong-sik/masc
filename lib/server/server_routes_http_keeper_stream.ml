@@ -28,7 +28,18 @@ let worker_events_buffer_size = 512
    a missing failure in the operation journal for clients that reopen it. *)
 type operation_wire_stream = Wire_started | Wire_terminal_sent
 
-let operation_wire_streams : (string, operation_wire_stream) Hashtbl.t =
+(* Request IDs are unique inside one runtime root's Keeper operation store.
+   These process-wide registries share the owner's canonical base authority. *)
+type operation_stream_key =
+  { base_path : string; keeper_name : string; operation_id : string }
+
+let operation_stream_key ~base_path ~keeper_name ~operation_id =
+  { base_path = Keeper_registry_types.canonical_base_path_exn base_path
+  ; keeper_name
+  ; operation_id
+  }
+
+let operation_wire_streams : (operation_stream_key, operation_wire_stream) Hashtbl.t =
   Hashtbl.create 32
 
 let operation_wire_streams_mu = Stdlib.Mutex.create ()
@@ -40,75 +51,79 @@ let ag_ui_terminal_event (event : Ag_ui.event) =
   | Text_message_end | Tool_call_start | Tool_call_args | Tool_call_end
   | Custom -> false
 
-let note_operation_wire_opened ~operation_id =
+let note_operation_wire_opened key =
   Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
-    if not (Hashtbl.mem operation_wire_streams operation_id)
-    then Hashtbl.replace operation_wire_streams operation_id Wire_started)
+    if not (Hashtbl.mem operation_wire_streams key)
+    then Hashtbl.replace operation_wire_streams key Wire_started)
 
-let note_operation_wire_event ~operation_id event =
+let note_operation_wire_event ~base_path ~keeper_name ~operation_id event =
+  let key = operation_stream_key ~base_path ~keeper_name ~operation_id in
   let terminal = ag_ui_terminal_event event in
   Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
-    match Hashtbl.find_opt operation_wire_streams operation_id, terminal with
+    match Hashtbl.find_opt operation_wire_streams key, terminal with
     | Some Wire_terminal_sent, _ -> ()
     | _, true ->
-      Hashtbl.replace operation_wire_streams operation_id Wire_terminal_sent
+      Hashtbl.replace operation_wire_streams key Wire_terminal_sent
     | None, false ->
-      Hashtbl.replace operation_wire_streams operation_id Wire_started
+      Hashtbl.replace operation_wire_streams key Wire_started
     | Some Wire_started, false -> ())
 
-let drop_operation_wire_stream ~operation_id =
+let drop_operation_wire_stream key =
   Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
-    Hashtbl.remove operation_wire_streams operation_id)
+    Hashtbl.remove operation_wire_streams key)
 
-let take_operation_wire_stream ~operation_id =
+let take_operation_wire_stream ~base_path ~keeper_name ~operation_id =
+  let key = operation_stream_key ~base_path ~keeper_name ~operation_id in
   Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
-    let state = Hashtbl.find_opt operation_wire_streams operation_id in
-    Hashtbl.remove operation_wire_streams operation_id;
+    let state = Hashtbl.find_opt operation_wire_streams key in
+    Hashtbl.remove operation_wire_streams key;
     state)
 
 type operation_live_sink = seq:int option -> Ag_ui.event -> unit
 
 let operation_live_sinks :
-  (string, (int * operation_live_sink) list) Hashtbl.t =
+  (operation_stream_key, (int * operation_live_sink) list) Hashtbl.t =
   Hashtbl.create 16
 ;;
 
 let operation_live_sinks_mu = Stdlib.Mutex.create ()
 let next_operation_live_sink_id = Atomic.make 0
 
-let register_operation_live_sink ~operation_id sink =
+let register_operation_live_sink ~base_path ~keeper_name ~operation_id sink =
+  let key = operation_stream_key ~base_path ~keeper_name ~operation_id in
   let sink_id = Atomic.fetch_and_add next_operation_live_sink_id 1 in
   Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
     let current =
-      match Hashtbl.find_opt operation_live_sinks operation_id with
+      match Hashtbl.find_opt operation_live_sinks key with
       | None -> []
       | Some sinks -> sinks
     in
-    Hashtbl.replace operation_live_sinks operation_id ((sink_id, sink) :: current);
+    Hashtbl.replace operation_live_sinks key ((sink_id, sink) :: current);
     (* An attached sink IS the open wire stream (#28849 review): mark it under
        the sinks lock so registration and the last-sink drop below cannot
        interleave into an attached-client/no-record state. Lock order is
        always sinks_mu -> streams_mu; the streams lock never takes sinks_mu. *)
-    note_operation_wire_opened ~operation_id);
+    note_operation_wire_opened key);
   fun () ->
     Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
-      match Hashtbl.find_opt operation_live_sinks operation_id with
+      match Hashtbl.find_opt operation_live_sinks key with
       | None -> ()
       | Some sinks ->
         let remaining = List.filter (fun (id, _) -> id <> sink_id) sinks in
         if remaining = []
         then (
-          Hashtbl.remove operation_live_sinks operation_id;
+          Hashtbl.remove operation_live_sinks key;
           (* The wire audience is gone; durable settlement is independent of
              this transient registry. *)
-          drop_operation_wire_stream ~operation_id)
-        else Hashtbl.replace operation_live_sinks operation_id remaining)
+          drop_operation_wire_stream key)
+        else Hashtbl.replace operation_live_sinks key remaining)
 ;;
 
-let publish_operation_live_event ~operation_id ~seq event =
+let publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq event =
+  let key = operation_stream_key ~base_path ~keeper_name ~operation_id in
   let sinks =
     Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
-      match Hashtbl.find_opt operation_live_sinks operation_id with
+      match Hashtbl.find_opt operation_live_sinks key with
       | None -> []
       | Some sinks -> sinks)
   in
@@ -118,8 +133,8 @@ let publish_operation_live_event ~operation_id ~seq event =
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
-           "keeper_stream: operation live sink failed operation_id=%s error=%s"
-           operation_id
+           "keeper_stream: operation live sink failed base=%s keeper=%s operation_id=%s error=%s"
+           key.base_path key.keeper_name key.operation_id
            (Printexc.to_string exn))
     sinks
 ;;
@@ -2937,6 +2952,7 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
 ;;
 
 let operation_executor ~state ~clock : Keeper_owner.operation_executor =
+  let base_path = (Mcp_server.workspace_config state).base_path in
   fun ~sw ~keeper_name ~claim ->
   let failed ?outcome_ref kind detail =
     Keeper_owner.Operation_failed { kind; detail; outcome_ref }
@@ -3056,9 +3072,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                        ~timestamp:ts ~redact_text ~redact_json projection member_event in
                      Option.iter (fun event ->
                        let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
-                       note_operation_wire_event ~operation_id event;
+                       note_operation_wire_event ~base_path ~keeper_name ~operation_id event;
                        Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:(Some seq) ~event;
-                       publish_operation_live_event ~operation_id ~seq:(Some seq) event) projected;
+                       publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) event) projected;
                      member_id, projection) projections in
                    let is_terminal = Server_keeper_chat_agui_projection.is_terminal event in
                    if is_terminal && not terminal_seen then settle_delivery (Ok ());
@@ -3307,7 +3323,7 @@ let record_settled_error ~base_path ~keeper_name ~operation_id ~message =
     Ok (Recorded_error (entry.seq, entry.ts, message))
 
 let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~execution =
-  let wire = take_operation_wire_stream ~operation_id in
+  let wire = take_operation_wire_stream ~base_path ~keeper_name ~operation_id in
   match execution with
   | Keeper_owner.Operation_failed { kind; detail; _ } ->
     let receipt = record_settled_error ~base_path ~keeper_name ~operation_id ~message:detail in
@@ -3330,10 +3346,10 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
          ~code:(Some (Keeper_chat_operation.failure_kind_to_string kind))
          Ag_ui.Run_error in
        (match wire with
-        | Some Wire_started -> note_operation_wire_event ~operation_id event
+        | Some Wire_started -> note_operation_wire_event ~base_path ~keeper_name ~operation_id event
         | Some Wire_terminal_sent | None -> ());
        Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq ~event;
-       publish_operation_live_event ~operation_id ~seq event)
+       publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq event)
   | Keeper_owner.Operation_deferred -> ()
   | Keeper_owner.Operation_succeeded _ ->
     (match wire with
@@ -3540,7 +3556,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       let sink ~seq event =
         Server_keeper_stream_handoff.publish handoff ~send:send_live (seq, event)
       in
-      let unregister = register_operation_live_sink ~operation_id sink in
+      let unregister = register_operation_live_sink ~base_path ~keeper_name:payload.name ~operation_id sink in
       Eio.Switch.on_release stream_sw (fun () ->
         (* A publisher may already hold a registry snapshot containing this
            sink. Close its queue before unregistering so it cannot restart. *)

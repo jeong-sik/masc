@@ -25,6 +25,10 @@ drain, before releasing sender ownership. The state lock never covers a send.
 Rejection, release and send failure close the queue; a publisher holding an old
 subscription callback cannot reactivate it. Replay still deduplicates exact
 sequence membership, retaining a buffered event if its journal append failed.
+Live subscriptions and terminal accounting are keyed by canonical runtime base,
+Keeper and operation ID, matching the owner registry's authority and each Keeper's
+operation store. Reusing a request ID in another Keeper or runtime cannot share
+its live audience, consume its terminal record or unregister it.
 
 Inputs remain in a separate pending area through local dispatch, unconfirmed
 transport, and server queue admission. `Run_started` or an authoritative persisted

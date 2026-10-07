@@ -743,7 +743,20 @@ let test_stream_model_stop_reaches_the_view () =
   List.iter (fun actual ->
     check (list delta) "provider stop is preserved across chunk boundaries"
       [Live.Stream_model_stopped] actual)
-    [feed_whole body; feed_in_chunks ~size:1 body]
+    [feed_whole body; feed_in_chunks ~size:1 body];
+  List.iter (fun (label, value) ->
+    let body = sse (event "CUSTOM"
+      (["name", `String "KEEPER_STREAM_MESSAGE_STOP"]
+       @ Option.to_list (Option.map (fun value -> "value", value) value))) in
+    List.iter (fun actual ->
+      match actual with
+      | [Live.Undecodable _] -> ()
+      | _ -> failf "%s stop payload must be undecodable, got %s" label
+          (String.concat ", " (List.map delta_to_string actual)))
+      [feed_whole body; feed_in_chunks ~size:1 body])
+    ["missing", None; "object", Some (`Assoc []); "array", Some (`List []);
+     "string", Some (`String ""); "boolean", Some (`Bool false);
+     "number", Some (`Int 0)]
 
 let test_stream_usage_is_typed () =
   let body =

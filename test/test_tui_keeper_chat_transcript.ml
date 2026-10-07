@@ -1457,6 +1457,25 @@ let test_response_stop_preserves_pending_work () =
     feed t [Live.Run_started; Live.Stream_model_started
       {message_id=Some "response";model="observed";usage=None}; content];
     let before = Transcript.drawn t in
+    let active = progress_text t in
+    let decoder = Live.create () in
+    let receive json =
+      Live.feed decoder ("data: " ^ json ^ "\n\n")
+      |> List.iter (fun (observed : Live.observed_delta) ->
+          Transcript.apply ~now:origin t observed.delta) in
+    List.iter (fun json ->
+      receive json;
+      check phase "malformed provider stop leaves Keeper running" Transcript.Working
+        (Transcript.phase t);
+      check string "malformed provider stop preserves current model activity" active
+        (progress_text t);
+      check bool "malformed provider stop is reported" true
+        (Option.is_some (Transcript.unreadable t)))
+      [{|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP"}|};
+       {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":{}}|}];
+    receive {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}|};
+    check bool "a subsequent valid wire stop ends only model activity" true
+      (contains ~needle:"model response ended" (progress_text t));
     feed t [Live.Stream_model_stopped; Live.Stream_model_stopped; Live.Text ""; Live.Thinking ""];
     check phase "provider stop leaves Keeper running" Transcript.Working (Transcript.phase t);
     check bool "response stop and empty chunks leave the transcript body unchanged" true

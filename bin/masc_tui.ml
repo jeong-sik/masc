@@ -3424,7 +3424,7 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
   if account_login_action_is_read action && not (server_authority_ready state) then
-    view.notice <- "Workspace reading is unconfirmed; retry after identity returns."
+    suspend_account_login_read view
   else begin
   let host = server_peer_host and port = state.port in
   let check_workspace = capture_workspace_check state ~mailbox in
@@ -8220,7 +8220,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         Inbox.operation_lines (`Assoc ["operations", `List operations]) in
     let operations = read_messages None [] in
     let lines = function Ok lines -> lines | Error detail -> ["Read unavailable: " ^ detail] in
-    Ok (receipt @ lines waiting @ lines operations) in
+    Ok (receipt, Ok (lines waiting @ lines operations)) in
   let run () =
     let result = try perform () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -13860,6 +13860,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   function
   | Workspace_scoped (authority, reading, message) ->
       if workspace_message_admitted state ~authority ~reading message then
+        let message = project_workspace_operation_reply state ~authority ~reading message in
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
       else (match message with
@@ -13916,7 +13917,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       launch_keeper_turns_load state ~mailbox;
       let kind, lines = match result with
         | Error detail -> Notice_failure, [detail]
-        | Ok lines -> Notice_reply,
+        | Ok (receipt, observation) ->
+            let lines = match observation with
+              | Ok lines -> receipt @ lines
+              | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
+            Notice_reply,
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";

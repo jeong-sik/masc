@@ -121,7 +121,7 @@ type async_msg =
       }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result
@@ -591,10 +591,10 @@ type 'a mailed = {
    this match exhaustive: a new reply must choose whether it is a replaceable
    observation or the outcome of an operation already sent. *)
 let account_login_action_is_read = function
-  | Masc_tui_account_login.Inventory | Discover | Preview_removal _
+  | Masc_tui_account_login.Inventory | Refresh_saved _ | Refresh_retry | Recover | Discover | Preview_removal _
   | Refresh_removed _ | Refresh_list _ -> true
-  | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Input _
-  | Cancel | Recover | Prepare _ | Save _ | Close | Nothing | Remove _ -> false
+  | Activate_saved _ | Select_existing _ | Start _ | Input _
+  | Cancel | Prepare _ | Save _ | Close | Nothing | Remove _ -> false
 
 let rec workspace_message_is_read = function
   | Workspace_scoped (_, _, message) -> workspace_message_is_read message
@@ -781,3 +781,36 @@ let workspace_message_admitted state ~authority ~reading message =
   workspace_reply_admitted state ~authority ~reading
     ~kind:(if workspace_message_is_read message
       then Workspace_observation else Workspace_operation_outcome)
+
+let rec project_workspace_operation_reply state ~authority ~reading message =
+  let project receipt observation = workspace_operation_reply state ~authority ~reading
+      (receipt, observation) in
+  match message with
+  | Workspace_operation inner ->
+      Workspace_operation (project_workspace_operation_reply state ~authority ~reading inner)
+  | Keeper_queue_loaded (keeper, control, action, Ok reply) ->
+      Keeper_queue_loaded (keeper, control, action,
+        Ok (workspace_operation_reply state ~authority ~reading reply))
+  | Lane_addons_loaded (generation, detail, Ok ({lar_snapshot=Some snapshot; _} as reply)) ->
+      let reply, observation = project reply (Ok snapshot) in
+      let reply = match observation with
+        | Ok snapshot -> {reply with lar_snapshot=Some snapshot}
+        | Error reason -> {reply with lar_snapshot=None; lar_inventory_read=`Failed reason} in
+      Lane_addons_loaded (generation, detail, Ok reply)
+  | Lane_subscriptions_loaded (generation, Ok snapshot) ->
+      let snapshot, observation = project snapshot (Ok snapshot.entries) in
+      let entries = match observation with
+        | Ok entries -> entries
+        | Error reason -> List.map (fun (subscription, _) ->
+            subscription, Masc_tui_lane_subscriptions.Unavailable reason) snapshot.entries in
+      Lane_subscriptions_loaded (generation, Ok {snapshot with entries})
+  | Browser_lane_scene_loaded (generation, result) ->
+      let (), result = project () result in
+      Browser_lane_scene_loaded (generation, result)
+  | Browser_lane_follow_loaded (generation, Ok (receipt, result)) ->
+      let receipt, result = project receipt result in
+      Browser_lane_follow_loaded (generation, Ok (receipt, result))
+  | Browser_lane_screenshot_ready reply ->
+      let (), result = project () reply.result in
+      Browser_lane_screenshot_ready {reply with result}
+  | _ -> message

@@ -121,7 +121,7 @@ type async_msg =
       }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result
@@ -594,3 +594,7 @@ val workspace_message_admitted :
     and chat receipts keep their original workspace authority. *)
 
 val account_login_action_is_read : Masc_tui_account_login.action -> bool
+
+val project_workspace_operation_reply : state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> async_msg
+(** Preserve operation receipts while rejecting any separately fetched
+    observation whose read epoch has retired, including queued completions. *)

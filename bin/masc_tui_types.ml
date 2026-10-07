@@ -6438,12 +6438,30 @@ let workspace_reply_admitted state ~authority ~reading ~kind =
           | Some admitted -> admitted == state.workspace_read_authority
           | None -> false
 
+(* A POST receipt can outlive the GET started after it, including a result
+   already queued when identity is lost. Never promote that GET's authority
+   merely because it shares a completion with an admitted operation. *)
+let workspace_operation_reply state ~authority ~reading (receipt, observation) =
+  let observation = match observation with
+    | Error _ -> observation
+    | Ok _ when workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation -> observation
+    | Ok _ -> Error "Action outcome retained; follow-up reading was retired while workspace identity was unconfirmed. Refresh before acting again."
+  in
+  receipt, observation
+
 (* The deletion overlay keeps its confirmed inventory while identity is
    unavailable. Invalidate the read generation as well: reconfirming A must
    not admit a reply that was in flight during an uncertain A -> B -> A. *)
 let suspend_keeper_deletions_read state =
   state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
   state.keeper_deletions_loading <- false
+
+let suspend_account_login_read (view : Masc_tui_account_login.t) =
+  view.phase <- (match view.phase with
+    | Masc_tui_account_login.Finished outcome -> Finished {outcome with refresh_failed=true}
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving
+    | Removing | Failed | Removal _ -> Failed);
+  view.notice <- "Workspace reading is unconfirmed; read again after identity returns."
 
 let suspend_voice_wizard_read state =
   let module Wizard = Masc_tui_voice_wizard_session in
@@ -6472,9 +6490,7 @@ let suspend_workspace_readings state =
     (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
   state.keeper_queue_readings <- [];
   List.iter (fun ((view : Masc_tui_account_login.t), generation) ->
-    if view.generation = generation then (
-      view.phase <- Masc_tui_account_login.Failed;
-      view.notice <- "Workspace reading is unconfirmed; read again after identity returns."))
+    if view.generation = generation then suspend_account_login_read view)
     state.account_login_readings;
   state.account_login_readings <- [];
   state.browser_lane <- Option.map (fun (view : Browser_lane_view.t) ->

@@ -462,6 +462,38 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
       ~kind:Workspace_observation);
   state.board_detail <- Detail.complete state.board_detail refreshed (Ok (a, [], None))
 
+let test_operation_receipt_outlives_queued_followup_read () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  (* The POST has completed; its later GET has produced B's snapshot and
+     the combined result is already queued, before health failure applies. *)
+  let queued = ("saved-A-revision", Ok "B's follow-up snapshot") in
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Error "health failed");
+  suspend_workspace_readings state;
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+  let receipt, observation = workspace_operation_reply state ~authority ~reading queued in
+  Alcotest.(check string) "POST revision receipt survives reconfirmation" "saved-A-revision" receipt;
+  Alcotest.(check bool) "queued GET snapshot stays retired after A returns" true (Result.is_error observation);
+  let fresh_receipt, fresh_observation = workspace_operation_reply state ~authority
+      ~reading:(Some state.workspace_read_authority) ("next-receipt", Ok "A's current snapshot") in
+  Alcotest.(check string) "fresh receipt retained" "next-receipt" fresh_receipt;
+  Alcotest.(check (result string string)) "new epoch can observe A" (Ok "A's current snapshot") fresh_observation;
+  let module Login = Masc_tui_account_login in
+  let view = Login.create "test" in
+  view.phase <- Login.Finished {saved=Login.Saved_verified;
+    activation=Login.Active {exact_output_available=true}; refresh_failed=false};
+  suspend_account_login_read view;
+  (match view.phase with
+   | Login.Finished {saved=Login.Saved_verified; activation=Login.Active _; refresh_failed=true} -> ()
+   | _ -> Alcotest.fail "retired account inventory lost the save/activation receipt")
+
 let test_unknown_voice_save_read_retirement () =
   let open Masc_tui_types in
   let module Wizard = Masc_tui_voice_wizard_session in
@@ -495,7 +527,9 @@ let test_unknown_voice_save_read_retirement () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "unknown voice save read retirement" `Quick
+      , [ Alcotest.test_case "operation receipt outlives queued follow-up read" `Quick
+            test_operation_receipt_outlives_queued_followup_read
+        ; Alcotest.test_case "unknown voice save read retirement" `Quick
             test_unknown_voice_save_read_retirement
         ; Alcotest.test_case "detail focus waits for authoritative roster" `Quick
             test_detail_focus_waits_for_authoritative_roster

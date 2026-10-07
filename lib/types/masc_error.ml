@@ -212,11 +212,7 @@ end
 module System_error = struct
   type t =
     | NotInitialized
-    | AlreadyInitialized
-    | InvalidJson of string
     | IoError of string
-    | InvalidFilePath of string
-    | StorageError of string
     | ValidationError of string
     | LockContention of { key : string; attempts : int }
       (** Distributed lock acquire budget exhausted under transient
@@ -227,11 +223,7 @@ module System_error = struct
 
   let to_string = function
     | NotInitialized -> "[SystemError] MASC not initialized."
-    | AlreadyInitialized -> "[SystemError] MASC already initialized."
-    | InvalidJson msg -> Printf.sprintf "[SystemError] Invalid JSON: %s" msg
     | IoError msg -> Printf.sprintf "[SystemError] IO error: %s" msg
-    | InvalidFilePath reason -> Printf.sprintf "[SystemError] Invalid file path: %s" reason
-    | StorageError msg -> Printf.sprintf "[SystemError] Storage error: %s" msg
     | ValidationError msg -> Printf.sprintf "[SystemError] Validation error: %s" msg
     | LockContention { key; attempts } ->
         Printf.sprintf
@@ -281,11 +273,7 @@ let code = function
   | Task (Task_error.VerificationSuperseded _) -> 409
   | Agent (Agent_error.InvalidName _) -> 400
   | System (System_error.NotInitialized
-           | System_error.AlreadyInitialized
-           | System_error.InvalidJson _
            | System_error.IoError _
-           | System_error.InvalidFilePath _
-           | System_error.StorageError _
            | System_error.ValidationError _) -> 400
   | System (System_error.LockContention _) -> 503
   | RateLimitExceeded _ -> 429
@@ -364,11 +352,8 @@ let is_retryable = function
   | Auth (Auth_error.Unauthorized _ | Auth_error.Forbidden _
          | Auth_error.SameOriginBlocked
          | Auth_error.InvalidToken _) -> false
-  | System (System_error.IoError _ | System_error.StorageError _
-           | System_error.LockContention _) -> true
-  | System (System_error.NotInitialized | System_error.AlreadyInitialized
-           | System_error.InvalidJson _ | System_error.InvalidFilePath _
-           | System_error.ValidationError _) -> false
+  | System (System_error.IoError _ | System_error.LockContention _) -> true
+  | System (System_error.NotInitialized | System_error.ValidationError _) -> false
   | RateLimitExceeded _ -> true
   | CacheError (CacheReadFailed _ | CacheWriteFailed _ | CacheExpired _) -> true
   | CacheError (CacheCorrupted _) -> false

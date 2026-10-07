@@ -239,7 +239,6 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
               | Masc_domain.RateLimitExceeded _
               | Masc_domain.System
                   (Masc_domain.System_error.IoError _
-                  | Masc_domain.System_error.StorageError _
                   | Masc_domain.System_error.LockContention _)
               | Masc_domain.CacheError
                   (Masc_domain.CacheReadFailed _
@@ -248,9 +247,6 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                 Tool_result.Dependency_unavailable
               | Masc_domain.System
                   (Masc_domain.System_error.NotInitialized
-                  | Masc_domain.System_error.AlreadyInitialized
-                  | Masc_domain.System_error.InvalidJson _
-                  | Masc_domain.System_error.InvalidFilePath _
                   | Masc_domain.System_error.ValidationError _)
               | Masc_domain.CacheError (Masc_domain.CacheCorrupted _) ->
                 Tool_result.Runtime_failure

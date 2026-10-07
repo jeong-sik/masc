@@ -51,7 +51,6 @@ let classify : Masc_domain.t -> t = function
       | Masc_domain.Auth_error.SameOriginBlocked) -> Forbidden
   | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> Agent_not_found
   | Masc_domain.System (Masc_domain.System_error.IoError _) -> Io_error
-  | Masc_domain.System (Masc_domain.System_error.InvalidJson _) -> Invalid_json
   (* Named rather than swept, so the closure this module documents is the one
      the compiler enforces: every Auth_error constructor is placed above, and a
      new one cannot reach [Other] without an edit here. The remaining families

@@ -322,20 +322,38 @@ let test_pin_aliases_history_and_canonical_reply () = at_sizes (fun origin ->
   assert_still_reading state "ALIASED_040")
 
 let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
-  let state = state origin in
-  ignore (log state ~id:"short" ~at:1.
-    [Live.Run_started; Live.Text "SHORT_MATCH"; reply "SHORT_MATCH"; Live.Run_finished]);
-  ignore (find state "SHORT_MATCH");
-  let tail = long_answer "ARRIVED_BEFORE_PAINT_" in
-  ignore (log state ~id:"tail" ~at:50.
-    [Live.Run_started; Live.Text tail; reply tail; Live.Run_finished]);
-  assert_still_reading state "SHORT_MATCH";
-  T.set_msg_scroll state 0;
-  check bool "explicitly returning to the bottom releases the search pin" true
-    (Option.is_none state.msg_scroll_pin);
-  ignore (frame_lines state);
-  check bool "live-edge frame feedback does not recreate a pin" true
-    (Option.is_none state.msg_scroll_pin))
+  List.iter (fun paint_before_arrival ->
+    List.iter (fun draft ->
+      let state = state origin in
+      state.keeper_message_focus <- T.Right_pane;
+      Masc_tui_message_input.insert state.msg_input draft;
+      ignore (log state ~id:"short" ~at:1.
+        [Live.Run_started; Live.Text "SHORT_MATCH"; reply "SHORT_MATCH"; Live.Run_finished]);
+      ignore (find state "SHORT_MATCH");
+      if paint_before_arrival then ignore (frame_lines state);
+      check int "short-answer search starts at the live edge" 0 state.msg_scroll;
+      let tail = long_answer "ARRIVED_BEFORE_PAINT_" in
+      ignore (log state ~id:"tail" ~at:50.
+        [Live.Run_started; Live.Text tail; reply tail; Live.Run_finished]);
+      let first_frame, feedback = Render.render_keeper_message state in
+      check int "render returns scroll feedback without changing the stored position" 0
+        state.msg_scroll;
+      Option.iter (T.apply_clamped_scroll state) feedback;
+      check bool "the first frame restores the pin away from the live edge" true
+        (state.msg_scroll > 0);
+      let first_row = visible_line
+          (List.map Masc_tui_theme.strip_sgr first_frame.Masc_tui_frame_presenter.lines)
+          "SHORT_MATCH" in
+      check int "the restored pin budgets chrome on its first frame" first_row
+        (visible_line (frame_lines state) "SHORT_MATCH");
+      assert_still_reading state "SHORT_MATCH";
+      T.set_msg_scroll state 0;
+      check bool "explicitly returning to the bottom releases the search pin" true
+        (Option.is_none state.msg_scroll_pin);
+      ignore (frame_lines state);
+      check bool "live-edge frame feedback does not recreate a pin" true
+        (Option.is_none state.msg_scroll_pin)) [""; "/"])
+    [false; true])
 
 let () = run "chat search projection" [
   "rendered conversation", [

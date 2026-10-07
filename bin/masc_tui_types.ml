@@ -12086,8 +12086,13 @@ let conversation_urls (state : state) : string list =
 
    The fact itself used to live in the footer alone, seventh of nine hints,
    and the footer drops hints from its tail on a narrow terminal: the one
-   thing that changes what the arrow keys do was among the first to go. *)
-let keeper_message_reading_back (state : state) = state.msg_scroll > 0
+   thing that changes what the arrow keys do was among the first to go.
+
+   A frame passes its restored pin position through [scroll] before feedback
+   stores that position. Its chrome must budget and draw against that same
+   position even when an arrival changed it since the previous paint. *)
+let keeper_message_reading_back ?scroll (state : state) =
+  Option.value scroll ~default:state.msg_scroll > 0
 
 type keeper_message_pending_preview_row =
   | Pending_preview_item of int * Masc_tui_keeper_chat_queue.item
@@ -12607,7 +12612,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
         |> List.map (fun line -> false, "  " ^ line) in
       command_rows @ [false, summary group]) others
 
-let keeper_message_status_rows (state : state) ~terminal_cols =
+let keeper_message_status_rows ?scroll (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
       ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
@@ -12663,19 +12668,20 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
-  + (if keeper_message_reading_back state then 1 else 0)
+  + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-let keeper_message_command_window state ~terminal_rows ~terminal_cols =
+let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
   match state.view, state.keeper_message_focus, state.voice_capture,
         state.msg_recall_replaces with
-  | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
+  | Keepers Keeper_message, Right_pane, None, None
+    when not (keeper_message_reading_back ?scroll state) ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
     (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in
+       let status_rows = keeper_message_status_rows ?scroll state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height
@@ -12692,8 +12698,8 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
    At the live edge, reserve that possible row only for the support threshold;
    once reading back, it is already part of [keeper_message_status_rows]. The
    rendered history still uses the exact rows it currently draws. *)
-let keeper_message_support_status_rows state ~status_rows =
-  status_rows + if keeper_message_reading_back state then 0 else 1
+let keeper_message_support_status_rows ?scroll state ~status_rows =
+  status_rows + if keeper_message_reading_back ?scroll state then 0 else 1
 
 
 (* The Code pane asks the server for at most this many entries per directory

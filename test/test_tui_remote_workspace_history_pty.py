@@ -602,9 +602,13 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
     """Same schedule ID on B needs a fresh arm; the old runtime picker closes."""
-    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    # The schedule fixtures must land first: they carry the Overview
+    # defaults, whose empty roster would otherwise overwrite the two-row
+    # roster this scenario wires its workspace identities through (the last
+    # writer wins for the same fixture key).
+    fixtures = _keyboard_schedule.schedule_detail_http_fixtures()
+    fixtures.update(_keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current"))
     roster = fixtures[ROSTER_PATH]
-    fixtures.update(_keyboard_schedule.schedule_detail_http_fixtures())
     wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     schedule_template = _keyboard_harness.json_payload_fixture(fixtures, _keyboard_schedule.SCHEDULES_PATH)
     unknown_health = threading.Event()

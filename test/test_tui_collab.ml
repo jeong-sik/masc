@@ -11,7 +11,7 @@ let listed view names =
 let selected view = match snd (C.key view "enter") with
   | C.Open_link name -> Some name
   | C.Stay -> None
-  | C.Close | C.Watch _ | C.Game_menu | C.Refresh | C.Issue _ | C.Revoke _ ->
+  | C.Close | C.Watch _ | C.Game_menu | C.Refresh | C.Issue _ | C.Revoke _ | C.Resolve_unknown ->
       fail "a browsing Enter must only inspect its selected link"
 
 let revoke view =
@@ -72,8 +72,23 @@ let test_notice_does_not_settle_mutation () =
   let attempted, _ = C.key second_view "n" in
   check bool "a reopened owner retains its own pending mutation" false (C.text_input_active attempted)
 
+let test_explicit_unknown_resolution () =
+  let view = C.write_access (C.create ()) (C.Uncertain "unknown request") in
+  let view, _ = C.key view "u" in
+  let pasted = C.paste view "\r" in
+  check bool "pasting cannot submit resolution" false (C.text_input_active pasted);
+  let _, action = C.key view "enter" in
+  check bool "the confirmation emits explicit resolution" true (action = C.Resolve_unknown);
+  let blocked = C.write_access view (C.Read_only "workspace mismatch") in
+  let _, action = C.key blocked "enter" in
+  check bool "losing authority withdraws the confirmation" true (action = C.Stay);
+  let cancelled, _ = C.key view "esc" in
+  let _, action = C.key cancelled "enter" in
+  check bool "cancelled resolution cannot be confirmed" true (action = C.Stay)
+
 let () = run "Collab request ownership" ["operator flows", [
   test_case "superseded and foreign inventories are ignored" `Quick test_superseded_inventory;
   test_case "removed selections move to surviving invites" `Quick test_removed_selection;
   test_case "only the matching receipt settles a mutation" `Quick test_notice_does_not_settle_mutation;
+  test_case "unknown resolution requires its explicit current confirmation" `Quick test_explicit_unknown_resolution;
 ]]

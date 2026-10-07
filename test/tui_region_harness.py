@@ -46,6 +46,10 @@ BORDER_GLYPHS = frozenset(
 # The chat portrait's half-block mosaic: rows of these under the "현재 대화"
 # caption, drawn across the band with no divider (render_chat portrait).
 PORTRAIT_GLYPHS = frozenset(("▀", "▄", "█"))
+# The one glyph an unboxed sidebar's row must end on (#41527): every roster
+# row leaves its last cell to this divider standing in the band's rightmost
+# column. A ┘ or ┬ borrowed from a neighbouring frame's corner is not one.
+ROSTER_DIVIDER = "│"
 # Every box-drawing glyph. The footer is the frame's key hints, and a footer
 # row holding one of these is a pane's border the frame pushed down onto it.
 BOX_DRAWING = range(0x2500, 0x2580)
@@ -275,12 +279,17 @@ def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, 
     # drawn at the band's full width and no divider. They are geometry too
     # -- inside the band, strictly above the roster block -- while every
     # roster row must still end at the divider, carry the KEEPERS heading
-    # and exactly one rule.
-    portrait_rows = [row for row in drawn
-                     if cells(rows[row], divider, divider + 1) not in BORDER_GLYPHS]
-    roster_rows = [row for row in drawn if row not in portrait_rows]
+    # and exactly one rule. The divider is classified strictly: only │
+    # (ROSTER_DIVIDER) marks a roster row. Membership in BORDER_GLYPHS
+    # would let a ┘ or ┬ from a neighbouring frame's corner stand in for
+    # the edge and admit a broken sidebar as a roster band, which the
+    # negative controls in test_tui_region_baseline_pty.py refuse.
+    edges = {row: cells(rows[row], divider, divider + 1) for row in drawn}
+    portrait_rows = [row for row in drawn if edges[row] != ROSTER_DIVIDER]
+    roster_rows = [row for row in drawn if edges[row] == ROSTER_DIVIDER]
     for row in portrait_rows:
-        if not any(character in PORTRAIT_GLYPHS for character in cells(rows[row], left, right)):
+        if not any(character in PORTRAIT_GLYPHS
+                   for character in cells(rows[row], left, divider)):
             raise AssertionError(f"the pane in cells {left}-{right} stops ending its rows "
                                  f"at the divider cell {divider} on row {row} and holds no "
                                  f"portrait mosaic: {cells(rows[row], left, right)!r}")

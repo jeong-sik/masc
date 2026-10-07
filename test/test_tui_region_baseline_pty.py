@@ -64,6 +64,68 @@ GATE_ARGUMENT = "GATE_CLICK " + "long-argument " * 16 + "GATE_TAIL"
 # clock and role label, inside the text the row carries.
 CHAT_PRESS_COLUMN = 40
 CHAT_PRESS_WIDTH = 100
+
+
+def roster_divider_controls():
+    """The sidebar's divider classification, proven on synthetic bands.
+
+    measure_pane reads the roster's unboxed sidebar as geometry: only │
+    (region.ROSTER_DIVIDER) in the band's last column marks a roster row.
+    A ┘ or ┬ borrowed from a neighbouring frame's corner classifies as a
+    portrait row instead, and a band whose rows all end in such a corner
+    must be refused as no roster block at all -- membership in
+    BORDER_GLYPHS admitted them and a broken sidebar edge passed as a
+    roster band (woman's review of head 76751faeda). The controls call the
+    same measure_pane the scenarios call, every run, so a classifier that
+    widens again fails here before it fails on a live screen.
+    """
+    left, right = 0, 12
+
+    def screen(rows_text):
+        rows = {row: b"" for row in range(1, region.TERMINAL_ROWS + 1)}
+        for row, text in rows_text.items():
+            rows[row] = text.encode("utf-8")
+        return rows
+
+    def band(corner=None, end_blank=False):
+        def edge(text):
+            body = text[:right - 1].ljust(right - 1)
+            if corner is not None:
+                return body + corner
+            if end_blank:
+                return body + " "
+            return body + "│"
+        # The portrait mosaic rows end on their glyph with no divider; the
+        # roster rows below them carry the band's edge glyph.
+        return screen({
+            3: "▀" * (right - left),
+            4: "▄" * (right - left),
+            5: edge("KEEPERS"),
+            6: edge("─" * (right - left)),
+            7: edge("alice"),
+            8: edge("beta"),
+        })
+
+    healthy = region.measure_pane(band(), left=left, right=right)
+    if healthy["top"] != 5 or healthy["bottom"] != 8:
+        raise AssertionError(f"the healthy sidebar band measured {healthy!r}, want top 5 bottom 8")
+
+    for name, broken in (("┘", band(corner="┘")), ("┬", band(corner="┬")),
+                         ("a blank cell", band(end_blank=True))):
+        try:
+            region.measure_pane(broken, left=left, right=right)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"a roster band ending in {name} passed as a roster band")
+
+    framed = region.measure_pane(screen({
+        3: "┌" + "─" * (right - left - 2) + "┐",
+        4: " alice",
+        9: "└" + "─" * (right - left - 2) + "┘",
+    }), left=left, right=right)
+    if framed["top"] != 3 or framed["bottom"] != 9:
+        raise AssertionError(f"the framed-pane branch measured {framed!r}, want top 3 bottom 9")
 # Typed into the chat's input after a press. Keys and presses reach the TUI in
 # order, so once this is drawn every press before it has been handled.
 INPUT_SENTINEL = b"QZX"
@@ -228,6 +290,9 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
 
 
 def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
+    # Synthetic bands, real oracle: the divider controls run the exact
+    # measure_pane path the `take` calls below use, on every scenario run.
+    roster_divider_controls()
     measured: dict[tuple[str, object], dict[str, object]] = {}
 
     def take(process, fd, output, screen: str, columns: int, *, selected_post="Retry") -> None:

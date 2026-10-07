@@ -41,7 +41,7 @@ name = "title"
 type = "string"
 description = """
 Optional new title. When omitted, the title is re-derived \
-from the new body."""
+from the new body. Write readable prose with natural word spacing (including Korean). Shorten the title instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."""
 
 [[params]]
 name = "author"

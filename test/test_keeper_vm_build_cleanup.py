@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -124,6 +125,32 @@ class CleanerService(unittest.TestCase):
             with patch.object(service.subprocess, "run", side_effect=sweep) as run:
                 self.assertEqual(command("run"), 0)
                 run.assert_not_called()
+
+    def test_stop_queued_behind_start_is_recorded_before_the_lock_is_free(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            state = base / ".masc/maintenance/keeper-vm-cleaner"
+            state.mkdir(parents=True)
+            stop = state / "stop-requested"
+            argv = ["keeper-vm-cleaner", "stop", "--base-path", str(base)]
+            results: list[int] = []
+
+            def run_stop() -> None:
+                with patch.object(sys, "argv", argv):
+                    results.append(service.main())
+
+            # The test holds control.lock the way start does while it spawns.
+            with (state / "control.lock").open("a") as control:
+                fcntl.flock(control, fcntl.LOCK_EX)
+                worker = threading.Thread(target=run_stop)
+                worker.start()
+                deadline = time.monotonic() + 10
+                while not stop.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(stop.exists())
+                self.assertEqual(results, [])
+            worker.join(timeout=10)
+            self.assertEqual(results, [0])
 
     def test_start_admission_holds_control_and_clears_old_stop(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

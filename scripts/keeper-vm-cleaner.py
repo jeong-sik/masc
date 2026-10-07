@@ -43,9 +43,15 @@ def main() -> int:
         print(json.dumps({"running": running(state), "state_dir": str(state)}))
         return 0
     if args.command == "stop":
+        # Record the request before queueing on control.lock. While start holds
+        # that lock, the spawned child and this stop wait together and flock
+        # gives no order between them, so the marker must already exist when
+        # the child checks it.
+        stop.touch()
         with (state / "control.lock").open("a") as control:
             fcntl.flock(control, fcntl.LOCK_EX)
-            # Record stop even before a spawned child takes the service lease.
+            # A start that cleared the marker before this stop took the lock
+            # admitted a new service; this stop applies to that service.
             stop.touch()
             if running(state):
                 print("stop requested; the current sweep will finish safely")

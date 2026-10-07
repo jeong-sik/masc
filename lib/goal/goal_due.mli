@@ -1,8 +1,8 @@
 (** A Goal's due date, read once from the string the store keeps.
 
     [Goal_store.goal.due_date] is a string. Whoever needs a moment or a day
-    out of it reads it here, so the overdue notice, the Overview countdown and
-    the upsert check agree on what a due date is.
+    out of it reads it here, so the TUI overdue mark and countdown, the upsert
+    check and the Candle appraisal agree on what a due date is.
 
     A due date is [YYYY-MM-DD] and nothing else: four digits, a dash, two
     digits, a dash, two digits, and a day that exists in the calendar. It is

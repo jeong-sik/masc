@@ -32,7 +32,6 @@ type source_field =
   | Anchor
   | Path
   | Access
-  | Unexpected of string
 
 type value_kind =
   | String

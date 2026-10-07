@@ -630,10 +630,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~default:Runtime_native_tools.claude_code_default
         ~none_supported:(Runtime_execution.supports_native_none (Claude_code config))
     in
-    (* The keeper TOML surface no longer declares setting sources — the
-       fleet never used the field. The safe value the old admission rule
-       degraded to is now the only value. *)
-    let setting_sources = [] in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256
@@ -783,7 +779,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; cwd = base_path
       ; model = config.model
       ; native = native_posture
-      ; setting_sources
       ; system_prompt
       ; admission_timeout_s = config.timeout_s
       ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
@@ -1425,11 +1420,8 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let starting_capacity_bytes =
     (* Every turn starts at the runtime's own ceiling when it has one, and
        unbounded otherwise: the provider's typed overflow is what narrows it.
-       The pinned briefing was sized earlier from the smallest ceiling among
-       the candidates the turn's walk holds
-       ([Keeper_turn_runtime_budget.world_state_briefing_budget_bytes]). That
-       budget can only withhold [Own_recent_actions] rows, so it does not
-       promise a fit; the shrink below cuts only the conversation window. *)
+       The shrink below cuts only the conversation window; the pinned
+       briefing is sent whole. *)
     Option.value
       (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id)
       ~default:unbounded_model_input_capacity_bytes

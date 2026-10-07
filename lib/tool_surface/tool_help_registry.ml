@@ -134,14 +134,7 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
     | Tool_catalog.Hidden -> [ Prompt_names.tool_help_constraint_hidden ]
     | Tool_catalog.Default -> []
   in
-  let implementation_note =
-    match meta.implementation_status with
-    | Tool_catalog.Placeholder -> [ Prompt_names.tool_help_constraint_placeholder ]
-    | Tool_catalog.Simulation -> [ Prompt_names.tool_help_constraint_simulation ]
-    | Tool_catalog.Adapter -> [ Prompt_names.tool_help_constraint_adapter ]
-    | Tool_catalog.Real -> []
-  in
-  List.filter_map render_fragment_opt (visibility_note @ implementation_note)
+  List.filter_map render_fragment_opt visibility_note
 
 (* Authored help lives in the tool's own [config/tools/<name>.toml] [help]
    table (RFC prompts-and-tool-definitions-outside-ocaml §2.2; the in-code

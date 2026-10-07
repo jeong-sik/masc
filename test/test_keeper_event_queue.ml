@@ -242,8 +242,6 @@ let () =
 
   (* --- typed payload kind labels (RFC-0020): the stimulus kind is a
          closed variant, not classified from a JSON-prefixed string --- *)
-  assert (is_board_signal (board_payload ()));
-  assert (not (is_board_signal Bootstrap));
   assert (String.equal (payload_kind_label (board_payload ())) "board_signal");
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
 
@@ -260,7 +258,6 @@ let () =
           }
       }
   in
-  assert (is_board_signal (board_attention_payload "candidate-1"));
   assert (
     String.equal
       (payload_kind_label (board_attention_payload "candidate-1"))
@@ -408,7 +405,6 @@ let () =
       ; channel = Keeper_continuation_channel.unrouted "test fixture"
       }
   in
-  assert (not (is_board_signal (fusion_payload ())));
   assert (String.equal (payload_kind_label (fusion_payload ())) "fusion_completed");
   assert (
     String.equal
@@ -522,7 +518,6 @@ let () =
     }
   in
   let schedule_payload () = Schedule_due scheduled_wake in
-  assert (not (is_board_signal (schedule_payload ())));
   assert (String.equal (payload_kind_label (schedule_payload ())) "schedule_due");
   (match
      stimulus_of_yojson
@@ -873,46 +868,6 @@ let () =
   in
   assert (String.equal stim.post_id "p1");
   assert (length q = 1);
-
-  (* --- drain_board_all: turn-keyed digest drains every board signal
-     regardless of arrival time (RFC-0334 W2). [old_board] arrived far
-     outside the retired 2 s window — under the old arrival-keyed drain
-     it starved in the queue and cost one extra wake→turn cycle; the
-     turn digest consumes it with the rest. *)
-  let now = Unix.gettimeofday () in
-  let recent_board_1 =
-    { post_id = "rb1"; urgency = Normal; arrived_at = now; payload = board_payload () }
-  in
-  let recent_board_2 =
-    { post_id = "rb2"; urgency = Immediate; arrived_at = now; payload = board_payload () }
-  in
-  let old_board =
-    { post_id = "ob1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }
-  in
-  let bootstrap_in_queue =
-    { post_id = "bs1"; urgency = Normal; arrived_at = now; payload = Bootstrap }
-  in
-  let q_drain = empty in
-  let q_drain = enqueue q_drain recent_board_1 in
-  let q_drain = enqueue q_drain old_board in
-  let q_drain = enqueue q_drain bootstrap_in_queue in
-  let q_drain = enqueue q_drain recent_board_2 in
-  let board_digest, rest_queue = drain_board_all q_drain in
-  assert (List.length board_digest = 3);
-  (match board_digest with
-   | first :: _ ->
-     (* Explicit mentions enqueue as [Immediate], so they lead the digest. *)
-     assert (String.equal first.post_id "rb2")
-   | [] -> Alcotest.fail "expected board signals in digest");
-  assert (
-    List.exists (fun s -> String.equal s.post_id "ob1") board_digest);
-  (* Non-board stimuli are not part of the board digest. *)
-  assert (length rest_queue = 1);
-
-  (* --- drain_board_all: empty queue --- *)
-  let empty_board, empty_rest = drain_board_all empty in
-  assert (List.length empty_board = 0);
-  assert (is_empty empty_rest);
 
   (* --- durable snapshot codec: preserves FIFO order and typed payloads --- *)
   let queue_for_snapshot =

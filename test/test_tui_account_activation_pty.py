@@ -30,6 +30,7 @@ SESSION = "a" * 64
 ACCOUNT = "b" * 64
 ACTIVE = "런타임에 활성화했습니다".encode()
 FAILED = "런타임 활성화 미확인".encode()
+REFRESH_FAILED = "목록을 새로 읽지 못했습니다".encode()
 
 
 def frame(event, data):
@@ -197,10 +198,18 @@ def scenario(binary, outcome):
             h.wait_for_output(process, fd, output, b"account-one.model (quota_exhausted)", start=start, timeout=20.0)
             h.wait_for_output(process, fd, output, "아직 사용할 수 없습니다".encode(), start=start, timeout=20.0)
             assert "검증하고 저장했습니다".encode() not in output[start:]
-        # A successful state's refresh remains read-only.
+        # A successful state's refresh remains read-only. The frame presenter
+        # writes nothing when the refresh changes nothing, so the active
+        # receipt is not drawn again: wait for the refresh request, then read
+        # the screen it left, which must still say active and must not say
+        # the refresh failed.
         refreshed["inventory"].clear()
-        h.send_and_wait(process, fd, output, b"r", ACTIVE)
-        assert h.wait_for_fixture_event(process, fd, output, refreshed["inventory"], timeout=5.0)
+        os.write(fd, b"r")
+        assert h.wait_for_fixture_event(process, fd, output, refreshed["inventory"], timeout=5.0), "r did not reload the saved inventory"
+        h.drain_until_quiet(process, fd, output)
+        settled = h.screen_text(bytes(output))
+        assert ACTIVE in settled and FAILED not in settled, settled
+        assert REFRESH_FAILED not in settled, settled
         assert len(saves) == 1 and len(activations) == (2 if outcome in ("refused", "lost", "incomplete", "close_failed") else 1)
         h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")

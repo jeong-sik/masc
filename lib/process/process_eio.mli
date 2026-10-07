@@ -78,18 +78,11 @@ val child_exit_grace_seconds : float
 
 (** Origin at which a [run_argv*] timeout budget was exhausted.
 
-    - [Timeout_origin.Slot_wait] — retained only for decoding historical
-      telemetry. Current process execution has no pre-admission slot wait and
-      [Process_eio] never emits it.
     - [Timeout_origin.Spawn] — timeout fired before [Eio.Process.spawn] returned, i.e.
       process creation itself stalled (docker daemon backpressure, container
       cold start during [docker run]).
     - [Timeout_origin.Command] — timeout fired after the child was created and while
-      draining pipes or awaiting exit; the normal “command was slow” case.
-
-    The closed vocabulary lives in [Timeout_origin] so process timeouts,
-    LLM timeouts, dashboard refreshes, and health probes cannot drift into
-    separate stringly vocabularies. *)
+      draining pipes or awaiting exit; the normal “command was slow” case. *)
 
 val process_timeout_observer_fn :
   (program:string -> timeout_sec:float -> origin:Timeout_origin.t -> unit) Atomic.t
@@ -97,7 +90,7 @@ val process_timeout_observer_fn :
     [masc_process] carries no [Otel_metric_store] dependency.  [lib/workspace.ml]
     wires it at module load to emit [masc_process_timeout_total].
     [program] is [Filename.basename argv0] (~10-20 distinct programs fleet-wide);
-    [origin] is one of {!Timeout_origin.process_origins}, so the metric’s
+    [origin] is [Spawn] or [Command], so the metric’s
     total cardinality stays bounded by [program × bucket × origin]. *)
 
 val argv_program : string list -> string

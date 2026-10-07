@@ -266,8 +266,17 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
     original = msx_loaded_frame_fixture()[1]
     pixel_responses: list[dict[str, object]] = []
     live_reads: list[LiveMark | None] = []
+    presses: list[list[str]] = []
 
     live_fixture = msx_live_fixture(lambda: (200, original))
+
+    # A game key re-reads the screen only after the server takes the press
+    # (#41199): a refused press leaves the frame and says why. Answer the way
+    # the press route does on success, so the read after the key happens.
+    def press(request_body: bytes = b""):
+        presses.append(json.loads(request_body)["keys"])
+        return 200, {"ok": True, "frame": number[0], "mode": original["mode"],
+                     "cartridge": original["cartridge"], "disk": None}
 
     def live(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
@@ -360,6 +369,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         # keeps its title metadata while the live route returns pixels only.
         before_key = len(live_reads)
         after_key = key(b"z", b"F6: save quick")
+        assert presses == [["z"]], presses
         assert any(mark is not None for mark in live_reads[before_key:]), live_reads
         assert b"SCREEN2" in after_key and b"split.rom" in after_key, after_key[:250]
         print(f"MSX PTY wire: first={len(first)} steady_three_polls={len(steady)} "
@@ -373,7 +383,8 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
                      else "MSX retains Kitty pixels between live polls"),
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
         http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(live),
-                       "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick},
+                       "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick,
+                       "/api/v1/msx/press": RequestHttpResponse(press)},
     )
     if retained_tick:
         print(json.dumps({"msx_tick_pixels": pixel_responses}), flush=True)

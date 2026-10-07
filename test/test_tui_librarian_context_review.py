@@ -62,7 +62,11 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
         )
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"1 loaded / 1 retained")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"context_review")
+        # The run detail opens with the JEV evidence folded (#40795): the
+        # context review report sits behind the pane's own `d` toggle.
+        # Unfold before reading it.
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", "d: 모델·확률·원문 펼치기".encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"d", b"context_review")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         needles = [
             b'"context_review"',

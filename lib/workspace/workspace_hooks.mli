@@ -107,7 +107,6 @@ val operator_pending_confirm_read_result_fn :
 val operator_pending_confirm_remove_fn :
   (Workspace_utils_backend_setup.config -> string -> (unit, string) result) Atomic.t
 
-val subscribe_messages_fn : (subscriber:string -> unit) Atomic.t
 val distributed_lock_acquire_failed_fn : (key:string -> attempts:int -> unit) Atomic.t
 val tool_assigned_fn : (agent_id:string ->
             profile:string ->

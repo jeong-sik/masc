@@ -116,23 +116,6 @@ module Memory : sig
   val exists : t -> string -> bool
   val delete : t -> string -> unit result
   val list_keys : t -> prefix:string -> string list result
-  val set_if_not_exists : t -> string -> string -> bool result
   val clear : t -> unit
   val get_or_create : base_path:string -> t
 end
-
-(** {1 Unified Backend} *)
-
-type backend =
-  | FS of FileSystem.t
-  | Mem of Memory.t
-
-val get : backend -> string -> string result
-val set : backend -> string -> string -> unit result
-val exists : backend -> string -> bool
-val delete : backend -> string -> unit result
-val list_keys : backend -> string list result
-val set_if_not_exists : backend -> string -> string -> bool result
-val acquire_lock : backend -> key:string -> owner:string -> ttl_seconds:int -> bool result
-val release_lock : backend -> key:string -> owner:string -> bool result
-val extend_lock : backend -> key:string -> owner:string -> ttl_seconds:int -> bool result

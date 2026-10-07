@@ -921,6 +921,27 @@ let create_thread_fixture config ~keeper_name =
   meta, signal
 ;;
 
+(* A thread signal whose post is gone from the store has an unavailable
+   relevance read. The push path routes once, delivers nothing and does not
+   wake the lane. *)
+let test_thread_signal_for_a_swept_post_delivers_nothing () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal = create_thread_fixture config ~keeper_name:"sweptlane" in
+       (match Board_dispatch.delete_post ~post_id:signal.signal.post_id with
+        | Ok () -> ()
+        | Error error -> fail (Board.show_board_error error));
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "lane queue stays empty" 0 (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "lane not woken" false (Atomic.get entry.fiber_wakeup)
+       | None -> fail "sweptlane registry entry missing")
+;;
+
 (* The author of a post is a thread participant. [check_self_comment_status]
    only looks for the keeper's own comments, so before the authorship check an
    answer to a keeper's question never reached the keeper that asked. Measured
@@ -1390,6 +1411,8 @@ let () =
             test_restarting_exact_mention_is_durable_with_deferred_wake
         ; test_case "lane metadata failure does not block next durable delivery" `Quick
             test_lane_meta_failure_does_not_block_next_durable_delivery
+        ; test_case "thread signal for a swept post delivers nothing" `Quick
+            test_thread_signal_for_a_swept_post_delivers_nothing
         ; test_case "comment routes bystander lane to attention judgment" `Quick
             test_comment_routes_bystander_lane_to_attention_judgment
         ; test_case "comment on own post wakes the author" `Quick

@@ -133,15 +133,14 @@ let context_budget_json_of_resolution
 
 let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 
-let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
+let record_lifecycle_dispatch_rejection ~keeper_name event ~error =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
     ();
   Log.Keeper.warn
-    "%s: keeper lifecycle dispatch rejected origin=%s event=%s error=%s"
+    "%s: keeper lifecycle dispatch rejected event=%s error=%s"
     keeper_name
-    (Keeper_registry.lifecycle_event_origin_to_string origin)
     (Keeper_state_machine.event_to_string event)
     error
 
@@ -150,13 +149,11 @@ type lifecycle_dispatch_error =
 
 let dispatch_keeper_phase_event_result
     ~(config : Workspace.config)
-    ?(origin = Keeper_registry.Generic_dispatch)
     ~keeper_name
     event =
   match
     Keeper_registry.dispatch_event
       ~base_path:config.base_path
-      ~origin
       keeper_name
       event
   with
@@ -164,13 +161,12 @@ let dispatch_keeper_phase_event_result
   | Error err ->
       record_lifecycle_dispatch_rejection
         ~keeper_name
-        ~origin
         event
         ~error:(Keeper_state_machine.transition_error_to_string err);
       Error (Transition_rejected err)
 
-let dispatch_keeper_phase_event ~config ?origin ~keeper_name event =
-  dispatch_keeper_phase_event_result ~config ?origin ~keeper_name event
+let dispatch_keeper_phase_event ~config ~keeper_name event =
+  dispatch_keeper_phase_event_result ~config ~keeper_name event
   |> ignore
 
 (* ================================================================ *)

@@ -76,29 +76,11 @@ type meta_command =
       { latch : shutdown_latch
       ; updated_at : string
       }
-  | Set_activation_mode of
-      { mode : Keeper_activation_mode.t
-      ; updated_at : string
-      }
   | Update_profile of profile_update
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
-  | Turn_started_projection of { updated_at : string }
-  | Turn_succeeded of
-      { usage : usage_delta
-      ; updated_at : string
-      }
-  | Turn_failed of
-      { usage : usage_delta option
-      ; updated_at : string
-      }
   | Commit_turn_runtime of turn_runtime_delta
-  | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
-      ; updated_at : string
-      }
-  | Ack_message_scope of
-      { message_id : string option
       ; updated_at : string
       }
 

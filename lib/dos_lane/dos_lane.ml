@@ -211,16 +211,16 @@ let current_publication () = Atomic.get published
 
    Written only from call sites that already hold [lock], same as
    [published]'s writes, so the two are never torn relative to each other.
-   Capped by {!Lane_activity.push} rather than kept whole. It outlives an
+   Capped by {!Machine_action_feed.push} rather than kept whole. It outlives an
    eject on purpose -- "who ejected it" is itself an answer a spectator
    watching the screen go blank wants -- and is never otherwise reset: a load
    or restore is one more line on the same feed, not a new one, so the
    Lane's timeline reads as continuous. *)
-let activity_feed : Lane_activity.entry list Atomic.t = Atomic.make []
+let activity_feed : Machine_action_feed.entry list Atomic.t = Atomic.make []
 
 let note_activity ~who action =
   Atomic.set activity_feed
-    (Lane_activity.push { Lane_activity.at = Time_compat.now (); who; action } (Atomic.get activity_feed))
+    (Machine_action_feed.push { Machine_action_feed.at = Time_compat.now (); who; action } (Atomic.get activity_feed))
 ;;
 
 let recent_activity () = Atomic.get activity_feed

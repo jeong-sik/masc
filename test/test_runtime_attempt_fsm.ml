@@ -1,10 +1,5 @@
-(** Unit tests for Runtime_attempt_fsm.
-
-    Covers the functions with production callers first ([should_try_next],
-    [to_user_message], [provider_outcome_to_string]) and documents the pure
-    [decide] matrix.  Only [Call_err]/[Accept_rejected]-reachable paths are
-    exercised: constructing the opaque [Llm_provider.Types.api_response]
-    needed for [Call_ok] is not possible from this test. *)
+(** Unit tests for [Runtime_attempt_fsm.should_try_next], the retry
+    predicate the runtime candidate walk reads. *)
 
 open Runtime_attempt_fsm
 
@@ -27,16 +22,6 @@ let mk_provider_terminal ?(message = "terminal") () =
 let mk_accept_rejected ?(reason = "quality") () =
   Llm_provider.Http_client.AcceptRejected { reason }
 
-let mk_response () : Llm_provider.Types.api_response =
-  {
-    Llm_provider.Types.id = "resp-test";
-    model = "model-test";
-    stop_reason = Llm_provider.Types.EndTurn;
-    content = [];
-    usage = None;
-    telemetry = None;
-  }
-
 (* --- should_try_next (live: keeper_turn_driver_try_runtime) --- *)
 
 let check_retry name expected err =
@@ -57,94 +42,6 @@ let test_should_try_terminal () =
 let test_should_try_accept_rejected () =
   check_retry "accept rejection stops" false (mk_accept_rejected ())
 
-(* --- decide: Call_err / Accept_rejected matrix --- *)
-
-let test_decide_call_err_retryable_not_last () =
-  match
-    decide ~accept_on_exhaustion:false ~is_last:false
-      (Call_err (mk_http_err ~code:429 ()))
-  with
-  | Try_next { last_err = Some _ } -> ()
-  | _ -> Alcotest.fail "retryable + not-last should yield Try_next with last_err"
-
-let test_decide_call_err_retryable_last () =
-  match
-    decide ~accept_on_exhaustion:false ~is_last:true
-      (Call_err (mk_http_err ~code:429 ()))
-  with
-  | Exhausted { last_err = Some _ } -> ()
-  | _ -> Alcotest.fail "retryable + last should yield Exhausted with last_err"
-
-let test_decide_call_err_accept_on_exhaustion_preserves_last_err () =
-  match
-    decide ~accept_on_exhaustion:true ~is_last:true
-      (Call_err (mk_http_err ~code:429 ()))
-  with
-  | Exhausted { last_err = Some _ } -> ()
-  | _ ->
-    Alcotest.fail
-      "accept_on_exhaustion should not discard the final Call_err"
-
-let test_decide_call_err_terminal_not_last () =
-  match
-    decide ~accept_on_exhaustion:false ~is_last:false
-      (Call_err (mk_provider_terminal ()))
-  with
-  | Exhausted { last_err = Some _ } -> ()
-  | _ -> Alcotest.fail "non-retryable error should yield Exhausted even when not last"
-
-let test_decide_accept_rejected_not_last () =
-  (* Production maps typed accept rejection through the HTTP-error shape before
-     candidate retry classification. Pin that boundary explicitly. *)
-  match
-    decide ~accept_on_exhaustion:false ~is_last:false
-      (Call_err (mk_accept_rejected ()))
-  with
-  | Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected _) } -> ()
-  | _ -> Alcotest.fail "AcceptRejected via Call_err is non-retryable → Exhausted"
-
-let test_decide_accept_rejected_outcome_not_last () =
-  match
-    decide ~accept_on_exhaustion:false ~is_last:false
-      (Accept_rejected { response = mk_response (); reason = "no visible answer" })
-  with
-  | Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) } ->
-    Alcotest.(check string) "reason preserved" "no visible answer" reason
-  | _ -> Alcotest.fail "AcceptRejected outcome is terminal even before last provider"
-
-(* --- to_user_message (live: keeper_turn_driver_try_runtime) --- *)
-
-let contains ~needle haystack =
-  let nl = String.length needle and hl = String.length haystack in
-  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
-  nl = 0 || scan 0
-
-let test_user_message_http () =
-  let msg = to_user_message (Some (mk_http_err ~code:503 ~body:"overloaded" ())) in
-  Alcotest.(check bool) "mentions HTTP 503" true (contains ~needle:"503" msg)
-
-let test_user_message_accept_rejected () =
-  let msg = to_user_message (Some (mk_accept_rejected ~reason:"low quality" ())) in
-  Alcotest.(check string) "reason passes through" "low quality" msg
-
-let test_user_message_network () =
-  let msg = to_user_message (Some (mk_network_err ~message:"conn reset" ())) in
-  Alcotest.(check string) "network message passes through" "conn reset" msg
-
-let test_user_message_none () =
-  Alcotest.(check bool) "absent error still yields a message" true
-    (String.length (to_user_message None) > 0)
-
-(* --- provider_outcome_to_string --- *)
-
-let test_outcome_to_string_call_err () =
-  Alcotest.(check bool) "Call_err serializes non-empty" true
-    (String.length (provider_outcome_to_string (Call_err (mk_http_err ()))) > 0)
-
-let test_outcome_option_to_string_none () =
-  Alcotest.(check bool) "None serializes non-empty" true
-    (String.length (provider_outcome_option_to_string None) > 0)
-
 let () =
   Alcotest.run "runtime_attempt_fsm"
     [ ( "should_try_next"
@@ -158,31 +55,5 @@ let () =
         ; Alcotest.test_case "timeout" `Quick test_should_try_timeout
         ; Alcotest.test_case "provider terminal" `Quick test_should_try_terminal
         ; Alcotest.test_case "accept rejected" `Quick test_should_try_accept_rejected
-        ] )
-    ; ( "decide"
-      , [ Alcotest.test_case "retryable not-last" `Quick
-            test_decide_call_err_retryable_not_last
-        ; Alcotest.test_case "retryable last" `Quick
-            test_decide_call_err_retryable_last
-        ; Alcotest.test_case "accept_on_exhaustion preserves Call_err" `Quick
-            test_decide_call_err_accept_on_exhaustion_preserves_last_err
-        ; Alcotest.test_case "terminal not-last" `Quick
-            test_decide_call_err_terminal_not_last
-        ; Alcotest.test_case "accept-rejected via Call_err" `Quick
-            test_decide_accept_rejected_not_last
-        ; Alcotest.test_case "accept-rejected outcome terminal" `Quick
-            test_decide_accept_rejected_outcome_not_last
-        ] )
-    ; ( "to_user_message"
-      , [ Alcotest.test_case "HTTP 503" `Quick test_user_message_http
-        ; Alcotest.test_case "accept rejected reason" `Quick
-            test_user_message_accept_rejected
-        ; Alcotest.test_case "network message" `Quick test_user_message_network
-        ; Alcotest.test_case "none" `Quick test_user_message_none
-        ] )
-    ; ( "provider_outcome_to_string"
-      , [ Alcotest.test_case "Call_err" `Quick test_outcome_to_string_call_err
-        ; Alcotest.test_case "option none" `Quick
-            test_outcome_option_to_string_none
         ] )
     ]

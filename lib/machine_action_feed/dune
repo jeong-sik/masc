@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name machine_action_feed)
+ (public_name masc.machine_action_feed)
+ (wrapped false)
+ (modules machine_action_feed)
+ (libraries yojson))

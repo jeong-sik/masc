@@ -7928,7 +7928,12 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
              | Ok (roster, _) ->
                match Keeper_control.liveness_of_roster roster keeper_name with
                | Keeper_control.Present runtime -> Ok runtime.kr_paused
-               | Unobserved | Invalid _ | Absent ->
+               (* A complete roster without the Keeper: no owner is running,
+                  and the server refuses chat admission without one, so a
+                  local send could only be refused. Name the way out. *)
+               | Absent ->
+                 Error "Keeper is not running on the server; boot it, then /queue resume sends the retained input"
+               | Unobserved | Invalid _ ->
                  Error "Keeper pause state is unavailable; input remains retained") in
         let* () = check_control () in
         if not owner_paused then Ok ["Server confirmed the Keeper is active"] else

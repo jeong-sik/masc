@@ -4040,12 +4040,9 @@ let test_composing_holds_only_while_the_composer_is_live () =
 
 ;;
 
-(* The rows that say a request is being sent have to say how long for. A turn
-   running minutes is ordinary, and without an age those rows read the same at
-   three seconds and at thirteen minutes -- which is the difference between
-   slow and stuck. The age is computed where it can be tested; this pins that
-   the pane actually asks for it. *)
-let test_the_sending_rows_show_an_age () =
+(* In-flight status remains visible without a clock by default. Opting into
+   clocks also reveals request ages, including other Keepers' compact rows. *)
+let test_the_sending_rows_follow_clock_visibility () =
   List.iter (fun keeper_name ->
     let state = Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
         ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -4056,6 +4053,12 @@ let test_the_sending_rows_show_an_age () =
       | (_, text) :: _ -> text
       | [] -> fail "an in-flight request lost its status row"
     in
+    let bare_summary = summary ~now:5. in
+    check bool "default request row retains its running status" true
+      (String.starts_with ~prefix:"  (running " bare_summary);
+    check string "default request row omits changing ages" bare_summary
+      (summary ~now:782.);
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     check bool "three-second request displays its age" true
       (String.ends_with ~suffix:" · 3s)" (summary ~now:5.));
     check bool "thirteen-minute request displays its changed age" true
@@ -4067,9 +4070,14 @@ let test_the_sending_rows_show_an_age () =
       check (list string) "compact status retains the running request" ["기존 작업 처리 중"]
         (List.map Masc_tui_answering.chat_activity_row_text
            (Tui_types.keeper_message_activity_rows state))
-    end else
+    end else begin
+      state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+      check string "compact mode hides the other Keeper request age" bare_summary
+        (summary ~now:782.);
+      state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
       check bool "compact mode retains the other Keeper request age" true
-        (String.ends_with ~suffix:" · 3s)" (summary ~now:5.)))
+        (String.ends_with ~suffix:" · 3s)" (summary ~now:5.))
+    end)
     ["alpha"; "beta"]
 
 ;;
@@ -4383,6 +4391,21 @@ let test_observed_checkpoint_retains_earlier_output () =
     Tui_types.turn_log_add ~now:110. log ~seq:(Some 8) Live.Run_started;
     Tui_types.turn_log_add ~now:111. log ~seq:(Some 9) (Live.Text "TEXT_AFTER_CHECKPOINT");
     retained "continuation starts";
+    let status () = Tui_types.keeper_message_visible_status_rows state
+        log.tl_transcript ~now:172_911.
+      |> List.map snd |> String.concat "\n" in
+    check bool "resumed progress keeps its activity" true
+      (Astring.String.is_infix ~affix:"STREAMING" (status ()));
+    check bool "resumed progress hides the cumulative request age" false
+      (Astring.String.is_infix ~affix:"2d" (status ()));
+    check bool "resumed progress hides silence timing" false
+      (Astring.String.is_infix ~affix:"nothing back for" (status ()));
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    check bool "clock metadata restores elapsed details" true
+      (Astring.String.is_infix ~affix:"2d" (status ()));
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+    check bool "turning clocks off hides silence timers again" false
+      (Astring.String.is_infix ~affix:"nothing back for" (status ()));
     check bool "new continuation text also appears" true
       (Astring.String.is_infix ~affix:"TEXT_AFTER_CHECKPOINT" (screen ())))
 ;;
@@ -5144,8 +5167,8 @@ let () =
             test_composing_holds_only_while_the_composer_is_live
         ; test_case "the support threshold reserves the scrollback row" `Quick
             test_the_support_threshold_reserves_the_scrollback_row
-        ; test_case "the sending rows show an age" `Quick
-            test_the_sending_rows_show_an_age
+        ; test_case "the sending rows follow clock visibility" `Quick
+            test_the_sending_rows_follow_clock_visibility
         ; test_case "a refresh keeps what was paged back to" `Quick
             test_a_refresh_keeps_what_was_paged_back_to
         ; test_case "a refresh does not double the overlap" `Quick

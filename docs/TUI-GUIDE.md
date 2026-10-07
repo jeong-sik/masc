@@ -958,7 +958,8 @@ steps in two cells and reads behind a solid bar in the sender's colour, where
 the journal's rows carry a dotted one. The operator's lines, the keeper's
 replies and its work rows stay at the conversation's edge.
 
-Chat opens without timestamps, turn time ranges or hourly separators.
+Chat opens without timestamps, turn time ranges, hourly separators or generated
+progress timers (request age, call age and model silence).
 `Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
 (`metadata:full`), then returns to the default. The short clock appears only
 where the minute moved. An open request between continuation segments has no

@@ -2,6 +2,7 @@ module Context = Workspace_memory_context
 module Ledger = Workspace_memory_ledger
 module Request = Workspace_memory_request
 module Decision = Workspace_memory_decision
+module Briefing = Workspace_memory_briefing
 module Exact = Agent_core.Exact_output
 module Runs = Exact_lane_run_registry
 
@@ -30,7 +31,7 @@ type http_failure =
 
 (* The lane's HTTP slots, as one exact-output flow. *)
 let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requirement
-    ~rendered_prompt ~selected ~ledger =
+    ~rendered_prompt ~validate_output =
   let failed result = Result.map_error (fun detail -> Http_failed detail) result in
   let rec candidates = function
     | [] -> Ok []
@@ -62,7 +63,7 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
   | Some net, Some clock ->
     let validate success =
       let raw = (Exact.flow_success_output success).output in
-      match validate ~selected ~ledger raw with
+      match validate_output raw with
       | Ok _ -> Exact.Accept raw
       | Error detail -> Exact.Reject_and_advance detail in
     let flow = Exact.execute_flow_once ~net ~clock
@@ -85,14 +86,26 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
 (* This lane requires a measured context window for every provider it can
    dispatch to. Official-client slots do not publish one, so they are refused
    by [prepare_execution] instead of silently exceeding the request bound. *)
-let execute ~(resolved : Runtime_exact_output_registry.resolved_lane)
-    ~rendered_prompt ~selected ~ledger =
-  let requirement = Exact.make_output_requirement ~schema:output_schema
+let execute_output ~(resolved : Runtime_exact_output_registry.resolved_lane)
+    ~schema ~rendered_prompt ~validate_output =
+  let requirement = Exact.make_output_requirement ~schema
       ~minimum_guarantee:Exact.Json_syntax in
-  match execute_http ~resolved ~requirement ~rendered_prompt ~selected ~ledger with
+  match execute_http ~resolved ~requirement ~rendered_prompt ~validate_output with
   | Ok answer -> Ok answer
   | Error No_http_slot -> Error "workspace curator has no admitted exact-output HTTP slot"
   | Error (Http_failed detail) -> Error detail
+
+let execute ~resolved ~rendered_prompt ~selected ~ledger =
+  execute_output ~resolved ~schema:output_schema ~rendered_prompt
+    ~validate_output:(validate ~selected ~ledger)
+
+let summarize ~resolved ~batch =
+  execute_output ~resolved ~schema:Briefing.output_schema
+    ~rendered_prompt:(Briefing.rendered_prompt batch)
+    ~validate_output:(fun raw ->
+      let* text = Briefing.decode_output raw in
+      let* _ = Briefing.accept batch ~text in
+      Ok raw)
 
 type owner =
   { mutex : Stdlib.Mutex.t
@@ -126,27 +139,29 @@ let request ~base_path =
 type execution =
   { configuration : Yojson.Safe.t
   ; max_input_bytes : int
+  ; briefing_input_bytes : int
   ; execute : rendered_prompt:string -> selected:Ledger.pending_fact list
       -> ledger:Ledger.t -> (Yojson.Safe.t * string, string) result
+  ; summarize : batch:Briefing.batch -> (Yojson.Safe.t * string, string) result
   }
 
-let admitted_input_bytes (slot : Runtime_exact_output_registry.selected_slot) =
+let admitted_input_bytes ~schema (slot : Runtime_exact_output_registry.selected_slot) =
   let target = Exact.projection_target slot.admitted_target in
   match Llm_provider.Provider_config.context_window target.config, target.config.max_tokens with
   | Some window, Some output when window > output ->
-    let schema_bytes = String.length (Yojson.Safe.to_string output_schema) in
+    let schema_bytes = String.length (Yojson.Safe.to_string schema) in
     let available = window - output - schema_bytes in
     if available > 0 then Ok available else Error (slot.slot_id ^ " has no input room")
   | _ -> Error (slot.slot_id ^ " has no known context window and output budget")
 
-let minimum_input_bytes slots =
+let minimum_input_bytes ~schema slots =
   match slots with
   | [] -> Error "workspace curator needs a window-declared HTTP slot to bound its input"
   | first :: rest ->
-    let* initial = admitted_input_bytes first in
+    let* initial = admitted_input_bytes ~schema first in
     List.fold_left (fun result slot ->
       let* size = result in
-      let* next = admitted_input_bytes slot in
+      let* next = admitted_input_bytes ~schema slot in
       Ok (min size next)) (Ok initial) rest
 
 let prepare_execution ~base_path =
@@ -156,15 +171,16 @@ let prepare_execution ~base_path =
     |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string in
   let* () = if resolved.cli_slots = [] then Ok ()
     else Error "workspace curator cannot bound official-client slots without a declared context window" in
-  let* max_input_bytes = minimum_input_bytes resolved.selected_slots in
+  let* max_input_bytes = minimum_input_bytes ~schema:output_schema resolved.selected_slots in
+  let* briefing_input_bytes = minimum_input_bytes ~schema:Briefing.output_schema resolved.selected_slots in
   let configuration = `Assoc
     [ "catalog_generation", `String (Runtime_exact_output_registry.catalog_generation_fingerprint registry)
     ; "slots", `List (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> `String slot.slot_id) resolved.selected_slots)
     ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots) ] in
-  Ok { configuration; max_input_bytes;
-       execute = execute ~resolved }
+  Ok { configuration; max_input_bytes; briefing_input_bytes;
+       execute = execute ~resolved; summarize = summarize ~resolved }
 
-let run ~base_path ~prepare =
+let classify ~base_path ~prepare =
   let initial = Domain_pool_ref.submit_io_or_inline (fun () ->
     let* context = Context.collect ~base_path in
     let* ledger = Ledger.load ~base_path in
@@ -173,8 +189,8 @@ let run ~base_path ~prepare =
       else Ledger.save ~base_path change.ledger in
     Ok (context, change)) in
   match initial with
-  | Error detail -> Log.Server.error "workspace curator inventory: %s" detail; false
-  | Ok (_, { Ledger.new_facts = []; _ }) -> false
+  | Error detail -> Error detail
+  | Ok (_, { Ledger.new_facts = []; _ }) -> Ok false
   | Ok (context, change) ->
     let prepared =
       let* execution = prepare () in
@@ -192,7 +208,7 @@ let run ~base_path ~prepare =
       | Some batch -> Ok (execution, resolution, batch)
     in
     (match prepared with
-     | Error detail -> Log.Server.error "workspace curator request: %s" detail; false
+     | Error detail -> Error detail
      | Ok (execution, resolution, batch) ->
        let registry = Runs.global () in
        let run_id = Random_id.prefixed ~prefix:"workspace-curator-" ~bytes:16 in
@@ -227,7 +243,7 @@ let run ~base_path ~prepare =
        let fail detail =
          complete (Runs.Failed { code = "workspace_curator_failed"; detail })
            (`Assoc ["error", `String detail; "semantic_verification", `String "not_performed"]);
-         false in
+         Error detail in
        try
          let result =
            let* raw, slot = execution.execute ~rendered_prompt:batch.rendered_prompt
@@ -245,12 +261,106 @@ let run ~base_path ~prepare =
                       ; "ledger_sha256", `String (sha (Yojson.Safe.to_string (Ledger.to_json updated)))
                       ; "remaining_count", `Int (List.length batch.remaining)
                       ; "semantic_verification", `String "not_performed" ]);
-            batch.remaining <> [])
+            Ok (batch.remaining <> []))
        with
        | Eio.Cancel.Cancelled _ as error ->
          Eio.Cancel.protect (fun () -> complete Runs.Cancelled (`Assoc ["cancelled", `Bool true]));
          raise error
        | exn -> fail (Printexc.to_string exn))
+
+(* Classification and synthesis have separate durable boundaries. In
+   particular, an existing ledger and a deletion-only reconciliation need a
+   briefing even when there are no facts left to classify. *)
+let refresh_briefing ~base_path ~prepare =
+  let directory = Ledger.directory ~base_path in
+  let* ledger, state = Domain_pool_ref.submit_io_or_inline (fun () ->
+    let* ledger = Ledger.load ~base_path in
+    let* state = Briefing.load ~directory in
+    Ok (ledger, state)) in
+  let sources = Ledger.briefing_sources ledger in
+  let key = Prompt_names.workspace_memory_briefing in
+  let resolution = Prompt_registry.resolve_prompt key in
+  let sha text = Digestif.SHA256.(digest_string text |> to_hex) in
+  let contract = sha (Yojson.Safe.to_string (`List
+    [`String resolution.effective; Briefing.output_schema])) in
+  if not (Briefing.needs_refresh ~sources ~contract state) then Ok false
+  else
+    let* execution = prepare () in
+    let render json = Prompt_registry.render_resolved_prompt_template key resolution
+        ["workspace_memory_briefing", Yojson.Safe.to_string json] in
+    let* batch = Briefing.prepare ~sources ~contract
+        ~max_input_bytes:execution.briefing_input_bytes ~render state in
+    match batch with
+    | None -> Ok false
+    | Some batch ->
+      let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
+        Briefing.save ~directory (Briefing.prepared_state batch)) in
+      let registry = Runs.global () in
+      let run_id = Random_id.prefixed ~prefix:"workspace-briefing-" ~bytes:16 in
+      let started_at = Time_compat.now () in
+      let monotonic_start = Mtime_clock.now () in
+      let input = `Assoc
+        [ "phase", `String "briefing"
+        ; "ledger_sha256", `String (sha (Yojson.Safe.to_string (Ledger.to_json ledger)))
+        ; "contract_sha256", `String contract
+        ; "actual_input", Briefing.input batch
+        ; "prompt", `Assoc
+          [ "key", `String key
+          ; "effective_template", `String resolution.effective
+          ; "rendered", `String (Briefing.rendered_prompt batch)
+          ; "rendered_sha256", `String (sha (Briefing.rendered_prompt batch)) ]
+        ; "output_schema", Briefing.output_schema
+        ; "configuration", execution.configuration
+        ; "max_input_bytes", `Int execution.briefing_input_bytes
+        ; "selected_count", `Int (Briefing.selected_count batch)
+        ; "remaining_count", `Int (Briefing.remaining_count batch) ] in
+      Runs.register_running registry ~run_id ~lane:Runs.Workspace_curator
+        ~actor:base_path ~started_at ~input:(Runs.Exact_input input);
+      let complete ?selected_slot outcome output =
+        match Runs.mark_completed registry ~run_id ~outcome
+          ~elapsed_s:(Mtime.Span.to_float_ns (Mtime.span monotonic_start (Mtime_clock.now ())) /. 1e9)
+          ~selected_slot ~output with
+        | Ok () -> ()
+        | Error error -> Log.Server.error "workspace briefing completion %s: %s"
+            run_id (Runs.completion_error_to_string error) in
+      let fail detail =
+        complete (Runs.Failed { code = "workspace_curator_briefing_failed"; detail })
+          (`Assoc ["error", `String detail]);
+        Error detail in
+      try
+        let result =
+          let* raw, slot = execution.summarize ~batch in
+          let* text = Briefing.decode_output raw in
+          let* updated = Briefing.accept batch ~text in
+          let* () = Domain_pool_ref.submit_io_or_inline (fun () -> Briefing.save ~directory updated) in
+          Ok (text, slot, updated) in
+        (match result with
+         | Error detail -> fail detail
+         | Ok (text, slot, updated) ->
+           let more = Briefing.needs_refresh ~sources ~contract updated in
+           complete ~selected_slot:slot Runs.Succeeded
+             (`Assoc [ "phase", `String "briefing"
+                     ; "briefing", `String text
+                     ; "briefing_bytes", `Int (String.length text)
+                     ; "source_refresh_pending", `Bool more
+                     ; "semantic_verification", `String "not_performed" ]);
+           Ok more)
+      with
+      | Eio.Cancel.Cancelled _ as error ->
+        Eio.Cancel.protect (fun () -> complete Runs.Cancelled (`Assoc ["cancelled", `Bool true]));
+        raise error
+      | exn -> fail (Printexc.to_string exn)
+
+let run ~base_path ~enabled ~prepare =
+  match classify ~base_path ~prepare with
+  | Error detail -> Log.Server.error "workspace curator classification: %s" detail; false
+  | Ok classification_pending when not (enabled ()) -> classification_pending
+  | Ok classification_pending ->
+    match refresh_briefing ~base_path ~prepare with
+    | Ok briefing_pending -> classification_pending || briefing_pending
+    | Error detail ->
+      Log.Server.error "workspace curator briefing: %s" detail;
+      classification_pending
 
 let start_with ~sw ~base_path ~enabled ~prepare =
   let base_path = Unix.realpath base_path in
@@ -296,7 +406,7 @@ let start_with ~sw ~base_path ~enabled ~prepare =
         | `Wait promise -> Eio.Promise.await promise; drain ()
         | `Run ->
           (* fire-and-forget: remaining facts queue another pulse; stopped owners need none. *)
-          (try if enabled () && run ~base_path ~prepare then ignore (wake owner) with
+          (try if enabled () && run ~base_path ~enabled ~prepare then ignore (wake owner) with
            | Eio.Cancel.Cancelled _ as error -> raise error
            | exn -> Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
           Stdlib.Mutex.protect owner.mutex (fun () -> owner.in_flight <- false);
@@ -318,16 +428,17 @@ let start ~sw ~base_path =
 module For_testing = struct
   let execute = execute
 
-  let start_with_enabled ~sw ~base_path ~enabled ~max_input_bytes ~execute =
+  let start_with_enabled ~sw ~base_path ~enabled ~max_input_bytes ~execute ~summarize =
     start_with ~sw ~base_path ~enabled
       ~prepare:(fun () -> Ok { configuration = `Assoc ["injected_runner", `Bool true];
-                              max_input_bytes; execute })
+                              max_input_bytes; briefing_input_bytes = max_input_bytes;
+                              execute; summarize })
 
-  let start ~sw ~base_path ~max_input_bytes ~execute =
-    start_with_enabled ~sw ~base_path ~enabled:(fun () -> true) ~max_input_bytes ~execute
+  let start ~sw ~base_path ~max_input_bytes ~execute ~summarize =
+    start_with_enabled ~sw ~base_path ~enabled:(fun () -> true) ~max_input_bytes ~execute ~summarize
 
-  let start_configured ~sw ~base_path ~max_input_bytes ~execute =
-    start_with_enabled ~sw ~base_path ~enabled:configured ~max_input_bytes ~execute
+  let start_configured ~sw ~base_path ~max_input_bytes ~execute ~summarize =
+    start_with_enabled ~sw ~base_path ~enabled:configured ~max_input_bytes ~execute ~summarize
 
   let find ~base_path =
     let base_path = Unix.realpath base_path in

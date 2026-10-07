@@ -6,27 +6,48 @@ module Current = Masc.Keeper_memory_os_current
 module Types = Masc.Keeper_memory_os_types
 module Runs = Masc.Exact_lane_run_registry
 module Registry = Runtime_exact_output_registry
+module Briefing = Masc.Workspace_memory_briefing
+module Prompt = Masc.Keeper_unified_prompt
+module Inputs = Masc.Keeper_world_observation_inputs
 
 let require = function Ok value -> value | Error detail -> Alcotest.fail detail
 let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 let field name json = Yojson.Safe.Util.member name json
 let string = Yojson.Safe.Util.to_string
 
-let commit ?(keeper_id = "writer") base_path claim =
+let commit_facts ?(keeper_id = "writer") base_path claims =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let expected_revision = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
     | None -> None | Some snapshot -> Some snapshot.revision in
   let now = 1_700_000_000. in
-  let fact = Types.observed ~claim ~category:Types.Fact ~now
-      ~origin:{ kind = Types.Authored; trace_id = "curator-test" } in
+  let facts = List.map (fun claim -> Types.observed ~claim ~category:Types.Fact ~now
+      ~origin:{ kind = Types.Authored; trace_id = "curator-test" }) claims in
   Current.replace ~keepers_dir ~keeper_id ~expected_revision ~now
-    ~source:{ kind = Current.Librarian; trace_id = "curator-test" } ~facts:[fact] ()
+    ~source:{ kind = Current.Librarian; trace_id = "curator-test" } ~facts ()
   |> require |> ignore
+
+let commit ?keeper_id base_path claim = commit_facts ?keeper_id base_path [claim]
 
 let answer selected =
   `Assoc ["decisions", `List (List.map (fun (fact : Ledger.pending_fact) ->
     `Assoc ["fact_id", `String (Request.fact_id fact.fact);
             "kind", `String "create_claim"; "value", `String fact.claim]) selected)]
+
+(* A deterministic provider fixture preserves the prior summary and every
+   selected entry. It exercises the real batch contract without pretending to
+   measure whether a model chose a faithful natural-language summary. *)
+let fixture_summarize ~batch =
+  let input = Briefing.input batch in
+  let previous = match field "previous_summary" input with
+    | `Null -> []
+    | `String text -> [text]
+    | _ -> Alcotest.fail "briefing previous_summary must be text or null" in
+  let entries = field "entries" input |> Yojson.Safe.Util.to_list in
+  let texts = List.map (fun entry ->
+    let kind = field "kind" entry |> string in
+    let text = field "text" entry |> string in
+    kind ^ " observation: " ^ text) entries in
+  Ok (`Assoc ["briefing", `String (String.concat "\n" (previous @ texts))], "summary.slot")
 
 let await_idle ~clock ~base_path =
   Eio.Time.with_timeout_exn clock 5. (fun () ->
@@ -34,6 +55,7 @@ let await_idle ~clock ~base_path =
 
 let with_base f =
   Prompt_registry.set_markdown_dir "../config/prompts";
+  Masc.Prompt_defaults.init ();
   let base_path = Filename.temp_dir "workspace-curator-ledger" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Eio_main.run (fun env -> f base_path env#clock))
@@ -41,13 +63,17 @@ let with_base f =
 let test_changed_facts_update_ledger_and_no_work_is_silent () = with_base (fun base_path clock ->
   commit base_path "Original observation";
   let calls = ref 0 in
-  let execute ~rendered_prompt ~selected ~ledger:_ =
+  let execute ~rendered_prompt:_ ~selected ~ledger:_ =
     incr calls;
-    Alcotest.(check bool) "prompt includes only changed facts" true
-      (String.contains rendered_prompt 'O');
+    let expected = match !calls with
+      | 1 -> ["Original observation"]
+      | 2 -> ["Independent observation"]
+      | _ -> Alcotest.fail "unchanged facts reached the classifier" in
+    Alcotest.(check (list string)) "only changed facts reach classification" expected
+      (List.map (fun (fact : Ledger.pending_fact) -> fact.claim) selected);
     Ok (answer selected, "test.slot") in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+    Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
     await_idle ~clock ~base_path;
     Alcotest.(check int) "one initial model call" 1 !calls;
     let ledger = Ledger.load ~base_path |> require in
@@ -68,7 +94,7 @@ let test_failure_preserves_ledger_and_later_change_retries () = with_base (fun b
   let execute ~rendered_prompt:_ ~selected ~ledger:_ =
     if !fail then Error "injected provider failure" else Ok (answer selected, "test.slot") in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+    Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
     await_idle ~clock ~base_path;
     Alcotest.(check int) "failed answer stores no assignment" 0
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
@@ -90,7 +116,7 @@ let test_invalid_model_answer_is_not_saved () = with_base (fun base_path clock -
   let execute ~rendered_prompt:_ ~selected:_ ~ledger:_ =
     Ok (`Assoc ["decisions", `List []], "test.slot") in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+    Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
     await_idle ~clock ~base_path;
     Alcotest.(check int) "invalid answer did not write an assignment" 0
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
@@ -101,7 +127,7 @@ let test_owner_switch_liveness () = with_base (fun base_path clock ->
   let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "test.slot") in
   match Eio.Time.with_timeout clock 5. (fun () ->
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       await_idle ~clock ~base_path);
     Ok ()) with
   | Ok () -> ()
@@ -122,7 +148,7 @@ let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun 
   let execute ~rendered_prompt:_ ~selected:_ ~ledger:_ =
     Alcotest.fail "missing Keeper directory reached a model" in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+    Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
     await_idle ~clock ~base_path;
     Alcotest.(check bool) "owner did not fabricate the missing directory" false
       (Sys.file_exists keepers_dir);
@@ -142,11 +168,16 @@ let test_initial_inventory_drains_across_bounded_runs () = with_base (fun base_p
       (String.length rendered_prompt <= 2000);
     Ok (answer selected, "test.slot") in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:2000 ~execute;
+    Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:2000 ~execute;
     await_idle ~clock ~base_path;
     Alcotest.(check bool) "initial inventory required more than one model call" true (!calls > 1);
     Alcotest.(check int) "all facts are classified" 4
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+    (match Ledger.observe ~base_path with
+     | Ledger.Available { briefing = Ok (Briefing.Current summary); _ } ->
+       Alcotest.(check int) "final briefing includes sources from every classification batch"
+         4 (List.length summary.source_ids)
+     | _ -> Alcotest.fail "bounded classification drain did not finish its shared briefing");
     Worker.For_testing.stop ~base_path))
 
 let accept_registry result =
@@ -177,7 +208,7 @@ let test_reenable_wakes_retained_facts () = with_base (fun base_path clock ->
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
       incr calls; Ok (answer selected, "curator-fixture") in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       await_idle ~clock ~base_path;
       Alcotest.(check int) "off owner parked without a model" 0 !calls;
       Alcotest.(check int) "off preserves unassigned fact" 0
@@ -202,7 +233,7 @@ let test_fence_exit_retries_deferred_work outcome = with_base (fun base_path clo
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
       incr calls; Ok (answer selected, "curator-fixture") in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       await_idle ~clock ~base_path;
       Alcotest.(check int) "initial pass finished" 1 !calls;
       let before = accept_registry (Registry.current ()) in
@@ -242,7 +273,7 @@ let test_initial_publication_wakes_parked_owner () = with_base (fun base_path cl
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
       incr calls; Ok (answer selected, "curator-fixture") in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       await_idle ~clock ~base_path;
       Alcotest.(check int) "unpublished registry does not run model" 0 !calls;
       publish true;
@@ -262,7 +293,7 @@ let test_off_preserves_in_flight_and_reenable_resumes_next_fact () = with_base (
       if !calls = 1 then (Eio.Promise.resolve mark_entered (); Eio.Promise.await release);
       Ok (answer selected, "curator-fixture") in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
       publish false;
       commit base_path "Pending after off";
@@ -286,10 +317,10 @@ let test_cancelled_owner_does_not_consume_another_owners_wake () = with_base (fu
       let execute calls ~rendered_prompt:_ ~selected ~ledger:_ =
         incr calls; Ok (answer selected, "curator-fixture") in
       Eio.Switch.run (fun survivor ->
-        Worker.For_testing.start_configured ~sw:survivor ~base_path:other ~max_input_bytes:8192
+        Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw:survivor ~base_path:other ~max_input_bytes:8192
           ~execute:(execute surviving_calls);
         Eio.Switch.run (fun stopped ->
-          Worker.For_testing.start_configured ~sw:stopped ~base_path ~max_input_bytes:8192
+          Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw:stopped ~base_path ~max_input_bytes:8192
             ~execute:(execute stopped_calls);
           await_idle ~clock ~base_path; await_idle ~clock ~base_path:other);
         (match Worker.request ~base_path with
@@ -325,7 +356,7 @@ let test_enable_publication_resumes_existing_fact () = with_registry (fun () ->
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
       incr calls; Ok (answer selected, "curator-test") in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start_configured ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       await_idle ~clock ~base_path;
       Alcotest.(check int) "disabled lane makes no call" 0 !calls;
       (match Registry.publish ~lanes:[{ curator_lane with slot_ids = [] }] snapshot with
@@ -359,7 +390,7 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
       registry_ok (Registry.prepare_replacement ~runtime_observations:[] ~lanes
         ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       await_idle ~clock ~base_path;
       Alcotest.(check int) "initial refused attempt" 1 !calls;
       registry_ok (Registry.publish ~lanes:[curator_lane] before) |> ignore;
@@ -428,7 +459,7 @@ let test_credential_publication_resumes_pending_fact () = with_registry (fun () 
       if !calls = 1 then Error "injected credential refusal"
       else Ok (answer selected, "curator-test") in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       await_idle ~clock ~base_path;
       Alcotest.(check int) "initial refusal leaves pending work" 1 !calls;
       registry_ok (Registry.publish ~runtime_observations:before_observations ~lanes:[curator_lane] before) |> ignore;
@@ -519,7 +550,7 @@ let test_publication_during_failed_call_keeps_wake () = with_registry (fun () ->
         Error "old configuration failed")
       else Ok (answer selected, "curator-test") in
     Eio.Switch.run (fun sw ->
-      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~max_input_bytes:8192 ~execute;
       Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
       let changed = { curator_lane with max_output_tokens = Some 100 } in
       registry_ok (Registry.publish ~lanes:[changed] snapshot) |> ignore;
@@ -528,6 +559,195 @@ let test_publication_during_failed_call_keeps_wake () = with_registry (fun () ->
       await_idle ~clock ~base_path;
       Alcotest.(check int) "in-flight failure does not consume recovery wake" 2 !calls;
       Worker.For_testing.stop ~base_path)))
+
+let empty_world : Masc.Keeper_world_observation.world_observation =
+  { pending_messages = []; pending_board_events = []; idle_seconds = 0;
+    active_goals = Ok []; unclaimed_task_count = 0; claimable_tasks = [];
+    held_task_skills = []; failed_task_count = 0;
+    scheduled_automation = Masc.Keeper_world_observation.empty_scheduled_automation_observation;
+    approval_authority =
+      { revision = 1; state = Masc.Keeper_world_observation.Approval_authority_complete; pending = [] };
+    backlog_revision = Some 1; running_keeper_fiber_count = 0;
+    connected_surfaces = []; connected_surface_failures = [];
+    own_recent_board_posts = []; fleet_messages = []; own_recent_actions = Ok [] }
+
+let occurrences ~needle text =
+  let rec count offset found =
+    if offset + String.length needle > String.length text then found
+    else if String.sub text offset (String.length needle) = needle
+    then count (offset + String.length needle) (found + 1)
+    else count (offset + 1) found in
+  if needle = "" then Alcotest.fail "empty briefing assertion" else count 0 0
+
+let check_delivery ~base_path expected =
+  let observation = Ledger.observe ~base_path in
+  let direct = Masc.Keeper_turn.For_testing.direct_turn_dynamic_context
+    ~lane_updates:(Ok (`List [])) ~workspace_memory:observation
+    ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
+    ~approval_authority_text:"" ~recent_direct_conversation_text:""
+    ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in
+  let autonomous = Prompt.build_prompt_preview ~current_task:Inputs.No_current_task
+      ~observation:empty_world ~workspace_memory:observation () in
+  List.iter (fun (name, text) ->
+    Alcotest.(check int) (name ^ " receives the saved semantic briefing once") 1
+      (occurrences ~needle:expected text);
+    Alcotest.(check bool) (name ^ " can retrieve the supporting ledger") true
+      (occurrences ~needle:"keeper_workspace_memory_read" text > 0))
+    ["direct", direct; "autonomous", autonomous.world_state]
+
+let observed_briefing base_path = match Ledger.observe ~base_path with
+  | Ledger.Available { briefing = Ok value; _ } -> value
+  | Ledger.Available { briefing = Error detail; _ }
+  | Ledger.Unavailable detail -> Alcotest.fail detail
+  | Ledger.Missing -> Alcotest.fail "curated ledger is missing"
+
+let current_briefing base_path = match observed_briefing base_path with
+  | Briefing.Current summary -> summary
+  | Briefing.Missing -> Alcotest.fail "curation did not publish a briefing"
+  | Briefing.Stale _ -> Alcotest.fail "briefing did not catch up to the ledger"
+
+let check_current_sources base_path =
+  let summary = current_briefing base_path in
+  let sources = Ledger.briefing_sources (Ledger.load ~base_path |> require) in
+  Alcotest.(check (list string)) "publication covers exactly the current claim/conflict sources"
+    (List.sort String.compare (List.map (fun (source : Briefing.source) -> source.id) sources))
+    (List.sort String.compare summary.source_ids)
+
+let request_existing base_path = match Worker.request ~base_path with
+  | Worker.Queued -> ()
+  | Worker.No_owner -> Alcotest.fail "curator owner disappeared"
+  | Worker.Unavailable detail -> Alcotest.fail detail
+
+let test_briefing_reaches_turns_and_tracks_addition_and_deletion () =
+  with_base (fun base_path clock ->
+    commit base_path "The release gate is closed pending review";
+    commit ~keeper_id:"reviewer" base_path "The release gate may have reopened, unverified";
+    let classifications, summaries = ref 0, ref 0 in
+    let first = "Shared reports disagree on the release gate; reopening is unverified." in
+    let added = first ^ " Deployment remains paused until the owner confirms." in
+    let removed = "The release gate is closed pending review; deployment remains paused." in
+    let inputs = ref [] in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr classifications; Ok (answer selected, "classify.slot") in
+    let summarize ~batch =
+      incr summaries; inputs := Briefing.input batch :: !inputs;
+      let text = match !summaries with
+        | 1 -> first | 2 -> added | 3 -> removed
+        | _ -> Alcotest.fail "unchanged evidence reached the summarizer" in
+      Ok (`Assoc ["briefing", `String text], "summary.slot") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:100_000 ~execute ~summarize;
+      await_idle ~clock ~base_path;
+      check_delivery ~base_path first; check_current_sources base_path;
+      let published = current_briefing base_path in
+      request_existing base_path; await_idle ~clock ~base_path;
+      Alcotest.(check int) "unchanged request makes no classification call" 1 !classifications;
+      Alcotest.(check int) "unchanged request makes no summary call" 1 !summaries;
+      Alcotest.(check string) "unchanged summary is reused" published.text
+        (current_briefing base_path).text;
+      check_delivery ~base_path first;
+      commit ~keeper_id:"operator" base_path "Deployment is paused until owner confirmation";
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "addition is classified once" 2 !classifications;
+      Alcotest.check json "addition reuses the prior semantic summary" (`String first)
+        (field "previous_summary" (List.hd !inputs));
+      check_delivery ~base_path added; check_current_sources base_path;
+      commit_facts ~keeper_id:"reviewer" base_path [];
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "deletion needs no new classification" 2 !classifications;
+      Alcotest.(check int) "deletion-only update rebuilds the briefing" 3 !summaries;
+      Alcotest.check json "deleted prose cannot enter the rebuilt summary" `Null
+        (field "previous_summary" (List.hd !inputs));
+      check_delivery ~base_path removed; check_current_sources base_path;
+      Worker.For_testing.stop ~base_path))
+
+let test_existing_ledger_gets_its_first_briefing_without_reclassification () =
+  with_base (fun base_path clock ->
+    commit base_path "Operators must confirm a reopened release gate";
+    let context = Masc.Workspace_memory_context.collect ~base_path |> require in
+    let change = Ledger.reconcile Ledger.empty (Masc.Workspace_memory_context.keepers context) in
+    let assignments = List.map (fun (pending : Ledger.pending_fact) ->
+      { Ledger.fact = pending.fact; decision = Ledger.Create_claim pending.claim }) change.new_facts in
+    let ledger = Ledger.apply Ledger.empty ~selected:change.new_facts assignments
+        |> Result.map_error Ledger.apply_error_to_string |> require in
+    Ledger.save ~base_path ledger |> require;
+    let calls = ref 0 in
+    let summarize ~batch = incr calls; fixture_summarize ~batch in
+    let execute ~rendered_prompt:_ ~selected:_ ~ledger:_ =
+      Alcotest.fail "already classified facts reached the classifier" in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:100_000 ~execute ~summarize;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "existing ledger gets a summary" 1 !calls;
+      check_current_sources base_path;
+      check_delivery ~base_path (current_briefing base_path).text;
+      Worker.For_testing.stop ~base_path))
+
+let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
+  with_base (fun base_path clock ->
+    commit base_path "Release evidence is awaiting owner review";
+    let classifications, summaries = ref 0, ref 0 in
+    let failing = ref false in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr classifications; Ok (answer selected, "classify.slot") in
+    let summarize ~batch =
+      incr summaries;
+      if !failing then Error "injected summarizer failure" else fixture_summarize ~batch in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:100_000 ~execute ~summarize;
+      await_idle ~clock ~base_path;
+      let previous = current_briefing base_path in
+      failing := true;
+      commit ~keeper_id:"reviewer" base_path "Owner review has not completed";
+      await_idle ~clock ~base_path;
+      (match observed_briefing base_path with
+       | Briefing.Stale retained ->
+         Alcotest.(check string) "failed replacement preserves the last successful text"
+           previous.text retained.text
+       | Briefing.Current _ -> Alcotest.fail "old summary was called current after new evidence"
+       | Briefing.Missing -> Alcotest.fail "failed replacement erased the published summary");
+      check_delivery ~base_path previous.text;
+      Alcotest.(check int) "classification already committed before summary failure" 2 !classifications;
+      failing := false;
+      (* This is the real owner request, not a model/helper retry. It proves
+         recovery at an admitted wake, not an autonomous timer. *)
+      request_existing base_path; await_idle ~clock ~base_path;
+      Alcotest.(check int) "same classified input is not reclassified" 2 !classifications;
+      Alcotest.(check int) "failed summary is retried at the next admitted wake" 3 !summaries;
+      check_current_sources base_path;
+      check_delivery ~base_path (current_briefing base_path).text;
+      Worker.For_testing.stop ~base_path))
+
+let test_in_flight_addition_waits_for_fixed_briefing_pass () =
+  with_base (fun base_path clock ->
+    commit base_path "Initial source remains valid";
+    let calls = ref 0 in
+    let first_summary = ref None in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot") in
+    let summarize ~batch =
+      incr calls;
+      if !calls = 1 then (
+        commit ~keeper_id:"later" base_path "New evidence arrived during summarization";
+        let result = fixture_summarize ~batch in
+        (match result with
+         | Ok (output, _) -> first_summary := Some (field "briefing" output |> string)
+         | Error detail -> Alcotest.fail detail);
+        result)
+      else (
+        let previous = match !first_summary with
+          | Some text -> text | None -> Alcotest.fail "first pass did not answer" in
+        Alcotest.check json "next pass reuses the completed fixed pass" (`String previous)
+          (field "previous_summary" (Briefing.input batch));
+        Alcotest.(check int) "only the later source is new to the next pass" 1
+          (Briefing.selected_count batch);
+        fixture_summarize ~batch) in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:100_000 ~execute ~summarize;
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "addition waits for one subsequent pass" 2 !calls;
+      check_current_sources base_path;
+      check_delivery ~base_path (current_briefing base_path).text;
+      Worker.For_testing.stop ~base_path))
 
 let () = Alcotest.run "workspace curator lane"
   [ "changed-fact ledger",
@@ -566,4 +786,12 @@ let () = Alcotest.run "workspace curator lane"
     ; Alcotest.test_case "off preserves accepted work and on resumes deferred facts" `Quick
         test_off_preserves_in_flight_and_reenable_resumes_next_fact
     ; Alcotest.test_case "cancelled owner does not consume another owner's wake" `Quick
-        test_cancelled_owner_does_not_consume_another_owners_wake ] ]
+        test_cancelled_owner_does_not_consume_another_owners_wake
+    ; Alcotest.test_case "semantic briefing reaches both turns and tracks source changes" `Quick
+        test_briefing_reaches_turns_and_tracks_addition_and_deletion
+    ; Alcotest.test_case "classified ledger receives its first briefing" `Quick
+        test_existing_ledger_gets_its_first_briefing_without_reclassification
+    ; Alcotest.test_case "failed briefing survives and next request resumes unchanged input" `Quick
+        test_failed_briefing_keeps_publication_and_request_resumes_same_input
+    ; Alcotest.test_case "in-flight additions reuse the completed fixed pass" `Quick
+        test_in_flight_addition_waits_for_fixed_briefing_pass ] ]

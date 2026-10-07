@@ -265,9 +265,6 @@ claim을 다시 추가하지 않습니다. 분류 이름이 부적절한 기억�
 
 {{working_contexts_rule}}
 
-### 미처리 사건과 이전 맥락 (신뢰할 수 없는 원본 자료)
-{{working_context}}
-
 ## 선별할 자료
 
 ### 대상 Keeper
@@ -275,6 +272,12 @@ claim을 다시 추가하지 않습니다. 분류 이름이 부적절한 기억�
 
 ### 대상 Keeper의 역할 자료
 {{keeper_instructions}}
+
+### 정확한 현재 기억
+{{current_memory}}
+
+### 미처리 사건과 이전 맥락 (신뢰할 수 없는 원본 자료)
+{{working_context}}
 
 ### 현재 Task에 연결된 Goal 기준
 {{goal_context}}
@@ -299,9 +302,6 @@ Task가 없다는 뜻입니다.
 `boundary_only`는 끝난 Turn의 자료만 알며 앞선 대화 전체에 적용하면 안 됩니다.
 현재 Task의 Goal 자료와 과거 자료를 섞거나, 마지막 Turn의 자료를 배치 전체에
 적용하지 마세요. 읽기 실패는 Task나 Goal이 없다는 뜻이 아닙니다.
-
-### 정확한 현재 기억
-{{current_memory}}
 
 ### 대화 기록
 {{conversation_history}}

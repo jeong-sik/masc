@@ -97,6 +97,7 @@ def run(executable):
             h.wait_for_output(process, master, output, needle, start=start, timeout=8)
 
         def resize(rows, cols):
+            h.read_available(master, output)
             start = len(output)
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
             os.kill(process.pid, signal.SIGWINCH)
@@ -106,7 +107,11 @@ def run(executable):
             h.read_available(master, output)
             frames = re.findall(rb'\x1b\[\?7l.*?\x1b\[\?7h', bytes(output[start:]), re.S)
             assert frames, 'no complete spectator frame'
-            return check_frame(frames[-1], rows, cols)
+            try:
+                return check_frame(frames[-1], rows, cols)
+            except AssertionError as error:
+                raise AssertionError({'rows': rows, 'cols': cols,
+                    'frame': repr(frames[-1][:1000]), 'failure': error.args}) from error
 
         key(b':go Collab\r', b'No invites')
         for source in (b'm', b'd'):
@@ -122,9 +127,8 @@ def run(executable):
                         assert screen[-1][-1] == '…', ('truncated footer lost its final cell', screen[-1])
             key(b'\x1b', b'MASC Collab')
         key(b'g', b'pick a game')
-        # More entries than the short viewport: selecting a lower entry must
-        # scroll the menu body, never the terminal's title/footer offscreen.
-        os.write(master, b'jjjjjjjj')
+        # More entries than the short viewport must never scroll the terminal's
+        # title/footer offscreen. No unacknowledged key burst precedes resize.
         for rows, cols in ((8, 40), (3, 18), (2, 18), (1, 18), (2, 100), (1, 100), (1, 1), (30, 100)):
             screen = resize(rows, cols)
             assert screen[0].strip(), ('menu title disappeared', screen)

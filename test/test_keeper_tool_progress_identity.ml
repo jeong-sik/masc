@@ -1,11 +1,15 @@
 (* The repeated-call yield compares these fingerprints, so what they hash is
-   behavior: a measurement field in the output must not break identity, and a
-   changed answer must. The live shape this pins: a keeper ran [gh auth status]
-   four times in one run and the four results differed only at
-   execution_time_ms, so the yield never saw the loop (2026-08-24). *)
+   behavior: a receipt field in the output must not break identity, and a
+   changed answer must. Two live shapes this pins: a keeper ran [gh auth
+   status] four times in one run and the four results differed only at
+   execution_time_ms (2026-08-24); a keeper rewrote twelve memory claims 1,861
+   times and every receipt differed only at revision and recorded_at
+   (2026-10-05). Which part is the answer is each tool's to say
+   (Keeper_tool_answer); this module names no field. *)
 
 open Alcotest
 module P = Masc.Keeper_tool_progress_identity
+module A = Masc.Keeper_tool_answer
 
 let fingerprints ~output =
   match
@@ -26,16 +30,6 @@ let test_measurement_does_not_name_identity () =
   let b = fingerprints ~output:(execute_payload ~elapsed_ms:1471 ~stdout:"logged in") in
   check string "same answer, different measurement: same fingerprint"
     a.P.output_fingerprint b.P.output_fingerprint
-
-let test_nested_measurement_is_dropped_too () =
-  let shape ms =
-    Printf.sprintf
-      {|{"ok":true,"steps":[{"cmd":"a","execution_time_ms":%d}],"output":"x"}|} ms
-  in
-  let a = fingerprints ~output:(shape 10) in
-  let b = fingerprints ~output:(shape 99) in
-  check string "nested measurement dropped" a.P.output_fingerprint
-    b.P.output_fingerprint
 
 let test_a_changed_answer_changes_identity () =
   let a = fingerprints ~output:(execute_payload ~elapsed_ms:5 ~stdout:"branch main") in
@@ -87,13 +81,129 @@ let test_the_input_reaches_the_answer_through_the_memo () =
   in
   check string "the repeat answers the same" a a_again
 
+let output_fingerprint ~tool_name output =
+  match P.digest_tool_io ~tool_name ~input:(`Assoc [ ("title", `String "t") ]) ~output_text:output with
+  | Some io -> io.P.output_fingerprint
+  | None -> fail "digest_tool_io returned no fingerprints"
+
+(* A name that does not reach its handler would leave the tool's answer
+   unread and the loop hidden again, with nothing failing. *)
+let test_tool_names_reach_their_handlers () =
+  let handler name =
+    match A.resolve name with
+    | A.Keeper_handler handler -> Masc.Keeper_tool_descriptor.runtime_handler_to_string handler
+    | A.Outside_keeper_descriptors -> "outside"
+  in
+  check string "Execute" (Masc.Keeper_tool_descriptor.runtime_handler_to_string Masc.Keeper_tool_descriptor.Tool_execute)
+    (handler "Execute");
+  check string "keeper_memory_write"
+    (Masc.Keeper_tool_descriptor.runtime_handler_to_string Masc.Keeper_tool_descriptor.Tool_memory_write)
+    (handler "keeper_memory_write");
+  check string "a transport-prefixed name"
+    (Masc.Keeper_tool_descriptor.runtime_handler_to_string Masc.Keeper_tool_descriptor.Tool_memory_write)
+    (handler "mcp__masc__keeper_memory_write");
+  check string "an external tool" "outside" (handler "some_external_mcp_tool")
+
+let test_a_whole_output_tool_keeps_every_field () =
+  let shape ms = Printf.sprintf {|{"content":"x","execution_time_ms":%d}|} ms in
+  check bool "Read reads its whole output: a changed field changes identity" false
+    (String.equal
+       (output_fingerprint ~tool_name:"Read" (shape 10))
+       (output_fingerprint ~tool_name:"Read" (shape 99)));
+  check bool "an external tool reads its whole output too" false
+    (String.equal
+       (output_fingerprint ~tool_name:"some_external_mcp_tool" (shape 10))
+       (output_fingerprint ~tool_name:"some_external_mcp_tool" (shape 99)))
+
+let memory_receipt ~disposition ~memory_id ~revision ~recorded_at =
+  Printf.sprintf
+    {|{"ok":true,"error_kind":"","identity_disposition":%S,"what_committed":"w","rows_written":1,"revision":%d,"recorded_at":%S,"outcome":"persisted_current_snapshot","store":"current_memory_snapshot","memory_id":%S,"basis":{"kind":"observed"}}|}
+    disposition revision recorded_at memory_id
+
+let test_a_memory_rewrite_is_the_same_answer () =
+  let fingerprint ~revision ~recorded_at =
+    output_fingerprint ~tool_name:"keeper_memory_write"
+      (memory_receipt ~disposition:"reobserved" ~memory_id:"sha256:aa" ~revision
+         ~recorded_at)
+  in
+  check string "revision and recorded_at do not name identity"
+    (fingerprint ~revision:3760 ~recorded_at:"2026-10-05T21:00:45Z")
+    (fingerprint ~revision:3772 ~recorded_at:"2026-10-05T21:03:14Z");
+  check bool "another claim is another answer" false
+    (String.equal
+       (fingerprint ~revision:1 ~recorded_at:"t")
+       (output_fingerprint ~tool_name:"keeper_memory_write"
+          (memory_receipt ~disposition:"reobserved" ~memory_id:"sha256:bb" ~revision:1
+             ~recorded_at:"t")));
+  check bool "the insert is another answer than the rewrite" false
+    (String.equal
+       (fingerprint ~revision:1 ~recorded_at:"t")
+       (output_fingerprint ~tool_name:"keeper_memory_write"
+          (memory_receipt ~disposition:"inserted" ~memory_id:"sha256:aa" ~revision:1
+             ~recorded_at:"t")))
+
+(* A source-bound write names what it stored by the file's hash, not by a
+   memory_id. The hash is the answer: the same file written again is the
+   same answer, an edited file is another one. *)
+let source_bound_receipt ~source_sha256 ~revision =
+  Printf.sprintf
+    {|{"ok":true,"error_kind":"","what_committed":"w","rows_written":1,"revision":%d,"recorded_at":"2026-10-05T21:%02d:00Z","outcome":"persisted_source_bound_current","store":"source_bound_current_memory","source_path":"docs/a.md","source_sha256":%S}|}
+    revision revision source_sha256
+
+let test_a_source_bound_rewrite_is_named_by_its_hash () =
+  let fingerprint ~source_sha256 ~revision =
+    output_fingerprint ~tool_name:"keeper_memory_write"
+      (source_bound_receipt ~source_sha256 ~revision)
+  in
+  check string "the same file written again is the same answer"
+    (fingerprint ~source_sha256:"sha256:11" ~revision:7)
+    (fingerprint ~source_sha256:"sha256:11" ~revision:8);
+  check bool "an edited file is another answer" false
+    (String.equal
+       (fingerprint ~source_sha256:"sha256:11" ~revision:7)
+       (fingerprint ~source_sha256:"sha256:22" ~revision:7))
+
+(* The detector the turn runs, fed the fingerprints the turn computes. *)
+let test_a_third_memory_rewrite_stops_the_turn () =
+  let call revision : Masc.Keeper_agent_result.tool_call_detail =
+    let io =
+      P.digest_tool_io ~tool_name:"keeper_memory_write"
+        ~input:(`Assoc [ ("title", `String "t"); ("content", `String "c") ])
+        ~output_text:
+          (memory_receipt ~disposition:"reobserved" ~memory_id:"sha256:aa" ~revision
+             ~recorded_at:(Printf.sprintf "2026-10-05T21:%02d:00Z" revision))
+    in
+    { tool_name = "keeper_memory_write"
+    ; provider = "test"
+    ; execution_outcome = Tool_result.Ok
+    ; typed_outcome = None
+    ; latency_ms = 1.
+    ; task_id = None
+    ; route_evidence = None
+    ; input_fingerprint = Option.map (fun (io : P.io_fingerprints) -> io.input_fingerprint) io
+    ; output_fingerprint = Option.map (fun (io : P.io_fingerprints) -> io.output_fingerprint) io
+    }
+  in
+  check (option (pair string int)) "the third identical rewrite yields"
+    (Some ("keeper_memory_write", 3))
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+       [ call 3; call 2; call 1 ])
+
 let () =
   run "keeper_tool_progress_identity"
     [ ( "identity"
       , [ test_case "measurement does not name identity" `Quick
             test_measurement_does_not_name_identity
-        ; test_case "nested measurement is dropped too" `Quick
-            test_nested_measurement_is_dropped_too
+        ; test_case "tool names reach their handlers" `Quick
+            test_tool_names_reach_their_handlers
+        ; test_case "a whole-output tool keeps every field" `Quick
+            test_a_whole_output_tool_keeps_every_field
+        ; test_case "a memory rewrite is the same answer" `Quick
+            test_a_memory_rewrite_is_the_same_answer
+        ; test_case "a source-bound rewrite is named by its hash" `Quick
+            test_a_source_bound_rewrite_is_named_by_its_hash
+        ; test_case "a third memory rewrite stops the turn" `Quick
+            test_a_third_memory_rewrite_stops_the_turn
         ; test_case "a changed answer changes identity" `Quick
             test_a_changed_answer_changes_identity
         ; test_case "field order does not name identity" `Quick

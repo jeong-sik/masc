@@ -30,9 +30,19 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     return { textContent: '', className: '', value: '', hidden: false,
       disabled: false, children: [], dataset: {}, handlers: {},
       addEventListener(name, fn) { this.handlers[name] = fn; },
-      append(...nodes) { this.children.push(...nodes); },
+      append(...nodes) {
+        for (const node of nodes) node.parentElement = this;
+        this.children.push(...nodes);
+      },
       replaceChildren() { this.children = []; },
       get options() { return this.children; },
+      getBoundingClientRect() {
+        const parent = this.parentElement;
+        if (!parent || !parent.rowHeight) return { top:0, bottom:0 };
+        const top = parent.getBoundingClientRect().top
+          + parent.children.indexOf(this) * parent.rowHeight - parent.scrollTop;
+        return { top, bottom:top + parent.rowHeight };
+      },
       focus() {},
     };
   }
@@ -74,7 +84,8 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     history: { replaceState(_state, _title, url) { const at = url.indexOf('#'); location.hash = at < 0 ? '' : url.slice(at); } },
     window: { addEventListener(name, handler) { windowHandlers.set(name, handler); } },
     navigator: { getGamepads: () => [] },
-    crypto: require('node:crypto').webcrypto,
+    // HTTP LAN origins expose getRandomValues but not secure-context randomUUID.
+    crypto: { getRandomValues: values => require('node:crypto').webcrypto.getRandomValues(values) },
     TextEncoder,
     AbortController,
     requestAnimationFrame() {},
@@ -322,6 +333,112 @@ test('a late room acknowledgment and disconnect cannot erase a newer document dr
   assert.match(first.get('room-status').textContent, /새로고침/);
   await newer.get('leave').handlers.click();
   assert.equal(storage.size, 0, 'the current document may explicitly clear its own draft on disconnect');
+});
+
+test('a queued public message cannot dispatch after a newer document replaces its draft', async () => {
+  const storage = new Map();
+  let finishRead;
+  const older = fixture(gameReply, { storage, roomReply: ({ body }) => body.action === 'read'
+    ? new Promise(resolve => { finishRead = () => resolve(response(emptyRoom)); }) : response(emptyRoom) });
+  await older.settle();
+  older.get('chat-text').value = 'superseded queued public message';
+  older.get('chat-send').handlers.click();
+  await older.settle();
+  assert.equal(older.roomRequests.some(request => request.body.action === 'say'), false,
+    'the message is waiting behind the admitted read');
+
+  const newer = fixture(gameReply, { storage, hash:'' });
+  await newer.settle();
+  newer.get('chat-text').value = 'newer draft';
+  newer.get('chat-text').handlers.input();
+  const saved = storage.get('masc.play.room.draft');
+  finishRead();
+  await older.settle();
+  assert.equal(older.roomRequests.some(request => request.body.action === 'say'), false,
+    'superseded draft authority must be checked before the public POST');
+  assert.equal(storage.get('masc.play.room.draft'), saved);
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.equal(older.get('chat-text').disabled, true);
+  assert.match(older.get('room-status').textContent, /새로고침/);
+  assert.equal(newer.get('chat-text').value, 'newer draft');
+  assert.equal(newer.get('chat-text').disabled, false);
+});
+
+test('a queued public message still dispatches when its own document edits the next draft', async () => {
+  const storage = new Map();
+  let finishRead;
+  const page = fixture(gameReply, { storage, roomReply: ({ body }) => body.action === 'read'
+    ? new Promise(resolve => { finishRead = () => resolve(response(emptyRoom)); }) : response(emptyRoom) });
+  await page.settle();
+  page.get('chat-text').value = 'admitted message';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  page.get('chat-text').value = 'next draft';
+  page.get('chat-text').handlers.input();
+  finishRead();
+  await page.settle();
+  const sends = page.roomRequests.filter(request => request.body.action === 'say');
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].body.text, 'admitted message');
+  assert.equal(page.get('chat-text').value, 'next draft');
+  assert.equal(JSON.parse(storage.get('masc.play.room.draft')).text, 'next draft');
+  assert.equal(page.get('chat-text').disabled, false);
+});
+
+function roomViewport(page) {
+  const list = page.get('room-messages');
+  list.rowHeight = 20;
+  list.clientHeight = 60;
+  list.scrollTop = 0;
+  list.getBoundingClientRect = () => ({ top:100, bottom:160 });
+  Object.defineProperty(list, 'scrollHeight', { get:() => list.children.length * list.rowHeight });
+  return list;
+}
+
+test('room history keeps a visible message and pixel offset across rolling retention', async () => {
+  let messages = Array.from({ length:100 }, (_, index) => roomMessage(index + 1, 'message ' + (index + 1)));
+  const page = fixture(gameReply, { roomReply: () => response({ ...emptyRoom, messages }) });
+  const list = roomViewport(page);
+  await page.settle();
+  list.scrollTop = 39 * list.rowHeight + 7; // Read message 40, seven pixels into its row.
+  messages = messages.slice(1).concat(roomMessage(101, 'message 101'));
+  await page.roomPoll();
+  assert.equal(list.scrollTop, 38 * list.rowHeight + 7,
+    'dropping an earlier message must not move the visible message or within-row offset');
+  messages = Array.from({ length:100 }, (_, index) => roomMessage(index + 50, 'message ' + (index + 50)));
+  await page.roomPoll();
+  assert.equal(list.scrollTop, 0, 'an evicted anchor clamps to the oldest surviving message');
+  assert.equal(list.children[0].children[1].textContent, 'message 50');
+});
+
+test('room history keeps following new messages when already at the bottom', async () => {
+  let messages = Array.from({ length:10 }, (_, index) => roomMessage(index + 1, 'message ' + (index + 1)));
+  const page = fixture(gameReply, { roomReply: () => response({ ...emptyRoom, messages }) });
+  const list = roomViewport(page);
+  await page.settle();
+  list.scrollTop = list.scrollHeight - list.clientHeight;
+  messages = messages.concat(roomMessage(11, 'message 11'));
+  await page.roomPoll();
+  assert.equal(list.scrollTop, list.scrollHeight);
+  assert.equal(list.children.at(-1).children[1].textContent, 'message 11');
+});
+
+test('game input works on an HTTP origin without crypto.randomUUID', async () => {
+  const storage = new Map();
+  let acknowledge;
+  const page = fixture(request => request.method === 'POST'
+    ? new Promise(resolve => { acknowledge = () => resolve(response({ ok:true })); })
+    : normalReply(request), { storage });
+  await page.settle();
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
+  const marker = JSON.parse(storage.get('masc.play.pending'));
+  assert.equal(marker.token, 'fixture-token');
+  assert.match(marker.operation, /^[a-f0-9]{32}$/);
+  acknowledge();
+  await page.settle();
+  assert.equal(storage.has('masc.play.pending'), false);
 });
 
 for (const [name, refusal, control] of [

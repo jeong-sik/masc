@@ -421,9 +421,15 @@ function renderRoom(snapshot, showMessages = true) {
   const list = el('room-messages');
   const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop < 24;
   const previousTop = list.scrollTop;
+  const viewportTop = list.getBoundingClientRect().top;
+  const visible = atBottom ? null : [...list.children].find(item =>
+    item.dataset.messageId && item.getBoundingClientRect().bottom > viewportTop);
+  const anchor = visible ? { id:visible.dataset.messageId,
+    offset:visible.getBoundingClientRect().top - viewportTop } : null;
   list.replaceChildren();
   for (const message of snapshot.messages) {
     const item = document.createElement('li');
+    item.dataset.messageId = String(message.id);
     const meta = document.createElement('span');
     meta.className = 'room-meta';
     const mark = message.who === me ? '▶' : message.speaker === 'keeper' ? '●' : '◀';
@@ -439,13 +445,22 @@ function renderRoom(snapshot, showMessages = true) {
     empty.textContent = '아직 대화가 없어요. 먼저 말을 걸어 보세요.';
     list.append(empty);
   }
-  list.scrollTop = atBottom && roomBefore === null ? list.scrollHeight : previousTop;
+  if (atBottom && roomBefore === null) list.scrollTop = list.scrollHeight;
+  else if (anchor) {
+    const retained = [...list.children].find(item => item.dataset.messageId === anchor.id);
+    // Latest history rolls at 100 messages. Keep the actual row under the
+    // reader; if it was evicted, begin at the oldest surviving message.
+    list.scrollTop = retained ? list.scrollTop + retained.getBoundingClientRect().top
+      - list.getBoundingClientRect().top - anchor.offset : 0;
+  } else list.scrollTop = previousTop;
   setRoomControls();
 }
 
 function roomRequest(body) {
   roomSending = roomSending.catch(() => {}).then(() => {
-    if (ended || disconnecting || !roomConnectionCurrent()) return null;
+    // A send can wait behind a read while another document replaces this
+    // tab's draft. Recheck its authority at the public write boundary.
+    if (ended || disconnecting || !roomConnectionCurrent(body.action === 'say')) return null;
     const abort = new AbortController();
     roomAbort = abort;
     return api('POST', ROOM_PATH, body, abort.signal).finally(() => {
@@ -523,7 +538,7 @@ async function mutate(path, body) {
   try {
     // Persist before dispatch: closing/reloading the document can lose its
     // response while the authenticated server operation is still pending.
-    pending = JSON.stringify({ token, operation: crypto.randomUUID() });
+    pending = JSON.stringify({ token, operation: roomId() });
     sessionStorage.setItem(PENDING_KEY, pending);
   } catch (_) {
     setStatus('action', '브라우저에 연결 상태를 저장하지 못해 입력을 보내지 않았어요. 이 사이트의 탭 저장소를 허용해 주세요.');

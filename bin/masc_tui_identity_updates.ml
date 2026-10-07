@@ -50,7 +50,10 @@ let switch_set
 
 let providers_loaded (state : state) request result =
   let keeper_name = request.drr_keeper in
-  let current = Masc_tui_types.finish_detail_read state request in
+  let current =
+    Masc_tui_types.finish_detail_read state request
+    && Masc_tui_types.server_authority_ready state
+  in
   if current
   then (
     match result with

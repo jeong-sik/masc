@@ -145,22 +145,27 @@ let server_workspace_matches ~expected reading =
   | None, (Ok _ | Error _) | Some _, Error _ -> false
 ;;
 
+(* What the paths alone say, booting or not. *)
+let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
+  let local_base_path = canonical_path local_base_path in
+  let server_base_path = canonical_path identity.sid_base_path in
+  let local_masc_root = canonical_path
+    (Filename.concat local_base_path Common.masc_dirname) in
+  let server_masc_root = canonical_path identity.sid_masc_root in
+  if String.equal local_base_path "" || String.equal server_base_path ""
+     || String.equal server_masc_root ""
+  then Workspace_identity_unread
+  else if String.equal local_base_path server_base_path
+       && String.equal local_masc_root server_masc_root
+  then Workspace_identity_match
+  else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
 let workspace_identity_of_refresh ~local_base_path reading =
   match reading with
   | Error _ -> Workspace_identity_unread
-  | Ok identity ->
-    let local_base_path = canonical_path local_base_path in
-    let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
-    let local_masc_root = canonical_path
-      (Filename.concat local_base_path Common.masc_dirname) in
-    let server_masc_root = canonical_path identity.sid_masc_root in
-    if String.equal local_base_path "" || String.equal server_base_path ""
-       || String.equal server_masc_root "" || server_is_booting reading
-    then Workspace_identity_unread
-    else if String.equal local_base_path server_base_path
-         && String.equal local_masc_root server_masc_root
-    then Workspace_identity_match
-    else Workspace_identity_mismatch { local_base_path; server_base_path }
+  | Ok _ when server_is_booting reading -> Workspace_identity_unread
+  | Ok identity -> workspace_identity_of_paths ~local_base_path identity
 ;;
 
 let unconfirmed_identity_reason reading =
@@ -172,14 +177,27 @@ let unconfirmed_identity_reason reading =
 
 (* A read that cannot say which workspace the server serves does not say it
    serves another one. After a match it keeps that match, unconfirmed; only a
-   read that names a different workspace withdraws what the match authorized. *)
+   read that names a different workspace withdraws what the match authorized.
+   A booting server's paths do name its workspace: one that names another
+   workspace answers unread, so the match is withdrawn as before. *)
 let next_workspace_identity ~previous ~local_base_path reading =
+  let names_another_workspace =
+    match reading with
+    | Ok identity ->
+      (match workspace_identity_of_paths ~local_base_path identity with
+       | Workspace_identity_mismatch _ -> true
+       | Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_match_unconfirmed _ -> false)
+    | Error _ -> false
+  in
   match workspace_identity_of_refresh ~local_base_path reading, previous with
   | Workspace_identity_unread
-  , (Workspace_identity_match | Workspace_identity_match_unconfirmed _) ->
+  , (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
+    when not names_another_workspace ->
     Workspace_identity_match_unconfirmed (unconfirmed_identity_reason reading)
   | Workspace_identity_unread
-  , (Workspace_identity_unread | Workspace_identity_mismatch _) ->
+  , ( Workspace_identity_unread | Workspace_identity_match
+    | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ) ->
     Workspace_identity_unread
   | ( (Workspace_identity_match
       | Workspace_identity_match_unconfirmed _
@@ -6391,6 +6409,14 @@ let server_authority_ready state =
       && not (String.equal identity.sid_masc_root "")
   | None -> false
 
+(* Why a write launched under [authority] must not go out now: the workspace
+   moved since launch, or the server identity is not confirmed (unread, or a
+   match kept unconfirmed). [None] means it may be sent. *)
+let write_authority_refusal state authority =
+  if authority <> state.workspace_authority then Some "Workspace authority withdrawn"
+  else if not (server_authority_ready state) then Some "Workspace identity is unconfirmed"
+  else None
+
 (* The one definition of "same workspace" used to admit a held expectation
    back into the poll after authority is restored. Same answer as the screen
    itself uses, so the pane never polls across a workspace change it would
@@ -7866,7 +7892,8 @@ let keeper_detail_target_matches state keeper_name =
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
   let current = finish_detail_read state request in
-  if current && keeper_detail_target_matches state request.drr_keeper then
+  if current && server_authority_ready state
+     && keeper_detail_target_matches state request.drr_keeper then
     match result with
     | Ok snapshot ->
         state.keeper_schedules <- Some (request.drr_keeper, snapshot);

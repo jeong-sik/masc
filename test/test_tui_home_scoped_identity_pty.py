@@ -143,14 +143,20 @@ def scoped_identity_journey(executable, *, unread):
             state["changed"] = True
         start = len(output)
         keepers.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"Enter:open")
-        identity = b"workspace identity unconfirmed"
+        # A 503 keeps the last match unconfirmed; a read that names B is a
+        # mismatch and withdraws A's decisions. The mismatch badge sits past
+        # the default header width, so that case widens the frame first.
+        h.resize_and_wait(process, fd, output, rows=40, columns=160,
+                          needle=b"Enter:open", final_cursor=b"\x1b[?25l")
+        identity = b"workspace identity unconfirmed" if unread else b"[workspace mismatch]"
         h.wait_for_output(process, fd, output, identity, start=start, timeout=10)
         assert_scoped(baseline)
-        frame = h.resize_and_wait(process, fd, output, rows=40, columns=120,
-                                  needle=b"Enter:open", final_cursor=b"\x1b[?25l")
-        visible = h.screen_text(frame)
+        h.drain_until_quiet(process, fd, output)
+        visible = h.screen_text(bytes(output))
         assert label not in visible, ("unverified decision was cached", visible)
-        assert b"decisions wait" in visible, visible
+        assert (b"decisions wait" if unread else b"not fully read") in visible, visible
+        if not unread:
+            assert b"[workspace mismatch]" in visible, visible
         home.assert_no_decision_posts(requests)
         assert_scoped(baseline)
         os.write(fd, b"q")

@@ -1592,6 +1592,14 @@ let workspace_enqueue state =
   let authority = state.workspace_authority in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
 
+(* A refused request or a discarded bundle may still have read the server's
+   identity. A reading that names a workspace is what the screen follows -- a
+   different workspace withdraws, the same one confirms; anything else leaves
+   the refusal to keep the match unconfirmed. *)
+let identity_after_refusal ~detail = function
+  | Some (Ok _ as reading) -> reading
+  | Some (Error _) | None -> Error detail
+
 let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
   else
@@ -1600,7 +1608,8 @@ let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
-      enqueue_async mailbox (Workspace_scoped (authority, Workspace_identity_unconfirmed detail));
+      enqueue_async mailbox
+        (Workspace_scoped (authority, Workspace_identity_unconfirmed { detail; latest = reading }));
       Error detail
     end
 
@@ -3833,8 +3842,9 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
   let run () =
     let outcome =
       try
-        if authority <> state.workspace_authority then Masc_tui_http.Post_unanswered "Workspace authority withdrawn"
-        else Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
+        match write_authority_refusal state authority with
+        | Some reason -> Masc_tui_http.Post_unanswered reason
+        | None -> Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
           ~partition_id ~request
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3872,9 +3882,9 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
       Masc_tui_board_quarantine.requeue_all
         ~send:(fun ~partition_id ~request ->
           try
-            if authority <> state.workspace_authority then
-              Masc_tui_http.Post_unanswered "Workspace authority withdrawn"
-            else Masc_tui_http.post_board_quarantine_requeue
+            match write_authority_refusal state authority with
+            | Some reason -> Masc_tui_http.Post_unanswered reason
+            | None -> Masc_tui_http.post_board_quarantine_requeue
               ~host ~port ~keeper_name ~partition_id ~request
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -7146,9 +7156,10 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
              Masc_tui_keeper_config.expected_runtime_assignment_revision json
            with
            | Ok expected_assignment_revision ->
-             if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-             else Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
-               ~runtime_id ~expected_assignment_revision
+             (match write_authority_refusal state authority with
+              | Some reason -> Error reason
+              | None -> Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+                ~runtime_id ~expected_assignment_revision)
            | Error detail -> Error detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -10358,7 +10369,8 @@ let load_http_surfaces ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
       Refresh_surfaces
         { http_overview; http_approvals; http_scoped; http_server_identity = identity_after }
     else Refresh_workspace_unconfirmed
-        { refresh_ticket; detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
+        { refresh_ticket; latest_identity = identity_after;
+          detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
           unreachable = Result.is_error http_server_identity && Result.is_error identity_after
             && Result.is_error http_overview;
           approval_ticket }
@@ -10987,9 +10999,9 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     drain_queued_message state ~base_path ~mailbox
   end
 
-let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err =
+let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket ~latest err =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
-    apply_server_identity_reading state (Error err);
+    apply_server_identity_reading state (identity_after_refusal ~detail:err latest);
     Option.iter
       (fun ao_ticket ->
          apply_approval_observation state { ao_ticket; ao_result = Error err })
@@ -11045,8 +11057,8 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
   state.connection_status <- Masc_tui_types.Booting
   end
 
-let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
-  apply_server_identity_reading state (Error detail);
+let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity =
+  apply_server_identity_reading state (identity_after_refusal ~detail (Some latest_identity));
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
   state.candle_observation <- Some (Error detail);
@@ -11057,9 +11069,10 @@ let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
   add_event state "error" detail
 
 let apply_http_refresh_outcome state ~mailbox = function
-  | Refresh_workspace_unconfirmed { refresh_ticket; detail; unreachable; approval_ticket } ->
+  | Refresh_workspace_unconfirmed
+      { refresh_ticket; detail; unreachable; approval_ticket; latest_identity } ->
     if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
-      apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket
+      apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity
   | Refresh_surfaces results -> apply_http_surfaces state ~mailbox results
   | Refresh_server_booting { refresh_ticket; identity; approval_ticket } ->
     apply_server_booting state ~refresh_ticket ~identity ~approval_ticket
@@ -11765,6 +11778,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
       car_generation = state.candle_authority_generation;
       car_identity = state.server_identity;
     } in
+    let latest_identity = ref None in
     let read_refresh () =
       try
         let ( let* ) = Result.bind in
@@ -11775,6 +11789,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
           else
             let reading = load_server_identity ~host ~port in
+            latest_identity := Some reading;
             if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
             else if Masc_tui_types.server_workspace_matches ~expected:identity reading
             then reading
@@ -11803,7 +11818,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
       enqueue_async mailbox
         (match read_refresh () with
          | Ok results -> Http_scoped_refresh_done (authority, currency_authority, results)
-         | Error err -> Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket))
+         | Error err ->
+           Http_scoped_refresh_failed
+             (authority, err, approval_ticket, refresh_ticket, !latest_identity))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
@@ -11816,8 +11833,10 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
                  apply_http_scoped_refresh_success state ~currency_authority
                    ~base_path:state.local_base_path ~mailbox results
              | Error err when authority = state.workspace_authority ->
+                 let before = read_authority state in
                  apply_http_scoped_refresh_failure state
-                   ~refresh_ticket ~approval_ticket err
+                   ~refresh_ticket ~approval_ticket ~latest:!latest_identity err;
+                 resume_reads_after_authority_change state ~mailbox ~before
              | Ok _ | Error _ -> ())
   end
 
@@ -13504,8 +13523,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
         | _ -> ())
-  | Workspace_identity_unconfirmed detail ->
-      apply_server_identity_reading state (Error detail);
+  | Workspace_identity_unconfirmed { detail; latest } ->
+      let authority = read_authority state in
+      apply_server_identity_reading state (identity_after_refusal ~detail (Some latest));
+      resume_reads_after_authority_change state ~mailbox ~before:authority;
       report_action state "error" detail
   | Lane_package_catalog_loaded (generation,directory,result) ->
       map_lane_addons state (fun view ->
@@ -13849,11 +13870,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.voice_floor <- None;
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
           ("voice failed: " ^ error))
-  | Http_refresh_done (Refresh_workspace_unconfirmed { refresh_ticket; detail; unreachable; approval_ticket }) ->
+  | Http_refresh_done
+      (Refresh_workspace_unconfirmed
+         { refresh_ticket; detail; unreachable; approval_ticket; latest_identity }) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
-        apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket;
+        let authority = read_authority state in
+        apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity;
+        resume_reads_after_authority_change state ~mailbox ~before:authority;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
@@ -14256,10 +14281,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket) ->
+  | Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket, latest) ->
       http_scoped_refresh_inflight := false;
-      if authority = state.workspace_authority then
-      apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err;
+      if authority = state.workspace_authority then begin
+        let before = read_authority state in
+        apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket ~latest err;
+        resume_reads_after_authority_change state ~mailbox ~before
+      end;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight

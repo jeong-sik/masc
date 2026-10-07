@@ -275,7 +275,32 @@ let test_unread_after_a_match_keeps_it_unconfirmed () =
   check "a failed read after a mismatch is unread" "unread"
     (Workspace_identity_mismatch
        { local_base_path = local; server_base_path = "/workspace/other" })
-    (Error "one failed tick")
+    (Error "one failed tick");
+  (* A booting server's paths name its workspace even though it cannot
+     serve yet: another workspace withdraws the match. *)
+  check "a booting server of another workspace withdraws the match" "unread"
+    Workspace_identity_match
+    (Ok { (identity "/workspace/other") with sid_state_ready = Some false })
+
+(* A write goes out only while the authority it was launched under is current
+   and the server identity is confirmed. *)
+let test_writes_wait_for_a_confirmed_identity () =
+  let state = Masc_tui_types.create_state ~workspace:"a"
+    ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let refusal () = Masc_tui_types.write_authority_refusal state authority in
+  Alcotest.(check (option string)) "a confirmed match sends" None (refusal ());
+  state.workspace_identity <-
+    Masc_tui_types.Workspace_identity_match_unconfirmed "one failed tick";
+  Alcotest.(check (option string)) "an unconfirmed match waits"
+    (Some "Workspace identity is unconfirmed") (refusal ());
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  let (Masc_tui_types.Workspace_authority generation) = state.workspace_authority in
+  state.workspace_authority <- Masc_tui_types.Workspace_authority (generation + 1);
+  Alcotest.(check (option string)) "a moved authority refuses"
+    (Some "Workspace authority withdrawn") (refusal ())
 
 let () =
   Alcotest.run "tui_server_identity_refresh"
@@ -302,5 +327,7 @@ let () =
             test_local_rows_are_unread_until_the_workspace_is_read
         ; Alcotest.test_case "an unread after a match keeps it unconfirmed" `Quick
             test_unread_after_a_match_keeps_it_unconfirmed
+        ; Alcotest.test_case "writes wait for a confirmed identity" `Quick
+            test_writes_wait_for_a_confirmed_identity
         ] )
     ]

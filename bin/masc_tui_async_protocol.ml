@@ -61,7 +61,9 @@ type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_workspace_unconfirmed of
       { refresh_ticket : Http_refresh_order.ticket; detail : string; unreachable : bool;
-        approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option }
+        approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option;
+        latest_identity : (Masc.Tui_decode.server_identity, string) result
+        (* The identity read after the surfaces; it may name a workspace. *) }
   | Refresh_server_booting of
       { refresh_ticket : Http_refresh_order.ticket
       ; identity : (Masc.Tui_decode.server_identity, string) result
@@ -111,7 +113,11 @@ type currency_authority_request = {
 
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
-  | Workspace_identity_unconfirmed of string
+  | Workspace_identity_unconfirmed of
+      { detail : string
+      ; latest : (Masc.Tui_decode.server_identity, string) result
+        (* The identity the refusing probe read; it may name a workspace. *)
+      }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -163,6 +169,8 @@ type async_msg =
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
       workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+      * (Masc.Tui_decode.server_identity, string) result option
+        (* The last identity its probes read, if any. *)
   | Board_post_refresh_done of
       Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of

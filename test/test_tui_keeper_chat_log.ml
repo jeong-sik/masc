@@ -40,6 +40,7 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_model_stopped -> "stream_model_stopped"
   | Live.Stream_details { usage; stop_reason } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -843,9 +844,32 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
         (tokens log)) [wire;replay];
     List.iter send Agent_core.Types.[
       MessageDelta {stop_reason=Some StopToolUse;usage=None};MessageStop];
+    let wire,replay,journal = snapshots () in
+    List.iter (fun log ->
+      let t = T.of_log ~now:2000. log in
+      check bool "response stop does not finish the Keeper turn" true (T.phase t = T.Working);
+      check bool "provider stop reaches the progress row" true
+        (String_util.contains_substring (T.progress_text ~now:2000. t) "model response ended");
+      check bool "stopped provider is not still streaming or thinking" false
+        (String_util.contains_substring (T.progress_text ~now:2000. t) "STREAMING"
+         || String_util.contains_substring (T.progress_text ~now:2000. t) "THINKING");
+      check string "the completed response text stays authored text" "EARLIER_RESPONSE" (T.text t))
+      [wire; replay];
+    let revision = Log.revision replay in
+    ignore (Log.add_journaled replay journal);
+    check int "overlapping replay does not repeat the stop" revision (Log.revision replay);
     (match Accum.close_turn_without_sources accum ~turn:0 with
      | Ok () -> () | Error detail -> fail detail);
-    List.iter send Agent_core.Types.[start next_initial;
+    send (start next_initial);
+    let wire,replay,_ = snapshots () in
+    List.iter (fun log ->
+      let text = T.progress_text ~now:2000. (T.of_log ~now:2000. log) in
+      check bool "the next response clears its predecessor's stop" false
+        (String_util.contains_substring text "model response ended");
+      check bool "a response start does not invent reasoning or text" false
+        (String_util.contains_substring text "STREAMING" || String_util.contains_substring text "THINKING"))
+      [wire; replay];
+    List.iter send Agent_core.Types.[
       ContentBlockDelta {index=0;delta=TextDelta "PREFIX"};
       ContentBlockDelta {index=1;delta=ThinkingDelta "REASONING"};
       sparse 9;start next_initial;

@@ -197,6 +197,8 @@ type reply =
 type model_signal =
   | Model_started_at of float
       (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
+  | Model_response_ended
+      (* Provider response stop; the Keeper turn remains open. *)
   | Reasoning_at of float (* the last THINKING delta *)
   | Answering_at of float (* the last TEXT delta *)
   | Tool_returned_at of string * float
@@ -1552,21 +1554,20 @@ let quiet_after_s = 2.0
 (* The model side's phase as one clause, or [None] before the first byte,
    where the named runtime is the subject instead. *)
 let model_phase_text ~now t =
-  match t.model_signal with
-  | None -> None
-  | Some signal ->
-    let word, since =
-      match signal with
-      | Model_started_at since -> "model started", since
-      | Reasoning_at since -> "THINKING · reasoning", since
-      | Answering_at since -> "STREAMING · answering", since
-      | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
-    in
+  let observed ~since word =
     if now -. since < quiet_after_s then Some word
     else
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word
       | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
+  in
+  match t.model_signal with
+  | None -> None
+  | Some Model_response_ended -> Some "model response ended"
+  | Some (Model_started_at since) -> observed ~since "model started"
+  | Some (Reasoning_at since) -> observed ~since "THINKING · reasoning"
+  | Some (Answering_at since) -> observed ~since "STREAMING · answering"
+  | Some (Tool_returned_at (tool_name, since)) -> observed ~since (tool_name ^ " returned")
 ;;
 
 let phase_text ~now t =
@@ -2122,6 +2123,8 @@ let apply_delta ~now t (delta : Live.delta) =
       t.observed_usage <- usage;
       t.observed_stop_reason <- None;
       t.model_signal <- Some (Model_started_at now)
+  | Live.Stream_model_stopped ->
+      t.model_signal <- Some Model_response_ended
   | Live.Stream_details { usage; stop_reason } ->
       (* What the provider reported, not that anything was written, so the
          model-side signal is left as whatever last moved the answer. A field
@@ -2142,6 +2145,7 @@ let apply_delta ~now t (delta : Live.delta) =
       (match stop_reason with
        | Some stop_reason -> t.observed_stop_reason <- Some stop_reason
        | None -> ())
+  | Live.Text "" | Live.Thinking "" -> ()
   | Live.Text text ->
       t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;

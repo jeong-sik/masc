@@ -1,0 +1,1 @@
+- Clear streaming/thinking activity when the provider response ends, while keeping the Keeper turn and pending tools active.

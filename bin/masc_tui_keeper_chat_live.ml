@@ -35,6 +35,7 @@ type delta =
       ; model : string
       ; usage : stream_usage option
       }
+  | Stream_model_stopped
   | Stream_details of
       { usage : stream_usage option
       ; stop_reason : string option
@@ -268,6 +269,7 @@ let custom_deltas_unvalidated fields =
               } ]
         | _ -> [])
      | None -> [])
+  | Some "KEEPER_STREAM_MESSAGE_STOP" -> [ Stream_model_stopped ]
   | Some "KEEPER_STREAM_MESSAGE_DELTA" ->
     (* The dashboard reader already keeps both of these
        ([dashboard/src/keeper-stream.ts] KEEPER_STREAM_MESSAGE_DELTA) and draws

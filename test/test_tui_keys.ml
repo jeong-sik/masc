@@ -2019,7 +2019,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  i:input  a:fragments / voice / account  u:restore / adopt revision  S:save draft  C:compare file  U:use current text  X:discard draft  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  i:input  a:fragments / voice / account  u:restore / adopt revision  D:delete  S:save draft  C:compare file  U:use current text  X:discard draft  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2162,6 +2162,7 @@ let test_config_pane_footer_actions () =
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
     enabled "f" (pane = Config_themes);
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    enabled "D" (pane = Config_presets);
     (* Every pane that answers [e], including params -- where #36650 moved the
        key into the pair [e / Enter] because both spellings open the same
        field ([handle_runtime_param_edit_open] ~advanced:false). The pane was
@@ -2204,7 +2205,7 @@ let test_config_pane_footer_actions () =
     (fun key ->
       Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
-    [ "n"; "u"; "PgUp/PgDn" ];
+    [ "n"; "u"; "D"; "PgUp/PgDn" ];
   (* The account form's door, at the width the other panes promise their own
      writes. Narrower rows keep the pane's first keys and drop [e] and [a]
      alike; the ? sheet names both there. *)

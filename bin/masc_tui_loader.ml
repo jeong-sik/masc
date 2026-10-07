@@ -1853,6 +1853,18 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
         check when the preset list says _autosave was saved before retrying: " ^ message)
   | Ok json -> Tui_decode.decode_preset_restore json
 
+(** POST /api/v1/presets/delete — the name the server removed. An unanswered
+    request may still have removed it, so the operator is told to read the
+    list before trying again. *)
+let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, string) result =
+  match Masc_tui_http.post_preset_delete ~host ~port ~name with
+  | Post_answered json -> Tui_decode.decode_preset_deleted json
+  | Post_refused detail -> Error ("preset delete refused: " ^ detail)
+  | Post_unanswered detail ->
+    Error
+      ("preset delete unanswered — the preset may be gone; \
+        check the preset list before retrying: " ^ detail)
+
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)

@@ -9673,6 +9673,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
         ~wrap:(fun result -> Preset_restored (Preset_to_chat target, result))
+  | Masc_tui_command.Preset_delete_missing_name ->
+      notice ~kind:Notice_failure "/preset delete needs a name on the same line"
+  | Masc_tui_command.Preset_delete name ->
+      (* Typing the name is the confirmation, as for restore. The name need
+         not load: a preset listed with ! is deleted the same way. *)
+      Buffer.clear state.msg_input;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
+        ~wrap:(fun result -> Preset_deleted (Preset_to_chat target, result))
   | Masc_tui_command.Play_invalid reason ->
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
@@ -10491,7 +10500,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
-  state.preset_restore_armed <- None;
+  state.preset_armed <- None;
   state.preset_report <- None;
   state.preset_busy <- false;
   Masc_tui_types.withdraw_fusion_workspace state;
@@ -11187,7 +11196,7 @@ let enter_config_pane state ~mailbox pane =
   | Config_presets ->
     state.presets_cursor <- 0;
     state.preset_save_draft <- None;
-    state.preset_restore_armed <- None;
+    state.preset_armed <- None;
     if state.presets_snapshot = None
     then launch_presets_load state ~mailbox
   | Config_params -> launch_runtime_params_load state ~mailbox
@@ -13126,7 +13135,9 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Preset_restore _
        | Masc_tui_command.Preset_restore_missing_name
        | Masc_tui_command.Preset_show _
-       | Masc_tui_command.Preset_show_missing_name ->
+       | Masc_tui_command.Preset_show_missing_name
+       | Masc_tui_command.Preset_delete _
+       | Masc_tui_command.Preset_delete_missing_name ->
            set_msg_scroll state 0;
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
@@ -14468,7 +14479,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                |> Option.map (fun row -> row.Tui_decode.pm_name) in
            if not (Option.equal String.equal selected_name next_name) then begin
              state.config_scroll <- 0;
-             state.preset_restore_armed <- None
+             state.preset_armed <- None
            end;
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
@@ -14614,6 +14625,23 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
            report_action state "error" ("preset restore: " ^ detail))
+  | Preset_deleted (sink, result) ->
+      (* The list is read again after a failure too: a refusal says the
+         list was stale, and an unanswered delete may have landed. *)
+      (match sink, result with
+       | Preset_to_chat target, Ok name ->
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             ("deleted preset " ^ name)
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
+       | Preset_to_pane, Ok name ->
+           state.preset_busy <- false;
+           report_action state "system" (name ^ " 삭제");
+           launch_presets_load state ~mailbox
+       | Preset_to_pane, Error detail ->
+           state.preset_busy <- false;
+           report_action state "error" ("preset delete: " ^ detail);
+           launch_presets_load state ~mailbox)
   | Play_invites_listed (target, result) ->
       (match result with
        | Error detail ->
@@ -19997,9 +20025,15 @@ and is loaded on demand through keeper_skill.
            if cancelled [ "a"; "A" ] then
          state.verification_verdict_armed <- None
        | Config ->
-           (* A restore rewrites three surfaces; its arm must not outlive the
-              keypress that set it. *)
-           if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
+           (* A restore rewrites three surfaces and a delete removes a preset;
+              an arm must not outlive the keypress that set it, and only its
+              own key confirms it. *)
+           (match state.preset_armed with
+            | None -> ()
+            | Some (Restore_armed _) ->
+                if cancelled [ "u"; "U" ] then state.preset_armed <- None
+            | Some (Delete_armed _) ->
+                if cancelled [ "D" ] then state.preset_armed <- None)
        | Runtime ->
            if cancelled [ "D" ] then state.runtime_lane_remove_armed <- None
        | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
@@ -23955,7 +23989,7 @@ and is loaded on demand through keeper_skill.
                 if state.preset_busy then
                   report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
                 else begin
-                  state.preset_restore_armed <- None;
+                  state.preset_armed <- None;
                   state.preset_save_draft <- Some ""
                 end
             | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
@@ -24357,9 +24391,9 @@ and is loaded on demand through keeper_skill.
                 list to page; Config's panes carry cursors of their own. *)
              | Overview | Acting | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
-          refresh, so the pane takes u, twice, for the destructive restore.
-          Its save key is n, answered inside the [n] dispatch below, which
-          the surface list there requires. *)
+          refresh, so the pane takes u, twice, for the destructive restore,
+          and D, twice, for the delete. Its save key is n, answered inside
+          the [n] dispatch below, which the surface list there requires. *)
        | Some "u" | Some "U"
          when state.view = Config && state.config_pane = Config_presets ->
            (match selected_preset_for_state state with
@@ -24368,8 +24402,8 @@ and is loaded on demand through keeper_skill.
               let name = manifest.Tui_decode.pm_name in
               if state.preset_busy then
                 report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
-              else if state.preset_restore_armed = Some name then begin
-                state.preset_restore_armed <- None;
+              else if state.preset_armed = Some (Restore_armed name) then begin
+                state.preset_armed <- None;
                 state.preset_busy <- true;
                 report_action state "system" (name ^ " 복원 중 · 지금 상태는 먼저 저장됩니다");
                 launch_preset_call state ~mailbox:async_messages
@@ -24377,9 +24411,30 @@ and is loaded on demand through keeper_skill.
                   ~wrap:(fun result -> Preset_restored (Preset_to_pane, result))
               end
               else begin
-                state.preset_restore_armed <- Some name;
+                state.preset_armed <- Some (Restore_armed name);
                 report_action state "system"
                   (Printf.sprintf "u 를 한 번 더 누르면 %s 로 되돌립니다" name)
+              end)
+       | Some "D"
+         when state.view = Config && state.config_pane = Config_presets ->
+           (match selected_preset_for_state state with
+            | None -> report_action state "error" "지울 프리셋을 고르세요"
+            | Some manifest ->
+              let name = manifest.Tui_decode.pm_name in
+              if state.preset_busy then
+                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+              else if state.preset_armed = Some (Delete_armed name) then begin
+                state.preset_armed <- None;
+                state.preset_busy <- true;
+                report_action state "system" (name ^ " 삭제 중");
+                launch_preset_call state ~mailbox:async_messages
+                  ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
+                  ~wrap:(fun result -> Preset_deleted (Preset_to_pane, result))
+              end
+              else begin
+                state.preset_armed <- Some (Delete_armed name);
+                report_action state "system"
+                  (Printf.sprintf "D 를 한 번 더 누르면 %s 를 지웁니다" name)
               end)
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)
@@ -25009,7 +25064,7 @@ and is loaded on demand through keeper_skill.
                 if state.presets_cursor < count - 1 then begin
                   state.presets_cursor <- state.presets_cursor + 1;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None;
+                  state.preset_armed <- None;
                   ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->
@@ -25381,7 +25436,7 @@ and is loaded on demand through keeper_skill.
                 if next <> state.presets_cursor then begin
                   state.presets_cursor <- next;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None;
+                  state.preset_armed <- None;
                   ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->

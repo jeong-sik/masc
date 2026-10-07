@@ -2037,7 +2037,7 @@ status: reference
 : `Prompt_preset`가 이름으로 저장하는 세 설정 표면의 묶음 — prompt overrides, Keeper instructions,
   runtime routing(Keeper assignments와 exact-output lanes). `.masc/presets/<name>/` 아래에
   저장하며, managed prompt 파일은 담지 않는다. 부팅 때 managed prompt 파일은 바이너리에서 다시
-  동기화된다. Config의 presets 패널과 채팅의 `/preset` 명령으로 저장·목록·복원한다. 복원은
+  동기화된다. Config의 presets 패널과 채팅의 `/preset` 명령으로 저장·목록·복원·삭제한다. 복원은
   현재 상태를 `_autosave` 프리셋 하나에 덮어써 보존한 뒤 표면별로 적용한다 — prompt overrides는 바로,
   Keeper instructions는 각 Keeper의 다음 기상 때, runtime routing은 `runtime.toml`에 기록한다.
   `_autosave`는 마지막 복원 직전 상태만 담는다. 이걸 복원하면 prompt overrides와 Keeper

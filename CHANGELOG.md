@@ -60,7 +60,7 @@
 
 ### Changed
 
-- The GitHub release page lists Upgrade notes, Fresh state required, Known issues, Added, Changed, Deprecated, Removed and Performance entry by entry, and names Fixed, Documentation and Internal with their entry count and a link to the tagged `CHANGELOG.md`, which keeps every entry (#41591).
+- The GitHub release page lists the summary’s actionable sections and counts Fixed, Documentation and Internal from the retained complete change record when present, linking directly to that tagged record; releases without a separate complete record use `CHANGELOG.md` (#41591).
 
 ### Internal
 
@@ -69,6 +69,35 @@
 ### Internal
 
 - Drop the filesystem tool guidance `Cwd_not_directory` with its `keeper.tool_filesystem.cwd_not_directory` prompt slot; nothing renders it (#41630).
+
+### Included native execution stages
+
+The native execution entries below describe successive changes included together: #41652 supplies the Keeper Owner restart recovery left for follow-up by #41641, and #41655 supplies the native dispatch wiring left for follow-up by #41652. Those two staged follow-ups are included in this candidate.
+
+### Internal
+
+- Remove two MCP tools/list tests that only checked the absence of a tool nothing declares (#41631).
+
+### Added
+- Native runtime calls accept caller-owned durable execution stores across regular, streaming, cooperative, and checkpoint-continuation entry points. Keeper Owner restart recovery remains follow-up work. (#41641)
+
+### Added
+- Keeper Owner retains typed native execution witnesses, requeues witnessed active calls after restart, and preserves unacknowledged terminal or unknown-effect receipts. Native dispatch wiring remains a separate follow-up. (#41652)
+
+### Fixed
+
+- Queued Keeper chat keeps the next released execution slot even when autonomous work repeatedly observed the previous chat as busy. Saved autonomous work resumes after claimable direct input drains (#41654).
+
+### Added
+- Direct Keeper native calls retain per-call execution authority and restore exact input/checkpoints after restart, with canonical terminal readback and explicit fencing for unknown or unretained effects. (#41655)
+
+### Fixed
+
+- Failed Keeper chat operations record their missing terminal event even after the live subscriber disconnects, so reconnecting clients can read the cancellation from the operation journal (#41657).
+
+### Fixed
+
+- Show replayed Keeper chat failures after partial output or prior replies, without duplicating history errors or hiding failed requests when focus changes. (#41660)
 
 ## [0.49.0] - 2026-10-04
 

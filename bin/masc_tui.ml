@@ -11248,19 +11248,18 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   (* An operator who consented in a browser is standing in front of a tab
      that does not know it happened: the callback lands on the server, not
      here. So while a login this TUI started is still outstanding, the tick
-     asks again. It stops as soon as the answer says attached, so this is
-     not a poll that runs forever -- it runs exactly as long as somebody is
-     waiting for it. Same shape as the chat reload above, and for the same
-     reason: a pane that read once on open showed a fact that had since
-     changed. *)
-  (if
-     state.view = Keepers Keeper_detail
-     && state.detail_tab = Detail_identity
-   then
-     match selected_keeper state with
-     | Some keeper when identity_login_recovery_poll_ready state keeper.k_name ->
-         Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
-     | Some _ | None -> ());
+     asks again, for every Keeper that waits and from any surface: the
+     operator may have left the Identity tab or opened another Keeper. It
+     stops as soon as the answer says attached, or that the provider is gone,
+     so this is not a poll that runs forever -- it runs exactly as long as
+     somebody is waiting for it. Same shape as the chat reload above, and for
+     the same reason: a pane that read once on open showed a fact that had
+     since changed. *)
+  Masc_tui_types.identity_login_pending_keepers state
+  |> List.iter (fun keeper_name ->
+       if identity_login_recovery_poll_ready state keeper_name then
+         Masc_tui_identity_requests.launch_view state ~host:server_peer_host
+           ~deliver:(workspace_enqueue state mailbox) keeper_name);
   (* The "answering now" badge rides every tick for the same reason as the
      held approvals: it is drawn from every surface, and its whole point is
      the operator who walked away from the chat pane. *)

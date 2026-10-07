@@ -6456,6 +6456,18 @@ let identity_login_pending_for_keeper (state : state) keeper_name =
        && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
        state.identity_login_expectations
 
+(* Every Keeper this workspace still waits on a login for. The tick asks
+   after each one from any surface: an operator who consented in a browser
+   and then left the Identity tab, or opened another Keeper, still sees the
+   login land. *)
+let identity_login_pending_keepers (state : state) =
+  state.identity_login_expectations
+  |> List.filter_map (fun expectation ->
+       if identity_login_pending_for_keeper state expectation.ile_keeper
+       then Some expectation.ile_keeper
+       else None)
+  |> List.sort_uniq String.compare
+
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
 let start_identity_login_request (state : state) ~keeper_name ~provider_id =
@@ -6515,10 +6527,16 @@ let remember_identity_login (state : state) login =
    | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  (* The wait ends when consent lands (attached) or when it never can (the
+     provider is no longer declared). A provider removed mid-consent left
+     its wait polling for the life of the process before the inventory's
+     absence counted as an answer. *)
   state.identity_login_expectations <- List.filter
     (fun expectation ->
+      let provider_id = expectation.ile_provider in
       not (String.equal expectation.ile_keeper keeper_name
-           && identity_provider_attached ~providers ~provider_id:expectation.ile_provider))
+           && (identity_provider_attached ~providers ~provider_id
+               || not (identity_provider_declared ~providers ~provider_id))))
     state.identity_login_expectations;
   state.identity_logins <-
     List.filter

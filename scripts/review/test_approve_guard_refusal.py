@@ -21,6 +21,7 @@ FAKE_GH = r"""#!/usr/bin/env bash
 shift
 [ "$1" != --paginate ] || shift
 path="$1"; shift
+printf '%s\n' "$path" >> "$FAKE_DIR/calls.log"
 expr="."
 [ "$1" != --jq ] || expr="$2"
 case "$path" in
@@ -61,9 +62,10 @@ class Case(unittest.TestCase):
             "user": {"login": "author-keeper"}}))
         (self.data / "comments.json").write_text("[]")
 
-    def review(self, footer, *, assoc="COLLABORATOR", first_suffix=""):
+    def review(self, footer, *, assoc="COLLABORATOR", first_suffix="", scope=SCOPE):
+        scope_line = f"review-scope: {scope}\n" if scope is not None else ""
         body = (f"verdict: PASS head: {HEAD} by: reviewer-keeper{first_suffix}\nsource review notes\n\n---\n"
-                f"review-scope: {SCOPE}\n{footer}")
+                f"{scope_line}{footer}")
         rev = {"id": 77, "state": "APPROVED", "author_association": assoc, "body": body,
                "commit_id": HEAD, "user": {"login": "reviewer-keeper"},
                "submitted_at": "2026-10-07T03:45:54Z"}
@@ -115,11 +117,49 @@ class Case(unittest.TestCase):
         self.assertIn("diff changed after the review", r.stderr)
 
     def test_untrusted_association_is_still_refused(self):
-        # The structured-verdict gate already refuses an outsider PASS before footer diagnosis.
         self.review(footer_line(), assoc="CONTRIBUTOR")
         r = self.run_guard("--merge-check")
         self.assertEqual(r.returncode, 2)
         self.assertIn("latest structured verdict is UNTRUSTED", r.stderr)
+        self.assertIn("author_association is CONTRIBUTOR", r.stderr)
+        self.assertLess(r.stderr.index("author_association is CONTRIBUTOR"),
+                        r.stderr.index("latest structured verdict is UNTRUSTED"))
+
+    def test_bad_footer_also_reports_missing_scope(self):
+        self.review(footer_line(tail=False), scope=None)
+        r = self.run_guard("--merge-check")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("footer lacks", r.stderr)
+        self.assertIn("review-scope stamp does not match", r.stderr)
+
+    def test_bad_footer_also_reports_mismatched_scope(self):
+        wrong_scope = json.dumps({"base_ref": "another-branch", "base_sha": BASE, "stack": None})
+        self.review(footer_line(tail=False), scope=wrong_scope)
+        r = self.run_guard("--merge-check")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("footer lacks", r.stderr)
+        self.assertIn("review-scope stamp does not match", r.stderr)
+
+    def test_valid_approval_does_not_diagnose_another_invalid_scope(self):
+        old_scope = json.dumps({"base_ref": "main", "base_sha": "f" * 40, "stack": None})
+        self.review(footer_line(tail=False), scope=old_scope)
+        rejected = json.loads((self.data / "review.json").read_text())
+        self.review(footer_line())
+        admitted = json.loads((self.data / "review.json").read_text())
+        admitted["id"] = 78
+        admitted["user"]["login"] = "second-reviewer"
+        (self.data / "review-78.json").write_text(json.dumps(admitted))
+        (self.data / "review.json").write_text(json.dumps(rejected))
+        (self.data / "reviews.json").write_text(json.dumps([rejected, admitted]))
+        gh = self.tmp / "gh"
+        gh.write_text(gh.read_text().replace(
+            "  repos/*/pulls/*/reviews/*)",
+            '  repos/*/pulls/*/reviews/78) f="$FAKE_DIR/review-78.json";;\n  repos/*/pulls/*/reviews/*)'))
+        r = self.run_guard("--merge-check")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        calls = (self.data / "calls.log").read_text().splitlines()
+        self.assertFalse(any("/compare/" in path for path in calls))
 
 
 if __name__ == "__main__":

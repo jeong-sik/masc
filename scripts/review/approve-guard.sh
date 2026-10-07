@@ -31,9 +31,35 @@ source "$here/review-verdict.sh"
 refuse() { echo "REFUSED #$pr head $head: $*" >&2; exit 2; }
 # Diagnostic detail for refusals: one line per failed test, never consulted for admission.
 refusal_detail=""
+refused_scope_reviews=""
+check_review_scope() {
+  printf '%s' "$1" |
+    python3 "$here/review-scope.py" --repo "$repo" --head "$head" \
+      --base-ref "$pr_base" --base-sha "$pr_base_sha" --stack "$pr_stack" --gh "$GH"
+}
+emit_refusal_detail() {
+  local review_json scope_status rid who
+  [ -z "$refusal_detail" ] || printf '%s' "$refusal_detail" >&2
+  # A malformed footer cannot authorize a review, but it must not hide an
+  # independent scope failure. Defer any scope comparison API calls until
+  # admission actually refuses, and reuse the review JSON already read.
+  while IFS= read -r review_json; do
+    [ -n "$review_json" ] || continue
+    scope_status=0
+    check_review_scope "$review_json" || scope_status=$?
+    [ "$scope_status" -ne 0 ] || continue
+    rid=$(printf '%s' "$review_json" | jq -r '.id')
+    who=$(printf '%s' "$review_json" | jq -r '.user.login')
+    if [ "$scope_status" -eq 2 ]; then
+      printf '  review %s by %s: review-scope stamp does not match this PR base/stack (expected review-scope: %s)\n' "$rid" "$who" "$(compute_scope)" >&2
+    else
+      printf '  review %s by %s: review-scope could not be verified\n' "$rid" "$who" >&2
+    fi
+  done <<<"$refused_scope_reviews"
+}
 refuse_detail() {
   echo "REFUSED #$pr head $head: $*" >&2
-  [ -z "$refusal_detail" ] || printf '%s' "$refusal_detail" >&2
+  emit_refusal_detail
   exit 2
 }
 compute_scope() {
@@ -63,7 +89,7 @@ review_rows() {
 check_reviews() {
   local rows who rid state bound scope_status review_json admit_status
   rows=$(review_rows) || return 1
-  approvals=""; replaced=""; own_approval=""; refusal_detail=""
+  approvals=""; replaced=""; own_approval=""; refusal_detail=""; refused_scope_reviews=""
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
     if [ "$state" = CHANGES_REQUESTED ]; then
@@ -80,12 +106,12 @@ check_reviews() {
 $(printf '%s\n' "$bound" | sed 's/^/    - /')
 "
         bound=""
+        refused_scope_reviews="$refused_scope_reviews$(printf '%s' "$review_json" | jq -c .)
+"
       fi
       if [ -n "$bound" ]; then
         scope_status=0
-        ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.' |
-          python3 "$here/review-scope.py" --repo "$repo" --head "$head" \
-            --base-ref "$pr_base" --base-sha "$pr_base_sha" --stack "$pr_stack" --gh "$GH" || scope_status=$?
+        check_review_scope "$review_json" || scope_status=$?
         if [ "$scope_status" -eq 2 ]; then
           refusal_detail="$refusal_detail  review $rid by $who: footer is bound, but its review-scope stamp does not match this PR base/stack (expected review-scope: $(compute_scope))
 "
@@ -103,7 +129,10 @@ check_verdict() {
   local value state cited by
   value=$(verdict_for "$pr" "$head") || return 1
   read -r state cited by <<<"$value"
-  [ -z "$state" ] || [ "$state" = PASS ] || refuse "latest structured verdict is $state"
+  if [ -n "$state" ] && [ "$state" != PASS ]; then
+    [ -n "$approvals" ] || emit_refusal_detail
+    refuse "latest structured verdict is $state"
+  fi
 }
 check_reviews
 check_verdict

@@ -347,7 +347,8 @@ From Dashboard (Overview), press `Left` to open the Keeper list. In chat,
 `Left` opens it only when the input is empty and its cursor is at the start.
 With text present, `Left`/`Right` move the editing cursor; typing, paste,
 Backspace and Ctrl-W edit at that cursor. Even at the start of a nonempty
-draft, `Left` stays in the input. Use `Ctrl-G` to switch Keepers with a draft. `Up`/`Down` (or `j`/`k`) select a Keeper; `Enter` opens its chat.
+draft, `Left` stays in the input. Use `Ctrl-G` to switch Keepers with a draft.
+In the list, `Up`/`Down` (or `j`/`k`) select a Keeper; `Enter` opens its chat.
 `Right`, `Esc`, or `Tab` returns to the screen you were reading without sending
 a message or interrupting the Keeper. Chat drafts stay with their Keeper when
 you switch. `Left` also opens a list hidden with `Ctrl-B`, without changing

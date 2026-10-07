@@ -30,7 +30,7 @@ def account_fixture() -> tuple[int, dict]:
     return (
         200,
         {
-            "status": "ready",
+            "status": "ready", "season": None,
             "keeper": "alpha",
             "balance_milli": "1500",
             "owned_items": ["glasses", "shades"],

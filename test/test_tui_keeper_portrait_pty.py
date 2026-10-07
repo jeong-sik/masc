@@ -335,7 +335,7 @@ def item_tab_previews_accessories(binary: str) -> None:
     items = ItemWorkspaceFixture((
         200,
         {
-            "status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
+            "status": "ready", "season": None, "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
             "owned_items": ["glasses"],
             "catalog": [
                 ({"id": item, "slot": slot, "price_status": "unpriced"}
@@ -410,7 +410,7 @@ def item_tab_previews_accessories(binary: str) -> None:
 
 def item_account_failure_keeps_the_preview(binary: str) -> None:
     fixtures = item_roster_fixtures()
-    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
+    ready = {"status": "ready", "season": None, "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
              "owned_items": ["glasses"], "catalog": [
                  ({"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
                   if item == "glasses" else
@@ -466,7 +466,7 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
     held_at = [None]
     arm = [False]
     balance = ["12500"]
-    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "owned_items": [],
+    ready = {"status": "ready", "season": None, "account_revision": "a" * 64, "keeper": "alpha", "owned_items": [],
              "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
                          for item, slot in ITEM_CATALOG]}
 
@@ -558,7 +558,7 @@ def item_account_follows_private_changes(binary: str) -> None:
         return 200, copy.deepcopy(roster)
 
     fixtures[roster_path] = read_roster
-    account = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
+    account = {"status": "ready", "season": None, "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
                "owned_items": [], "catalog": [
                    {"id": item, "slot": slot,
                     "price_status": "priced" if item == "glasses" else "unpriced",
@@ -642,7 +642,7 @@ def item_account_follows_private_changes(binary: str) -> None:
 
 def item_account_follows_workspace_authority(binary: str) -> None:
     fixtures = item_roster_fixtures()
-    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
+    ready = {"status": "ready", "season": None, "account_revision": "a" * 64, "keeper": "alpha",
              "balance_milli": "12500", "owned_items": ["glasses"], "catalog": [
                  {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
                  for item, slot in ITEM_CATALOG]}
@@ -747,7 +747,7 @@ def item_account_follows_workspace_authority(binary: str) -> None:
 
 def item_account_refuses_an_unobserved_server_workspace(binary: str) -> None:
     fixtures = item_roster_fixtures()
-    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
+    ready = {"status": "ready", "season": None, "account_revision": "a" * 64, "keeper": "alpha",
              "balance_milli": "12500", "owned_items": [], "catalog": [
                  {"id": item, "slot": slot, "price_status": "unpriced"}
                  for item, slot in ITEM_CATALOG]}
@@ -812,7 +812,7 @@ def item_account_refreshes_without_public_currency(binary: str) -> None:
     fixtures = item_roster_fixtures()
     roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
     fixtures["/api/v1/gate/keepers?detailed=true"] = lambda: (200, roster)
-    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
+    ready = {"status": "ready", "season": None, "account_revision": "a" * 64, "keeper": "alpha",
              "balance_milli": "12500", "owned_items": ["glasses"], "catalog": [
                  {"id": item, "slot": slot, "price_status": "unpriced"}
                  for item, slot in ITEM_CATALOG]}
@@ -855,7 +855,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
     held, release, served = threading.Event(), threading.Event(), threading.Event()
     arm = [False]
     balance = ["12500"]
-    account = {"account_revision": "a" * 64, "status": "ready", "keeper": "alpha", "owned_items": [],
+    account = {"account_revision": "a" * 64, "status": "ready", "season": None, "keeper": "alpha", "owned_items": [],
                "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
                            for item, slot in ITEM_CATALOG]}
 

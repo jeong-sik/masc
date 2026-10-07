@@ -6,7 +6,7 @@ const revision = 'a'.repeat(64)
 const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
   ids.slice(1).map(id => ({ id, slot, price_status: id === 'crown' ? 'priced' : 'unpriced', ...(id === 'crown' ? { price_milli: '200' } : {}) })),
 )
-const ready = { status: 'ready', account_revision: revision, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
+const ready = { status: 'ready', season: null, account_revision: revision, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
 
 describe('Keeper Item account wire', () => {
   it('decodes all three states and keeps unpriced separate from zero', () => {
@@ -18,6 +18,16 @@ describe('Keeper Item account wire', () => {
     expect(parsed.balance_milli).toBe('800')
     expect(parsed.catalog.find(item => item.id === 'crown')).toMatchObject({ price_milli: '200' })
     expect(parsed.catalog.find(item => item.id === 'book')).toMatchObject({ price_status: 'unpriced' })
+  })
+
+  it('requires an explicit absent or named season from the ready response', () => {
+    expect(parseKeeperItems(ready, 'rondo')).toMatchObject({ season: null })
+    expect(parseKeeperItems({ ...ready, season: 'winter-sale' }, 'rondo')).toMatchObject({ season: 'winter-sale' })
+    const { season: _, ...missingSeason } = ready
+    expect(() => parseKeeperItems(missingSeason, 'rondo')).toThrow('schema drift')
+    for (const season of ['', ' ', 1, false]) {
+      expect(() => parseKeeperItems({ ...ready, season }, 'rondo')).toThrow('schema drift')
+    }
   })
 
   it.each(['\n', '\r', '\r\n', '\u2028', '\u2029'])(

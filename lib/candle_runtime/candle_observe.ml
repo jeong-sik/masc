@@ -1,11 +1,11 @@
 type t =
   | Off
   | Disabled of string
-  | Ready of { policy : Candle_config.policy; balance : Candle_balance.t; events : Candle_event.t list }
+  | Ready of { at : Candle_time.t; policy : Candle_config.policy; balance : Candle_balance.t; events : Candle_event.t list }
 
 let read ~now ~base_path =
   match Candle_status.observed_view ~now ~base_path with
-  | Ok view -> Ready {policy=view.policy;balance=view.balance;events=view.events}
+  | Ok view -> Ready {at=view.at;policy=view.policy;balance=view.balance;events=view.events}
   | Error Candle_status.Off -> Off
   | Error (Candle_status.Disabled reason) -> Disabled reason
   | Error ((Candle_status.Invalid_time _ | Candle_status.Invalid_ledger _
@@ -29,7 +29,7 @@ let equipment observation ~keeper = match observation with
 let disabled_account_revision reason =
   Digestif.SHA256.(digest_string ("disabled\000" ^ reason) |> to_hex)
 
-let ready_account_revision ~events ~policy ~balance ~keeper =
+let ready_account_revision ~at ~events ~policy ~balance ~keeper =
   let relevant (event : Candle_event.t) = match event.body with
     | Candle_event.Half_life_set _ -> true
     | Candle_event.Paid payment -> List.exists (fun (allocation : Candle_payment.allocation) ->
@@ -46,19 +46,23 @@ let ready_account_revision ~events ~policy ~balance ~keeper =
   let owned = Candle_balance.owned balance ~keeper
     |> List.map (fun item -> `String (Keeper_portrait_item.id item)) in
   let catalog = Keeper_portrait_item.all |> List.map (fun item ->
-    let price = match Candle_config.price policy item with
+    let price = match Candle_config.price_at policy ~at item with
       | Candle_config.Unpriced -> `Null
       | Candle_config.Priced amount -> `String (string_of_int amount) in
     `List [`String (Keeper_portrait_item.id item); price]) in
+  let season = match Candle_config.season_at policy ~at with
+    | None -> `Null
+    | Some season -> `String (Candle_config.season_id season) in
   let account = `List [
     half_life;
     `List facts;
     `List owned;
     `List catalog;
+    season;
   ] in
   Digestif.SHA256.(digest_string ("ready\000" ^ Yojson.Safe.to_string account) |> to_hex)
 
 let account_revision observation ~keeper = match observation with
   | Off -> None
   | Disabled reason -> Some (disabled_account_revision reason)
-  | Ready {policy;balance;events} -> Some (ready_account_revision ~events ~policy ~balance ~keeper)
+  | Ready {at;policy;balance;events} -> Some (ready_account_revision ~at ~events ~policy ~balance ~keeper)

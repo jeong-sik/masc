@@ -15,7 +15,7 @@ const catalog = Object.entries({
   ...(id === 'crown' ? { price_milli: '200' } : {}),
 })))
 function account(owned, price) {
-  return { status: 'ready', account_revision: '0'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: owned,
+  return { status: 'ready', season: null, account_revision: '0'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: owned,
     catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: price } : item) }
 }
 function gate() {

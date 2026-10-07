@@ -148,7 +148,9 @@ let season_day context key raw =
   let fail () = Error (Printf.sprintf "%s.%s must be a calendar date written YYYY-MM-DD, got %S" context key raw) in
   match String.split_on_char '-' raw with
   | [ year; month; day ]
-    when String.length year = 4 && String.length month = 2 && String.length day = 2 ->
+    when String.length year = 4 && String.length month = 2 && String.length day = 2
+         && List.for_all (String.for_all (fun c -> c >= '0' && c <= '9'))
+              [ year; month; day ] ->
     (match int_of_string_opt year, int_of_string_opt month, int_of_string_opt day with
      | Some year, Some month, Some day ->
        (match Ptime.of_date (year, month, day) with

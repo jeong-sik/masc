@@ -22,7 +22,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  let account = { status: 'ready', account_revision: '0'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
+  let account = { status: 'ready', season: null, account_revision: '0'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
   let failed = false
   let releaseResponse = null
   const requests = []

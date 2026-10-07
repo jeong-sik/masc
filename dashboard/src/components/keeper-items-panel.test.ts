@@ -58,7 +58,7 @@ function pendingAccount() {
 }
 function account(owned: string[], crownPrice: string) {
   return parseKeeperItems({
-    status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: owned,
+    status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: owned,
     catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: crownPrice } : item),
   }, 'rondo')
 }
@@ -338,7 +338,7 @@ describe('Keeper Item tab', () => {
   })
 
   it('shows observed balance, prices, ownership and equipment', async () => {
-    fetchKeeperItems.mockResolvedValue({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
+    fetchKeeperItems.mockResolvedValue({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
     render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
     expect(await screen.findByText('0.800 Candle')).toBeTruthy()
     expect(screen.getByText('보유 1 / 18개')).toBeTruthy()
@@ -348,7 +348,7 @@ describe('Keeper Item tab', () => {
   })
 
   it('prints wallets beyond JavaScript safe integers exactly', async () => {
-    fetchKeeperItems.mockResolvedValue({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '9007199254740993', owned_items: [], catalog })
+    fetchKeeperItems.mockResolvedValue({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '9007199254740993', owned_items: [], catalog })
     render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
     expect(await screen.findByText('9,007,199,254,740.993 Candle')).toBeTruthy()
   })
@@ -364,7 +364,7 @@ describe('Keeper Item tab', () => {
   })
 
   it('does not show the previous Keeper account after switching', async () => {
-    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
       .mockResolvedValueOnce({ status: 'off', account_revision: null, keeper: 'geek-scout' })
     const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
     expect(await screen.findByText('0.800 Candle')).toBeTruthy()
@@ -374,8 +374,8 @@ describe('Keeper Item tab', () => {
   })
 
   it('rereads ownership when the server-observed outfit changes', async () => {
-    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
-      .mockResolvedValueOnce({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '600', owned_items: ['crown', 'beanie'], catalog })
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
+      .mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '600', owned_items: ['crown', 'beanie'], catalog })
     const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
     expect(await screen.findByText('0.800 Candle')).toBeTruthy()
     view.rerender(html`<${KeeperItemsPanel} keeper=${keeper('rondo', 'beanie')} />`)
@@ -384,8 +384,8 @@ describe('Keeper Item tab', () => {
   })
 
   it('rereads purchases when the server-observed wallet changes', async () => {
-    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
-      .mockResolvedValueOnce({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '600', owned_items: ['crown'], catalog })
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+      .mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '600', owned_items: ['crown'], catalog })
     const view = render(html`<${KeeperItemsPanel} keeper=${{ ...keeper('rondo'), candle_balance_milli: '800' }} />`)
     expect(await screen.findByText('0.800 Candle')).toBeTruthy()
     view.rerender(html`<${KeeperItemsPanel} keeper=${{ ...keeper('rondo'), candle_balance_milli: '600' }} />`)
@@ -559,8 +559,8 @@ describe('Keeper Item tab', () => {
   })
 
   it('rereads a free purchase when ownership changes but wallet and outfit do not', async () => {
-    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
-      .mockResolvedValueOnce({ status: 'ready', account_revision: revisionB, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+      .mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionB, keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
     const observed = (revision: string) => ({ ...keeper('rondo'), candle_balance_milli: '800', candle_account_revision: revision })
     const view = render(html`<${KeeperItemsPanel} keeper=${observed('a'.repeat(64))} />`)
     expect(await screen.findByText('보유 0 / 18개')).toBeTruthy()
@@ -572,8 +572,8 @@ describe('Keeper Item tab', () => {
 
   it('rereads edited prices while ownership, wallet and outfit stay fixed', async () => {
     const repriced = catalog.map(item => item.id === 'crown' ? { ...item, price_milli: '300' } : item)
-    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
-      .mockResolvedValueOnce({ status: 'ready', account_revision: revisionB, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog: repriced })
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionA, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+      .mockResolvedValueOnce({ status: 'ready', season: null, account_revision: revisionB, keeper: 'rondo', balance_milli: '800', owned_items: [], catalog: repriced })
     const observed = (revision: string) => ({ ...keeper('rondo'), candle_balance_milli: '800', candle_account_revision: revision })
     const view = render(html`<${KeeperItemsPanel} keeper=${observed('a'.repeat(64))} />`)
     expect(await screen.findByText('0.200 Candle')).toBeTruthy()
@@ -642,12 +642,12 @@ describe('Keeper Item tab', () => {
     await act(async () => { keeperRosterObservationRevision.value += 1 })
     expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
     expect(signal.aborted).toBe(false)
-    await act(async () => { finish({ status: 'ready', account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: [], catalog }) })
+    await act(async () => { finish({ status: 'ready', season: null, account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: [], catalog }) })
     expect(await screen.findByText('0.800 Candle')).toBeTruthy()
   })
   it('rejects an intermediate account revision even when the roster returns to its original revision', async () => {
-    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', account_revision: 'b'.repeat(64), keeper: 'rondo', balance_milli: '300', owned_items: [], catalog })
-      .mockResolvedValueOnce({ status: 'ready', account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', season: null, account_revision: 'b'.repeat(64), keeper: 'rondo', balance_milli: '300', owned_items: [], catalog })
+      .mockResolvedValueOnce({ status: 'ready', season: null, account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
     render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
     expect(await screen.findByText(/Item 계정 관측이 변경되었습니다/)).toBeTruthy()
     expect(screen.queryByText('0.300 Candle')).toBeNull()

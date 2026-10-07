@@ -20,7 +20,7 @@ try {
   await page.route('**/api/v1/keepers/rondo/items', route => {
     accountReads.push({ recovered })
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-      status: 'ready', keeper: 'rondo', balance_milli: recovered ? '600' : '800',
+      status: 'ready', season: null, keeper: 'rondo', balance_milli: recovered ? '600' : '800',
       account_revision: (recovered ? '1' : '0').repeat(64),
       owned_items: recovered ? ['crown', 'beanie'] : ['crown'], catalog,
     }) })

@@ -38,7 +38,7 @@ let ready_json ~keeper (view : Candle_status.view) =
     [ "status", `String "ready"
     ; "keeper", `String keeper
     ; "account_revision", `String (Candle_observe.ready_account_revision
-        ~events:view.events ~policy:view.policy ~balance:view.balance ~keeper)
+        ~at:view.at ~events:view.events ~policy:view.policy ~balance:view.balance ~keeper)
     ; "balance_milli", `String (string_of_int (Candle_balance.balance view.balance ~keeper))
     ; "owned_items", `List (List.map (fun item -> `String (Item.id item))
         (Candle_balance.owned view.balance ~keeper))

@@ -314,6 +314,13 @@ let test_shop_season_misconfiguration_disables () =
     let reason = disabled_reason (Candle_config.of_toml_string (valid_text ^ suffix)) in
     Alcotest.(check bool) label true (contains ~affix reason)
   in
+  List.iter (fun raw ->
+    List.iter (fun key ->
+      let starts, ends = if key = "starts" then raw, "2027-02-28" else "2026-12-01", raw in
+      refuse ("non-decimal " ^ key ^ ": " ^ raw)
+        (Printf.sprintf "[shop.season.bad]\nstarts = %S\nends = %S\n" starts ends)
+        "YYYY-MM-DD") [ "starts"; "ends" ])
+    [ "+026-12-01"; "0x7E-12-01"; "2026-12-1_"; "2_26-12-01"; "2026-+1-01" ];
   refuse "blank season id"
     {|
 [shop.season."  "]

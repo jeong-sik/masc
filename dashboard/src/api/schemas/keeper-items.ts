@@ -26,6 +26,7 @@ const ReadySchema = Schema.Struct({
   keeper: Schema.NonEmptyString,
   account_revision: RevisionSchema,
   balance_milli: AmountSchema,
+  season: Schema.NullOr(Schema.String.pipe(Schema.filter(value => value.trim().length > 0 || 'season id is empty'))),
   owned_items: Schema.Array(ItemIdSchema),
   catalog: Schema.Array(CatalogEntrySchema),
 }).pipe(Schema.filter(account => {

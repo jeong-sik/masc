@@ -42,7 +42,7 @@ CATALOG = (
 
 def account(balance: str, owned: str, price: str, revision: str):
     return 200, {
-        "status": "ready",
+        "status": "ready", "season": None,
         "account_revision": revision * 64,
         "keeper": "alpha",
         "balance_milli": balance,

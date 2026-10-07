@@ -251,7 +251,7 @@ let test_account_revision_binds_facts_not_decay_clock () =
     ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="appraiser"}}]
     ~weights_trace:{run_id="weights";slot_id="appraiser"}
     ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[owner,1]) in
-  let policy = match Candle_config.of_toml_string {|half_life = 1
+  let policy_text = {|half_life = 1
 [payout]
 weight_max = 1
 deduction_rate = 0
@@ -273,15 +273,17 @@ large = 1000
 epic = 1000
 [shop.prices_milli]
 crown = 0
-|} with
+|} in
+  let read_policy text = match Candle_config.of_toml_string text with
     | Candle_config.Enabled policy -> policy
     | config -> fail (Candle_config.to_string config) in
+  let policy = read_policy policy_text in
   let events = funding_rows at0 (payment "own-credit" keeper) |> List.map (fun (event : Candle_event.t) ->
     match event.body with Candle_event.Half_life_set _ -> {event with body=Half_life_set (Candle_decay.Hours 1)}
     | _ -> event) in
   let project at events = require_ok Candle_balance.error_to_string (Candle_balance.of_events ~at events) in
   let revision ?(policy=policy) at events =
-    Candle_observe.ready_account_revision ~events ~policy ~balance:(project at events) ~keeper in
+    Candle_observe.ready_account_revision ~at ~events ~policy ~balance:(project at events) ~keeper in
   check int "funded at initial instant" 1000 (Candle_balance.balance (project at0 events) ~keeper);
   check int "natural one-second decay remains observable" 999 (Candle_balance.balance (project at1 events) ~keeper);
   let initial = revision at0 events in
@@ -301,7 +303,31 @@ crown = 0
     {Candle_event.at=at1;body=Equipped {keeper="other-keeper";slot=Keeper_portrait_item.Head;choice=Item crown}}] in
   check string "unrelated purchase/equipment do not invalidate this account" initial (revision at1 other_equipped);
   let boundary = events @ [{Candle_event.at=at1;body=Half_life_set (Candle_decay.Hours 2)}] in
-  check bool "durable policy boundary invalidates" false (initial = revision at1 boundary)
+  check bool "durable policy boundary invalidates" false (initial = revision at1 boundary);
+  let before = require_ok Fun.id (Candle_time.of_rfc3339 "2026-11-30T23:59:59Z") in
+  let first = require_ok Fun.id (Candle_time.of_rfc3339 "2026-12-01T00:00:00Z") in
+  let last = require_ok Fun.id (Candle_time.of_rfc3339 "2026-12-31T23:59:59Z") in
+  let after = require_ok Fun.id (Candle_time.of_rfc3339 "2027-01-01T00:00:00Z") in
+  let season = {|
+[shop.season.winter]
+starts = "2026-12-01"
+ends = "2026-12-31"
+|} in
+  let priced amount = read_policy (policy_text ^ season
+    ^ Printf.sprintf "[shop.season.winter.prices_milli]\ncrown = %d\n" amount) in
+  let winter = priced 100 in
+  let outside = revision ~policy:winter before events in
+  let active = revision ~policy:winter first events in
+  check bool "season start changes the account revision" false (outside = active);
+  check string "unchanged season remains stable through its last second"
+    active (revision ~policy:winter last events);
+  check string "season end restores base catalog identity"
+    outside (revision ~policy:winter after events);
+  check bool "price edit within the same season invalidates the account" false
+    (active = revision ~policy:(priced 200) first events);
+  let banner_only = read_policy (policy_text ^ season) in
+  check bool "season name invalidates even without price overrides" false
+    (revision ~policy:banner_only before events = revision ~policy:banner_only first events)
 
 (* ---- the real router, over an in-memory HTTP/1.1 connection ---- *)
 

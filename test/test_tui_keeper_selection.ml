@@ -84,7 +84,18 @@ let test_message_target_survives_unavailability () =
     (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 0 })
     (reconcile [ "haneul"; "seongsu" ]
        (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
-       [])
+       []);
+  (* A failed read empties the roster and the next one refills it. The cursor
+     read against the empty roster names no row, so the chat target, not row
+     zero, is where Esc must return. *)
+  let emptied =
+    reconcile [ "haneul"; "seongsu" ]
+      (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
+      []
+  in
+  check navigation "a refilled roster returns the cursor to the chat target"
+    (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
+    (reconcile [] emptied [ "haneul"; "seongsu" ])
 
 let test_pathological_cursors_are_total () =
   check navigation "negative list cursor normalizes to zero"

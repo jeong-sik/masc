@@ -74,8 +74,18 @@ let reconcile ~current_ids ~next_ids ~current =
         if cursor < 0 then None else List.nth_opt current_ids cursor
       in
       let cursor =
-        match Option.bind selected_id (fun id -> find_index id next_ids) with
-        | Some next_cursor -> next_cursor
-        | None -> fallback_cursor ~cursor next_ids
+        match selected_id with
+        | Some id ->
+            (match find_index id next_ids with
+             | Some next_cursor -> next_cursor
+             | None -> fallback_cursor ~cursor next_ids)
+        | None ->
+            (* The row the operator chose is gone from the roster it was read
+               against -- a failed read left that roster empty -- so the
+               cursor names nothing. The chat target is the Keeper they came
+               from; land on it when the roster returns. *)
+            (match find_index keeper_name next_ids with
+             | Some next_cursor -> next_cursor
+             | None -> fallback_cursor ~cursor next_ids)
       in
       Message_keeper { keeper_name; cursor }

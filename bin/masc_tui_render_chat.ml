@@ -3473,7 +3473,7 @@ let render_keeper_message (state : state) =
            Foreground-only restore keeps that ground through the prompt. The
            already viewport-fitted draft leaves room for this exact prefix. *)
         box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background
-          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.default_fg ^ line))
+          (Theme.recede () ^ prefix ^ Ansi.default_fg ^ line))
       composer.lines;
 
     let input_row =

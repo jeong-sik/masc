@@ -1,5 +1,5 @@
 (** The editable chat draft. Cursor positions are UTF-8 byte offsets; every
-    mutation keeps the cursor at a scalar boundary. Restored drafts start at
+    mutation keeps the cursor at a grapheme boundary. Restored drafts start at
     their end, while typed and pasted text is inserted at the current cursor. *)
 type t
 

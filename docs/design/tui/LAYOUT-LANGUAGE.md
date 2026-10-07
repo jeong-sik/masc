@@ -18,9 +18,9 @@ stay at the bottom. Each area answers one question.
   counts, metadata and hints through the existing theme tokens.
 - Separate adjacent panes with one quiet edge. Full-screen content needs no
   enclosing box. Overlays can retain a frame so they remain recognisable.
-- Only the row that owns keyboard focus gets a full reverse band. Keep a caret
-  on an open selection when focus moves into its detail. NO_COLOR must retain
-  both signals.
+- Only the row that owns keyboard focus gets a full selection band. With a
+  known palette it is a quiet neutral tint; without colours or a usable palette
+  it uses reverse video. Keep a caret on the open selection in both modes.
 - Keep label columns fixed as selection moves. Fold long names in the middle
   when the identity's distinguishing end would otherwise be lost.
 - Align the list title on the left and its count on the right. Preserve the
@@ -35,6 +35,26 @@ Status still comes from its typed reading. This treatment changes neither the
 meaning of a pause nor a health observation. An unavailable read remains
 unavailable. A quieter presentation must not conceal a failure or a decision
 that actually needs the operator.
+
+## Moving from the composer
+
+The Keeper list starts closed. In chat, an empty composer with its cursor at
+zero gives `Left` to the list. A nonempty draft keeps `Left` for editing, even
+at its start. `Right`/`Esc` return focus to the composer; opening a Keeper also
+closes the transient list. `Ctrl-B` remains the explicit pinning control and
+`Ctrl-G` switches Keepers while keeping their drafts. Dashboard opens the
+Keeper list with `Left` directly.
+
+Input, paste and deletion operate at the cursor. Unicode grapheme boundaries
+keep combined emoji and accents together. The composer viewport follows that
+cursor horizontally and across newline-separated rows.
+
+The preview starts in chat with a real editable field. It follows the same
+empty-input boundary, supports per-Keeper drafts, and starts with the list
+closed. Its muted text and neutral selection band demonstrate the quieter
+palette direction. Native rendering retains the terminal foreground for text;
+focused shared composers no longer colour the whole draft cyan, and known
+terminal palettes supply the neutral sidebar band.
 
 ## The seven surfaces
 

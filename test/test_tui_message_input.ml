@@ -29,6 +29,20 @@ let unicode_editing () =
   check int "Right stops at end" (String.length "가다🙂") (Input.cursor draft);
   check bool "valid UTF-8 remains" true (String.is_valid_utf_8 (Input.contents draft))
 
+let joined_emoji () =
+  let draft = Input.create () in
+  Input.insert draft "👩‍💻X";
+  Input.move_left draft;
+  check int "before trailing X" (String.length "👩‍💻") (Input.cursor draft);
+  Input.move_left draft;
+  check int "Left crosses the complete ZWJ grapheme" 0 (Input.cursor draft);
+  Input.move_right draft;
+  Input.backspace draft;
+  check string "Backspace removes the whole visible emoji" "X" (Input.contents draft);
+  Input.insert draft "é";
+  Input.backspace draft;
+  check string "combining mark follows its base" "X" (Input.contents draft)
+
 let paste_and_word_delete () =
   let draft = Input.create () in
   Input.insert draft "one two!";
@@ -58,5 +72,6 @@ let viewport_tracks_cursor () =
 let () = run "Chat composer cursor"
   [ "editing", [ test_case "empty Left boundary" `Quick empty_boundary;
                   test_case "Unicode insertion and erasure" `Quick unicode_editing;
+                  test_case "joined emoji and combining marks" `Quick joined_emoji;
                   test_case "paste and word erasure at cursor" `Quick paste_and_word_delete ];
     "rendering", [test_case "multiline and horizontal cursor viewport" `Quick viewport_tracks_cursor] ]

@@ -524,6 +524,12 @@ val split_styled_cells : max_cells:int -> string -> string list
     restores its inherited style and closes it, so rows can scroll separately. *)
 
 val input_viewport : max_cells:int -> string -> string
+(** Keep the complete input when it fits. Overflow uses a leading […] and the
+    newest complete-scalar suffix that fits in the remaining cells. *)
+
+val input_boundaries : string -> int list
+(** Byte offsets surrounding complete displayed graphemes, including 0 and
+    the end. Input editing and display use the same Unicode segmentation. *)
 
 val input_window : max_cells:int -> cursor:int -> string -> string * int
 (** Horizontally fit a draft around its byte cursor. Return the visible text
@@ -533,8 +539,6 @@ type composer_window = { lines : string list; cursor_row : int; cursor_cells : i
 val composer_window : max_rows:int -> max_cells:int -> cursor:int -> string -> composer_window
 (** A newline-separated window containing the cursor. [cursor_row] is zero-based;
     the number of rows is the same as {!composer_lines}. *)
-(** Keep the complete input when it fits. Overflow uses a leading […] and the
-    newest complete-scalar suffix that fits in the remaining cells. *)
 
 val scroll_hint : scrolled_back:int -> older_exist:bool -> string
 (** The footer's scrolling keys: which ones move the pane. How far back it

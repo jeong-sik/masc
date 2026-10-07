@@ -884,6 +884,9 @@ let input_window ~max_cells ~cursor input =
   let visible_after, _, _ = cell_prefix after (max 0 (max_cells - cursor_cells)) in
   visible_before ^ visible_after, cursor_cells
 
+let input_boundaries input =
+  0 :: List.map (fun piece -> piece.end_offset) (display_pieces input)
+
 type composer_window = { lines : string list; cursor_row : int; cursor_cells : int }
 
 let composer_window ~max_rows ~max_cells ~cursor input =

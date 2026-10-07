@@ -360,8 +360,9 @@ separately. Short viewports give those detail rows back to the list.
 
 The same list treatment is used beside Work, Tasks, Board, Approvals, Schedules,
 Task Review, Verdicts and Fusion details. Titles and counts sit apart, label
-columns stay aligned, and only the pane holding keyboard focus reverses the
-selected row. The [layout language](design/tui/LAYOUT-LANGUAGE.md) records the
+columns stay aligned, and only the pane holding keyboard focus highlights the
+selected row. The focus band uses a quiet neutral tint with a known terminal
+palette and reverse video when colours or the palette are unavailable. The [layout language](design/tui/LAYOUT-LANGUAGE.md) records the
 shared direction and which custom surfaces still have separate renderers.
 
 ### The Activity pane

@@ -680,6 +680,8 @@ let slash_hint_text ~restore draft =
 
 let composer_draft_window state ~cols ~prompt =
   let draft = Terminal_text.single_line (Masc_tui_message_input.contents state.msg_input) in
+  (* Editing stops at whole grapheme boundaries, so this prefix cannot end
+     inside a ZWJ/variation-selector sequence whose escaping needs its suffix. *)
   let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
   Message_layout.input_window
     ~max_cells:(max 0 (cols - Message_layout.display_width prompt))
@@ -699,7 +701,7 @@ let composer_line state ~cols =
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
   let tone =
     match (composer.Composer.focus, composer.Composer.target) with
-    | Composer.Focused, _ -> (Theme.info ())
+    | Composer.Focused, _ -> Ansi.default_fg
     | Composer.Unfocused, Composer.Ready _ -> Ansi.dim
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
         Ansi.dim
@@ -1591,7 +1593,7 @@ let sidebar_heading ~cols ~title ~count =
   let title_cells = max 0 (cols - 1 - count_cells - 3) in
   fit_width title title_cells ^ " " ^ count ^ "  "
 
-(* A quiet rail beside the conversation. Only the cursor row reverses when
+(* A quiet rail beside the conversation. Only the cursor row gets a band when
    this pane owns the keys; the selected Keeper's readings sit below the list.
    [rows] includes the caller's footer, as it does for the detail/chat panes. *)
 let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
@@ -1660,12 +1662,12 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
         let glyph = keeper_state_glyph ~paused:reading.paused
           ~health:(Keeper_control.health reading) in
         if selected && focused then
-          draw ~style:Theme.selection (" › " ^ glyph ^ " " ^ name ^ " ")
+          draw ~style:(Theme.sidebar_selection ()) (" › " ^ glyph ^ " " ^ name ^ " ")
         else
           let caret = if selected then " › " else "   " in
           draw (caret ^ keeper_action_color (Keeper_control.next_action reading)
                 ^ glyph ^ restore ^ " "
-                ^ (if selected then Ansi.bold else "") ^ name ^ restore ^ " ")
+                ^ name ^ restore ^ " ")
     | None when i = 0 && count = 0 ->
         draw ~style:(Theme.recede ())
           (match state.keeper_roster_error with
@@ -1764,7 +1766,7 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
           (Terminal_text.single_line label)
       in
       if Option.equal Int.equal selection (Some (first + i)) then
-        draw ~style:(if focused then Theme.selection else Ansi.bold)
+        draw ~style:(if focused then Theme.sidebar_selection () else "")
           (sidebar_caret_lead ^ drawn)
       else draw (String.make sidebar_row_lead_cells ' ' ^ drawn)
     | None -> draw ""

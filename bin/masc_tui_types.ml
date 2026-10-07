@@ -5042,8 +5042,8 @@ type state = {
      newest; the keys that move it re-fetch the exact provider input for the
      row they name, so every tab describes the turn the operator chose. *)
   mutable context_inspector_turn_back: int;
-  (* Chat shows its roster by default; other surfaces keep their columns.
-     An explicit Ctrl-B choice survives both navigation and resizing. *)
+  (* The roster starts closed. An explicit Ctrl-B choice survives both
+     navigation and resizing; Left navigation is transient. *)
   mutable roster_pane_preference: Masc_tui_roster_pane.preference;
   (* Left opens a temporary Keeper navigator without changing Ctrl-B's choice.
      On narrow screens it occupies the body until a selection or dismissal. *)

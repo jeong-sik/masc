@@ -333,8 +333,9 @@ val upsert_goal :
       non-blank [title] on every create path (an explicit unknown [id]
       without one no longer defaults to "Untitled goal"), and a [due_date]
       already past is refused — a goal born overdue is unreachable by
-      construction. Updates are not gated: an existing goal's due date
-      passing is ordinary life. *)
+      construction. The date is a UTC calendar day and falls due at 23:59:59
+      UTC, independent of the operator's time zone. Updates are not gated:
+      an existing goal's due date passing is ordinary life. *)
 
 (** Run a dependent mutation while all referenced Goals exist in the primary
     store. Lock order: Goal, backlog, goal-task links. The callback must not

@@ -424,10 +424,7 @@ let event_deltas (event : Yojson.Safe.t) =
            | Error detail -> [ Undecodable detail ])
       | Some "CUSTOM" -> custom_deltas fields
       (* Accepted by the strict decode, nothing for this view to draw. *)
-      | Some
-          ( "TEXT_MESSAGE_START" | "TEXT_MESSAGE_END" | "STEP_STARTED"
-          | "STEP_FINISHED" | "STATE_SNAPSHOT" | "STATE_DELTA" ) ->
-          []
+      | Some ("TEXT_MESSAGE_START" | "TEXT_MESSAGE_END") -> []
       | Some unknown ->
           [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ])
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->

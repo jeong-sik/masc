@@ -1,10 +1,10 @@
 (** Tests for Tool_blob_store + Tool_output.
 
     Covers:
-    - Round-trip: encode then decode for both [Inline] and [Stored] variants.
+    - Round-trip: encode then decode a [Stored] reference.
     - Backward compat: any string without marker reports [Not_marker].
     - Malformed marker surfaces as [Invalid_marker] — a visible, typed
-      outcome, not a silent inline fallback.
+      outcome.
     - Content-addressed: same bytes -> same sha -> idempotent put.
     - Sharding: blobs land under [<sha[0..1]>/<sha>].
     - Maintenance: union-scanned live refs survive and stable dead refs are
@@ -31,9 +31,7 @@ let fetch_ok store ~sha256 =
   | Error error ->
       Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error)
 
-let stored_ref_exn = function
-  | O.Stored reference -> reference
-  | O.Inline _ -> Alcotest.fail "expected Stored"
+let stored_ref_exn (O.Stored reference) = reference
 
 let with_temp_dir f =
   let dir = Filename.temp_file "masc_blob_test" "" in
@@ -55,19 +53,6 @@ let with_temp_dir f =
   match r with Ok v -> v | Error e -> raise e
 
 (* --- Tool_output round-trip --- *)
-
-let test_inline_roundtrip () =
-  let s = "hello world\n" in
-  let encoded = O.encode_for_agent_core (O.Inline s) in
-  Alcotest.(check string) "inline encode = identity" s encoded;
-  match O.decode_from_agent_core encoded with
-  | O.Not_marker ->
-      (* Raw text is not a marker: the content is the string itself,
-         already asserted identical above. *)
-      ()
-  | O.Decoded _ -> Alcotest.fail "expected Not_marker"
-  | O.Invalid_marker { detail } ->
-      Alcotest.failf "expected Not_marker, got Invalid_marker: %s" detail
 
 (* A spaced media type used to encode fine and fail at read time with
    "scanf: bad input at char number 109: looking for 'p', found 'c'" -- the
@@ -199,10 +184,9 @@ let test_decode_non_marker () =
     cases
 
 let test_decode_malformed_marker () =
-  (* Has the prefix but body is garbage — must NOT raise. Instead of the
-     old silent Inline fallback, a malformed marker is now a visible, typed
-     [Invalid_marker] outcome; the caller decides what to do with the raw
-     text. *)
+  (* Has the prefix but body is garbage — must NOT raise. A malformed
+     marker is a visible, typed [Invalid_marker] outcome; the caller decides
+     what to do with the raw text. *)
   let bad_markers =
     [ "[masc:blob sha256=garbage that cannot scanf]"
     ; "[masc:blob sha256=garbage]"
@@ -230,8 +214,7 @@ let test_put_returns_stored () =
           Alcotest.(check int) "sha length" 64 (String.length sha256);
           Alcotest.(check int) "bytes" (String.length payload) bytes;
           Alcotest.(check string) "preview" payload preview;
-          Alcotest.(check string) "mime" "text/plain" mime
-      | O.Inline _ -> Alcotest.fail "put must return Stored")
+          Alcotest.(check string) "mime" "text/plain" mime)
 
 let test_put_then_fetch () =
   with_temp_dir (fun dir ->
@@ -245,8 +228,7 @@ let test_put_then_fetch () =
               Alcotest.(check string) "round-trip bytes" payload bytes
           | Ok None -> Alcotest.fail "fetch returned None"
           | Error error ->
-              Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
-      | O.Inline _ -> Alcotest.fail "put returned Inline")
+              Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error)))
 
 let test_fetch_bounded_rejects_large_real_blob () =
   with_temp_dir (fun dir ->
@@ -255,7 +237,6 @@ let test_fetch_bounded_rejects_large_real_blob () =
     let sha256 =
       match B.put store ~bytes:payload ~mime:"application/octet-stream" with
       | O.Stored { sha256; _ } -> sha256
-      | O.Inline _ -> Alcotest.fail "put returned Inline"
     in
     let maximum = String.length payload - 1 in
     (match B.fetch_bounded store ~sha256 ~max_bytes:maximum with
@@ -321,7 +302,6 @@ let test_put_then_fetch_bounded_ranges () =
         String.init 8_192 (fun index -> Char.chr (index mod 251))
       in
       match B.put store ~bytes:payload ~mime:"application/octet-stream" with
-      | O.Inline _ -> Alcotest.fail "put returned Inline"
       | O.Stored { sha256; _ } ->
         let fetch_range store ~offset ~max_bytes =
           match B.fetch_range store ~sha256 ~offset ~max_bytes with
@@ -358,7 +338,6 @@ let test_fetch_range_revalidates_changed_snapshot () =
       let store = B.create ~base_path:dir in
       let payload = String.make 8_192 'x' in
       match B.put store ~bytes:payload ~mime:"text/plain" with
-      | O.Inline _ -> Alcotest.fail "put returned Inline"
       | O.Stored { sha256; _ } ->
         (match B.fetch_range store ~sha256 ~offset:0 ~max_bytes:64 with
          | Ok (Some _) -> ()
@@ -426,7 +405,6 @@ let test_fetch_range_cold_validates_without_materialising () =
       let size = 1_048_576 in
       let payload = String.init size (fun i -> Char.chr (i mod 251)) in
       match B.put store ~bytes:payload ~mime:"application/octet-stream" with
-      | O.Inline _ -> Alcotest.fail "put returned Inline"
       | O.Stored { sha256; _ } ->
         (* Reopen so the snapshot cache is cold. *)
         let cold = B.create ~base_path:dir in
@@ -531,7 +509,6 @@ let test_fetch_range_cold_returns_only_bytes_it_hashed () =
       let payload = String.make 8_192 'p' in
       let corrupt = String.make 8_192 'c' in
       match B.put store ~bytes:payload ~mime:"text/plain" with
-      | O.Inline _ -> Alcotest.fail "put returned Inline"
       | O.Stored { sha256; _ } ->
         let path = shard_path_of store sha256 in
         let write bytes =
@@ -611,7 +588,6 @@ let test_range_with_sha256_window_is_a_slice_of_the_hashed_bytes () =
       let size = 200_000 in
       let payload = String.init size (fun i -> Char.chr ((i * 7 + (i / 251)) mod 256)) in
       match B.put store ~bytes:payload ~mime:"application/octet-stream" with
-      | O.Inline _ -> Alcotest.fail "put returned Inline"
       | O.Stored { sha256; _ } ->
         let path = shard_path_of store sha256 in
         List.iter
@@ -664,7 +640,6 @@ let test_idempotent_put () =
       let r2 = B.put store ~bytes:payload ~mime:"text/plain" in
       let sha_of = function
         | O.Stored { sha256; _ } -> sha256
-        | O.Inline _ -> Alcotest.fail "expected Stored"
       in
       Alcotest.(check string)
         "same content -> same sha" (sha_of r1) (sha_of r2);
@@ -805,8 +780,7 @@ let test_ordinary_put_does_not_establish_durable_reuse () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       let payload = "not yet strictly published" in
-      let reference = match B.put store ~bytes:payload ~mime:"text/plain" with
-        | O.Stored reference -> reference | _ -> Alcotest.fail "expected stored reference" in
+      let reference = stored_ref_exn (B.put store ~bytes:payload ~mime:"text/plain") in
       let path = blob_path store reference.O.sha256 in
       let inode = (Unix.stat path).Unix.st_ino in
       ignore (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref);
@@ -827,8 +801,7 @@ let test_sharding_layout () =
           in
           Alcotest.(check bool)
             "sharded path exists" true
-            (Sys.file_exists expected)
-      | O.Inline _ -> Alcotest.fail "put returned Inline")
+            (Sys.file_exists expected))
 
 (* Fixtures here hold a handful of small files and compete with no startup
    watchdog, so they scan unbounded; the budget path has its own tests. *)
@@ -2029,7 +2002,6 @@ let test_fetch_reports_integrity_mismatch () =
       let store = B.create ~base_path:dir in
       let original = "content-addressed bytes" in
       match B.put store ~bytes:original ~mime:"text/plain" with
-      | O.Inline _ -> Alcotest.fail "put returned Inline"
       | O.Stored { sha256; _ } ->
           let path =
             Filename.concat
@@ -2064,7 +2036,6 @@ let () =
     [
       ( "tool_output round-trip",
         [
-          Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
           Alcotest.test_case "trailing bytes after the marker are rejected"
             `Quick test_trailing_bytes_after_the_marker_are_rejected;

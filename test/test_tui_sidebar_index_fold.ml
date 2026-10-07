@@ -16,9 +16,8 @@ let strip_sgr row =
     row;
   Buffer.contents buf
 
-(* The frame's vertical rule, three bytes, and the space it keeps on each
-   side. *)
-let border_bytes = String.length Masc_tui_theme.Box.v + 1
+(* The rail has one right separator. Keep its padding when measuring rows. *)
+let border_bytes = String.length Masc_tui_theme.Box.v
 
 let content_rows ~title ~cols ~focused ~labels ~selected =
   let buf = Buffer.create 1024 in
@@ -30,11 +29,10 @@ let content_rows ~title ~cols ~focused ~labels ~selected =
   | _top :: _title :: _divider :: rest ->
     List.filter_map
       (fun line ->
-        if String.length line <= 2 * border_bytes then None
+        if String.length line <= border_bytes then None
         else
           Some
-            (String.sub line border_bytes
-               (String.length line - (2 * border_bytes))))
+            (String.sub line 0 (String.length line - border_bytes)))
       rest
     |> fun rows -> List.filteri (fun i _ -> i < List.length labels) rows
   | _ -> []
@@ -76,9 +74,8 @@ let first_row ~cols ~focused ~selected =
   | [] -> Alcotest.fail "the pane drew no label row"
 
 let test_the_fold_holds_still_under_the_cursor () =
-  (* The caret row leads with two cells more than a plain row. Both fold the
-     name to the room the caret leaves, so the name does not re-fold as the
-     cursor passes over it. *)
+  (* Both rows reserve the same lead. The name neither shifts nor re-folds
+     as the caret passes over it. *)
   let plain = first_row ~cols:44 ~focused:false ~selected:1 in
   let under_the_caret = first_row ~cols:44 ~focused:false ~selected:0 in
   Alcotest.(check string)
@@ -97,8 +94,8 @@ let test_a_row_never_runs_past_the_frame () =
   List.iter
     (fun row ->
       Alcotest.(check int)
-        "the row fills the frame's inner width exactly"
-        (Masc_tui_frame.inner_width ~cols)
+        "the row fills the rail up to its right separator"
+        (cols - 1)
         (Masc_tui_message_layout.display_width row))
     rows
 
@@ -133,7 +130,7 @@ let test_titles_that_share_both_ends_are_parted_by_the_id () =
     (String.ends_with ~suffix:"task-1174" first
     && String.ends_with ~suffix:"task-1175" second)
 
-(* The Approvals detail uses this same framed index at its real pane width.
+(* The Approvals detail uses this same rail at its real pane width.
    The labels below come from the same helper as approval_sidebar_label; the
    row-wiring test checks that all three approval kinds pass their actor to it.
    A head-only fit made these two valid Keeper ids draw the same line. *)

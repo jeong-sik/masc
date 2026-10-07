@@ -29,7 +29,7 @@ let test_emit_transition_signature_stable () =
       ~keeper_name:"alice"
       ~turn_id:42
       ~prev:F.Phase_gating
-      (F.Cancelled F.Cancelled_phase_gate_close);
+      (F.Cancelled F.Cancelled_supervisor_stop);
     F.emit_transition
       ~keeper_name:"bob"
       ~turn_id:0
@@ -138,12 +138,9 @@ let test_turn_state_labels_cover_every_variant () =
     ; F.Any F.Completing, "completing"
     ; F.Any F.Done, "done"
     ; F.Any (F.Failed (F.Failure_runtime_error "x")), "failed:runtime_error"
-    ; ( F.Any
-          (F.Failed
-             (F.Failure_no_capable_provider
-                { runtime_id = "tools"; detail = "no candidate supports tools" }))
-      , "failed:no_capable_provider" )
-    ; F.Any (F.Cancelled F.Cancelled_phase_gate_close), "cancelled:phase_gate_close"
+    ; ( F.Any (F.Failed (F.Failure_provider_error { kind = "k"; detail = "d" }))
+      , "failed:provider_error" )
+    ; F.Any (F.Cancelled F.Cancelled_supervisor_stop), "cancelled:supervisor_stop"
     ]
   in
   List.iter
@@ -180,13 +177,6 @@ let test_transition_actions_cover_tla_next () =
     ~from_state:F.Runtime_routing
     ~to_state:
       (F.Failed (F.Failure_runtime_unavailable { base = "ollama"; resolved = None }));
-  check_action
-    F.NoToolCapableProvider
-    ~from_state:F.Runtime_routing
-    ~to_state:
-      (F.Failed
-         (F.Failure_no_capable_provider
-            { runtime_id = "tools"; detail = "no provider supports requested tool surface" }));
   check_action
     F.ProviderError
     ~from_state:F.Runtime_routing
@@ -418,9 +408,7 @@ let test_cancel_reason_labels_documented () =
   let pairs : (F.cancel_reason * string) list =
     [ F.Cancelled_supervisor_stop, "supervisor_stop"
     ; F.Cancelled_external, "external_cancel"
-    ; F.Cancelled_phase_gate_close, "phase_gate_close"
     ; F.Cancelled_provider_timeout, "provider_timeout"
-    ; F.Cancelled_fleet_shutdown, "fleet_shutdown"
     ; F.Cancelled_input_required, "input_required"
     ]
   in
@@ -437,9 +425,6 @@ let test_failure_reason_labels_documented () =
   let pairs : (F.failure_reason * string) list =
     [ ( F.Failure_runtime_unavailable { base = "ollama:7b"; resolved = None }
       , "runtime_unavailable" )
-    ; ( F.Failure_no_capable_provider
-          { runtime_id = "tools"; detail = "no candidate supports tools" }
-      , "no_capable_provider" )
     ; F.Failure_provider_error { kind = "k"; detail = "d" }, "provider_error"
     ; F.Failure_receipt_lost { primary_error = "e"; fallback_path = None }, "receipt_lost"
     ; F.Failure_runtime_error "msg", "runtime_error"

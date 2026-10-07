@@ -43,9 +43,7 @@ let all_cancel_reasons : Keeper_turn_fsm.cancel_reason list =
   [
     Cancelled_supervisor_stop;
     Cancelled_external;
-    Cancelled_phase_gate_close;
     Cancelled_provider_timeout;
-    Cancelled_fleet_shutdown;
     Cancelled_input_required;
   ]
 
@@ -61,7 +59,6 @@ let test_cancel_reason_labels_unique () =
 let all_failure_reasons : Keeper_turn_fsm.failure_reason list =
   [
     Failure_runtime_unavailable { base = "x"; resolved = None };
-    Failure_no_capable_provider { runtime_id = "x"; detail = "d" };
     Failure_provider_error { kind = "k"; detail = "d" };
     Failure_receipt_lost { primary_error = "e"; fallback_path = None };
     Failure_runtime_error "msg";
@@ -101,8 +98,6 @@ let test_pp_failure_reason_preserves_exact_text () =
     [ ( Failure_runtime_unavailable
           { base = "claude_api"; resolved = Some "claude_code" }
       , "runtime_unavailable(base=claude_api,resolved=claude_code)" )
-    ; ( Failure_no_capable_provider { runtime_id = "runtime-1"; detail = "none" }
-      , "no_capable_provider(runtime=runtime-1,detail=none)" )
     ; ( Failure_provider_error { kind = "quota"; detail = "blocked" }
       , "provider_error(kind=quota,detail=blocked)" )
     ; ( Failure_receipt_lost
@@ -153,11 +148,11 @@ let test_failed_label_carries_reason () =
 
 let test_cancelled_label_carries_reason () =
   let s =
-    Keeper_turn_fsm.any_state_label (Keeper_turn_fsm.Any (Cancelled Cancelled_fleet_shutdown))
+    Keeper_turn_fsm.any_state_label (Keeper_turn_fsm.Any (Cancelled Cancelled_provider_timeout))
   in
   Alcotest.(check string)
     "Cancelled label uses 'cancelled:' prefix + reason"
-    "cancelled:fleet_shutdown" s
+    "cancelled:provider_timeout" s
 
 (* ── Keeper_contract_classifier.actionable_signal ────────────── *)
 

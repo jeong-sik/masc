@@ -7,7 +7,6 @@ type t =
   | Board_events
   | Board_stimulus_intake
   | Scheduled_automation
-  | Empty_run_reasons
   | Reconcile_read_meta
 
 let to_label = function
@@ -19,6 +18,5 @@ let to_label = function
   | Board_events -> "board_events"
   | Board_stimulus_intake -> "board_stimulus_intake"
   | Scheduled_automation -> "scheduled_automation"
-  | Empty_run_reasons -> "empty_run_reasons"
   | Reconcile_read_meta -> "reconcile_read_meta"
 ;;

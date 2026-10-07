@@ -54,7 +54,6 @@ let persist_snapshot ?ownership_root path meta =
 module Problem_report_state = struct
   type site =
     | Meta_read
-    | Meta_read_changed
     | Meta_repair
     | Meta_retired_fields
     | Keepalive_scan
@@ -127,7 +126,6 @@ module Problem_report_state = struct
 
   let site_to_string = function
     | Meta_read -> "meta_read"
-    | Meta_read_changed -> "meta_read_changed"
     | Meta_repair -> "meta_repair"
     | Meta_retired_fields -> "meta_retired_fields"
     | Keepalive_scan -> "keepalive_scan"

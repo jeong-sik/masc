@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 
 import test_tui_keyboard_input as h
 
@@ -67,7 +68,16 @@ def run(executable):
         h.write_all(fd, output, b"\x1b[200~" + PASTED.encode() + b"\x1b[201~")
         settled(process, fd, output, b"  ")
         h.send_and_wait(process, fd, output, b"\r", b"fixture refuses the drop")
-        assert posted == [{"goal_id": GOAL_ID, "action": "drop", "note": PASTED.strip()}], posted
+        workspace = Path(_base).resolve()
+        assert posted == [{
+            "expected_workspace": {
+                "base_path": str(workspace),
+                "masc_root": str(workspace / ".masc"),
+            },
+            "goal_id": GOAL_ID,
+            "action": "drop",
+            "note": PASTED.strip(),
+        }], posted
         h.drain_until_quiet(process, fd, output)
         assert b"DROP REASON" not in screen(output), screen(output)
         os.write(fd, b"q")

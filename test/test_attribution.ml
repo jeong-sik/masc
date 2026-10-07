@@ -71,7 +71,7 @@ let test_wire_format_toplevel_shape () =
 
 let test_show_elides_long_fields () =
   let t =
-    A.policy_failed ~origin:NonDet ~gate:"verification"
+    A.policy_failed ~origin:Det ~gate:"verification"
       ~evidence:(`String "very long evidence blob that should not appear")
       ~reason:"also long rationale text"
   in

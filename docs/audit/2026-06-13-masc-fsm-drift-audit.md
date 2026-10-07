@@ -13,18 +13,17 @@ status: reference
 
 ## Summary
 
-MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (`lib/keeper/keeper_turn_fsm.ml`), TLA+ spec (`specs/keeper-turn-fsm/KeeperTurnFSM.tla`), and parity/wiring tests. This audit found **8 concrete drift points or SSOT gaps** between the formal model, the documented lifecycle, and the runtime implementation. None are immediately crash-inducing, but several weaken the guarantee that FSM telemetry, receipts, and TLA invariants stay aligned.
+MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (`lib/keeper/keeper_turn_fsm.ml`), TLA+ spec (`specs/keeper-turn-fsm/KeeperTurnFSM.tla`), and parity/wiring tests. This audit found **7 concrete drift points or SSOT gaps** between the formal model, the documented lifecycle, and the runtime implementation. None are immediately crash-inducing, but several weaken the guarantee that FSM telemetry, receipts, and TLA invariants stay aligned.
 
 | # | Finding | Severity | TLA invariant at risk |
 |---|---------|----------|----------------------|
 | 1 | Duplicate `Streaming → Completing → Done` emission on success path | Medium | `ReceiptIsAuthoritative` (telemetry noise) |
 | 2 | `StreamYieldsTool` / `ToolReturned` transitions emitted only when `yield_on_tool` is enabled | Medium | `TypeOK` coverage |
 | 3 | Direct `masc_keeper_msg` turns bypass the typed FSM entirely | Medium | `TypeOK` coverage |
-| 4 | `Cancelled_fleet_shutdown` variant is dead code | Low | — |
-| 5 | `safe_emit_turn_end` catch-all can swallow `Cancelled_*` exceptions | High | `StopSignalRespected`, `ReceiptIsAuthoritative` |
-| 6 | `ContractViolation` FSM transition has no explicit emission site | Low-Medium | `ReceiptMatchesState` |
-| 7 | `test_keeper_turn_fsm_wired_sites` only counts emit calls, not transition correctness | Low | all invariants |
-| 8 | No runtime assertion that receipt outcome matches FSM terminal state | Medium | `ReceiptMatchesState`, `ReceiptIsAuthoritative`, `EveryTurnHasTerminalReceipt` |
+| 4 | `safe_emit_turn_end` catch-all can swallow `Cancelled_*` exceptions | High | `StopSignalRespected`, `ReceiptIsAuthoritative` |
+| 5 | `ContractViolation` FSM transition has no explicit emission site | Low-Medium | `ReceiptMatchesState` |
+| 6 | `test_keeper_turn_fsm_wired_sites` only counts emit calls, not transition correctness | Low | all invariants |
+| 7 | No runtime assertion that receipt outcome matches FSM terminal state | Medium | `ReceiptMatchesState`, `ReceiptIsAuthoritative`, `EveryTurnHasTerminalReceipt` |
 
 ---
 
@@ -81,22 +80,7 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 
 ---
 
-## 4. `Cancelled_fleet_shutdown` variant is dead code
-
-**Severity**: Low
-
-**Evidence**:
-- `lib/turn_fsm/turn_fsm.mli:19` defines `Cancelled_fleet_shutdown`.
-- Grep across `lib/` shows **no emission site** for this variant.
-- Fleet shutdown is handled generically as `Cancelled_supervisor_stop` or through `safe_emit_turn_end`.
-
-**Impact**: The type promises a cancellation reason that cannot appear in telemetry, creating a minor specification/implementation mismatch.
-
-**Recommended action**: Either remove the variant or add an explicit fleet-shutdown emission site in the server shutdown path.
-
----
-
-## 5. `safe_emit_turn_end` catch-all can swallow cancellations
+## 4. `safe_emit_turn_end` catch-all can swallow cancellations
 
 **Severity**: High
 
@@ -113,7 +97,7 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 
 ---
 
-## 6. `ContractViolation` FSM transition has no explicit emission site
+## 5. `ContractViolation` FSM transition has no explicit emission site
 
 **Severity**: Low-Medium
 
@@ -128,7 +112,7 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 
 ---
 
-## 7. Wired-sites test only counts emit calls
+## 6. Wired-sites test only counts emit calls
 
 **Severity**: Low
 
@@ -149,7 +133,7 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 
 ---
 
-## 8. No runtime receipt-authority assertion
+## 7. No runtime receipt-authority assertion
 
 **Severity**: Medium
 
@@ -168,11 +152,11 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 
 | TLA invariant | Findings that threaten it |
 |---------------|---------------------------|
-| `EveryTurnHasTerminalReceipt` | #5, #8 |
-| `ReceiptMatchesState` | #5, #6, #8 |
-| `StopSignalRespected` | #5 |
-| `ReceiptIsAuthoritative` | #1, #5, #8 |
-| `TypeOK` | #2, #3, #4 |
+| `EveryTurnHasTerminalReceipt` | #4, #7 |
+| `ReceiptMatchesState` | #4, #5, #7 |
+| `StopSignalRespected` | #4 |
+| `ReceiptIsAuthoritative` | #1, #4, #7 |
+| `TypeOK` | #2, #3 |
 
 ## Appendix B: Existing documentation references
 

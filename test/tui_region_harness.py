@@ -43,6 +43,9 @@ BOX_BOTTOM_LEFT = "└"
 # framed body next to it.
 BORDER_GLYPHS = frozenset(
     ("│", "┃", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴"))
+# The chat portrait's half-block mosaic: rows of these under the "현재 대화"
+# caption, drawn across the band with no divider (render_chat portrait).
+PORTRAIT_GLYPHS = frozenset(("▀", "▄", "█"))
 # Every box-drawing glyph. The footer is the frame's key hints, and a footer
 # row holding one of these is a pane's border the frame pushed down onto it.
 BOX_DRAWING = range(0x2500, 0x2580)
@@ -233,23 +236,72 @@ def body_row(rows: dict[int, bytes], row: int, *, left: int, right: int) -> str:
 
 
 def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, int]:
-    """A framed side pane's top and bottom border rows, in cells [left, right)."""
+    """A side pane's band in cells [left, right), in one of two shapes.
+
+    A framed pane (the keeper detail beside the roster) keeps the old
+    reading: exactly one ┌ top row and one └ bottom row, each with a
+    complete border of the band's width, the bottom below the top.
+
+    The roster pane itself was an unboxed sidebar since #41527: it owns no
+    box corners, every one of its drawn rows leaves its last cell to a │
+    divider standing in the band's rightmost column, and inside the block
+    the sidebar draws its "KEEPERS" heading and exactly one rule run. The
+    block's first and last drawn rows pin the band the way the box's
+    borders did -- a bleed from the body, or a pane truncated by its own
+    height, stops ending rows at the divider and fails here."""
     pane = {row: cells(rows[row], left, right).strip() for row in rows}
     tops = [row for row, text in pane.items() if text.startswith(BOX_TOP_LEFT)]
     bottoms = [row for row, text in pane.items() if text.startswith(BOX_BOTTOM_LEFT)]
-    if len(tops) != 1 or len(bottoms) != 1:
-        raise AssertionError(f"the pane in cells {left}-{right} has tops {tops} "
-                             f"and bottoms {bottoms}: {rows!r}")
-    for row, left_corner, right_corner in ((tops[0], BOX_TOP_LEFT, "┐"),
-                                           (bottoms[0], BOX_BOTTOM_LEFT, "┘")):
-        border = cells(rows[row], left, right)
-        expected = left_corner + "─" * (right - left - 2) + right_corner
-        if border != expected:
-            raise AssertionError(f"the pane in cells {left}-{right} has an incomplete border: {border!r}")
-    if bottoms[0] <= tops[0]:
+    if len(tops) == 1 and len(bottoms) == 1:
+        for row, left_corner, right_corner in ((tops[0], BOX_TOP_LEFT, "┐"),
+                                               (bottoms[0], BOX_BOTTOM_LEFT, "┘")):
+            border = cells(rows[row], left, right)
+            expected = left_corner + "─" * (right - left - 2) + right_corner
+            if border != expected:
+                raise AssertionError(f"the pane in cells {left}-{right} has an incomplete border: {border!r}")
+        if bottoms[0] <= tops[0]:
+            raise AssertionError(f"the pane in cells {left}-{right} closes before its top: "
+                                 f"top {tops[0]}, bottom {bottoms[0]}")
+        return {"top": tops[0], "bottom": bottoms[0]}
+    divider = right - 1
+    # Full-width chrome shares the band's cells: the tab bar on the first
+    # rows and the hints/composer at the bottom draw no divider. Only the
+    # body's rows answer for the pane.
+    body = range(3, TERMINAL_ROWS - 1)
+    drawn = sorted(row for row in body if pane[row])
+    if not drawn:
+        raise AssertionError(f"the pane in cells {left}-{right} draws nothing: {rows!r}")
+    # The chat's sidebar shows the portrait above the roster: mosaic rows
+    # drawn at the band's full width and no divider. They are geometry too
+    # -- inside the band, strictly above the roster block -- while every
+    # roster row must still end at the divider, carry the KEEPERS heading
+    # and exactly one rule.
+    portrait_rows = [row for row in drawn
+                     if cells(rows[row], divider, divider + 1) not in BORDER_GLYPHS]
+    roster_rows = [row for row in drawn if row not in portrait_rows]
+    for row in portrait_rows:
+        if not any(character in PORTRAIT_GLYPHS for character in cells(rows[row], left, right)):
+            raise AssertionError(f"the pane in cells {left}-{right} stops ending its rows "
+                                 f"at the divider cell {divider} on row {row} and holds no "
+                                 f"portrait mosaic: {cells(rows[row], left, right)!r}")
+    if not roster_rows:
+        raise AssertionError(f"the pane in cells {left}-{right} draws no roster block "
+                             f"below its portrait: rows {portrait_rows}")
+    if portrait_rows and max(portrait_rows) > min(roster_rows):
+        below = [row for row in portrait_rows if row > min(roster_rows)]
+        raise AssertionError(f"the pane in cells {left}-{right} draws portrait rows "
+                             f"inside or below the roster block: {below}")
+    band = [row for row in roster_rows if is_rule(cells(rows[row], left, divider))]
+    if len(band) != 1:
+        raise AssertionError(f"the pane in cells {left}-{right} holds {len(band)} rule rows, "
+                             f"expected the sidebar's one: rows {band}")
+    if not any("KEEPERS" in cells(rows[row], left, divider) for row in roster_rows):
+        raise AssertionError(f"the pane in cells {left}-{right} lost its KEEPERS heading: "
+                             f"{[cells(rows[row], left, divider) for row in roster_rows[:4]]!r}")
+    if roster_rows[-1] <= roster_rows[0]:
         raise AssertionError(f"the pane in cells {left}-{right} closes before its top: "
-                             f"top {tops[0]}, bottom {bottoms[0]}")
-    return {"top": tops[0], "bottom": bottoms[0]}
+                             f"top {roster_rows[0]}, bottom {roster_rows[-1]}")
+    return {"top": roster_rows[0], "bottom": roster_rows[-1]}
 
 
 def assert_pane_edge(rows: dict[int, bytes], column: int, where: str) -> None:

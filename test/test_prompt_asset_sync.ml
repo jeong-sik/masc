@@ -517,6 +517,8 @@ let outcome_testable =
            Printf.sprintf "preserved at %s, override exists %s" preserved_at key
          | Managed_asset_sync.Preserved_not_promotable { reason; preserved_at } ->
            Printf.sprintf "preserved at %s: %s" preserved_at reason
+         | Managed_asset_sync.Preserved_retired { preserved_at } ->
+           Printf.sprintf "retired, preserved at %s" preserved_at
          | Managed_asset_sync.Discarded -> "discarded"))
     ( = )
 
@@ -1005,6 +1007,112 @@ let test_an_unwritable_override_file_keeps_the_edit () =
         check string "the edit is kept beside the file" edited_curator
           (read_file (Filename.concat prompts (preserved_name "curator.md" edited_curator))))
 
+(* A prompt file a later release no longer ships, the way #41495 and #41509
+   fold three files each into keeper.md and librarian.md. *)
+let retired_embedded =
+  ( "prompts/curator.retired.md"
+  , "---\ndescription: retired\n---\nText a later release moves elsewhere.\n" )
+
+let edited_retired = "---\ndescription: retired\n---\nText the operator changed.\n"
+
+let retired_file prompts = Filename.concat prompts "curator.retired.md"
+
+let sync_retiring ~base ~prompts =
+  let (_ : Managed_asset_sync.sync_result) =
+    prompt_sync_with ~assets:(retired_embedded :: prompt_embedded) ~base ~prompts
+  in
+  ()
+
+(* A retired file used to be deleted without the digest check a current
+   file gets, so an edit made since the last boot went with it. The edit is
+   kept beside the file first, and reported like any other kept edit. *)
+let test_an_edited_retired_prompt_is_kept_before_it_goes () =
+  with_workspace (fun ~base ~prompts ->
+      sync_retiring ~base ~prompts;
+      write_file (retired_file prompts) edited_retired;
+      let result = prompt_sync_with ~assets:prompt_embedded ~base ~prompts in
+      let preserved = preserved_name "curator.retired.md" edited_retired in
+      check (list string) "the retired file goes" [ "prompts/curator.retired.md" ]
+        result.Managed_asset_sync.removed;
+      check (list (pair string outcome_testable)) "the edit is reported where it is kept"
+        [ ( "prompts/curator.retired.md"
+          , Managed_asset_sync.Preserved_retired
+              { preserved_at = Filename.concat prompts preserved } )
+        ]
+        (edits result);
+      check bool "the file is gone" false (Sys.file_exists (retired_file prompts));
+      check string "the edit is kept beside it" edited_retired
+        (read_file (Filename.concat prompts preserved));
+      check (list (pair string string)) "nothing failed" [] result.Managed_asset_sync.failed;
+      match Managed_asset_sync.operator_edit_lines ~label:"prompt" result with
+      | [ line ] ->
+        check bool "the line names where the edit is" true (mentions ~line preserved)
+      | lines -> failf "expected one edit line, found %d" (List.length lines))
+
+let test_an_unedited_retired_prompt_goes_without_a_copy () =
+  with_workspace (fun ~base ~prompts ->
+      sync_retiring ~base ~prompts;
+      let result = prompt_sync_with ~assets:prompt_embedded ~base ~prompts in
+      check (list string) "the retired file goes" [ "prompts/curator.retired.md" ]
+        result.Managed_asset_sync.removed;
+      check int "no edit" 0 (List.length result.Managed_asset_sync.operator_edits);
+      check (list string) "nothing kept beside" [] (preserved_files prompts))
+
+(* When the release that retires a file fails to write a current one, the
+   retired file stays: its text may be what the failed file was to carry.
+   It stays listed with its recorded digest, so the next pass retires it
+   and still tells an edit from the distribution copy. *)
+let test_a_failed_current_write_retires_nothing_until_the_next_pass () =
+  with_workspace (fun ~base ~prompts ->
+      sync_retiring ~base ~prompts;
+      let curator = Filename.concat prompts "curator.md" in
+      Sys.remove curator;
+      Unix.mkdir curator 0o700;
+      let blocked = prompt_sync_with ~assets:prompt_embedded ~base ~prompts in
+      check (list string) "the failure names the current file" [ "prompts/curator.md" ]
+        (List.map fst blocked.Managed_asset_sync.failed);
+      check (list string) "nothing retired" [] blocked.Managed_asset_sync.removed;
+      check bool "the retired text is still readable" true
+        (Sys.file_exists (retired_file prompts));
+      let _, _, paths = runtime_manifest prompts in
+      check bool "the manifest still owns it" true (List.mem "curator.retired.md" paths);
+      Unix.rmdir curator;
+      write_file (retired_file prompts) edited_retired;
+      let next = prompt_sync_with ~assets:prompt_embedded ~base ~prompts in
+      check (list string) "the next pass retires it" [ "prompts/curator.retired.md" ]
+        next.Managed_asset_sync.removed;
+      check (list string) "and judges it against the recorded digest"
+        [ "prompts/curator.retired.md" ]
+        (List.map fst (edits next));
+      check (list (pair string string)) "nothing failed" [] next.Managed_asset_sync.failed)
+
+let retired_nested =
+  "prompts/retired/old.md", "---\ndescription: old\n---\nOld text.\n"
+
+(* A retired file the pass could not delete used to drop out of the
+   rewritten manifest, so no later pass owned it again. It stays listed and
+   the next pass retires it. Root deletes anywhere, so the case is skipped
+   there. *)
+let test_a_retired_file_that_cannot_go_stays_listed () =
+  if Unix.geteuid () = 0 then ()
+  else
+    with_workspace (fun ~base ~prompts ->
+        let (_ : Managed_asset_sync.sync_result) =
+          prompt_sync_with ~assets:(retired_nested :: prompt_embedded) ~base ~prompts
+        in
+        let blocked =
+          with_read_only (Filename.concat prompts "retired") (fun () ->
+              prompt_sync_with ~assets:prompt_embedded ~base ~prompts)
+        in
+        check (list string) "the failure names it" [ "prompts/retired/old.md" ]
+          (List.map fst blocked.Managed_asset_sync.failed);
+        check (list string) "nothing retired" [] blocked.Managed_asset_sync.removed;
+        let _, _, paths = runtime_manifest prompts in
+        check bool "the manifest still owns it" true (List.mem "retired/old.md" paths);
+        let next = prompt_sync_with ~assets:prompt_embedded ~base ~prompts in
+        check (list string) "the next pass retires it" [ "prompts/retired/old.md" ]
+          next.Managed_asset_sync.removed)
+
 let () =
   run "prompt_asset_sync"
     [
@@ -1080,5 +1188,16 @@ let () =
             test_a_failed_reset_after_promotion_is_reported_then_finished;
           test_case "an unwritable override file keeps the edit" `Quick
             test_an_unwritable_override_file_keeps_the_edit;
+        ] );
+      ( "retired assets",
+        [
+          test_case "an edited retired prompt is kept before it goes" `Quick
+            test_an_edited_retired_prompt_is_kept_before_it_goes;
+          test_case "an unedited retired prompt goes without a copy" `Quick
+            test_an_unedited_retired_prompt_goes_without_a_copy;
+          test_case "a failed current write retires nothing until the next pass" `Quick
+            test_a_failed_current_write_retires_nothing_until_the_next_pass;
+          test_case "a retired file that cannot go stays listed" `Quick
+            test_a_retired_file_that_cannot_go_stays_listed;
         ] );
     ]

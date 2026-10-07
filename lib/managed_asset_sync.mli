@@ -75,6 +75,9 @@ type operator_edit_outcome =
       (** The edit maps to no single override (or the override file could
           not be used). The edit is written to [preserved_at] and the file is
           reset. *)
+  | Preserved_retired of { preserved_at : string }
+      (** The distribution no longer ships the file. The edit is written to
+          [preserved_at] before the file is removed. *)
   | Discarded
       (** No edit layer: the file is overwritten with the embedded copy. *)
 
@@ -123,11 +126,18 @@ val sync
     Deletion reaches only what masc owned: the runtime
     [managed-assets.json] the previous pass wrote lists the paths it placed
     there, and a listed path the embedded set no longer carries is removed.
+    Removal waits until every current asset is in place: a pass where any
+    current asset failed retires nothing, so text a release moved into
+    another file is never deleted before the file that now holds it is
+    written. A retired file whose bytes differ from its recorded digest was
+    edited, and the edit is written beside it before it is removed
+    ([Preserved_retired]); if that write fails the file stays.
     A file that was in no manifest is the operator's and stays. The
-    manifest is then rewritten from the current set ([managed_by],
-    [schema], sorted [paths], and [sha256] mapping each path to the digest
-    of the bytes this pass left there) as the record of what this binary
-    owns there. A manifest without [sha256] still says what to retire but
+    manifest is then rewritten from the current set plus the retired paths
+    still in place ([managed_by], [schema], sorted [paths], and [sha256]
+    mapping each path to the digest of the bytes this pass left there, or
+    the recorded one for a retired path), as the record of what this binary
+    owns there; the next pass retires what this one could not. A manifest without [sha256] still says what to retire but
     records no digest, so every differing file is treated as stale: that is
     the manifest a binary that records no digests leaves after its pass, for
     example after a rollback, and the copies it wrote are distribution

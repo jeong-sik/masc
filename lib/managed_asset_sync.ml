@@ -90,6 +90,7 @@ type operator_edit_outcome =
       { reason : string
       ; preserved_at : string
       }
+  | Preserved_retired of { preserved_at : string }
   | Discarded
 
 type operator_edit =
@@ -283,41 +284,6 @@ let writable_leaf_state ~domain dest =
       (Printf.sprintf "managed %s asset leaf is not a regular file" (noun domain))
 ;;
 
-let remove_runtime_asset ~domain ~dest_dir runtime_rel acc =
-  let embedded_rel = prefix domain ^ runtime_rel in
-  let dest = Filename.concat dest_dir runtime_rel in
-  try
-    match owned_parent_state ~dest_dir dest with
-    | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
-    | Ok `Missing -> acc
-    | Ok `Directory ->
-      (match Fs_compat.exact_path_kind ~follow:false dest with
-       | Fs_compat.Exact_missing -> acc
-       | Fs_compat.Exact_kind Unix.S_REG
-       | Fs_compat.Exact_kind Unix.S_LNK ->
-         Sys.remove dest;
-         { acc with removed = embedded_rel :: acc.removed }
-       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-         { acc with
-           failed =
-             ( embedded_rel
-             , Printf.sprintf
-                 "managed %s asset leaf is neither a regular file nor a symbolic link"
-                 (noun domain) )
-             :: acc.failed
-         })
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | Sys_error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
-  | Unix.Unix_error (error, operation, argument) ->
-    { acc with
-      failed =
-        ( embedded_rel
-        , Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error) )
-        :: acc.failed
-    }
-;;
-
 let write_runtime_manifest ~domain ~dest_dir content acc =
   let dest = Filename.concat dest_dir "managed-assets.json" in
   try
@@ -396,6 +362,22 @@ let edited_since_recorded ~recorded ~runtime_rel current =
   | None -> false
 ;;
 
+(* Writes an edit beside its managed file and returns where. A copy already
+   there under the same name is this edit preserved by an earlier pass and
+   is left as it is. *)
+let preserve_edit dest current =
+  let preserved_at = preserved_edit_path dest current in
+  match read_file_opt preserved_at with
+  | Some existing when String.equal existing current -> Ok preserved_at
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "%s already holds different bytes; the edit was not preserved and the \
+          file is left as edited"
+         preserved_at)
+  | None -> Result.map (fun () -> preserved_at) (Fs_compat.save_file_atomic preserved_at current)
+;;
+
 (* Returns the pass so far and the digests to record: for [runtime_rel],
    the embedded copy's when the file holds it after this pass, and the
    previous record when an edit was kept or the write failed. *)
@@ -457,25 +439,11 @@ let sync_current_asset
                    ~unwritten:acc
                | Some current ->
                  (* The edit is written beside the file before the file is
-                    reset, so the edit is never in no place. A copy already
-                    there under the same name is this edit preserved by an
-                    earlier pass and is left as it is. *)
+                    reset, so the edit is never in no place. *)
                  let preserve_then_install outcome =
-                   let preserved_at = preserved_edit_path dest current in
-                   let preserved =
-                     match read_file_opt preserved_at with
-                     | Some existing when String.equal existing current -> Ok ()
-                     | Some _ ->
-                       Error
-                         (Printf.sprintf
-                            "%s already holds different bytes; the edit was not \
-                             preserved and the file is left as edited"
-                            preserved_at)
-                     | None -> Fs_compat.save_file_atomic preserved_at current
-                   in
-                   match preserved with
+                   match preserve_edit dest current with
                    | Error msg -> fail acc msg
-                   | Ok () ->
+                   | Ok preserved_at ->
                      install ~written:(with_edit (outcome preserved_at) acc) ~unwritten:acc
                  in
                  (match edit_layer with
@@ -508,6 +476,55 @@ let sync_current_asset
          fail
            acc
            (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+;;
+
+(* Deletes one retired asset. A regular file whose bytes are not the ones
+   the previous pass recorded was edited, and the edit is written beside it
+   before it goes, the way a current asset's edit is. A symbolic link is
+   removed without being read through. Returns the pass so far and the
+   retired paths still in place: a path that could not be deleted stays
+   masc's, so the next pass retires it. *)
+let retire_runtime_asset ~domain ~recorded ~dest_dir runtime_rel (acc, kept) =
+  let embedded_rel = prefix domain ^ runtime_rel in
+  let dest = Filename.concat dest_dir runtime_rel in
+  let keep msg =
+    { acc with failed = (embedded_rel, msg) :: acc.failed }, String_set.add runtime_rel kept
+  in
+  let remove acc =
+    Sys.remove dest;
+    { acc with removed = embedded_rel :: acc.removed }, kept
+  in
+  try
+    match owned_parent_state ~dest_dir dest with
+    | Error msg -> keep msg
+    | Ok `Missing -> acc, kept
+    | Ok `Directory ->
+      (match Fs_compat.exact_path_kind ~follow:false dest with
+       | Fs_compat.Exact_missing -> acc, kept
+       | Fs_compat.Exact_kind Unix.S_LNK -> remove acc
+       | Fs_compat.Exact_kind Unix.S_REG ->
+         (match read_file_opt dest with
+          | Some current when edited_since_recorded ~recorded ~runtime_rel current ->
+            (match preserve_edit dest current with
+             | Error msg -> keep msg
+             | Ok preserved_at ->
+               remove
+                 { acc with
+                   operator_edits =
+                     { path = embedded_rel; outcome = Preserved_retired { preserved_at } }
+                     :: acc.operator_edits
+                 })
+          | Some _ | None -> remove acc)
+       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+         keep
+           (Printf.sprintf
+              "managed %s asset leaf is neither a regular file nor a symbolic link"
+              (noun domain)))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg -> keep msg
+  | Unix.Unix_error (error, operation, argument) ->
+    keep (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
 ;;
 
 let sync ~domain ~edit_layer ~read ~files ~dest_dir () =
@@ -561,20 +578,30 @@ let sync ~domain ~edit_layer ~read ~files ~dest_dir () =
         | Ok record -> record, []
         | Error msg -> no_record, [ manifest_path domain, msg ]
       in
-      (* Retired: recorded as masc's by the previous pass and no longer
-         shipped. The listing only says which of those are still here. *)
-      let removable = String_set.inter runtime (String_set.diff owned_before current) in
-      let purged =
-        String_set.fold
-          (remove_runtime_asset ~domain ~dest_dir)
-          removable
-          { initial with failed = manifest_failure }
-      in
       let synced, digests =
         List.fold_left
           (sync_current_asset ~domain ~edit_layer ~recorded ~read ~dest_dir)
-          (purged, String_map.empty)
+          (initial, String_map.empty)
           assets
+      in
+      (* Retired: recorded as masc's by the previous pass and no longer
+         shipped. The listing only says which of those are still here.
+         They go only once every current asset is in place. When a release
+         moves a prompt's text into another file, the old file is deleted
+         after the new one is written, so a failed write leaves the old text
+         readable rather than neither. Until then they stay listed. *)
+      let retired = String_set.inter runtime (String_set.diff owned_before current) in
+      let retired_result, kept =
+        match synced.failed with
+        | _ :: _ -> synced, retired
+        | [] ->
+          String_set.fold
+            (retire_runtime_asset ~domain ~recorded ~dest_dir)
+            retired
+            (synced, String_set.empty)
+      in
+      let result =
+        { retired_result with failed = retired_result.failed @ manifest_failure }
       in
       (* A manifest this pass could not read stays as it is. Rewriting it
          would make the next boot read clean, so the failure would show
@@ -583,13 +610,22 @@ let sync ~domain ~edit_layer ~read ~files ~dest_dir () =
          operator repairs or removes the file, and the next pass then
          starts from what it says. *)
       match manifest_failure with
-      | _ :: _ -> synced
+      | _ :: _ -> result
       | [] ->
+        let kept_digests =
+          String_set.fold
+            (fun rel acc ->
+              match String_map.find_opt rel recorded with
+              | Some digest -> String_map.add rel digest acc
+              | None -> acc)
+            kept
+            digests
+        in
         write_runtime_manifest
           ~domain
           ~dest_dir
-          (runtime_manifest_content ~domain current digests)
-          synced)
+          (runtime_manifest_content ~domain (String_set.union current kept) kept_digests)
+          result)
 ;;
 
 (* Two lines, two budgets. The bootstrap used to concatenate copied,
@@ -690,6 +726,14 @@ let operator_edit_line ~label { path; outcome } =
       label
       path
       reason
+      preserved_at
+  | Preserved_retired { preserved_at } ->
+    Printf.sprintf
+      "%s asset %s was edited after the last sync, and this release no longer \
+       ships it. The edit is kept at %s and the file is removed; copy what you \
+       still need from the edit"
+      label
+      path
       preserved_at
   | Discarded ->
     Printf.sprintf

@@ -31,6 +31,7 @@ val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
   -> live:Masc_tui_machine_live.view
+  -> ?interaction:Masc_tui_types.machine_interaction
   -> ?notice:string
   -> Masc_tui_types.msx_frame option
   -> Masc_tui_interactive.frame option

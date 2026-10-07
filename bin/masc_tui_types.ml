@@ -4650,6 +4650,7 @@ type runtime_config_edit_session = {
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
+type machine_interaction = Observe_machine | Control_machine
 
 (* One row of the MSX load menu. The highlight is kept as the row itself, not
    its position: rows come and go while the menu is open (the DOS watch row
@@ -5139,6 +5140,7 @@ type state = {
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
   mutable machine_source: Masc.Machine_lane.t;
+  mutable machine_interaction: machine_interaction;
   (* The last live read of each machine. [msx_live] is [Showing] the picture
      [msx_frame] holds, with its change mark, whether a live read or a tick
      answer drew it: the tick returns its picture and mark from one snapshot,
@@ -5154,10 +5156,13 @@ type state = {
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* Locally retained invite cards, newest first. The selected card remains
      open until the operator closes it; the modal sweep leaves it alone. *)
+  mutable collab: Masc_tui_collab.t option;
   mutable play_invite: play_invite;
+  mutable play_invite_quarantine: (workspace_input_identity * play_invite) option;
   mutable play_invite_scroll: int;
-  (* Serialize issue requests so their one-time answers arrive in order. *)
-  mutable play_invite_inflight: bool;
+  (* Serialize issue and revoke across chat/Collab owners, including a closed
+     view: a delayed receipt must not revive or erase a reissued card. *)
+  mutable play_mutation_inflight: bool;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -6756,6 +6761,7 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_collab_form
   | Text_account_login
   | Text_browser_url
   | Text_ask_answer
@@ -6811,7 +6817,11 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  if Option.is_some state.collab then
+    (match state.collab with
+     | Some view when not compact_viewport && Masc_tui_collab.text_input_active view -> Some Text_collab_form
+     | Some _ | None -> None)
+  else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
   (* A drop reason takes every key on the goal detail it was opened on, so
      its letters never reach the lifecycle keys under it. *)
@@ -6898,7 +6908,7 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_collab_form | Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_runtime_account_form | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
@@ -8190,6 +8200,27 @@ let play_invite_forget current name =
        | Some _ | None -> current.shown_name)
   }
 
+let withdraw_play_invite_workspace state
+    ~(previous : workspace_input_identity option) ~(current : workspace_input_identity option) =
+  let hidden invite = {invite with shown_name = None} in
+  match current with
+  | None ->
+      (* Losing a health response removes display/action authority, not the
+         only copy of a credential. Keep it sealed under its confirmed origin. *)
+      (match previous, state.play_invite.cards with
+       | Some workspace, _ :: _ ->
+           state.play_invite_quarantine <- Some (workspace, hidden state.play_invite)
+       | (Some _ | None), [] | None, _ :: _ -> ());
+      state.play_invite <- {cards = []; shown_name = None}
+  | Some workspace ->
+      let retained =
+        if previous = Some workspace then hidden state.play_invite
+        else match state.play_invite_quarantine with
+          | Some (owner, invite) when owner = workspace -> hidden invite
+          | Some _ | None -> {cards = []; shown_name = None} in
+      state.play_invite <- retained;
+      state.play_invite_quarantine <- None
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -8202,6 +8233,7 @@ let modal_owns_keys (state : state) =
   || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
+  || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
@@ -8231,6 +8263,7 @@ let close_key_modals (state : state) =
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
+  state.collab <- None;
   state.exact_activity_open <- None;
   state.browser_activity_open <- None;
   state.machine_activity_open <- None;
@@ -8352,14 +8385,17 @@ let create_state
   msx_frame = None;
   msx_last_poll_ns = 0L;
   machine_source = Masc.Machine_lane.Msx;
+  machine_interaction = Observe_machine;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   msx_live_in_flight = None;
   dos_live_in_flight = None;
   dos_activity = [];
+  collab = None;
   play_invite = { cards = []; shown_name = None };
+  play_invite_quarantine = None;
   play_invite_scroll = 0;
-  play_invite_inflight = false;
+  play_mutation_inflight = false;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;

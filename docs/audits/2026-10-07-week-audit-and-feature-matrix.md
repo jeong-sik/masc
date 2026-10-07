@@ -160,6 +160,10 @@ PR(모두 Draft, base main):
 - #41475 (#41459 위에 쌓음) Board 관련 여부 읽기의 즉시 3회 재시도와 테스트 뒷문 제거. 09-30~10-07 로그에서 재시도·포기 줄 0번(같은 기간 `board signal` 줄 하루 약 1,500개). 커서 스캔이 댓글까지 다시 읽어 배달하는 것을 코드와 기존 테스트로 확인.
 - #41479 `/api/v1/runtime/resolved` 와 TUI Runtime 상세에 마지막 실패(종류, 시각, 기록한 Keeper)를 보여 줌. lane 걸음이 이 값으로 후보를 뒤로 미루는데 투영이 버리고 있었음.
 
+4차(사용자 "지워"):
+- #41485 (#41475 위에 쌓음) Board 읽기 전용 오류 타입 `board_read_error`. Board 읽기는 메모리만 봐서 `Io_error` 를 낼 수 없어요.
+- #41486 (#41485 위에 쌓음) Keeper 의 Board 읽기 "일시 실패" 처리(intake 보류, 커서 스캔 정지, 밀어 주기 경고), `disposition` 타입, 테스트 뒷문 `force_transient_board_reads`, 그 뒷문으로만 돌던 테스트 5개 삭제. Keeper 코드에서 `Board.Io_error` 를 만드는 곳은 테스트 뒷문 두 개뿐이었고, 09-30~10-07 로그에 일시 실패 줄 0번.
+
 남은 TUI 문구(B3·B4·B5): "task owner without fiber N", "running X/Y" 와 "not running" 목록의 Failing 처리, Approvals 제목 수와 Home "need you" 수 차이. 다음 차례.
 
 Keeper 가 올린 Glossary PR(`polisher`): #41435 DOS 피드 개명, #41437 Draft RFC 이름 제거, #41440 중복 개념 통일, #41446 어려운 말 15곳, #41449 RFC-0472 분할 제안.

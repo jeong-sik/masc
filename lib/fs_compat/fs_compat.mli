@@ -1247,9 +1247,9 @@ val read_private_jsonl_durable_locked_with_io_for_testing :
 
 (** Append complete rows under the canonical in-process mutex and stable
     sibling lock used by {!recover_private_jsonl_durable_locked_result}.
-    A torn final row fails with [Incomplete_transaction_tail] and the file is
-    left unchanged; only {!recover_private_jsonl_durable_locked_result}
-    truncates. Existing-file appends read only the final byte. Descriptor settlement
+    A torn final row is truncated and fsynced under that same lock before the
+    append; complete malformed rows are never removed. Existing-file appends
+    read only the final byte unless recovery is needed. Descriptor settlement
     failures retain the committed cursor in the typed error. A contended
     cross-process lock returns [Stable_lock_contended] without changing data.
     All writers of a store using this operation must use the stable protocol;

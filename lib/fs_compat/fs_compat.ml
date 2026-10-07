@@ -3062,8 +3062,9 @@ let private_jsonl_last_complete_row_length bytes =
 ;;
 
 (* Called only under the stable sibling lock, with a writable descriptor.
-   Reads the complete store and truncates an incomplete final row. Appends and
-   general readers never truncate. *)
+   Reads the complete store and truncates an incomplete final row. The stable
+   append calls it when no cursor is expected; an append at an expected cursor
+   and general readers never truncate. *)
 let private_jsonl_recover_snapshot fd =
   let ( let* ) = Result.bind in
   let capture operation f =
@@ -3283,14 +3284,37 @@ let append_private_jsonl_durable_stable_with_io ~io path ~expected suffix =
            let* stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
            let* actual = private_jsonl_cursor_of_stats stats in
            let* () = check_cursor actual in
-           let* () = private_jsonl_validate_complete_tail fd stats.Unix.st_size in
+           let* append_from =
+             match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
+             | Ok () -> Ok stats.Unix.st_size
+             | Error (Incomplete_transaction_tail _ as error) ->
+               (match expected with
+                | Some _ -> Error error
+                | None ->
+                  private_jsonl_recover_snapshot fd
+                  |> Result.map (fun snapshot -> String.length snapshot.bytes))
+             | Error
+                 (( Stable_lock_contended _
+                 | Unexpected_stable_lock_permissions _
+                 | Invalid_stable_lock_state _
+                 | Cursor_mismatch _
+                 | Unexpected_transaction_file_kind _
+                 | Ambiguous_transaction_file_identity _
+                 | Transaction_path_binding_changed _
+                 | Invalid_transaction_suffix
+                 | Private_jsonl_operation_failed _
+                 | Rewrite_stage_failed _
+                 | Rewrite_published_durability_unknown _
+                 | Transaction_settlement_failed _
+                 | Transaction_append_failed _ ) as error) -> Error error
+           in
            let* () = capture Set_transaction_data_permissions (fun () ->
              Unix.fchmod fd 0o600) in
            (* See POSIX lseek: O_APPEND owns writes; this resets reads. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
            let* () =
              append_fd_durable ~io:durable_append_unix_io ~fd
-               ~original_length:stats.Unix.st_size suffix
+               ~original_length:append_from suffix
              |> Result.map_error (fun error -> Transaction_append_failed error)
            in
            let* committed_stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in

@@ -3025,8 +3025,8 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
          check int "a lead one short of the room still fills the row" inner
            (arrival_blank + Masc_tui_message_layout.display_width (String.trim line))
      | None -> fail "no heading spells the exact-width name");
-    (* A turn that opens on a tool block draws the keeper's mark and the
-       rule: no name, no dot with nothing on its left. *)
+    (* A turn that opens on a tool block names the activity lane: its own
+       mark and TOOLS label precede the rule and right-aligned clock. *)
     state.msg_history <-
       [ { (chat_entry ~request_id:request ~role:Tui_types.Message_tool
              ~text:"read_file a.ml" ~at ())
@@ -3039,10 +3039,10 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
          plain
      with
      | Some line ->
-         check bool "no dot with an empty name on its left" false
+         check bool "the tool heading has no spurious separator" false
            (Astring.String.is_infix ~affix:"\xc2\xb7" line);
-         check bool "the mark runs straight into the rule" true
-           (String.starts_with ~prefix:("\xe2\x97\x8f " ^ Masc_tui_theme.Box.h)
+         check bool "the tool mark and lane name precede the rule" true
+           (String.starts_with ~prefix:("■ TOOLS " ^ Masc_tui_theme.Box.h)
               (String.trim line))
      | None -> fail "no heading for the tool row"))
 ;;

@@ -645,7 +645,7 @@ let ollama_cloud_capabilities =
          assistant [reasoning] field to that same slot (ollama openai/openai.go
          [FromChatRequest], checked 2026-10-07). Before this the /v1 base fell
          back to no replay, so every row that did not repeat the declaration
-         lost its reasoning between tool calls: 32 of the 41 ollama_cloud rows.
+         lost its reasoning between tool calls: 12 of the 19 ollama_cloud rows.
          On 2026-10-06 one of them (glm-5.3-flash) thought 13 times in the first
          48 steps of a keeper turn and never again over the next 1,579 tool
          calls. A row whose model needs another contract still declares its

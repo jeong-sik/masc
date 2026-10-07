@@ -102,7 +102,7 @@ type approval_progress =
 
 권위는 가용성의 입력 셋(meta·registry·shutdown store)이고, 처분은 그 파생값이다. 그래서 모드 변경은 저장소 간 트랜잭션이 아니라 **재파생** 이다.
 
-- `Set_activation_mode` (`keeper_owner_reducer.ml`) 가 meta 를 쓴 직후 같은 호출 안에서 `redisposition ~keeper_name` 을 돌린다. 스케줄(`Scheduled|Due` ↔ `Paused`)과 delivery(`Delivery_held` ↔ `Delivery_accepted`)를 `disposition_of_availability` 로 다시 놓는다. 중간에 프로세스가 죽으면 부팅 복구가 전 keeper 에 대해 같은 함수를 돌린다. 입력이 같으면 결과가 같으므로 몇 번 돌아도 상태는 하나다.
+- `Update_profile` (`keeper_owner_reducer.ml`, `activation_mode` 를 바꾸는 명령) 이 meta 를 쓴 직후 같은 호출 안에서 `redisposition ~keeper_name` 을 돌린다. 스케줄(`Scheduled|Due` ↔ `Paused`)과 delivery(`Delivery_held` ↔ `Delivery_accepted`)를 `disposition_of_availability` 로 다시 놓는다. 중간에 프로세스가 죽으면 부팅 복구가 전 keeper 에 대해 같은 함수를 돌린다. 입력이 같으면 결과가 같으므로 몇 번 돌아도 상태는 하나다.
 - Autonomous → Manual 로 바꿔도 **도는 동안은 아무것도 바뀌지 않는다** (`Running of Manual` = Deliver). 백로그와 진행 중 턴은 그대로다. 변경은 keeper 가 멈추는 전이(`stop_requested` → `drain_complete`, 또는 프로세스 재시작 뒤 미등록)에서 재파생된다.
 - 멈추는 전이에서 소비했지만 ack 하지 않은 행에는 `Interrupted { turn_id; at }` 전이를 쓴다 (Q4). 행은 pending 으로 남고 다음 턴이 다시 본다.
 - 스케줄 dispatch 는 자기가 읽은 owner registry revision 을 커밋에 실어 CAS 한다. 분류와 커밋 사이에 모드가 바뀌면 커밋이 거부되고 dispatch 는 다시 분류한다. 낡은 분류로 큐에 들어가는 행은 없다.
@@ -155,7 +155,7 @@ type approval_progress =
 | PR-2 | 스케줄 `Paused of { reason; since; held_occurrences }` 상태. dispatch 가 `Dispatch_held` 를 반환. `| _ -> Ok ()`, `Keeper_wake_activation_deferred`, 낡은 drain 주석, `drain_owner_absent_pending_result` 삭제. #35361 의 Reject 행 포함 | §3-2, §3-8. `schedule stimulus retained` 0건 |
 | PR-3 | `approval_progress` 로 `grant_consumed` 하드컷. approve 응답에 delivery. 부팅 재생은 `Delivery_accepted` 만, audit 행 1회. 리셋 절차 동봉 (옛 `gate/pending.json` 은 부팅이 typed 로 거부하고 리셋 명령을 안내) | §3-3 |
 | PR-4 | `durable_demand` 를 모든 keeper 행에 투영. 대시보드 카드·스케줄 패널·승인 이력, TUI roster, `masc_keeper_waiting_inventory`, `next_action = Boot` | §3-5 |
-| PR-5 | `Set_activation_mode` 뒤 `redisposition`, 부팅 복구의 재파생, 운영자 부팅 시 Held 승인 재개, dispatch 의 revision CAS, stop 전이의 `Interrupted` | §3-4, §3-6, §3-7 |
+| PR-5 | `Update_profile` 뒤 `redisposition`, 부팅 복구의 재파생, 운영자 부팅 시 Held 승인 재개, dispatch 의 revision CAS, stop 전이의 `Interrupted` | §3-4, §3-6, §3-7 |
 | PR-6 | fusion/connector 영수증 `Committed_held | Rejected`. 로그 템플릿 교체 | `signal=deferred_*` 0건, §3-9 |
 
 PR-1 이 먼저다. PR-2·PR-3·PR-4 는 PR-1 위에서 서로 독립이다. PR-5 는 PR-2·PR-3 뒤다.
@@ -204,7 +204,7 @@ PR-1 이 먼저다. PR-2·PR-3·PR-4 는 PR-1 위에서 서로 독립이다. PR-
 - `lib/keeper_runtime/keeper_event_queue.ml:stimulus_identity_equal` — `Schedule_due` identity 는 occurrence `post_id`.
 - `lib/keeper/keeper_approval_queue.ml:signal_resolution_after_commit` (unit 반환, INFO), `complete_delivery` (`Hitl_recipient_absent` 만 폐기, Ok 경로가 `resolve_entry` 재호출), `install_persistence_internal` 재생 루프, `delivery_wake_was_observed`.
 - `lib/fusion/fusion_sink.ml:wake_keeper_on_fusion_completion` — 커밋 뒤 wake 는 best-effort, 결과 미반환.
-- `lib/server/server_dashboard_http_delete_actions.ml` → `Server_schedule_consumers.cancel_keeper_schedules` — DELETE 에서만 호출. 모드 변경 경로(`keeper_owner_reducer.ml:Set_activation_mode`)는 부르지 않음.
+- `lib/server/server_dashboard_http_delete_actions.ml` → `Server_schedule_consumers.cancel_keeper_schedules` — DELETE 에서만 호출. 모드 변경 경로(`keeper_owner_reducer.ml:Update_profile`)는 부르지 않음.
 - `lib/keeper/keeper_registry_event_queue.ml:drain_owner_absent_pending_result` — 호출자 0. `lib/server/server_bootstrap_maintenance.ml` 의 #34633 제거 주석.
 - `lib/keeper/keeper_status_runtime.ml` — `KH_offline` / `Proactive_disabled` → `Recover`.
 - `lib/schedule/schedule_domain.ml` — status 에 `Paused` 없음 (`Scheduled|Due|Running|Succeeded|Failed|Cancelled|Expired`).

@@ -18,10 +18,8 @@ type agent_core_timeout =
 
 type t =
   | Healthy
-  | Stale_termination_storm
   | Provider_runtime_error of string
   | Fiber_unresolved
-  | Turn_overflow_failure
   | Operator_interrupt
   | Agent_core_error of
       { wire : string
@@ -30,19 +28,15 @@ type t =
 
 let to_wire = function
   | Healthy -> "healthy"
-  | Stale_termination_storm -> "stale_termination_storm"
   | Provider_runtime_error code -> code
   | Fiber_unresolved -> "fiber_unresolved"
-  | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
   | Agent_core_error { wire; _ } -> wire
 ;;
 
 let of_wire_exact = function
   | "healthy" -> Some Healthy
-  | "stale_termination_storm" -> Some Stale_termination_storm
   | "fiber_unresolved" -> Some Fiber_unresolved
-  | "turn_overflow_failure" -> Some Turn_overflow_failure
   | "operator_interrupt" -> Some Operator_interrupt
   | _ -> None
 ;;

@@ -337,17 +337,17 @@ test('machine selection begins frames while the initial seat request is still pe
   const page = fixture(request => request.url === '/api/v1/play/seat'
     ? new Promise(resolve => { finishSeat = () => resolve(response(seat)); }) : gameReply(request));
   await page.settle();
-  assert.equal(page.rendered.length, 0);
+  assert.equal(page.rendered.length, 1);
   page.get('machine-view').value = 'msx';
   page.get('machine-view').handlers.change();
   await page.settle();
   assert.ok(page.requests.some(request => request.url.includes('msx_capture')));
-  assert.equal(page.rendered.length, 1);
+  assert.equal(page.rendered.length, 2);
   finishSeat();
   await page.settle();
-  assert.equal(page.rendered.length, 1, 'late initialization does not restart the selected view');
+  assert.equal(page.rendered.length, 2, 'late initialization does not restart the selected view');
   await page.poll();
-  assert.equal(page.rendered.length, 2);
+  assert.equal(page.rendered.length, 3);
 });
 
 test('the first observed handoff refreshes controller authority before the idle interval', async () => {
@@ -478,7 +478,12 @@ test('a late room acknowledgment and disconnect cannot erase a newer document dr
   assert.equal(first.requests.some(request => request.method === 'POST'), false);
   assert.match(first.get('room-status').textContent, /새로고침/);
   await newer.get('leave').handlers.click();
-  assert.equal(storage.size, 0, 'the current document may explicitly clear its own draft on disconnect');
+  assert.equal(storage.get('masc.play.room.draft'), saved, 'recovered pending message must be reconciled first');
+  newer.get('chat-send').handlers.click();
+  await newer.settle();
+  assert.equal(newer.get('chat-text').value, 'newer draft');
+  await newer.get('leave').handlers.click();
+  assert.equal(storage.size, 0, 'the current document may clear its draft after confirming its pending receipt');
 });
 
 test('a queued public message cannot dispatch after a newer document replaces its draft', async () => {
@@ -1814,4 +1819,47 @@ test('a timed-out room read releases a queued send and cannot overwrite its rece
   assert.equal(page.get('room-messages').children[0].children[1].textContent, 'delivered');
   await page.roomTick();
   assert.equal(reads, 2, 'periodic reads recover after the timeout');
+});
+
+
+test('the default spectator renders DOS before a stalled initial seat response', async () => {
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? new Promise(() => {}) : gameReply(request));
+  await page.settle();
+  assert.deepEqual(page.rendered[0], [255, 0, 0, 255]);
+  assert.equal(page.padButton.disabled, true);
+});
+
+test('disconnect preserves an active or unknown chat receipt until explicit reconciliation', async () => {
+  const storage = new Map();
+  let failSend;
+  let aborted;
+  let sends = 0;
+  const page = fixture(gameReply, { storage, roomReply: ({ body }, signal) => {
+    if (body.action === 'say' && ++sends === 1) {
+      aborted = signal;
+      return new Promise((_, reject) => { failSend = () => reject(new Error('receipt lost')); });
+    }
+    return response(emptyRoom);
+  } });
+  await page.settle();
+  page.get('chat-text').value = 'retain this exact receipt';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  const saved = storage.get('masc.play.room.draft');
+  await page.get('leave').handlers.click();
+  assert.equal(aborted.aborted, false, 'disconnect never aborts the admitted say');
+  assert.equal(storage.get('masc.play.room.draft'), saved);
+  assert.equal(page.requests.some(r => r.body?.connected === false), false);
+  failSend();
+  await page.settle();
+  await page.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.room.draft'), saved, 'unknown result still prevents forgetting the receipt');
+  assert.equal(page.requests.some(r => r.body?.connected === false), false);
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  const messages = page.roomRequests.filter(r => r.body.action === 'say');
+  assert.deepEqual(messages[1].body, messages[0].body);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0, 'confirmed message permits normal departure');
 });

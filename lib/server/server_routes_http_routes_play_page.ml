@@ -968,6 +968,11 @@ async function disconnect() {
     end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.');
     return;
   }
+  if (pendingChat !== null) {
+    el('room-status').textContent = '대화 전송 결과를 확인한 뒤 연결을 끊을 수 있어요. 이전 전송 확인을 눌러 같은 메시지를 확인해 주세요.';
+    setRoomControls();
+    return;
+  }
   disconnecting = true;
   if (roomAbort) roomAbort.abort();
   initialConnectIntent = false;
@@ -1122,7 +1127,7 @@ if (token === '') {
   starting = refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
   // A selected machine begins observing immediately even if this initial
   // seat never answers. Its eventual completion must not create a second loop.
-  starting.finally(() => { if (viewRevision === 0) restartFrames(); });
+  restartFrames();
 }
 </script>
 </body>

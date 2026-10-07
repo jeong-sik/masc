@@ -1,6 +1,6 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "f1409507c499d8641fb6ec205914702fed852acb99b65f8c42b03c086473cd57",
+  "source_sha256": "20fca15932d9c98f21d767fa277c13d6bc080b8e5d4b05359bdefecea8414c54",
   "browser_version": "149.0.7827.55",
   "seat_reads": 16,
   "frame_reads": 23,
@@ -38,14 +38,14 @@
       "query": ""
     },
     {
-      "method": "POST",
-      "path": "/api/v1/play/room",
-      "query": ""
-    },
-    {
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
     },
     {
       "method": "GET",
@@ -203,14 +203,14 @@
       "query": ""
     },
     {
-      "method": "POST",
-      "path": "/api/v1/play/room",
-      "query": ""
-    },
-    {
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
     },
     {
       "method": "GET",
@@ -283,6 +283,11 @@
       "query": ""
     },
     {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
       "method": "GET",
       "path": "/play",
       "query": ""
@@ -291,6 +296,11 @@
       "method": "GET",
       "path": "/api/v1/play/seat",
       "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
     },
     {
       "method": "POST",
@@ -306,11 +316,6 @@
       "method": "GET",
       "path": "/api/v1/play/seat",
       "query": ""
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/lane-addons/live",
-      "query": "?source_kind=dos_capture"
     },
     {
       "method": "GET",

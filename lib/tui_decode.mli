@@ -1083,6 +1083,9 @@ type gate_pending = {
           changes what the command means. *)
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_judge_advice : Keeper_approval_queue_rules_types.hitl_context_summary option;
+      (** Auto Judge's rationale and questions for a [Gate_human_required] row.
+          Required there and [None] in every other phase. *)
   gp_auto_judge_detail : string option;
       (** Durable Auto Judge failure or handoff reason, when the server
           recorded one. *)

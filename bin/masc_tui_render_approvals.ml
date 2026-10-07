@@ -51,7 +51,18 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
               | None ->
                   "y/n: decide now (this exact attempt cannot be replayed)" )
           ]
-        | Gate_queued | Gate_judging | Gate_human_required -> []
+        | Gate_human_required ->
+          (* Auto Judge handed the row over with its reasons; the person
+             deciding reads them here instead of guessing why. *)
+          (match pending.Tui_decode.gp_judge_advice with
+           | Some advice ->
+             ( "judge said", Terminal_text.single_line advice.rationale )
+             :: List.mapi
+                  (fun index question ->
+                     ((if index = 0 then "asks" else ""), Terminal_text.single_line question))
+                  advice.key_questions
+           | None -> [])
+        | Gate_queued | Gate_judging -> []
       in
       [ "keeper", pending.Tui_decode.gp_keeper
       ; "tool", pending.Tui_decode.gp_display_tool
@@ -441,7 +452,15 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
                headline Ansi.dim
                (fit_width detail (max 8 (cols - 12))) Ansi.reset
                Ansi.dim (fit_width next (max 8 (cols - 4))) Ansi.reset
-         | Gate_queued | Gate_judging | Gate_human_required -> headline)
+         | Gate_human_required ->
+             (match pending.gp_judge_advice with
+              | Some advice ->
+                  Printf.sprintf "%s\n  %sjudge: %s%s"
+                    headline Ansi.dim
+                    (fit_width (Terminal_text.single_line advice.rationale) (max 8 (cols - 11)))
+                    Ansi.reset
+              | None -> headline)
+         | Gate_queued | Gate_judging -> headline)
     | None -> ""
 ;;
 

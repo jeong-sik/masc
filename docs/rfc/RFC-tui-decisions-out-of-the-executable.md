@@ -148,7 +148,7 @@ val decision_authority
 
 | 순서 | 조각 | `masc_tui.ml` 수정 | 끝나면 지울 수 있는 것 |
 |---|---|---|---|
-| 1 | Librarian: 진짜 생산자 JSON 을 `Tui_decode` 로 읽는 단언을 기존 OCaml 테스트에 추가 (#41626) | 없음 | `test_tui_librarian_absorb_gate.py`, `test_tui_librarian_context_review.py` |
+| 1 | Librarian: 진짜 생산자 JSON 을 `Tui_decode` 로 읽는 단언을 기존 OCaml 테스트에 추가 (#41626) | 없음 | 두 파일(`test_tui_librarian_absorb_gate.py`, `test_tui_librarian_context_review.py`) 중 디코드 주장만. 렌더러 도달, Enter·`d`·`j`·Home/End, 선택한 실행을 한 번만 가져오는 주장은 남는 PTY 로 옮긴 뒤에야 파일을 지운다 |
 | 2 | Home: `masc_tui_home` 의 순수 함수(`home_decision_rows`, `home_selected_action`, `home_decision_window`, `reconcile_home_request_detail`)에 `test_tui_home.ml` 추가 | 없음 | `home_decision_cards` 의 선택·창·중복 주장 |
 | 3 | Answering: `overlay ~width` 에 긴 이름·CJK 단위 테스트 | 없음 | `answering_layout` 의 너비 주장 |
 | 4 | Runtime: 권한 칸이 4줄인 픽스처로 짧은 화면 단위 테스트(#41452 가 고친 결함의 재발 방지) | 없음 | `runtime_status` 의 선택 줄 주장 |

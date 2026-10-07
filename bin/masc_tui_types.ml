@@ -3514,7 +3514,7 @@ type palette_mode =
 module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Firefox | Zen
-  type client = { client_id : string; browser : browser }
+  type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport }
   type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
@@ -3676,7 +3676,11 @@ module Browser_lane_view = struct
     | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
   let browser_choice_label = function
-    | Connected_browser client -> browser_name client.browser ^ " · existing login · " ^ client.client_id
+    | Connected_browser client ->
+        let transport = match client.transport with
+          | Browser_lane.Web_extension -> "WebExtension"
+          | Browser_lane.Webdriver_bidi -> "BiDi" in
+        browser_name client.browser ^ " · " ^ transport ^ " · existing login · " ^ client.client_id
     | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
     | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
   let request_body t =
@@ -3773,8 +3777,10 @@ module Browser_lane_view = struct
     let* browser = get (function
       | `String "firefox" -> Ok Firefox | `String "zen" -> Ok Zen
       | _ -> Error "unknown native browser") "browser" json in
+    let* transport = get string "transport" json in
+    let* transport = Browser_lane.live_transport_of_string transport in
     if String.trim client_id = "" then Error "empty browser client ID"
-    else Ok { client_id; browser }
+    else Ok { client_id; browser; transport }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail

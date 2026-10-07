@@ -138,13 +138,20 @@ version separately. Browser identity is observed, not guessed from a manifest
 location or a configured label.
 
 `GET /api/v1/dashboard/browser-lane/clients` (read-state permission) returns
-`{ok:true,data:{clients:[{clientId,browser,version,engineVersion}]}}` for live
+`{ok:true,data:{clients:[{clientId,browser,version,engineVersion,transport}]}}` for live
 connections whose poll lease is current. Browser reads, screenshots, and
 interactions accept `clientId`. With no ID, only one connected live client can
 be selected; multiple connections return `ambiguous_browser_clients`, and none
 returns `no_live_client`. An explicit missing/retired ID returns
 `selected_client_disconnected`; it never selects a replacement. Automation
 requests omit `clientId` and return it as null.
+
+`transport` is `web_extension` or `webdriver_bidi`. The TUI browser picker
+displays WebExtension or BiDi beside the browser name. When both hosts attach
+to the same Firefox, select the BiDi client for trusted `hover_at`, then read
+its tabs and capture its viewport. Tab IDs do not transfer between those
+connections. The server rejects WebExtension hover before queueing a command
+with `trusted_hover_requires_live_bidi_connection`.
 
 When a Keeper browser tool meets `no_live_client` or
 `selected_client_disconnected`, before or after its target was resolved, its
@@ -167,9 +174,12 @@ read and screenshot replies include `clientId`; Keeper BrowserTabs returns an
 object containing `tabs` and `clientId`, and BrowserRead/Interact also preserve
 the selected identity. Carry that ID into subsequent operations.
 
-Native transport requires `x-lane: live`, the lane token, and all four identity
+Native transport requires `x-lane: live`, the lane token, and the identity
 headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and
-`x-browser-engine-version`. Missing identity headers are rejected. Each client
+`x-browser-engine-version`. Hosts also declare `x-browser-transport` as
+`web_extension` or `webdriver_bidi`; an omitted transport identifies the
+WebExtension poll contract. Empty or unknown transports, missing required
+identity headers, and a transport change on an existing client ID are rejected. Each client
 has its own queue and pending response owners. An HTTP result from a different
 client cannot settle another client's command. Native EOF attempts a bounded
 `POST /browser-lane/disconnect`; after a crash without cleanup the existing

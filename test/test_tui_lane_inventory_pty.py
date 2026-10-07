@@ -209,7 +209,7 @@ def run_destinations(executable):
     fixtures[lanes.LANE_INVENTORY_PATH] = inventory_response()
     fixtures["/api/v1/lane-addons"] = (200, addon_snapshot())
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {
-        "clients": [{"clientId": "fixture-client", "browser": "firefox"}],
+        "clients": [{"clientId": "fixture-client", "browser": "firefox", "transport": "web_extension"}],
     }})
     browser_reads = []
     slice_reads = []

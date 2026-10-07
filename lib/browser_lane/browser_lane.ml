@@ -442,7 +442,10 @@ let issue_live_with ~activity_check ?(only_if_idle = false) client ~verb ~timeou
     Error (Selected_client_disconnected client.info.client_id)
   else if not (verb_allowed_on_live verb) then
     Ok (Rejected_before_effect "session ownership, direct navigation and sentence verbs belong to the server's lanes")
-  else
+  else match client.info.transport, verb with
+  | Web_extension, Page_interact {action=Hover_at _; _} ->
+    Ok (Rejected_before_effect "trusted_hover_requires_live_bidi_connection")
+  | (Web_extension | Webdriver_bidi), _ ->
     Ok (Eio.Switch.run (fun sw ->
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in

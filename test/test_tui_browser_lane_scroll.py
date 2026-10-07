@@ -49,7 +49,7 @@ def run(executable: str) -> None:
             "nodes": [node(index) for index in range(NODE_COUNT)]}}
 
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
-        "data": {"clients": [{"clientId": CLIENT, "browser": "zen"}]}})
+        "data": {"clients": [{"clientId": CLIENT, "browser": "zen", "transport": "web_extension"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = h.RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = h.RequestHttpResponse(scene)
 

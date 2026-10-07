@@ -40,8 +40,11 @@ from tui_keyboard_harness import (
 def run_browser_client_picker_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
     firefox = "11111111-1111-4111-8111-111111111111"
-    zen = "22222222-2222-4222-8222-222222222222"
-    active = [{"clientId": firefox, "browser": "firefox"}, {"clientId": zen, "browser": "zen"}]
+    bidi = "22222222-2222-4222-8222-222222222222"
+    active = [
+        {"clientId": firefox, "browser": "firefox", "transport": "web_extension"},
+        {"clientId": bidi, "browser": "firefox", "transport": "webdriver_bidi"},
+    ]
     reads: list[dict[str, object]] = []
 
     def read(body: bytes) -> HttpResponse:
@@ -50,7 +53,7 @@ def run_browser_client_picker_regression(executable: str) -> None:
         client = request.get("clientId")
         if client not in [row["clientId"] for row in active]:
             return 409, {"ok": False, "error": "client_not_connected"}
-        text = "Zen selected page" if client == zen else "Firefox selected page"
+        text = "BiDi selected page" if client == bidi else "Firefox selected page"
         return 200, {"ok": True, "data": {
             "source": "live", "clientId": client, "elapsed_ms": 1.0,
             "tabs": [{"id": 2, "title": text, "url": "https://example.org/", "active": True}],
@@ -66,23 +69,25 @@ def run_browser_client_picker_regression(executable: str) -> None:
 
     def interact(process, master_fd, slave_fd, output, _base):
         palette_go(process, master_fd, output, b"go Browser Lane", b"Choose browser \xc2\xb7 separate sessions do not share login")
+        wait_for_output(process, master_fd, output, "Firefox · BiDi".encode(), start=0, timeout=3.0)
         if reads:
             raise AssertionError("unselected multi-client view sent a browser read")
         os.write(master_fd, b"j")
         wait_for_terminal_input_consumed(slave_fd)
-        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
-        if reads != [{"lane": "live", "clientId": zen}]:
-            raise AssertionError("Zen choice did not pin its client ID")
+        send_and_wait(process, master_fd, output, b"\r", b"BiDi selected page")
+        if reads != [{"lane": "live", "clientId": bidi}]:
+            raise AssertionError("BiDi choice did not pin its client ID")
         read_available(master_fd, output)
         chooser_start = len(output)
         send_and_wait(process, master_fd, output, b"b", b"Choose browser \xc2\xb7 separate sessions do not share login")
         # b clears the displayed inventory until discovery settles. Require a
         # row from this request, not Firefox text in an earlier chooser frame.
-        wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
+        wait_for_output(process, master_fd, output, "Firefox · BiDi".encode(), start=chooser_start, timeout=3.0)
         wait_for_output(process, master_fd, output, FRAME_END,
-                        start=bytes(output).rfind(b"Firefox", chooser_start), timeout=3.0)
+                        start=bytes(output).rfind("Firefox · BiDi".encode(), chooser_start), timeout=3.0)
         picker = screen_text(bytes(output))
-        for option in (b"Firefox", b"Stagehand Chromium", b"Independent Firefox/Zen"):
+        for option in ("Firefox · WebExtension".encode(), "Firefox · BiDi".encode(),
+                       b"Stagehand Chromium", b"Independent Firefox/Zen"):
             if option not in picker:
                 raise AssertionError(f"browser picker omitted {option!r}: {picker!r}")
         send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
@@ -91,11 +96,11 @@ def run_browser_client_picker_regression(executable: str) -> None:
         active[:] = [active[1]]
         send_and_wait(process, master_fd, output, b"r", b"Selected browser disconnected")
         if len(reads) != 2:
-            raise AssertionError("stale Firefox pin silently rebound to the remaining Zen client")
+            raise AssertionError("stale Firefox pin silently rebound to the remaining BiDi client")
         if b"Firefox selected page" in screen_text(bytes(output)):
             raise AssertionError("disconnected browser content remained under the chooser")
-        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
-        if reads[-1] != {"lane": "live", "clientId": zen}:
+        send_and_wait(process, master_fd, output, b"\r", b"BiDi selected page")
+        if reads[-1] != {"lane": "live", "clientId": bidi}:
             raise AssertionError("explicit reconnect carried the stale tab ID")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         os.write(master_fd, b"q")
@@ -165,7 +170,7 @@ def run_browser_scene_regression(executable: str) -> None:
         return 200, {"ok": True, "data": {"clicked": True}}
 
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
-        "data": {"clients": [{"clientId": client, "browser": "zen"}]}})
+        "data": {"clients": [{"clientId": client, "browser": "zen", "transport": "web_extension"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = RequestHttpResponse(scene)
     def interact_request(body):
@@ -277,7 +282,7 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
         return 200, {"ok": True, "data": {"scrollY": len(actions) * 120}}
 
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
-        "data": {"clients": [{"clientId": client, "browser": "zen"}]}})
+        "data": {"clients": [{"clientId": client, "browser": "zen", "transport": "web_extension"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
     fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(scroll)
@@ -379,7 +384,7 @@ def run_browser_pointer_regression(executable: str) -> None:
         actions.append(request)
         return 200, {"ok":True,"data":{}}
 
-    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox","transport":"web_extension"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
     fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
@@ -471,7 +476,7 @@ def run_browser_viewport_cadence_regression(executable: str, *, follow_navigatio
         actions.append(request)
         return 200, {"ok":True,"data":{}}
 
-    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox","transport":"web_extension"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
     fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
@@ -565,7 +570,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
             "source": request["lane"], "clientId": request.get("clientId"), "tabId": request["tabId"], "title": "selected Firefox tab",
             "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "viewport": {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}, "elapsed_ms": 13.0}}
 
-    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {"clients": [{"clientId": client_id, "browser": "firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {"clients": [{"clientId": client_id, "browser": "firefox", "transport": "web_extension"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
 

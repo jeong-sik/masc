@@ -79,6 +79,11 @@ def check_frame(frame, rows, cols):
 
 
 def run(executable):
+    requests = []
+
+    def loads():
+        return [(path, body) for path, body in requests if path in ('/api/v1/msx/load', '/api/v1/msx/disk')]
+
     def live(path):
         source = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)['source_kind'][0]
         body = {'state': 'changed', 'source_kind': source, 'change_count': 1,
@@ -137,14 +142,32 @@ def run(executable):
             if (rows, cols) == (8, 40):
                 assert any(line.endswith('…') for line in screen[1:-1]), (
                     'full-width unselected game rows lost their last cell', screen)
+        # The two watched machines precede the carts. Wait for this actual
+        # highlighted load row before hiding it; an unseen Enter must not POST.
+        key(b'jj', re.compile(rb'\x1b\[7m[^\r\n]*long-game-[^\r\n]*0\.rom'))
+        for rows in (1, 2):
+            resize(rows, 100)
+            for press in (b'\r', b' '):
+                key(press, b'\x1b[?7h')
+                assert loads() == [], ('hidden selection mutated the machine', rows, loads())
+        resize(3, 100)
+        key(b'\r', b'viewport load refused')
+        assert len(loads()) == 1, ('a visible selection should reach the fixture once', loads())
+        # The refusal occupies the only body row. Enter must first expose the
+        # choice again, without repeating the load hidden behind that status.
+        key(b'\r', b'\x1b[?7h')
+        assert len(loads()) == 1, ('status-only frame repeated an invisible load', loads())
+        resize(30, 100)
+        key(b'\x1b', b'spectating the server')
         key(b'\x1b', b'MASC Collab')
         key(b'\x1b', b'MASC Dashboard')
         os.write(master, b'q')
 
     h.run_terminal_scenario(executable, description='MSX and DOS spectator viewport bounds',
-        interact=interact, http_fixtures={'/api/v1/play/invites': (200, {'invites': []}),
+        interact=interact, http_requests=requests, http_fixtures={'/api/v1/play/invites': (200, {'invites': []}),
           '/api/v1/lane-addons/live': h.PathHttpResponse(live),
-          '/api/v1/msx/carts': (200, {'carts': ['long-game-' + ('x' * 60) + str(i) + '.rom' for i in range(8)]})})
+          '/api/v1/msx/carts': (200, {'carts': ['long-game-' + ('x' * 60) + str(i) + '.rom' for i in range(8)]}),
+          '/api/v1/msx/load': (200, {'ok': False, 'message': 'viewport load refused'})})
     print('tui play viewport: PASS')
 
 

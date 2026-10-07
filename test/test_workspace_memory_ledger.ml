@@ -166,7 +166,7 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
      | _ -> Alcotest.fail "classified evidence without a summary was hidden or called summarized");
     let directory = Ledger.directory ~base_path in
     let batch = match Briefing.prepare ~sources:(Ledger.briefing_sources ledger)
-        ~contract:"ledger-observation-fixture" ~max_input_bytes:100_000
+        ~contract:"ledger-observation-fixture"
         ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty |> require with
       | Some batch -> batch
       | None -> Alcotest.fail "unsummarized ledger prepared no work" in

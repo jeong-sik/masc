@@ -705,6 +705,7 @@ let test_departed_caller_cannot_pass_a_free_controller () =
 let test_independent_departure_recovers_damaged_participation () =
   List.iter (fun stopped_keeper ->
     with_machine @@ fun config _ credential ->
+    let credential = if stopped_keeper then snd (renew config) else credential in
     if stopped_keeper then (
       let meta = match Masc_test_deps.meta_of_json_fixture
           (`Assoc ["name", `String "player"; "trace_id", `String "stopped-holder"]) with

@@ -7732,12 +7732,6 @@ let drain_queued_message state ~base_path ~mailbox =
      && Option.is_none state.keepers_error then next ()
 ;;
 
-(* The same words the log projection ends a turn with: one function, so a
-   turn read from the strict decode and one drawn from its log agree. *)
-let chat_status_text completed =
-  Keeper_chat_transcript.turn_status_text ~reply:completed.Keeper_chat.reply
-    ~turn_ref:completed.turn_ref completed.turn_outcome
-
 (* /task in the composer or the chat pane: create the task first, then hand
    the keeper the operator's words with the task id in front. Creation runs
    on a daemon fiber; only the mailbox result mutates state. The MCP session

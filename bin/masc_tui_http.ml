@@ -1717,38 +1717,6 @@ let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_na
     result
 ;;
 
-let fetch_keeper_chat_operation ~(host : string) ~(port : int)
-    (request : Masc_tui_keeper_chat_projection.request) :
-    ( Masc_tui_keeper_chat_projection.operation_reconciliation
-    , Masc_tui_keeper_chat_projection.error )
-    result =
-  let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
-      (percent_encode_path_segment request.keeper_name)
-      (percent_encode_path_segment request.request_id)
-  in
-  match http_get ~host ~port ~path with
-  | Error detail ->
-      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
-  | Ok (status, response_body)
-    when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error
-        (Masc_tui_keeper_chat_projection.Http_error
-           { status; body = response_body })
-  | Ok (_, response_body) ->
-      (match Yojson.Safe.from_string response_body with
-       | json ->
-           Masc_tui_keeper_chat_projection.decode_operation_reconciliation
-             ~request json
-           |> Result.map_error (fun error ->
-                  Masc_tui_keeper_chat_projection.protocol_error error)
-       | exception Yojson.Json_error detail ->
-           Error
-             (Masc_tui_keeper_chat_projection.protocol_error
-                (Masc_tui_keeper_chat_projection.Malformed_event
-                   ("Keeper chat operation response is invalid JSON: "
-                  ^ detail))))
-
 (** Fetch the live keeper roster from [GET /api/v1/gate/keepers].
 
     The Keepers surface needs one fact the durable metadata on disk cannot
@@ -2433,26 +2401,6 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
       ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
-    ~body:(Yojson.Safe.to_string payload)
-
-(** POST /api/v1/tools/masc_schedule_create. The payload is the tool's own
-    argument contract; the kind-specific timing fields arrive already
-    assembled by the caller (the form's typed spec builds them), and time
-    syntax, cron text, and timezone spellings stay the tool's to validate.
-    The server records the credential's actor as requester and scheduler. *)
-let post_schedule_create ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(message : string)
-    ~(timing_fields : (string * Yojson.Safe.t) list) :
-    (Yojson.Safe.t, string) result =
-  let payload =
-    `Assoc
-      ([ ("keeper_name", `String keeper_name)
-       ; ("message", `String message)
-       ; ("source", `String "operator_request")
-       ]
-      @ timing_fields)
-  in
-  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_create"
     ~body:(Yojson.Safe.to_string payload)
 
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
@@ -3402,7 +3350,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     ([GET /api/v1/keepers/asks]).
 
     Open questions only. The rows carry choice ids next to labels and
-    {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
+    {!post_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
 let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
     (Masc.Tui_decode_asks.asks_snapshot, string) result =
@@ -3430,50 +3378,6 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
-
-(** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).
-
-    A [409] is not a transport failure: another surface answered first. The
-    body carries what landed, and the caller surfaces that rather than
-    retrying — resubmitting would only lose again, and the operator needs to
-    see the decision that stands. *)
-let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(ask_id : string) ~(question_id : string) ~(choice_ids : string list) :
-    (unit, string) result =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("name", `String keeper_name);
-          ("ask_id", `String ask_id);
-          ( "answers",
-            `List
-              [
-                `Assoc
-                  [
-                    ("question_id", `String question_id);
-                    ( "response",
-                      `Assoc
-                        [
-                          ("kind", `String "chose");
-                          ( "choice_ids",
-                            `List (List.map (fun id -> `String id) choice_ids) );
-                        ] );
-                  ];
-              ] );
-        ])
-  in
-  match
-    http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/keepers/ask-answer" ~body
-  with
-  | Error detail -> Error detail
-  | Ok (status, response_body) when Masc.Tui_decode.is_success_http_status status ->
-      let (_ : string) = response_body in
-      Ok ()
-  | Ok (409, response_body) ->
-      Error (named_refusal "another surface answered first" ~status:409 ~body:response_body)
-  | Ok (status, response_body) ->
-      Error (named_refusal "answer" ~status ~body:response_body)
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
     selecting the Firefox tab belongs to the request body. *)

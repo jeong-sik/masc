@@ -1885,12 +1885,6 @@ let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
           | Ok (rows, errors, truncated, total, candle) ->
               Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
-(* Every line these views hand the renderer goes through the terminal
-   sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
-   escaped, not a control to replay into the frame. *)
-let sanitize_view_lines lines =
-  List.map Masc.Tui_terminal_text.sanitize_terminal_text lines
-
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
   match

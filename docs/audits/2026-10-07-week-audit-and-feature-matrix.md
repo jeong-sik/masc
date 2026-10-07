@@ -157,7 +157,7 @@ PR(모두 Draft, base main):
 - #41468 TUI 화면 목록에 Approvals 가 없는데 남아 있던 숨김 갈래·배지·경고색, 테스트만 부르던 `approvals_count_label`, 아무도 안 부르던 `approvals_human_pending` 삭제(A2).
 - #41471 아무도 부르지 않는 TUI 함수 9개 삭제(A3, G-W5). 그 뒤 테스트만 남은 채팅 작업 다시 읽기 해석기(`decode_operation_reconciliation`)도 삭제. 커넥터 행의 `workspace_id` 읽기 제거(G-W6), 엉뚱한 자리의 주석 삭제(G-W7).
 - #41473 Gate mode 를 `Keeper_gate_mode` 로 한 번만 읽고, 모르는 값은 세 화면이 서버 철자 그대로 보여 줌. 서버가 보내지 않는 `"workspace"` 갈래 제거(G-W2, G-W3).
-- #41475 (#41459 위에 쌓음) Board 관련 여부 읽기의 즉시 3회 재시도와 테스트 뒷문 제거. 10-01~10-07 로그에서 재시도·포기 줄 0번(같은 기간 `board signal` 줄 하루 약 1,500개). 커서 스캔이 댓글까지 다시 읽어 배달하는 것을 코드와 기존 테스트로 확인.
+- #41475 (#41459 위에 쌓음) Board 관련 여부 읽기의 즉시 3회 재시도와 테스트 뒷문 제거. 09-30~10-07 로그에서 재시도·포기 줄 0번(같은 기간 `board signal` 줄 하루 약 1,500개). 커서 스캔이 댓글까지 다시 읽어 배달하는 것을 코드와 기존 테스트로 확인.
 - #41479 `/api/v1/runtime/resolved` 와 TUI Runtime 상세에 마지막 실패(종류, 시각, 기록한 Keeper)를 보여 줌. lane 걸음이 이 값으로 후보를 뒤로 미루는데 투영이 버리고 있었음.
 
 남은 TUI 문구(B3·B4·B5): "task owner without fiber N", "running X/Y" 와 "not running" 목록의 Failing 처리, Approvals 제목 수와 Home "need you" 수 차이. 다음 차례.

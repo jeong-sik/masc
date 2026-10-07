@@ -144,7 +144,6 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
     Pulse.create
       ~clock
       ~rhythm:(fixed_rhythm maintenance_interval)
-      ~lifecycle:Always_on
       ~consumers:[ orphan_observation_consumer ]
   in
   with_pulse_rw (fun () -> maintenance_pulse := Some mp);
@@ -164,7 +163,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
     Log.Orchestrator.debug "loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)";
 
   let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspace_config () in
-  let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Always_on ~consumers:[orch_consumer] in
+  let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~consumers:[orch_consumer] in
   with_pulse_rw (fun () -> orchestrator_pulse := Some op);
   Eio.Fiber.fork ~sw (fun () ->
     try Pulse.run ~sw op

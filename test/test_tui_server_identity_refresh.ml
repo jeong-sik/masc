@@ -240,6 +240,43 @@ let test_detail_focus_waits_for_authoritative_roster () =
   ready foreign [keeper "focused"];
   Alcotest.(check bool) "foreign store retires intent even after returning" false (restore_keeper_detail_focus foreign)
 
+(* A read that cannot name the server's workspace does not say it serves
+   another one. After a match it keeps that match, unconfirmed; only a read
+   that names a different workspace changes it. *)
+let test_unread_after_a_match_keeps_it_unconfirmed () =
+  let local = "/workspace/local" in
+  let next previous reading =
+    Masc_tui_types.next_workspace_identity ~previous ~local_base_path:local reading
+  in
+  let label = function
+    | Masc_tui_types.Workspace_identity_unread -> "unread"
+    | Workspace_identity_match -> "match"
+    | Workspace_identity_match_unconfirmed reason -> "unconfirmed: " ^ reason
+    | Workspace_identity_mismatch { server_base_path; _ } ->
+      "mismatch: " ^ server_base_path
+  in
+  let check name expected previous reading =
+    Alcotest.(check string) name expected (label (next previous reading))
+  in
+  let booting = { (identity local) with sid_state_ready = Some false } in
+  check "a failed read after a match keeps it" "unconfirmed: one failed tick"
+    Workspace_identity_match (Error "one failed tick");
+  check "a booting server after a match keeps it" "unconfirmed: the server is starting"
+    Workspace_identity_match (Ok booting);
+  check "another failed read stays unconfirmed" "unconfirmed: still down"
+    (Workspace_identity_match_unconfirmed "one failed tick") (Error "still down");
+  check "the same workspace confirms it again" "match"
+    (Workspace_identity_match_unconfirmed "one failed tick") (Ok (identity local));
+  check "a different workspace is still a mismatch" "mismatch: /workspace/other"
+    (Workspace_identity_match_unconfirmed "one failed tick")
+    (Ok (identity "/workspace/other"));
+  check "a failed read with no match before is unread" "unread"
+    Workspace_identity_unread (Error "boot");
+  check "a failed read after a mismatch is unread" "unread"
+    (Workspace_identity_mismatch
+       { local_base_path = local; server_base_path = "/workspace/other" })
+    (Error "one failed tick")
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -263,5 +300,7 @@ let () =
             test_detail_intents_wait_for_comparable_identity
         ; Alcotest.test_case "local rows are unread until read" `Quick
             test_local_rows_are_unread_until_the_workspace_is_read
+        ; Alcotest.test_case "an unread after a match keeps it unconfirmed" `Quick
+            test_unread_after_a_match_keeps_it_unconfirmed
         ] )
     ]

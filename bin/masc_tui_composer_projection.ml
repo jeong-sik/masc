@@ -22,6 +22,8 @@ let of_state (state : Masc_tui_types.state) : Composer.t =
                  | Masc_tui_types.Workspace_identity_mismatch _ ->
                    "chat needs the server workspace for attachments and pasted files"
                  | Workspace_identity_unread -> "server workspace not observed"
+                 | Workspace_identity_match_unconfirmed _ ->
+                   "server workspace unconfirmed; waiting for the next read"
                  | Workspace_identity_match ->
                    (match state.keepers_error with
                     | Some _ -> "keeper list unread"

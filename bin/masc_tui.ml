@@ -3248,6 +3248,8 @@ let launch_keeper_deletions state ~mailbox ?retry () =
               let* () = match state.workspace_identity with
                 | Workspace_identity_unread ->
                   Error "Workspace identity has not been read; deletion retry unavailable"
+                | Workspace_identity_match_unconfirmed _ ->
+                  Error "Workspace identity is unconfirmed; deletion retry unavailable"
                 | Workspace_identity_match | Workspace_identity_mismatch _ -> Ok () in
               let keeper_name = Keeper_control.deletion_keeper_name row in
               let operation_id = Masc.Keeper_shutdown_types.Operation_id.to_string (Keeper_control.deletion_operation_id row) in
@@ -3633,14 +3635,6 @@ let launch_keeper_config_view state ~mailbox keeper_name =
       enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
-let item_authority_ready state =
-  match state.server_identity with
-  | Some identity ->
-      identity.Tui_decode.sid_state_ready <> Some false
-      && not (String.equal identity.sid_base_path "")
-      && not (String.equal identity.sid_masc_root "")
-  | None -> false
-
 let withdraw_keeper_items state =
   state.item_account <- None;
   state.item_account_error <- None;
@@ -3663,10 +3657,11 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
   in
   withdraw_keeper_items state;
   match state.workspace_identity, state.server_identity with
-  | (Workspace_identity_unread | Workspace_identity_mismatch _), _
+  | ( Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _ ), _
   | Workspace_identity_match, None ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
-  | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
+  | Workspace_identity_match, Some _ when not (server_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some _
     when state.keeper_roster = Keeper_control.Roster_unobserved ->
@@ -10090,7 +10085,8 @@ let apply_overview_goals_load state = function
 
 let apply_remote_keeper_rows state =
   match state.workspace_identity with
-  | Workspace_identity_match | Workspace_identity_unread -> ()
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _
+  | Workspace_identity_unread -> ()
   | Workspace_identity_mismatch _ ->
     let keepers, error = match state.keeper_roster with
       | Keeper_control.Roster_unobserved -> [],
@@ -10802,7 +10798,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      set_msg_scroll state 0
    | _ -> ())
 
-let apply_server_identity_reading state reading =
+let apply_confirmed_server_identity_reading state reading =
   let previous_server = state.server_identity in
   let previous_input_workspace = workspace_input_identity_of_server previous_server in
   (* A withdrawal invalidates outstanding roster reads even if the same
@@ -10869,7 +10865,8 @@ let apply_server_identity_reading state reading =
   let same_workspace =
     Masc_tui_types.server_workspace_matches ~expected:previous_server reading
     && match previous, state.workspace_identity with
-    | Workspace_identity_match, Workspace_identity_match -> true
+    | (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
+    , Workspace_identity_match -> true
     | Workspace_identity_mismatch prior, Workspace_identity_mismatch current ->
       String.equal prior.server_base_path current.server_base_path
     | _ -> false
@@ -10926,6 +10923,37 @@ let apply_server_identity_reading state reading =
     state.keeper_roster <- Keeper_control.Roster_unobserved;
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+    (* [workspace_identity_of_refresh] answers only the three confirmed
+       readings; [apply_server_identity_reading] keeps an unconfirmed match
+       before this function runs. *)
+    ()
+
+(* A read that cannot say which workspace the server serves keeps the last
+   match unconfirmed ([Masc_tui_types.next_workspace_identity]). The confirmed
+   identity and everything it authorized stay; the state is no longer
+   [Workspace_identity_match], so decisions and new reads wait for a read that
+   matches again. Only a read that names a workspace goes on to compare it. *)
+let apply_server_identity_reading state reading =
+  match
+    Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path reading
+  with
+  | Workspace_identity_match_unconfirmed _ as unconfirmed ->
+    state.workspace_identity <- unconfirmed
+  | Workspace_identity_unread | Workspace_identity_match
+  | Workspace_identity_mismatch _ as next ->
+    (match state.workspace_identity, next with
+     | Workspace_identity_match_unconfirmed _, Workspace_identity_match ->
+       (* A detail read answered while the identity was unconfirmed was
+          dropped. Retiring the receipts still in flight makes the move back
+          visible to [resume_reads_after_authority_change], which reads the
+          open detail again; the screen keeps what it shows meanwhile. *)
+       state.detail_reads <- [];
+       state.detail_read_authority <- ref ()
+     | ( Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ), _ -> ());
+    apply_confirmed_server_identity_reading state reading
 
 (* Scoped navigation reads carry the identity observed before their datasets.
    A successful older full refresh cannot authorize a same-port replacement. *)
@@ -11036,6 +11064,7 @@ let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match -> load_from_masc_dir state base_path
   | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
 
@@ -11044,6 +11073,7 @@ let load_live_context_if_safe state base_path keeper =
   | Masc_tui_types.Workspace_identity_match ->
     load_live_context state base_path keeper
   | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
 
@@ -11051,6 +11081,9 @@ let load_keeper_logs_if_safe state base_path limit keeper =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match ->
     load_selected_keeper_logs state base_path limit keeper
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+    (* The logs the last match read stay until a read matches again. *)
+    ()
   | Masc_tui_types.Workspace_identity_unread ->
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
@@ -11603,7 +11636,7 @@ let launch_observer state ~host ~port ~mailbox =
    filled the eleven-entry event panel with its own refusals. *)
 let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match state.workspace_identity with
-  | Workspace_identity_unread -> ()
+  | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> ()
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
@@ -12531,6 +12564,8 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   match state.workspace_identity with
   | Workspace_identity_unread ->
       report_action state "error" "Workspace identity has not been read; action unavailable"
+  | Workspace_identity_match_unconfirmed _ ->
+      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
   state.schedule_cancel_error <- None;
@@ -12924,6 +12959,8 @@ let handle_keeper_action state ~base_path ~mailbox action =
   match state.workspace_identity with
   | Workspace_identity_unread ->
       report_action state "error" "Workspace identity has not been read; action unavailable"
+  | Workspace_identity_match_unconfirmed _ ->
+      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match selected_keeper state with
   | None ->
@@ -14447,7 +14484,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
-         && item_authority_ready state
+         && server_authority_ready state
          && state.keeper_roster <> Keeper_control.Roster_unobserved
          (* The same reading the dispatch guard makes: a partial roster's
             silence is not absence, so a read this TUI legitimately launched

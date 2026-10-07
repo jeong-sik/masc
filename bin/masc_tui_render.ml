@@ -3034,7 +3034,8 @@ let render_keeper_list (state : state) =
       match keeper_rows_page state ~error:keepers_error with
       | Page_empty -> Some (match state.workspace_identity with
           | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
-          | Workspace_identity_match | Workspace_identity_unread ->
+          | Workspace_identity_match | Workspace_identity_match_unconfirmed _
+          | Workspace_identity_unread ->
             "   no keeper metadata under .masc/keepers/")
       | Page_unread -> Some page_unread_note
       | Page_failed -> None
@@ -12929,6 +12930,12 @@ let render_config (state : state) =
          workspace under /var/folders both read as the same "/var/folders/
          bv/cjrbl01x52s…" while the age behind them left the row. A path's
          deciding end is its tail, which [fit_middle] keeps. *)
+      (match state.workspace_identity with
+       | Masc_tui_types.Workspace_identity_match_unconfirmed reason ->
+           c.push (Ansi.dim ^ "  (server identity unconfirmed: "
+                   ^ Terminal_text.single_line reason ^ "; last confirmed below)" ^ Ansi.reset)
+       | Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_mismatch _ -> ());
       (match state.server_identity with
        | None -> c.push (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
        | Some identity ->

@@ -98,6 +98,13 @@ type workspace_authority = Workspace_authority of int
 type workspace_identity =
   | Workspace_identity_unread
   | Workspace_identity_match
+  | Workspace_identity_match_unconfirmed of string
+      (** The last read that could say served this workspace; the latest
+          could not say (it failed, the server was starting, or a path was
+          missing) and the string says why. The rows that read authorized stay
+          on screen. It is not [Workspace_identity_match], so nothing that needs
+          a fresh match -- a decision, a write, applying a new read -- runs until
+          a read says match again. *)
   | Workspace_identity_mismatch of
       { local_base_path : string
       ; server_base_path : string
@@ -154,6 +161,30 @@ let workspace_identity_of_refresh ~local_base_path reading =
          && String.equal local_masc_root server_masc_root
     then Workspace_identity_match
     else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
+let unconfirmed_identity_reason reading =
+  match reading with
+  | Error detail -> detail
+  | Ok _ when server_is_booting reading -> "the server is starting"
+  | Ok _ -> "the server did not report a complete workspace path"
+;;
+
+(* A read that cannot say which workspace the server serves does not say it
+   serves another one. After a match it keeps that match, unconfirmed; only a
+   read that names a different workspace withdraws what the match authorized. *)
+let next_workspace_identity ~previous ~local_base_path reading =
+  match workspace_identity_of_refresh ~local_base_path reading, previous with
+  | Workspace_identity_unread
+  , (Workspace_identity_match | Workspace_identity_match_unconfirmed _) ->
+    Workspace_identity_match_unconfirmed (unconfirmed_identity_reason reading)
+  | Workspace_identity_unread
+  , (Workspace_identity_unread | Workspace_identity_mismatch _) ->
+    Workspace_identity_unread
+  | ( (Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _
+      | Workspace_identity_mismatch _) as next )
+  , _ -> next
 ;;
 
 (* A Broadcast retry belongs to the verified workspace store, not to the
@@ -6356,6 +6387,13 @@ type state = {
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
 let server_authority_ready state =
+  (* An unconfirmed match keeps the identity it last confirmed so its rows
+     stay on screen; that identity does not authorize a new read. *)
+  (match state.workspace_identity with
+   | Workspace_identity_match_unconfirmed _ -> false
+   | Workspace_identity_unread | Workspace_identity_match
+   | Workspace_identity_mismatch _ -> true)
+  &&
   match state.server_identity with
   | Some identity ->
       identity.Tui_decode.sid_state_ready <> Some false
@@ -9094,7 +9132,8 @@ let local_rows_page (state : state) ~error =
 (* A remote roster is its own observation, never evidence of a local read. *)
 let keeper_rows_page (state : state) ~error =
   match state.workspace_identity with
-  | Workspace_identity_match -> local_rows_page state ~error
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _ ->
+    local_rows_page state ~error
   | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
   | Workspace_identity_mismatch _ ->
     empty_page_of ~error ~snapshot:

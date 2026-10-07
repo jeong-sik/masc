@@ -598,7 +598,8 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
             (Terminal_text.single_line local_base_path)
         ]
     | Masc_tui_types.Workspace_identity_unread
-    | Masc_tui_types.Workspace_identity_match -> []
+    | Masc_tui_types.Workspace_identity_match
+    | Masc_tui_types.Workspace_identity_match_unconfirmed _ -> []
   in
   (* Keepers mid-turn, the one this pane last messaged first: that is the
      answer the operator who walked away is waiting on. *)
@@ -1467,6 +1468,8 @@ let connection_badge (state : state) =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
       connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+      connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 

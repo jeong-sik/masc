@@ -235,12 +235,13 @@ type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
-# call, then again refresh-s seconds after each read. Undocumented
-# endpoint; Ollama's own client calls it. The decoder supports the observed
-# session/weekly shape and reports other shapes as errors.
+# call, then again refresh-s seconds after each read. GET /api/balance
+# (ollama/ollama docs/api/balance.mdx) states a legacy plan's session and
+# weekly windows with their reset times; a credit plan's answer is reported
+# as an error.
 [providers.ollama_cloud.usage-read]
-shape = "ollama-usage"
-url = "https://ollama.com/api/usage"
+shape = "ollama-balance"
+url = "https://ollama.com/api/balance"
 refresh-s = 600.0
 
 [providers.deepseek]

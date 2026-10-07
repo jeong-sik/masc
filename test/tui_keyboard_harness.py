@@ -1040,26 +1040,83 @@ def frame_containing(
     return segment[frame_start : frame_end + len(FRAME_END)]
 
 
-def row_cell_width(text: str) -> int:
-    """Display cells a drawn row occupies, the same rule the region harness
-    uses for its pane reads: wide (W/F) glyphs take two cells, everything else
-    one. Cell geometry, not byte indexes, is what layout asserts must compare."""
-    return sum(2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
-               for character in text)
+def marker_cell_width(text: str) -> int:
+    """Screen cells `text` occupies, for marker placement arithmetic.
+
+    Explicit scope — this is not a general Unicode display-width function.
+    It is the width rule for what a marker row in this product can hold:
+    ASCII, the box-drawing rules, hangul and other W/F wide glyphs, plus
+    zero-width combining marks. General-category Mn/Me/Cf characters (a
+    combining acute accent, a zero-width space, a joiner) occupy no cell of
+    their own; every other character counts W/F as two cells and anything
+    else as one. Do not reuse it for arbitrary text layout — region-read
+    pane widths have their own reader.
+    """
+    cells = 0
+    for character in text:
+        if unicodedata.category(character) in ("Mn", "Me", "Cf"):
+            continue
+        cells += 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+    return cells
+
+
+def board_side_separation(rows: dict[int, bytes], body_marker: bytes,
+                          comment_marker: bytes) -> int:
+    """Assert side-by-side separation of two source texts, in screen cells.
+
+    Every row that carries both markers must hold them in disjoint cell
+    ranges, counted with marker_cell_width so byte hits become screen cells
+    (a box rule or a wide glyph is one cell and three UTF-8 bytes; a
+    combining mark is no cell). Rows carrying only one marker are not shared
+    rows — their separation is the caller's column check — but at least one
+    shared row must exist: a layout that pushes the body off every comment
+    row is stacked, not side-by-side, and must not pass as separation.
+
+    Returns the number of compared shared rows so the scenario can assert
+    the overlap itself instead of trusting a silent zero.
+    """
+    compared = 0
+    for row_index in sorted(rows):
+        line = rows[row_index]
+        body_at = line.find(body_marker)
+        comment_at = line.find(comment_marker)
+        if body_at < 0 or comment_at < 0:
+            continue
+        compared += 1
+        body_start = marker_cell_width(line[:body_at].decode("utf-8", "replace"))
+        body_end = body_start + marker_cell_width(body_marker.decode("utf-8", "replace"))
+        comment_start = marker_cell_width(line[:comment_at].decode("utf-8", "replace"))
+        comment_end = comment_start + marker_cell_width(comment_marker.decode("utf-8", "replace"))
+        if body_end > comment_start or body_start > comment_start:
+            raise AssertionError(
+                f"row {row_index}: on a shared row the body cells [{body_start}, {body_end}) must "
+                f"sit left of the comment cells [{comment_start}, {comment_end}): " + repr(line))
+    if compared == 0:
+        raise AssertionError(
+            "no row carries both " + repr(body_marker) + " and " + repr(comment_marker)
+            + ": the panes share no row, which is a stacked layout, not "
+            "side-by-side separation. rows:\n" + "\n".join(
+                f"{index}: {rows[index].decode('utf-8', 'replace')}"
+                for index in sorted(rows)))
+    return compared
 
 
 def marker_cells(rows: dict[int, bytes], needle: bytes) -> tuple[int, int, int]:
     """(row, first cell, last cell+1) of the first drawn occurrence of needle.
-    Cells are screen cells counted from column 0 with the harness width rule,
-    not byte offsets into the decoded row."""
+
+    Cells are screen cells counted from column 0 with the marker_cell_width
+    rule (W/F wide glyphs two cells, Mn/Me/Cf zero-width, everything else
+    one), not byte offsets into the decoded row. Same scope: ASCII and box
+    rules, hangul and other wide glyphs, combining marks — not a general
+    Unicode layout width."""
     for row in sorted(rows):
         text = rows[row].decode("utf-8", "replace")
         byte_at = text.encode("utf-8").find(needle)
         if byte_at < 0:
             continue
         prefix = text.encode("utf-8")[:byte_at].decode("utf-8", "replace")
-        start = row_cell_width(prefix)
-        end = start + row_cell_width(needle.decode("utf-8", "replace"))
+        start = marker_cell_width(prefix)
+        end = start + marker_cell_width(needle.decode("utf-8", "replace"))
         return row, start, end
     raise AssertionError(f"marker not on screen: {needle!r}")
 

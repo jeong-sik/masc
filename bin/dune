@@ -2179,11 +2179,6 @@
   masc.agent_core
   masc.agent_core.llm_provider))
 
-; RFC-0057 Phase 2 — tool descriptor codegen for lib/tool_schemas/.
-; Depends on tool_schemas_specs (types-only sibling library) to share
-; spec records with future schema-lint / doc-gen tooling. The cycle is
-; avoided because tool_schemas_specs does not depend on masc_tool_schemas.
-
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —
 ;; CI determinism rules forbid network calls in test/). Calls Fusion_panel.run

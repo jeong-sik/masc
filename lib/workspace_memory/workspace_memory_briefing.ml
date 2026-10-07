@@ -20,6 +20,9 @@ type batch =
 
 let ( let* ) = Result.bind
 let empty = { published = None; building = None }
+let is_empty t = match t.published, t.building with
+  | None, None -> true
+  | Some _, _ | _, Some _ -> false
 let nonblank value = String.trim value <> ""
 let kind_name = function Claim -> "claim" | Conflict -> "conflict"
 let source_json (source : source) = `Assoc

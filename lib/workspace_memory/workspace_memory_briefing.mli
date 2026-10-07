@@ -9,6 +9,7 @@ type t
 type observation = Missing | Current of summary | Stale of summary
 
 val empty : t
+val is_empty : t -> bool
 val path : directory:string -> string
 val load : directory:string -> (t, string) result
 val save : directory:string -> t -> (unit, string) result
@@ -51,7 +52,9 @@ val prepare
     Model input contains only [previous_summary] and selected [entries].
     Prepares all remaining entries without estimating provider capacity.
     Sources must have unique, nonblank ids and nonblank text. No new evidence
-    (or no sources) returns [Ok None] without rendering or model work. *)
+    (or no sources) returns [Ok None] without rendering or model work. When
+    all sources disappear, the owner must persist [empty] to discard old
+    publication and in-progress source bodies even though no model is needed. *)
 
 val narrow
   : render:(Yojson.Safe.t -> (string, string) result)

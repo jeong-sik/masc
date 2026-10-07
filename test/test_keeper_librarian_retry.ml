@@ -1812,6 +1812,8 @@ let test_working_context_prompt_carries_no_current_memory () =
     (occurrences ~needle:probe
        (render Prompt_names.librarian_working_context
           (Librarian.working_context_prompt_variables input)));
+  check bool "the working-context pass supplies no current_memory variable" false
+    (List.mem_assoc "current_memory" (Librarian.working_context_prompt_variables input));
   check bool "the working-context template has no current_memory slot" false
     (List.mem "current_memory"
        (template_slot_names (Prompt_registry.get_prompt Prompt_names.librarian_working_context)))

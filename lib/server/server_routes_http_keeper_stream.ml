@@ -910,7 +910,7 @@ let parse_keeper_chat_stream_request body_str =
     let* request_id = required_string "request_id" in
     let* request_id = Keeper_owner.Chat_operation.Operation_id.of_string request_id in
     let* name = required_string "name" |> Result.map String.trim in
-    let* raw_message = optional_string "message" |> Result.map String.trim in
+    let* raw_message = optional_string "message" in
     let* channel = optional_string "channel" |> Result.map String.trim in
     let* channel_user_id =
       optional_string "channel_user_id" |> Result.map String.trim
@@ -962,7 +962,7 @@ let parse_keeper_chat_stream_request body_str =
         user_blocks
     in
     let message =
-      if String.equal raw_message ""
+      if String.equal (String.trim raw_message) ""
       then Keeper_multimodal_input.fallback_message ~attachments user_blocks
       else raw_message
     in
@@ -1071,9 +1071,9 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   let ( let* ) = Result.bind in
   let* source = Keeper_chat_operation_payload.source_of_json source in
   let* input = Keeper_chat_operation_payload.input_of_json input in
-  let raw_message = String.trim input.message in
+  let raw_message = input.message in
   let message =
-    if String.equal raw_message ""
+    if String.equal (String.trim raw_message) ""
     then
       Keeper_multimodal_input.fallback_message
         ~attachments:input.attachments

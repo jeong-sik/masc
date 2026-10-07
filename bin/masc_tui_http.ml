@@ -1727,10 +1727,13 @@ let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_na
     The status is returned rather than folded into an error string: this route
     requires an operator token, and "no token" is a different thing for the
     surface to say than "the read failed". *)
-let fetch_keeper_runtimes ~(host : string) ~(port : int) ~expected_workspace :
+let fetch_keeper_runtimes ~(host : string) ~(port : int)
+    ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (int * string, string) result =
   http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
-    ^ percent_encode_path_segment expected_workspace)
+    ^ percent_encode_path_segment (Masc_tui_types.canonical_path expected_workspace.sid_base_path)
+    ^ "&expected_masc_root="
+    ^ percent_encode_path_segment (Masc_tui_types.canonical_path expected_workspace.sid_masc_root))
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
@@ -1751,13 +1754,17 @@ let post_keeper_lifecycle ~(host : string) ~(port : int) ~(keeper_name : string)
 (** POST a keeper directive ([pause] / [resume] / [wakeup]). *)
 let post_keeper_directive ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(action : string)
-    ~(operator_operation_id : string) : (int * string, string) result =
+    ~(operator_operation_id : string) ~(expected_workspace : Masc.Tui_decode.server_identity)
+    : (int * string, string) result =
+  let expected_workspace = { expected_workspace with
+    sid_base_path = Masc_tui_types.canonical_path expected_workspace.sid_base_path;
+    sid_masc_root = Masc_tui_types.canonical_path expected_workspace.sid_masc_root } in
   let path =
     Printf.sprintf "/api/v1/keepers/%s/directive"
       (percent_encode_path_segment keeper_name)
   in
   let body =
-    Masc_tui_keeper_control.directive_body ~operator_operation_id action
+    Masc_tui_keeper_control.directive_body ~expected_workspace ~operator_operation_id action
   in
   http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
 

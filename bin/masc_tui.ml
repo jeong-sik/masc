@@ -7888,8 +7888,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     && state.workspace_identity = Workspace_identity_match
     && keeper_available_for_new_message state keeper_name
     && can_resume_preflight_keeper_input state keeper_name in
-  let expected_workspace = Option.map
-    (fun identity -> canonical_path identity.Tui_decode.sid_base_path) state.server_identity in
+  let expected_workspace = state.server_identity in
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
   let control_generation = match action with
     | Inbox.Pause | Inbox.Resume ->
@@ -7918,11 +7917,11 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Inbox.Inspect -> Ok []
       | Inbox.Pause | Inbox.Resume ->
         let verb = if action = Inbox.Pause then "pause" else "resume" in
+        let* expected_workspace = match expected_workspace with
+          | Some identity -> Ok identity
+          | None -> Error "Workspace identity is unavailable; input remains retained" in
         let* owner_paused =
           if not local_resume then Ok true else
-          match expected_workspace with
-          | None -> Error "Workspace identity is unavailable; input remains retained"
-          | Some expected_workspace ->
             (match Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace with
              | Error failure -> Error (Keeper_control.roster_failure_message
                  ~credential_sent:(Masc_tui_http.operator_token_present ()) failure)
@@ -7949,7 +7948,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           Ok ["Server confirmed the Keeper is active"]
         end else
         let* status, body = Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-          ~action:verb ~operator_operation_id in
+          ~action:verb ~operator_operation_id ~expected_workspace in
         (match Keeper_control.classify_response ~status ~body with
          | Keeper_control.Accepted _ -> confirm Owner_resumed; Ok ["Server confirmed queue " ^ verb]
          | Keeper_control.Rejected {detail;_} | Keeper_control.Paused_owner_conflict detail -> Error detail
@@ -10240,10 +10239,7 @@ let refresh_status results =
 let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
-  let expected_workspace =
-    Result.to_option server_identity
-    |> Option.map (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
-  in
+  let expected_workspace = Result.to_option server_identity in
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -12276,15 +12272,18 @@ let handle_ask_submit state ~mailbox =
    surfacing as a failure. Recovery runs once — a conflict raised by the
    recovery itself is the operator's to read. *)
 let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_operation_id
-    action =
+    ~expected_workspace action =
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
         Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
           ~action:lifecycle_action
     | Keeper_control.Directive directive_action ->
-        Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-          ~action:directive_action ~operator_operation_id
-      | Keeper_control.Purge ->
+        (match expected_workspace with
+         | None -> Error "Workspace identity is unavailable; Keeper directive was not sent"
+         | Some expected_workspace ->
+           Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
+             ~action:directive_action ~operator_operation_id ~expected_workspace)
+    | Keeper_control.Purge ->
           Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name
   in
   let rec walk ~recovery_available last_outcome steps =
@@ -12382,7 +12381,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
     let result =
       try
         run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-          ~operator_operation_id action
+          ~operator_operation_id ~expected_workspace:identity action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -12395,7 +12394,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
       let result =
         try
           run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-            ~operator_operation_id action
+            ~operator_operation_id ~expected_workspace:identity action
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)

@@ -2587,7 +2587,6 @@ type identity_login_expectation = {
 type keeper_chat_return =
   | Keeper_chat_return_list
   | Keeper_chat_return_detail
-  | Keeper_chat_return_lanes
   | Keeper_chat_return_home
 
 (** Where [Esc] returns after the Changes surface was opened. [f] opens it
@@ -3063,20 +3062,11 @@ type inflight_phase =
   | Turn_streaming
   | Turn_reconciling
 
-type inflight_origin =
-  | Direct_submission
-  | Promoted_queue of
-      { submission_seq : int
-      ; intent : Masc_tui_keeper_chat_queue.intent
-      ; causal_parent_request_id : string option
-      }
-
 type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; submitted_at : float
   ; sent_at : float
   ; control_generation : int
-  ; origin : inflight_origin
   ; mutable phase : inflight_phase
   ; log : turn_log
   }
@@ -7413,12 +7403,6 @@ let completed_turn_row state (request : Masc_tui_keeper_chat_projection.request)
       ( role
       , Masc_tui_keeper_chat_transcript.turn_status_text ~reply:completed.reply
           ~turn_ref:completed.turn_ref completed.turn_outcome )
-;;
-
-let promoted_inflight_for_keeper state keeper_name =
-  match inflight_for_keeper state keeper_name with
-  | Some ({ origin = Promoted_queue _; _ } as entry) -> Some entry
-  | Some { origin = Direct_submission; _ } | None -> None
 ;;
 
 let working_chat_for_keeper state keeper_name =
@@ -12107,14 +12091,10 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
               Masc_tui_keeper_chat_transcript.admission transcript with
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            (match entry.phase, entry.origin with
-             | Turn_preflight _, (Promoted_queue _ | Direct_submission) ->
-                 Some (entry.sent_request, Local_pending)
-             | Turn_reconciling, (Promoted_queue _ | Direct_submission) ->
-                 Some (entry.sent_request, Rechecking_delivery)
-             | Turn_streaming, Promoted_queue _ ->
-                 Some (entry.sent_request, Awaiting_receipt)
-             | Turn_streaming, Direct_submission -> None)
+            (match entry.phase with
+             | Turn_preflight _ -> Some (entry.sent_request, Local_pending)
+             | Turn_reconciling -> Some (entry.sent_request, Rechecking_delivery)
+             | Turn_streaming -> Some (entry.sent_request, Awaiting_receipt))
         | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             let delivery = match entry.phase with

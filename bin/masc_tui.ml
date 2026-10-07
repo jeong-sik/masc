@@ -904,7 +904,6 @@ let leave_keeper_message state ~drain_queue =
   state.view <-
     (match state.msg_return, target_registered with
      | Keeper_chat_return_home, _ -> Overview
-     | Keeper_chat_return_lanes, _ -> Lanes
      | Keeper_chat_return_detail, true -> Keepers Keeper_detail
      | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
          Keepers Keeper_list);
@@ -7264,14 +7263,7 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
         item.oi_keeper <> request.Keeper_chat.keeper_name) state.keeper_observed_interrupts;
       advance_keeper_chat_control state request.Keeper_chat.keeper_name
     | Keeper_chat.Queue_only -> keeper_chat_control_generation state request.Keeper_chat.keeper_name in
-  let submitted_at, origin =
-    ( promoted.submitted_at
-    , Promoted_queue
-        { submission_seq = promoted.submission_seq
-        ; intent = promoted.intent
-        ; causal_parent_request_id = promoted.causal_parent_request_id
-        } )
-  in
+  let submitted_at = promoted.submitted_at in
   let log =
     turn_log_create
       ~keeper_name:request.Keeper_chat.keeper_name
@@ -7283,7 +7275,6 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
     ; submitted_at
     ; sent_at = Unix.gettimeofday ()
     ; control_generation
-    ; origin
     ; phase = Turn_preflight promoted
     ; log
     }

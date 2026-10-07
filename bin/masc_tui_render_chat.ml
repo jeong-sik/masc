@@ -3544,7 +3544,6 @@ let render_keeper_message (state : state) =
       | Keeper_chat_return_home -> "Esc:Dashboard"
       | Keeper_chat_return_list -> "Esc:list"
       | Keeper_chat_return_detail -> "Esc:detail"
-      | Keeper_chat_return_lanes -> "Esc:Lanes"
     in
     (* The hint is the dispatch's own table, not a retelling of it: both read
        Masc_tui_esc_interrupt.action, so the footer cannot advertise an

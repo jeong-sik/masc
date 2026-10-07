@@ -10932,7 +10932,7 @@ let apply_server_identity_reading state reading =
          | None, _ | Some _, Workspace_identity_mismatch _ -> false
     in
     let target = state.msg_target_keeper_name in
-    let draft = materialise_spilled_paste state (Buffer.contents state.msg_input) in
+    let draft = materialise_spilled_paste state (Masc_tui_message_input.contents state.msg_input) in
     let attachments = state.msg_attachments and references = state.msg_references in
     let since = state.msg_attachments_since and queue = state.msg_queued in
     let focused = state.composer_focused in
@@ -10952,8 +10952,8 @@ let apply_server_identity_reading state reading =
       state.msg_target_keeper_name <- target;
       state.view <- Keepers Keeper_message;
       state.composer_focused <- focused;
-      Buffer.clear state.msg_input;
-      Buffer.add_string state.msg_input draft;
+      Masc_tui_message_input.clear state.msg_input;
+      Masc_tui_message_input.insert state.msg_input draft;
       state.msg_attachments <- attachments;
       state.msg_references <- references;
       state.msg_attachments_since <- since;

@@ -634,7 +634,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 "Muse Code ran the verification turn on %s, but the configured model is %s"
                 other execution.model))
             | None, true, _ | None, false, [] -> Error Model_unreported
-            | None, false, _ :: _ -> Ok {model=execution.model; text=result.text})
+            | None, false, _ :: _ ->
+              (match result.text with
+               | Some text -> Ok {model=execution.model; text}
+               | None -> Error Empty_response))
          | Error (Runtime_verification_muse.Home_error (Runtime_muse_home.Sign_in_required _ as error)) ->
            Error (Unavailable (Client_not_authenticated (Runtime_muse_home.error_to_string error)))
          | Error (Home_error (Runtime_muse_home.Invalid_account_home detail)) ->

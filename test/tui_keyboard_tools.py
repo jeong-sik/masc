@@ -265,12 +265,14 @@ def run_tools_request_identity_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/tools?keeper=beta"] = inventory("beta", "keeper_beta_current")
     async_calls = 0
     async_lock = threading.Lock()
-    settled = {n: threading.Event() for n in range(1, 5)}
+    settled = {n: threading.Event() for n in range(1, 3)}
 
     def async_read() -> HttpResponse:
         nonlocal async_calls
-        # launch_tools_load enqueues Tools_loaded before this sequential GET.
-        # This is a response-settlement barrier, not an arbitrary sleep.
+        # launch_tools_load starts this read as a current inventory answer is
+        # delivered, and that answer is queued while this read is still on
+        # the wire. A superseded answer starts no read (25d8a20e84), so this
+        # marks a current answer settled, not an arbitrary sleep.
         with async_lock:
             async_calls += 1
             event = settled.get(async_calls)
@@ -288,6 +290,21 @@ def run_tools_request_identity_regression(executable: str) -> None:
         def await_event(event: threading.Event, description: str) -> None:
             if not wait_for_fixture_event(process, master_fd, output, event, timeout=10.0):
                 raise AssertionError(description)
+
+        def assert_superseded_ignored(gate: GatedHttpResponse, expected: bytes, *,
+                                      served: str, columns: tuple[int, int],
+                                      current_reads: int) -> None:
+            # Nothing the TUI does marks a superseded answer taken in: it
+            # starts no read and changes no state. The fixture serving it is
+            # the last point the test can see. Each full redraw drains the
+            # queue first, so an answer that lands during the first redraw is
+            # in by the second.
+            await_event(gate.completed, served)
+            for width in columns:
+                assert_current(expected, columns=width)
+            with async_lock:
+                if async_calls != current_reads:
+                    raise AssertionError("a superseded Tools answer started a read of its own")
 
         def assert_current(expected: bytes, *, columns: int) -> None:
             # The main loop handles resize, drains async_messages, then calls
@@ -315,20 +332,22 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 if async_calls != 1:
                     raise AssertionError("held alpha request settled before its fixture response")
             alpha_late.release.set()
-            await_event(settled[2], "late alpha response did not settle")
-            assert_current(b"keeper_beta_current", columns=119)
+            assert_superseded_ignored(alpha_late, b"keeper_beta_current",
+                                      served="late alpha response was not served",
+                                      columns=(118, 119), current_reads=1)
 
             fixtures["/api/v1/dashboard/tools?keeper=beta"] = beta_refresh_error
             os.write(master_fd, b"r")
             await_event(beta_refresh_error.requested, "older beta refresh did not start")
             send_and_wait(process, master_fd, output, b"r", b"keeper_beta_newest")
-            await_event(settled[3], "newer beta refresh did not settle")
+            await_event(settled[2], "newer beta refresh did not settle")
             with async_lock:
-                if async_calls != 3:
+                if async_calls != 2:
                     raise AssertionError("held beta error settled before its fixture response")
             beta_refresh_error.release.set()
-            await_event(settled[4], "obsolete same-keeper error did not settle")
-            assert_current(b"keeper_beta_newest", columns=120)
+            assert_superseded_ignored(beta_refresh_error, b"keeper_beta_newest",
+                                      served="obsolete same-keeper error was not served",
+                                      columns=(121, 120), current_reads=2)
             captured = bytes(output)
             end = captured.rfind(FRAME_END) + len(FRAME_END)
             redraw = captured.rfind(FULL_REDRAW, 0, end)
@@ -337,7 +356,7 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 raise AssertionError("Tools request identity evidence has no completed redraw")
             print("TOOLS_REQUEST_IDENTITY_PTY_EVIDENCE " + json.dumps({
                 "fixture": "A slow / B fast / A late; older same-Keeper error after newer success",
-                "settled_tool_responses": async_calls, "rows": 30, "columns": 120,
+                "current_tool_responses": async_calls, "rows": 30, "columns": 120,
                 "binary_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
                 "encoding": "base64", "pty": base64.b64encode(captured[start:end]).decode(),
             }), flush=True)
